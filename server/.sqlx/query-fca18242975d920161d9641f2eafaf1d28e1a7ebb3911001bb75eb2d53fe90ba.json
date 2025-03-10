@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT height, framework_state_hash, app_state_hash FROM state_stream ORDER BY height DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "height",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "framework_state_hash",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "app_state_hash",
+        "ordinal": 2,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fca18242975d920161d9641f2eafaf1d28e1a7ebb3911001bb75eb2d53fe90ba"
+}

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use tracing::Level;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -6,6 +8,9 @@ pub struct Opt {
     /// Enable verbose output?
     #[clap(long, short)]
     verbose: bool,
+    /// Location for data storage
+    #[clap(long, default_value = "local-test.sqlite3")]
+    pub storage: PathBuf,
 }
 
 impl Opt {

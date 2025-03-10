@@ -1,4 +1,0 @@
-CREATE TABLE actions(
-    height INTEGER PRIMARY KEY NOT NULL,
-    added TIMESTAMP NOT NULL,
-)

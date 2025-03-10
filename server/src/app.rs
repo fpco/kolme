@@ -1,9 +1,10 @@
-use crate::prelude::*;
+use std::borrow::Cow;
 
-pub struct App {}
+use crate::framework_state::RawFrameworkState;
 
-impl App {
-    pub(crate) async fn new(opt: Opt) -> Result<Self> {
-        Ok(App {})
+pub trait KolmeApp {
+    fn initial_framework_state() -> RawFrameworkState;
+    fn kolme_ident() -> Cow<'static, str> {
+        Self::initial_framework_state().kolme_ident.into()
     }
 }

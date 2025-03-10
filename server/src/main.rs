@@ -1,9 +1,14 @@
 mod app;
 mod cli;
+mod framework_state;
+mod kolme;
 mod prelude;
+mod sample;
+mod types;
 
 use clap::Parser;
 use prelude::*;
+use sample::SampleKolmeApp;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -14,6 +19,6 @@ async fn main_inner() -> Result<()> {
     dotenvy::dotenv()?;
     let opt = cli::Opt::parse();
     opt.init_logger();
-    let app = App::new(opt).await?;
+    let app = Kolme::new(SampleKolmeApp, "Dev code", &opt.storage).await?;
     Ok(())
 }
