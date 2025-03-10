@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use anyhow::Context;
 use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::{framework_state::FrameworkState, prelude::*};
@@ -22,7 +23,9 @@ impl<App: KolmeApp> Kolme<App> {
         let pool = sqlx::SqlitePool::connect_with(options).await?;
         sqlx::migrate!().run(&pool).await?;
         let framework_state = match get_latest_state(&pool).await? {
-            LatestState::NoState => FrameworkState::new(App::initial_framework_state())?,
+            LatestState::NoState { last_event_height } => {
+                FrameworkState::new(last_event_height, App::initial_framework_state())?
+            }
             LatestState::Latest {
                 last_event_height,
                 last_state_height,
@@ -43,7 +46,9 @@ impl<App: KolmeApp> Kolme<App> {
 }
 
 enum LatestState {
-    NoState,
+    NoState {
+        last_event_height: Option<EventHeight>,
+    },
     Latest {
         last_event_height: EventHeight,
         last_state_height: EventHeight,
@@ -59,19 +64,26 @@ async fn get_latest_state(pool: &sqlx::SqlitePool) -> Result<LatestState> {
         framework_state_hash: Vec<u8>,
         app_state_hash: Vec<u8>,
     }
+    let last_event_height = sqlx::query_scalar!("SELECT MAX(height) FROM event_stream")
+        .fetch_one(pool)
+        .await?
+        .map(|i| i.try_into().map(EventHeight))
+        .transpose()?;
     match sqlx::query_as!(
         Helper,
         "SELECT height, framework_state_hash, app_state_hash FROM state_stream ORDER BY height DESC LIMIT 1"
     )
     .fetch_optional(pool)
     .await? {
-        Some(Helper { height, framework_state_hash, app_state_hash }) => {
-            let last_state_height = EventHeight(height.try_into()?);
+        Some(Helper { height: last_state_height, framework_state_hash, app_state_hash }) => {
+            let last_event_height = last_event_height.context("Saw a state height with no event height")?;
+            let last_state_height = EventHeight(last_state_height.try_into()?);
+            anyhow::ensure!(last_event_height >= last_state_height);
             let framework_state=get_state_payload(pool, &framework_state_hash).await?;
             let app_state=get_state_payload(pool, &app_state_hash).await?;
             Ok(LatestState::Latest { last_event_height,last_state_height, framework_state, app_state })
         },
-        None => Ok(LatestState::NoState),
+        None => Ok(LatestState::NoState{ last_event_height  }),
     }
 }
 

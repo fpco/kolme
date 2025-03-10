@@ -95,13 +95,20 @@ impl FrameworkState {
         last_state_height: EventHeight,
         payload: &[u8],
     ) -> Result<Self> {
-        let raw = serde_json::from_slice::<RawFrameworkState>(&payload)?;
+        let raw = serde_json::from_slice::<RawFrameworkState>(payload)?;
         anyhow::ensure!(raw.kolme_ident == App::kolme_ident());
         Self::from_raw(raw, last_event_height.next(), last_state_height.next())
     }
 
-    pub(crate) fn new(raw: RawFrameworkState) -> Result<Self> {
-        Self::from_raw(raw, EventHeight::start(), EventHeight::start())
+    pub(crate) fn new(
+        last_event_height: Option<EventHeight>,
+        raw: RawFrameworkState,
+    ) -> Result<Self> {
+        Self::from_raw(
+            raw,
+            last_event_height.map_or_else(EventHeight::start, EventHeight::next),
+            EventHeight::start(),
+        )
     }
 
     fn from_raw(
