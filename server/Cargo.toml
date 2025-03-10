@@ -13,7 +13,7 @@ cosmos = { git = "https://github.com/fpco/cosmos-rs", branch = "main" }
 dotenvy = "0.15.7"
 elliptic-curve = { version = "0.13.8", features = ["serde"] }
 jiff = { version = "0.2.3", features = ["serde"] }
-k256 = { version = "0.13.4", features = ["serde"] }
+k256 = { version = "0.13.4", features = ["serde", "ecdsa", "sha256"] }
 parking_lot = "0.12.3"
 pid1 = "0.1.4"
 rand = "0.8"

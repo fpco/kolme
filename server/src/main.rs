@@ -1,8 +1,10 @@
 mod app;
 mod cli;
+mod event;
 mod framework_state;
 mod kolme;
 mod prelude;
+mod processor;
 mod sample;
 mod types;
 

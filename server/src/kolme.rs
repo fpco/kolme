@@ -6,6 +6,18 @@ use sqlx::sqlite::SqliteConnectOptions;
 use crate::{framework_state::FrameworkState, prelude::*};
 
 pub struct Kolme<App> {
+    pub inner: Arc<KolmeInner<App>>,
+}
+
+impl<App> Clone for Kolme<App> {
+    fn clone(&self) -> Self {
+        Kolme {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+pub struct KolmeInner<App> {
     pub pool: sqlx::SqlitePool,
     pub framework_state: Arc<RwLock<FrameworkState>>,
     pub app: App,
@@ -38,10 +50,30 @@ impl<App: KolmeApp> Kolme<App> {
         };
         framework_state.validate_code_version(code_version)?;
         Ok(Kolme {
-            pool,
-            framework_state: Arc::new(RwLock::new(framework_state)),
-            app,
+            inner: Arc::new(KolmeInner {
+                pool,
+                framework_state: Arc::new(RwLock::new(framework_state)),
+                app,
+            }),
         })
+    }
+
+    pub fn get_next_event_height(&self) -> EventHeight {
+        self.inner.framework_state.read().next_event_height
+    }
+
+    pub fn get_next_state_height(&self) -> EventHeight {
+        self.inner.framework_state.read().next_state_height
+    }
+
+    pub(crate) fn get_next_account_nonce(&self, public_key: k256::PublicKey) -> AccountNonce {
+        let guard = self.inner.framework_state.read();
+        match guard.get_account_id(&public_key) {
+            None => AccountNonce::start(),
+            Some(account_id) => {
+                 guard.raw.accounts.get(&account_id).expect("get_next_account_nonce: impossible account_id found with no matching account entry").next_nonce
+            }
+        }
     }
 }
 

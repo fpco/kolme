@@ -1,0 +1,5 @@
+test:
+    cargo sqlx database reset -y
+    cargo sqlx migrate run
+    cargo sqlx prepare
+    cargo test

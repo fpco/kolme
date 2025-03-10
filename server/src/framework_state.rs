@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use k256::PublicKey;
 
@@ -20,11 +20,22 @@ pub struct AssetName(pub String);
 pub struct AccountId(pub u64);
 
 #[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug,
+    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]
+pub struct AccountNonce(pub u64);
+
+impl AccountNonce {
+    pub fn start() -> Self {
+        AccountNonce(0)
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Account {
     pub created: Timestamp,
-    pub authorities: Vec<AccountAuthority>,
+    pub pubkeys: BTreeSet<PublicKey>,
+    pub wallets: BTreeSet<Wallet>,
+    pub next_nonce: AccountNonce,
     // TODO: add in balances, something like this: pub balances: BTreeMap<AssetId, Decimal>
 }
 
@@ -52,7 +63,7 @@ pub struct RawFrameworkState {
     pub needed_listeners: usize,
     pub executors: BTreeSet<PublicKey>,
     pub needed_executors: usize,
-    pub bridges: BTreeMap<ExternalChain, BridgeContract>,
+    pub chains: BTreeMap<ExternalChain, ChainConfig>,
 }
 
 impl RawFrameworkState {
@@ -78,12 +89,23 @@ impl EventHeight {
     pub fn start() -> EventHeight {
         EventHeight(0)
     }
+
+    pub(crate) fn is_start(&self) -> bool {
+        self.0 == 0
+    }
 }
 
+#[derive(
+    PartialEq, PartialOrd, Ord, Eq, Clone, Debug, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct Wallet(String);
+
 pub struct FrameworkState {
-    raw: RawFrameworkState,
-    next_event_height: EventHeight,
-    next_state_height: EventHeight,
+    pub raw: RawFrameworkState,
+    pub next_event_height: EventHeight,
+    pub next_state_height: EventHeight,
+    pub pubkeys: BTreeMap<k256::PublicKey, AccountId>,
+    pub wallets: HashMap<Wallet, AccountId>,
 }
 
 impl RawFrameworkState {}
@@ -118,15 +140,40 @@ impl FrameworkState {
     ) -> Result<FrameworkState> {
         anyhow::ensure!(next_event_height >= next_state_height);
         raw.validate()?;
+
+        let mut pubkeys = BTreeMap::new();
+        let mut wallets = HashMap::new();
+
+        for (account_id, account) in &raw.accounts {
+            for pubkey in &account.pubkeys {
+                pubkeys.insert(*pubkey, *account_id);
+            }
+            for wallet in &account.wallets {
+                wallets.insert(wallet.clone(), *account_id);
+            }
+        }
+
         Ok(FrameworkState {
             raw,
             next_event_height,
             next_state_height,
+            pubkeys,
+            wallets,
         })
     }
 
     pub(crate) fn validate_code_version(&self, code_version: impl AsRef<str>) -> Result<()> {
-        anyhow::ensure!(self.raw.code_version == code_version.as_ref());
+        let code_version = code_version.as_ref();
+        anyhow::ensure!(
+            self.raw.code_version == code_version,
+            "Could not match discovered code version {} against actual code version {}",
+            self.raw.code_version,
+            code_version
+        );
         Ok(())
+    }
+
+    pub fn get_account_id(&self, key: &k256::PublicKey) -> Option<AccountId> {
+        self.pubkeys.get(key).copied()
     }
 }
