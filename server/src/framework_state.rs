@@ -25,6 +25,7 @@ pub struct AccountId(pub u64);
 pub struct Account {
     pub created: Timestamp,
     pub authorities: Vec<AccountAuthority>,
+    // TODO: add in balances, something like this: pub balances: BTreeMap<AssetId, Decimal>
 }
 
 #[derive(
