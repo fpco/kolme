@@ -70,9 +70,7 @@ impl<App: KolmeApp> Kolme<App> {
         let guard = self.inner.framework_state.read();
         match guard.get_account_id(&public_key) {
             None => AccountNonce::start(),
-            Some(account_id) => {
-                 guard.raw.accounts.get(&account_id).expect("get_next_account_nonce: impossible account_id found with no matching account entry").next_nonce
-            }
+            Some(account_id) => guard.get_next_nonce(account_id).unwrap(),
         }
     }
 }

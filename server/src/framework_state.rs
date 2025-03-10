@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use anyhow::Context;
 use k256::PublicKey;
 
 use crate::prelude::*;
@@ -175,5 +176,38 @@ impl FrameworkState {
 
     pub fn get_account_id(&self, key: &k256::PublicKey) -> Option<AccountId> {
         self.pubkeys.get(key).copied()
+    }
+
+    pub(crate) fn get_or_insert_account_id(
+        &mut self,
+        key: &k256::PublicKey,
+        now: Timestamp,
+    ) -> AccountId {
+        match self.get_account_id(key) {
+            Some(id) => id,
+            None => {
+                let id = AccountId(self.raw.accounts.len().try_into().unwrap());
+                let mut pubkeys = BTreeSet::new();
+                pubkeys.insert(*key);
+                self.raw.accounts.insert(
+                    id,
+                    Account {
+                        created: now,
+                        pubkeys,
+                        wallets: BTreeSet::new(),
+                        next_nonce: AccountNonce::start(),
+                    },
+                );
+                id
+            }
+        }
+    }
+
+    pub fn get_next_nonce(&self, account_id: AccountId) -> Result<AccountNonce> {
+        self.raw
+            .accounts
+            .get(&account_id)
+            .context("get_next_nonce: account not found")
+            .map(|x| x.next_nonce)
     }
 }

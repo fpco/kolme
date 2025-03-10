@@ -1,2 +1,2 @@
-After init, catch up the stream. Create the genesis action if necessary.
+Start storing the app state too
 Allow for a "compatible version comparison" within KolmeApp
