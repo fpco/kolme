@@ -60,11 +60,12 @@ impl<App: KolmeApp> Processor<App> {
         // Make sure this is a genesis event if and only if we have no events so far
         if raw.next_event_height.is_start() {
             event.ensure_is_genesis()?;
+            anyhow::ensure!(event.payload.pubkey == raw.raw.processor);
         } else {
             event.ensure_no_genesis()?;
         };
 
-        self.insert_event(&mut *raw, event).await
+        self.insert_event(&mut raw, event).await
     }
 
     async fn insert_event(
@@ -73,6 +74,7 @@ impl<App: KolmeApp> Processor<App> {
         event: crate::event::ProposedEvent<App::Message>,
     ) -> Result<()> {
         // FIXME current approach causes a new FrameworkState on each event due to nonce updates. May want to consider removing nonce management from that state.
+        // Looks like we may need an event stream state, a framework state, and an app state.
 
         let now = Timestamp::now();
         let height = raw.next_event_height;
