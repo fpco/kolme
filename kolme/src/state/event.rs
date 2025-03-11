@@ -90,6 +90,17 @@ impl EventState {
             .map(|x| x.next_nonce)
     }
 
+    /// Errors if the account doesn't exist.
+    pub(crate) fn bump_nonce_for(&mut self, account_id: AccountId) -> Result<()> {
+        self.raw
+            .accounts
+            .get_mut(&account_id)
+            .context("bump_nonce_for found a missing account")?
+            .next_nonce
+            .increment();
+        Ok(())
+    }
+
     pub fn get_next_height(&self) -> EventHeight {
         self.next_height
     }
@@ -98,8 +109,18 @@ impl EventState {
         self.next_height = self.next_height.next();
     }
 
-    pub(super) fn new() -> Result<Self> {
-        todo!()
+    pub(super) fn new(kolme_ident: impl Into<String>) -> Result<Self> {
+        Ok(EventState {
+            raw: RawEventState {
+                kolme_ident: kolme_ident.into(),
+                accounts: BTreeMap::new(),
+                pending_listeners: BTreeMap::new(),
+                last_bridge_event_id: BTreeMap::new(),
+            },
+            next_height: EventHeight::start(),
+            pubkeys: BTreeMap::new(),
+            wallets: HashMap::new(),
+        })
     }
 
     pub(super) fn load(
@@ -132,5 +153,9 @@ impl EventState {
             pubkeys,
             wallets,
         })
+    }
+
+    pub(crate) fn serialize_raw_state(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(&self.raw).map_err(anyhow::Error::from)
     }
 }

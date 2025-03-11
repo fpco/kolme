@@ -30,15 +30,13 @@ impl<App: KolmeApp> KolmeState<App> {
         let info = App::genesis_info();
         let event = match event {
             Some(event) => EventState::load(&info.kolme_ident, event)?,
-            None => EventState::new()?,
+            None => EventState::new(&info.kolme_ident)?,
         };
         let exec = match exec {
             Some(exec) => ExecutionState::load(app, exec, code_version)?,
             None => ExecutionState::new(code_version, info)?,
         };
         anyhow::ensure!(event.get_next_height() >= exec.get_next_height());
-        // anyhow::ensure!(raw.kolme_ident == App::kolme_ident());
-        // framework_state.validate_code_version(code_version)?;
-        todo!()
+        Ok(KolmeState { event, exec })
     }
 }

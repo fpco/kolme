@@ -8,6 +8,24 @@ use k256::{
 
 use crate::*;
 
+/// An event that is signed by the processor.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SignedEvent {
+    /// An [ApprovedEvent], serialized to ensure the signature matches.
+    ///
+    /// FIXME: overall decide where to use Vec<u8> vs concrete types below, I'm being very inconsistent. Using a helper data type that wraps up the binary and parsed representations together may be advantageous.
+    pub event: Vec<u8>,
+    pub signature: Signature,
+}
+
+/// An event that has been accepted by the processor.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ApprovedEvent<AppMessage> {
+    pub event: ProposedEvent<AppMessage>,
+    pub timestamp: Timestamp,
+    pub processor: PublicKey,
+}
+
 /// A proposed event from a client, not yet added to the stream
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ProposedEvent<AppMessage> {

@@ -49,6 +49,10 @@ impl AccountNonce {
     pub fn start() -> Self {
         AccountNonce(0)
     }
+
+    pub(crate) fn increment(&mut self) {
+        self.0 += 1;
+    }
 }
 
 /// Height of an event
@@ -67,6 +71,10 @@ impl EventHeight {
 
     pub(crate) fn is_start(&self) -> bool {
         self.0 == 0
+    }
+
+    pub(crate) fn try_into_i64(self) -> Result<i64> {
+        self.0.try_into().map_err(anyhow::Error::from)
     }
 }
 

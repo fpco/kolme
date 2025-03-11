@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO combined_stream(height,added,is_execution,rendered) VALUES($1,$2,FALSE,$3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "167dec948f5b3455b5cc797e6b1b16578fc860b121e3fd8684e2c37c882302fe"
+}

@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use sqlx::sqlite::SqliteConnectOptions;
+use k256::sha2::{Digest, Sha256};
+use sqlx::{sqlite::SqliteConnectOptions, Sqlite, Transaction};
 
 use crate::*;
 
@@ -18,7 +19,7 @@ impl<App: KolmeApp> Clone for Kolme<App> {
 
 pub struct KolmeInner<App: KolmeApp> {
     pub pool: sqlx::SqlitePool,
-    pub state: Arc<RwLock<KolmeState<App>>>,
+    pub(crate) state: Arc<RwLock<KolmeState<App>>>,
     pub app: App,
 }
 
@@ -128,4 +129,31 @@ async fn get_state_payload(pool: &sqlx::SqlitePool, hash: &[u8]) -> Result<Vec<u
             .fetch_one(pool)
             .await?,
     )
+}
+
+/// Returns the hash of the content
+pub(crate) async fn insert_state_payload(
+    e: &mut Transaction<'_, Sqlite>,
+    payload: &[u8],
+) -> Result<Vec<u8>> {
+    let mut hasher = Sha256::new();
+    hasher.update(payload);
+    let hash = hasher.finalize().to_vec();
+    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM state_payload WHERE hash=$1", hash)
+        .fetch_one(&mut **e)
+        .await?;
+    match count {
+        0 => {
+            sqlx::query!(
+                "INSERT INTO state_payload(hash,payload) VALUES($1, $2)",
+                hash,
+                payload
+            )
+            .execute(&mut **e)
+            .await?;
+        }
+        1 => (),
+        _ => anyhow::bail!("insert_state_payload: impossible result of {count} entries"),
+    }
+    Ok(hash)
 }

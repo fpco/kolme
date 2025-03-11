@@ -1,3 +1,5 @@
+use k256::ecdsa::{signature::SignerMut, SigningKey};
+
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
@@ -68,12 +70,42 @@ impl<App: KolmeApp> Processor<App> {
         state: &mut KolmeState<App>,
         event: crate::event::ProposedEvent<App::Message>,
     ) -> Result<()> {
-        let now = Timestamp::now();
         let height = state.event.get_next_height();
         state.event.increment_height();
+        // FIXME finish whatever work needs to happen with account_id
         let account_id = state
             .event
             .get_or_insert_account_id(&event.payload.pubkey, height);
-        todo!()
+        state.event.bump_nonce_for(account_id)?;
+        let now = Timestamp::now();
+        let approved_event = ApprovedEvent {
+            event,
+            timestamp: now,
+            processor: self.secret.public_key(),
+        };
+        let event_bytes = serde_json::to_vec(&approved_event)?;
+        let signature = SigningKey::from(&self.secret).sign(&event_bytes);
+        let signed_event = SignedEvent {
+            event: event_bytes,
+            signature,
+        };
+        let signed_event = serde_json::to_vec(&signed_event)?;
+
+        let mut trans = self.kolme.inner.pool.begin().await?;
+        let height = height.try_into_i64()?;
+        let now = now.to_string();
+        let combined_id = sqlx::query!("INSERT INTO combined_stream(height,added,is_execution,rendered) VALUES($1,$2,FALSE,$3)", height, now, signed_event).execute(&mut *trans).await?.last_insert_rowid();
+        let event_state = state.event.serialize_raw_state()?;
+        let event_state = insert_state_payload(&mut trans, &event_state).await?;
+        sqlx::query!(
+            "INSERT INTO event_stream(height,state,rendered_id) VALUES($1,$2,$3)",
+            height,
+            event_state,
+            combined_id
+        )
+        .execute(&mut *trans)
+        .await?;
+        trans.commit().await?;
+        Ok(())
     }
 }
