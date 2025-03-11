@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use anyhow::Context;
 use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::*;
@@ -29,91 +28,97 @@ impl<App: KolmeApp> Kolme<App> {
         code_version: impl AsRef<str>,
         db_path: impl AsRef<Path>,
     ) -> Result<Self> {
+        let code_version = code_version.as_ref();
         let options = SqliteConnectOptions::new()
             .filename(db_path)
             .create_if_missing(true);
         let pool = sqlx::SqlitePool::connect_with(options).await?;
         sqlx::migrate!().run(&pool).await?;
-        let framework_state = match get_latest_state(&pool).await? {
-            LatestState::NoState { last_event_height } => {
-                FrameworkState::new(last_event_height, App::genesis_info())?
-            }
-            LatestState::Latest {
-                last_event_height,
-                last_state_height,
-                framework_state,
-                app_state,
-            } => {
-                FrameworkState::load(&app, last_event_height, last_state_height, &framework_state)
-                    .await?
-            }
-        };
-        framework_state.validate_code_version(code_version)?;
+        let event = EventStreamState::load(&pool).await?;
+        let exec = ExecutionStreamState::load(&pool).await?;
+        let state = KolmeState::new(&app, event, exec, code_version).await?;
         Ok(Kolme {
             inner: Arc::new(KolmeInner {
                 pool,
-                framework_state: Arc::new(RwLock::new(framework_state)),
+                state: Arc::new(RwLock::new(state)),
                 app,
             }),
         })
     }
 
     pub fn get_next_event_height(&self) -> EventHeight {
-        self.inner.framework_state.read().next_event_height
+        self.inner.state.read().event.get_next_height()
     }
 
-    pub fn get_next_state_height(&self) -> EventHeight {
-        self.inner.framework_state.read().next_state_height
+    pub fn get_next_exec_height(&self) -> EventHeight {
+        self.inner.state.read().exec.get_next_height()
     }
 
     pub(crate) fn get_next_account_nonce(&self, public_key: k256::PublicKey) -> AccountNonce {
-        let guard = self.inner.framework_state.read();
-        match guard.get_account_id(&public_key) {
+        let guard = self.inner.state.read();
+        match guard.event.get_account_id(&public_key) {
             None => AccountNonce::start(),
-            Some(account_id) => guard.get_next_nonce(account_id).unwrap(),
+            Some(account_id) => guard.event.get_next_nonce(account_id).unwrap(),
         }
     }
 }
 
-enum LatestState {
-    NoState {
-        last_event_height: Option<EventHeight>,
-    },
-    Latest {
-        last_event_height: EventHeight,
-        last_state_height: EventHeight,
-        framework_state: Vec<u8>,
-        app_state: Vec<u8>,
-    },
+pub(crate) struct EventStreamState {
+    pub(crate) height: EventHeight,
+    pub(crate) state: Vec<u8>,
 }
 
-async fn get_latest_state(pool: &sqlx::SqlitePool) -> Result<LatestState> {
-    #[derive(serde::Deserialize)]
-    struct Helper {
-        height: i64,
-        framework_state_hash: Vec<u8>,
-        app_state_hash: Vec<u8>,
-    }
-    let last_event_height = sqlx::query_scalar!("SELECT MAX(height) FROM event_stream")
-        .fetch_one(pool)
+impl EventStreamState {
+    async fn load(pool: &sqlx::SqlitePool) -> Result<Option<EventStreamState>> {
+        struct Helper {
+            height: i64,
+            state: Vec<u8>,
+        }
+        match sqlx::query_as!(
+            Helper,
+            "SELECT height,state FROM event_stream ORDER BY height DESC LIMIT 1"
+        )
+        .fetch_optional(pool)
         .await?
-        .map(|i| i.try_into().map(EventHeight))
-        .transpose()?;
-    match sqlx::query_as!(
+        {
+            None => Ok(None),
+            Some(Helper { height, state }) => {
+                let height = height.try_into()?;
+                let state = get_state_payload(pool, &state).await?;
+                Ok(Some(EventStreamState { height, state }))
+            }
+        }
+    }
+}
+
+pub(crate) struct ExecutionStreamState {
+    pub(crate) height: EventHeight,
+    pub(crate) framework: Vec<u8>,
+    pub(crate) app: Vec<u8>,
+}
+
+impl ExecutionStreamState {
+    async fn load(pool: &sqlx::SqlitePool) -> Result<Option<ExecutionStreamState>> {
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            height: i64,
+            framework_state: Vec<u8>,
+            app_state: Vec<u8>,
+        }
+        match sqlx::query_as!(
         Helper,
-        "SELECT height, framework_state_hash, app_state_hash FROM state_stream ORDER BY height DESC LIMIT 1"
+        "SELECT height, framework_state, app_state FROM execution_stream ORDER BY height DESC LIMIT 1"
     )
     .fetch_optional(pool)
     .await? {
-        Some(Helper { height: last_state_height, framework_state_hash, app_state_hash }) => {
-            let last_event_height = last_event_height.context("Saw a state height with no event height")?;
-            let last_state_height = EventHeight(last_state_height.try_into()?);
-            anyhow::ensure!(last_event_height >= last_state_height);
-            let framework_state=get_state_payload(pool, &framework_state_hash).await?;
-            let app_state=get_state_payload(pool, &app_state_hash).await?;
-            Ok(LatestState::Latest { last_event_height,last_state_height, framework_state, app_state })
+        None => Ok(None),
+        Some(Helper { height, framework_state, app_state  }) => {
+            let height = height.try_into()?;
+            let framework=get_state_payload(pool, &framework_state).await?;
+            let app = get_state_payload(pool, &app_state).await?;
+            Ok(Some(ExecutionStreamState { height, framework, app }))
         },
-        None => Ok(LatestState::NoState{ last_event_height  }),
+    }
     }
 }
 

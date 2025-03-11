@@ -1,41 +1,47 @@
-CREATE TABLE event_stream(
-    height INTEGER PRIMARY KEY NOT NULL,
+CREATE TABLE combined_stream(
+    id INTEGER PRIMARY KEY NOT NULL,
+    height INTEGER NOT NULL,
     added TIMESTAMP NOT NULL,
-    payload BLOB NOT NULL,
-    signature BLOB NOT NULL,
-    rendered BLOB NOT NULL
+    is_execution BOOLEAN NOT NULL,
+    rendered BLOB NOT NULL,
+    UNIQUE (height, is_execution)
 );
 
--- Unified table for framework and app state, just for code simplicity
+-- Unified table for state, just for code simplicity
 CREATE TABLE state_payload(
     hash BLOB PRIMARY KEY NOT NULL,
     payload BLOB NOT NULL
 );
 
-CREATE TABLE state_stream(
+CREATE TABLE event_stream(
+    height INTEGER PRIMARY KEY NOT NULL,
+    state BLOB NOT NULL REFERENCES state_payload(hash),
+    rendered_id INTEGER NOT NULL REFERENCES combined_stream(id)
+);
+
+CREATE TABLE execution_stream(
     height INTEGER PRIMARY KEY NOT NULL REFERENCES event_stream(height),
-    added TIMESTAMP NOT NULL,
-    framework_state_hash BLOB NOT NULL REFERENCES state_payload(hash),
-    app_state_hash BLOB NOT NULL REFERENCES state_payload(hash),
-    rendered BLOB NOT NULL
+    framework_state BLOB NOT NULL REFERENCES state_payload(hash),
+    app_state BLOB NOT NULL REFERENCES state_payload(hash),
+    rendered_id INTEGER NOT NULL REFERENCES combined_stream(id)
 );
 
-CREATE TABLE state_logs(
-    height INTEGER NOT NULL REFERENCES state_stream(height),
+CREATE TABLE execution_logs(
+    height INTEGER NOT NULL REFERENCES execution_stream(height),
     position INTEGER NOT NULL,
     payload TEXT NOT NULL,
     PRIMARY KEY(height, position)
 );
 
-CREATE TABLE state_loads(
-    height INTEGER NOT NULL REFERENCES state_stream(height),
+CREATE TABLE execution_loads(
+    height INTEGER NOT NULL REFERENCES execution_stream(height),
     position INTEGER NOT NULL,
     payload TEXT NOT NULL,
     PRIMARY KEY(height, position)
 );
 
-CREATE TABLE actions(
+CREATE TABLE execution_actions(
     id INTEGER PRIMARY KEY NOT NULL,
-    height INTEGER NOT NULL REFERENCES state_stream(height),
+    height INTEGER NOT NULL REFERENCES execution_stream(height),
     payload TEXT NOT NULL
 );

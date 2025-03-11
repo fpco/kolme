@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use crate::*;
 
 #[derive(
     serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug,
@@ -67,6 +67,14 @@ impl EventHeight {
 
     pub(crate) fn is_start(&self) -> bool {
         self.0 == 0
+    }
+}
+
+impl TryFrom<i64> for EventHeight {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self> {
+        value.try_into().map_err(anyhow::Error::from).map(Self)
     }
 }
 

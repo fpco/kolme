@@ -21,6 +21,9 @@ pub trait KolmeApp {
 
     /// Load state previously serialized with [Self::save_state].
     fn load_state(v: &[u8]) -> Result<Self::State>;
+
+    /// Generate a blank state.
+    fn new_state() -> Result<Self::State>;
 }
 
 /// Information defining the initial state of an app.

@@ -90,12 +90,23 @@ impl EventState {
             .map(|x| x.next_nonce)
     }
 
+    pub fn get_next_height(&self) -> EventHeight {
+        self.next_height
+    }
+
+    pub fn increment_height(&mut self) {
+        self.next_height = self.next_height.next();
+    }
+
+    pub(super) fn new() -> Result<Self> {
+        todo!()
+    }
+
     pub(super) fn load(
-        last_event_height: EventHeight,
         expected_kolme_ident: &str,
-        payload: &[u8],
+        EventStreamState { height, state }: EventStreamState,
     ) -> Result<Self> {
-        let raw = serde_json::from_slice::<RawEventState>(payload)?;
+        let raw = serde_json::from_slice::<RawEventState>(&state)?;
         anyhow::ensure!(
             raw.kolme_ident == expected_kolme_ident,
             "Loaded an event state with ident {:?}, but expected ident {:?}",
@@ -117,7 +128,7 @@ impl EventState {
 
         Ok(Self {
             raw,
-            next_height: last_event_height.next(),
+            next_height: height.next(),
             pubkeys,
             wallets,
         })

@@ -14,7 +14,7 @@ impl<App: KolmeApp> Processor<App> {
         if self.kolme.get_next_event_height().is_start() {
             self.create_genesis_event().await?;
         }
-        while self.kolme.get_next_event_height() > self.kolme.get_next_state_height() {
+        while self.kolme.get_next_event_height() > self.kolme.get_next_exec_height() {
             self.produce_next_state().await?;
         }
         Err(anyhow::anyhow!(
@@ -43,38 +43,37 @@ impl<App: KolmeApp> Processor<App> {
         event.validate_signature()?;
 
         // Take a write lock to ensure nothing else tries to mutate the database at the same time.
-        let mut raw = self.kolme.inner.framework_state.write();
+        let mut guard = self.kolme.inner.state.write();
 
         // Make sure the nonce is correct
-        let expected_nonce = match raw.get_account_id(&event.payload.pubkey) {
-            Some(account_id) => raw.get_next_nonce(account_id)?,
+        let expected_nonce = match guard.event.get_account_id(&event.payload.pubkey) {
+            Some(account_id) => guard.event.get_next_nonce(account_id)?,
             None => AccountNonce::start(),
         };
         anyhow::ensure!(expected_nonce == event.payload.nonce);
 
         // Make sure this is a genesis event if and only if we have no events so far
-        if raw.next_event_height.is_start() {
+        if guard.event.get_next_height().is_start() {
             event.ensure_is_genesis()?;
-            anyhow::ensure!(event.payload.pubkey == raw.raw.processor);
+            anyhow::ensure!(event.payload.pubkey == guard.exec.get_processor_pubkey());
         } else {
             event.ensure_no_genesis()?;
         };
 
-        self.insert_event(&mut raw, event).await
+        self.insert_event(&mut guard, event).await
     }
 
     async fn insert_event(
         &self,
-        raw: &mut FrameworkState,
+        state: &mut KolmeState<App>,
         event: crate::event::ProposedEvent<App::Message>,
     ) -> Result<()> {
-        // FIXME current approach causes a new FrameworkState on each event due to nonce updates. May want to consider removing nonce management from that state.
-        // Looks like we may need an event stream state, a framework state, and an app state.
-
         let now = Timestamp::now();
-        let height = raw.next_event_height;
-        raw.next_event_height = raw.next_event_height.next();
-        let account_id = raw.get_or_insert_account_id(&event.payload.pubkey, now);
+        let height = state.event.get_next_height();
+        state.event.increment_height();
+        let account_id = state
+            .event
+            .get_or_insert_account_id(&event.payload.pubkey, height);
         todo!()
     }
 }
