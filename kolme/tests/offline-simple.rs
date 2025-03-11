@@ -33,7 +33,7 @@ impl KolmeApp for SampleKolmeApp {
     type State = SampleState;
     type Message = SampleMessage;
 
-    fn initial_framework_state() -> RawFrameworkState {
+    fn genesis_info() -> RawFrameworkState {
         let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
@@ -60,7 +60,7 @@ impl KolmeApp for SampleKolmeApp {
         RawFrameworkState {
             assets: BTreeMap::new(),
             accounts: BTreeMap::new(),
-            kolme_ident: Self::kolme_ident().into_owned(),
+            kolme_ident: "Dev code".to_owned(),
             code_version: DUMMY_CODE_VERSION.to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -71,8 +71,12 @@ impl KolmeApp for SampleKolmeApp {
         }
     }
 
-    fn kolme_ident() -> std::borrow::Cow<'static, str> {
-        "Dev code".into()
+    fn save_state(state: &Self::State) -> anyhow::Result<Vec<u8>> {
+        serde_json::to_vec(state).map_err(anyhow::Error::from)
+    }
+
+    fn load_state(v: &[u8]) -> anyhow::Result<Self::State> {
+        serde_json::from_slice(v).map_err(anyhow::Error::from)
     }
 }
 

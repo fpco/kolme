@@ -1,118 +1,29 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-use anyhow::Context;
-use k256::PublicKey;
+/// Internal Kolme state management.
+///
+/// We split up the state of any Kolme application into three distinct pieces:
+///
+/// * Event metadata: handles things like account IDs, nonce management, etc. These are pieces of state necessary for managing the event stream itself.
+///
+/// * Framework state: manages framework data like account balances which are modified during execution. Since some events will fail, we can easily have an event that updates event metadata but has no impact on the framework state.
+///
+/// * App specific state: storage defined by each application, also updated only during execution.
+use std::collections::HashMap;
 
 use crate::*;
 
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct AssetId(pub u64);
+mod event;
+mod framework;
 
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug,
-)]
-pub struct AssetName(pub String);
-
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct AccountId(pub u64);
-
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct AccountNonce(pub u64);
-
-impl AccountNonce {
-    pub fn start() -> Self {
-        AccountNonce(0)
-    }
+pub(crate) struct KolmeState<App: KolmeApp> {
+    pub event: event::EventState,
+    pub framework: framework::FrameworkState,
+    pub app: App::State,
+    /// Serialized format stored to quickly reload if we need to roll back event processing.
+    pub app_serialized: Vec<u8>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Account {
-    pub created: Timestamp,
-    pub pubkeys: BTreeSet<PublicKey>,
-    pub wallets: BTreeSet<Wallet>,
-    pub next_nonce: AccountNonce,
-    // TODO: add in balances, something like this: pub balances: BTreeMap<AssetId, Decimal>
-}
-
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub enum AccountAuthority {
-    // TODO raw public key
-    // TODO Ethereum and Solana addresses
-    Cosmos(cosmos::Address),
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct RawFrameworkState {
-    // We intentionally do not include things like height in here.
-    // This allows us to bypass unnecessary updates to state, allowing
-    // for more shared storage.
-    pub assets: BTreeMap<AssetName, AssetId>,
-    pub accounts: BTreeMap<AccountId, Account>,
-    /// Unique identifier for this deployment
-    pub kolme_ident: String,
-    pub code_version: String,
-    pub processor: PublicKey,
-    pub listeners: BTreeSet<PublicKey>,
-    pub needed_listeners: usize,
-    pub executors: BTreeSet<PublicKey>,
-    pub needed_executors: usize,
-    pub chains: BTreeMap<ExternalChain, ChainConfig>,
-}
-
-impl RawFrameworkState {
-    pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
-        anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.executors.len() >= self.needed_executors);
-        anyhow::ensure!(self.needed_executors > 0);
-        Ok(())
-    }
-}
-
-/// Height of an event
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct EventHeight(pub u64);
-impl EventHeight {
-    pub fn next(self) -> EventHeight {
-        EventHeight(self.0 + 1)
-    }
-
-    pub fn start() -> EventHeight {
-        EventHeight(0)
-    }
-
-    pub(crate) fn is_start(&self) -> bool {
-        self.0 == 0
-    }
-}
-
-#[derive(
-    PartialEq, PartialOrd, Ord, Eq, Clone, Debug, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub struct Wallet(String);
-
-pub struct FrameworkState {
-    pub raw: RawFrameworkState,
-    pub next_event_height: EventHeight,
-    pub next_state_height: EventHeight,
-    pub pubkeys: BTreeMap<k256::PublicKey, AccountId>,
-    pub wallets: HashMap<Wallet, AccountId>,
-}
-
-impl RawFrameworkState {}
-
-impl FrameworkState {
-    pub async fn load<App: KolmeApp>(
+impl<App: KolmeApp> KolmeState<App> {
+    pub async fn load(
         _app: &App,
         last_event_height: EventHeight,
         last_state_height: EventHeight,
@@ -142,18 +53,6 @@ impl FrameworkState {
         anyhow::ensure!(next_event_height >= next_state_height);
         raw.validate()?;
 
-        let mut pubkeys = BTreeMap::new();
-        let mut wallets = HashMap::new();
-
-        for (account_id, account) in &raw.accounts {
-            for pubkey in &account.pubkeys {
-                pubkeys.insert(*pubkey, *account_id);
-            }
-            for wallet in &account.wallets {
-                wallets.insert(wallet.clone(), *account_id);
-            }
-        }
-
         Ok(FrameworkState {
             raw,
             next_event_height,
@@ -172,42 +71,5 @@ impl FrameworkState {
             code_version
         );
         Ok(())
-    }
-
-    pub fn get_account_id(&self, key: &k256::PublicKey) -> Option<AccountId> {
-        self.pubkeys.get(key).copied()
-    }
-
-    pub(crate) fn get_or_insert_account_id(
-        &mut self,
-        key: &k256::PublicKey,
-        now: Timestamp,
-    ) -> AccountId {
-        match self.get_account_id(key) {
-            Some(id) => id,
-            None => {
-                let id = AccountId(self.raw.accounts.len().try_into().unwrap());
-                let mut pubkeys = BTreeSet::new();
-                pubkeys.insert(*key);
-                self.raw.accounts.insert(
-                    id,
-                    Account {
-                        created: now,
-                        pubkeys,
-                        wallets: BTreeSet::new(),
-                        next_nonce: AccountNonce::start(),
-                    },
-                );
-                id
-            }
-        }
-    }
-
-    pub fn get_next_nonce(&self, account_id: AccountId) -> Result<AccountNonce> {
-        self.raw
-            .accounts
-            .get(&account_id)
-            .context("get_next_nonce: account not found")
-            .map(|x| x.next_nonce)
     }
 }

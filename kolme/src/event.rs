@@ -60,7 +60,7 @@ impl<AppMessage: serde::Serialize> EventPayload<AppMessage> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum EventMessage<AppMessage> {
-    Genesis(RawFrameworkState),
+    Genesis(GenesisInfo),
     App(AppMessage),
     Listener(ListenerMessage),
     Auth(AuthMessage),
@@ -72,6 +72,8 @@ pub enum EventMessage<AppMessage> {
     // }
 
     // TODO: outgoing actions
+
+    // TODO: admin actions: update code version, change processor/listeners/executors (need to update contracts too), modification to chain values (like asset definitions)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

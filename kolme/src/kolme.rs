@@ -5,11 +5,11 @@ use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::*;
 
-pub struct Kolme<App> {
+pub struct Kolme<App: KolmeApp> {
     pub inner: Arc<KolmeInner<App>>,
 }
 
-impl<App> Clone for Kolme<App> {
+impl<App: KolmeApp> Clone for Kolme<App> {
     fn clone(&self) -> Self {
         Kolme {
             inner: self.inner.clone(),
@@ -17,9 +17,9 @@ impl<App> Clone for Kolme<App> {
     }
 }
 
-pub struct KolmeInner<App> {
+pub struct KolmeInner<App: KolmeApp> {
     pub pool: sqlx::SqlitePool,
-    pub framework_state: Arc<RwLock<FrameworkState>>,
+    pub state: Arc<RwLock<KolmeState<App>>>,
     pub app: App,
 }
 
@@ -36,7 +36,7 @@ impl<App: KolmeApp> Kolme<App> {
         sqlx::migrate!().run(&pool).await?;
         let framework_state = match get_latest_state(&pool).await? {
             LatestState::NoState { last_event_height } => {
-                FrameworkState::new(last_event_height, App::initial_framework_state())?
+                FrameworkState::new(last_event_height, App::genesis_info())?
             }
             LatestState::Latest {
                 last_event_height,

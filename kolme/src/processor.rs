@@ -1,6 +1,6 @@
 use crate::*;
 
-pub struct Processor<App> {
+pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
     secret: k256::SecretKey,
 }
@@ -26,9 +26,7 @@ impl<App: KolmeApp> Processor<App> {
         let payload = EventPayload {
             pubkey: self.secret.public_key(),
             nonce: self.kolme.get_next_account_nonce(self.secret.public_key()),
-            messages: vec![EventMessage::<App::Message>::Genesis(
-                App::initial_framework_state(),
-            )],
+            messages: vec![EventMessage::<App::Message>::Genesis(App::genesis_info())],
             created: Timestamp::now(),
         };
         let proposed = payload.sign(&self.secret)?;
