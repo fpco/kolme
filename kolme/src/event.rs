@@ -6,7 +6,7 @@ use k256::{
     PublicKey,
 };
 
-use crate::prelude::*;
+use crate::*;
 
 /// A proposed event from a client, not yet added to the stream
 #[derive(serde::Serialize, serde::Deserialize)]

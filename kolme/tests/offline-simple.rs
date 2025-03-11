@@ -5,7 +5,7 @@ use std::{
 
 use k256::SecretKey;
 
-use crate::{framework_state::RawFrameworkState, prelude::*};
+use kolme::*;
 
 /// In the future, move to an example and convert the binary to a library.
 pub struct SampleKolmeApp;
@@ -78,8 +78,6 @@ impl KolmeApp for SampleKolmeApp {
 
 #[cfg(test)]
 mod tests {
-    use crate::processor::Processor;
-
     use super::*;
 
     #[tokio::test]

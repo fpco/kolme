@@ -1,5 +1,5 @@
 [package]
-name = "server"
+name = "kolme"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
@@ -11,12 +11,10 @@ chrono = { version = "0.4.40", features = ["serde"] }
 clap = { version = "4.5.20", features = ["derive", "env", "unicode"] }
 cosmos = { git = "https://github.com/fpco/cosmos-rs", branch = "main" }
 dotenvy = "0.15.7"
-elliptic-curve = { version = "0.13.8", features = ["serde"] }
 jiff = { version = "0.2.3", features = ["serde"] }
 k256 = { version = "0.13.4", features = ["serde", "ecdsa", "sha256"] }
 parking_lot = "0.12.3"
 pid1 = "0.1.4"
-rand = "0.8"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }
 serde = { version = "1.0.218", features = ["derive"] }
 serde_json = "1.0.140"
@@ -26,4 +24,5 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [dev-dependencies]
+rand = "0.8"
 tempfile = "3.18.0"

@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Context;
 use sqlx::sqlite::SqliteConnectOptions;
 
-use crate::{framework_state::FrameworkState, prelude::*};
+use crate::*;
 
 pub struct Kolme<App> {
     pub inner: Arc<KolmeInner<App>>,
@@ -24,7 +24,7 @@ pub struct KolmeInner<App> {
 }
 
 impl<App: KolmeApp> Kolme<App> {
-    pub(crate) async fn new(
+    pub async fn new(
         app: App,
         code_version: impl AsRef<str>,
         db_path: impl AsRef<Path>,
