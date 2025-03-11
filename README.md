@@ -1,2 +1,3 @@
-# flex-chain-poc1
-First Proof of Concept of the FlexChain concept
+# Kolme Framework
+
+It's quiet here, more info coming.
