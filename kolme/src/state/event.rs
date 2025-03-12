@@ -57,6 +57,13 @@ impl EventState {
         self.pubkeys.get(key).copied()
     }
 
+    pub fn get_next_account_nonce(&self, key: PublicKey) -> AccountNonce {
+        match self.get_account_id(&key) {
+            None => AccountNonce::start(),
+            Some(account_id) => self.get_next_nonce(account_id).unwrap(),
+        }
+    }
+
     pub(crate) fn get_or_insert_account_id(
         &mut self,
         key: &k256::PublicKey,

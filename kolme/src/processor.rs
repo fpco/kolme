@@ -13,10 +13,21 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn run_processor(self) -> Result<()> {
-        if self.kolme.get_next_event_height().await.is_start() {
+        if self
+            .kolme
+            .inner
+            .state
+            .read()
+            .await
+            .event
+            .get_next_height()
+            .is_start()
+        {
             self.create_genesis_event().await?;
         }
-        while self.kolme.get_next_event_height().await > self.kolme.get_next_exec_height().await {
+        while self.kolme.inner.state.read().await.event.get_next_height()
+            > self.kolme.inner.state.read().await.exec.get_next_height()
+        {
             self.produce_next_state().await?;
         }
         Err(anyhow::anyhow!(
@@ -29,8 +40,12 @@ impl<App: KolmeApp> Processor<App> {
             pubkey: self.secret.public_key(),
             nonce: self
                 .kolme
-                .get_next_account_nonce(self.secret.public_key())
-                .await,
+                .inner
+                .state
+                .read()
+                .await
+                .event
+                .get_next_account_nonce(self.secret.public_key()),
             messages: vec![EventMessage::<App::Message>::Genesis(App::genesis_info())],
             created: Timestamp::now(),
         };
@@ -40,6 +55,8 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn produce_next_state(&self) -> Result<()> {
+        let mut guard = self.kolme.inner.state.write().await;
+        anyhow::ensure!(guard.event.get_next_height() > guard.exec.get_next_height());
         todo!()
     }
 

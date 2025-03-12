@@ -19,7 +19,7 @@ impl<App: KolmeApp> Clone for Kolme<App> {
 
 pub struct KolmeInner<App: KolmeApp> {
     pub pool: sqlx::SqlitePool,
-    pub(crate) state: Arc<tokio::sync::RwLock<KolmeState<App>>>,
+    pub state: Arc<tokio::sync::RwLock<KolmeState<App>>>,
     pub app: App,
 }
 
@@ -45,22 +45,6 @@ impl<App: KolmeApp> Kolme<App> {
                 app,
             }),
         })
-    }
-
-    pub async fn get_next_event_height(&self) -> EventHeight {
-        self.inner.state.read().await.event.get_next_height()
-    }
-
-    pub async fn get_next_exec_height(&self) -> EventHeight {
-        self.inner.state.read().await.exec.get_next_height()
-    }
-
-    pub(crate) async fn get_next_account_nonce(&self, public_key: k256::PublicKey) -> AccountNonce {
-        let guard = self.inner.state.read().await;
-        match guard.event.get_account_id(&public_key) {
-            None => AccountNonce::start(),
-            Some(account_id) => guard.event.get_next_nonce(account_id).unwrap(),
-        }
     }
 }
 

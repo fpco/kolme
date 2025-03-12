@@ -15,13 +15,13 @@ use crate::*;
 mod event;
 mod exec;
 
-pub(crate) struct KolmeState<App: KolmeApp> {
+pub struct KolmeState<App: KolmeApp> {
     pub event: EventState,
     pub exec: ExecutionState<App>,
 }
 
 impl<App: KolmeApp> KolmeState<App> {
-    pub async fn new(
+    pub(crate) async fn new(
         app: &App,
         event: Option<EventStreamState>,
         exec: Option<ExecutionStreamState>,

@@ -91,25 +91,34 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(kolme.get_next_event_height().await, EventHeight::start());
-        assert_eq!(kolme.get_next_exec_height().await, EventHeight::start());
+        assert_eq!(
+            kolme.inner.state.read().await.event.get_next_height(),
+            EventHeight::start()
+        );
+        assert_eq!(
+            kolme.inner.state.read().await.exec.get_next_height(),
+            EventHeight::start()
+        );
 
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         processor.create_genesis_event().await.unwrap();
         assert_eq!(
-            kolme.get_next_event_height().await,
+            kolme.inner.state.read().await.event.get_next_height(),
             EventHeight::start().next()
         );
-        assert_eq!(kolme.get_next_exec_height().await, EventHeight::start());
+        assert_eq!(
+            kolme.inner.state.read().await.exec.get_next_height(),
+            EventHeight::start()
+        );
         processor.create_genesis_event().await.unwrap_err();
 
         processor.produce_next_state().await.unwrap();
         assert_eq!(
-            kolme.get_next_event_height().await,
+            kolme.inner.state.read().await.event.get_next_height(),
             EventHeight::start().next()
         );
         assert_eq!(
-            kolme.get_next_exec_height().await,
+            kolme.inner.state.read().await.exec.get_next_height(),
             EventHeight::start().next()
         );
         processor.produce_next_state().await.unwrap_err();
