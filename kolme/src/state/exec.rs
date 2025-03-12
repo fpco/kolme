@@ -96,4 +96,20 @@ impl<App: KolmeApp> ExecutionState<App> {
     pub fn get_processor_pubkey(&self) -> PublicKey {
         self.exec.processor
     }
+
+    pub(crate) fn increment_height(&mut self) {
+        self.next_height = self.next_height.next();
+    }
+
+    pub(crate) fn serialize_and_store_framework_state(&mut self) -> Result<&[u8]> {
+        let bytes = serde_json::to_vec(&self.exec)?;
+        self.exec_serialized = bytes;
+        Ok(&self.exec_serialized)
+    }
+
+    pub(crate) fn serialize_and_store_app_state(&mut self) -> Result<&[u8]> {
+        let bytes = App::save_state(&self.app)?;
+        self.app_serialized = bytes;
+        Ok(&self.app_serialized)
+    }
 }

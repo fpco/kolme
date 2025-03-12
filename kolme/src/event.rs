@@ -24,6 +24,8 @@ pub struct ApprovedEvent<AppMessage> {
     pub event: ProposedEvent<AppMessage>,
     pub timestamp: Timestamp,
     pub processor: PublicKey,
+    // FIXME include a hash of the previous event in the stream
+    // FIXME include the event height too
 }
 
 /// A proposed event from a client, not yet added to the stream

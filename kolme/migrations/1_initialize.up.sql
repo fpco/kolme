@@ -28,20 +28,25 @@ CREATE TABLE execution_stream(
 
 CREATE TABLE execution_logs(
     height INTEGER NOT NULL REFERENCES execution_stream(height),
+    message INTEGER NOT NULL,
     position INTEGER NOT NULL,
     payload TEXT NOT NULL,
-    PRIMARY KEY(height, position)
+    PRIMARY KEY(height, message, position)
 );
 
 CREATE TABLE execution_loads(
     height INTEGER NOT NULL REFERENCES execution_stream(height),
+    message INTEGER NOT NULL,
     position INTEGER NOT NULL,
     payload TEXT NOT NULL,
-    PRIMARY KEY(height, position)
+    PRIMARY KEY(height, message, position)
 );
 
 CREATE TABLE execution_actions(
     id INTEGER PRIMARY KEY NOT NULL,
     height INTEGER NOT NULL REFERENCES execution_stream(height),
-    payload TEXT NOT NULL
+    message INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    UNIQUE(height, message, position)
 );

@@ -1,6 +1,7 @@
 mod app;
 mod cli;
 mod event;
+mod execute;
 mod kolme;
 mod processor;
 mod state;
@@ -9,6 +10,7 @@ mod types;
 pub use app::*;
 pub use cli::*;
 pub use event::*;
+pub use execute::*;
 pub use k256::PublicKey;
 pub use kolme::*;
 pub use processor::*;

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT rendered\n            FROM combined_stream\n            WHERE height=$1\n            AND NOT is_execution\n            LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "rendered",
+        "ordinal": 0,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1d89167d463ba8f681e2ce1380f4ae494b7436effb9f058ce47978c3fc5dffef"
+}
