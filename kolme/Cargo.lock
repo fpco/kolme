@@ -1902,7 +1902,6 @@ dependencies = [
  "dotenvy",
  "jiff",
  "k256",
- "parking_lot",
  "pid1",
  "rand",
  "reqwest",

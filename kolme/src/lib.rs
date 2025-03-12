@@ -16,7 +16,6 @@ pub use types::*;
 
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use jiff::Timestamp;
-pub(crate) use parking_lot::RwLock;
 pub(crate) use state::*;
 pub(crate) use std::collections::{BTreeMap, BTreeSet};
 pub(crate) use std::sync::Arc;

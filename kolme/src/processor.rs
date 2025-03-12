@@ -13,10 +13,10 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn run_processor(self) -> Result<()> {
-        if self.kolme.get_next_event_height().is_start() {
+        if self.kolme.get_next_event_height().await.is_start() {
             self.create_genesis_event().await?;
         }
-        while self.kolme.get_next_event_height() > self.kolme.get_next_exec_height() {
+        while self.kolme.get_next_event_height().await > self.kolme.get_next_exec_height().await {
             self.produce_next_state().await?;
         }
         Err(anyhow::anyhow!(
@@ -27,7 +27,10 @@ impl<App: KolmeApp> Processor<App> {
     pub async fn create_genesis_event(&self) -> Result<()> {
         let payload = EventPayload {
             pubkey: self.secret.public_key(),
-            nonce: self.kolme.get_next_account_nonce(self.secret.public_key()),
+            nonce: self
+                .kolme
+                .get_next_account_nonce(self.secret.public_key())
+                .await,
             messages: vec![EventMessage::<App::Message>::Genesis(App::genesis_info())],
             created: Timestamp::now(),
         };
@@ -45,7 +48,7 @@ impl<App: KolmeApp> Processor<App> {
         event.validate_signature()?;
 
         // Take a write lock to ensure nothing else tries to mutate the database at the same time.
-        let mut guard = self.kolme.inner.state.write();
+        let mut guard = self.kolme.inner.state.write().await;
 
         // Make sure the nonce is correct
         let expected_nonce = match guard.event.get_account_id(&event.payload.pubkey) {
