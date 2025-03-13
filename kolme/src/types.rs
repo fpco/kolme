@@ -8,18 +8,18 @@ pub enum ExternalChain {
     NeutronTestnet,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
 }
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct AssetConfig {
     pub decimals: u8,
     pub asset_id: AssetId,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub enum BridgeContract {
     NeededCosmosBridge { code_id: u64 },
     Deployed(String),

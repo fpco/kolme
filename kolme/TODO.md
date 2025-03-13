@@ -1,3 +1,4 @@
+* Can I drop the event state entirely and keep it in the database?
 * Need to consolidate naming around messages from the contract and back to the contract. I made a mix of events, messages, actions, logs, and more in all of this.
 * State storage: is the framework piece of the exec stream "execution state" or "framework state"?
 * Processor produces its own event for "I have received sufficient listener signatures to approve an event"

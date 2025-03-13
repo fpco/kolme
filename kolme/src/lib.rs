@@ -6,6 +6,7 @@ mod kolme;
 mod processor;
 mod state;
 mod types;
+mod utils;
 
 pub use app::*;
 pub use cli::*;
@@ -15,6 +16,7 @@ pub use k256::PublicKey;
 pub use kolme::*;
 pub use processor::*;
 pub use types::*;
+pub use utils::*;
 
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use jiff::Timestamp;

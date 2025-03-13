@@ -6,7 +6,7 @@ use crate::*;
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct SignedExec {
     /// An [ExecutedEvent], see [SignedEvent::event] for details.
-    pub exec: Vec<u8>,
+    pub exec: TaggedJson<ExecutedEvent>,
     pub signature: Signature,
 }
 
@@ -16,8 +16,8 @@ pub struct ExecutedEvent {
     pub timestamp: Timestamp,
     // FIXME pub event_hash: EventHash
     // pub previous_executed_event: Option<ExecHash>
-    pub framework_state: Vec<u8>,
-    pub app_state: Vec<u8>,
+    pub framework_state: Sha256Hash,
+    pub app_state: Sha256Hash,
     pub loads: Vec<ExecLoad>,
 }
 

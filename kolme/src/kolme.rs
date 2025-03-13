@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use k256::sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqliteConnectOptions, Sqlite, Transaction};
 
 use crate::*;
@@ -50,7 +49,7 @@ impl<App: KolmeApp> Kolme<App> {
 
 pub(crate) struct EventStreamState {
     pub(crate) height: EventHeight,
-    pub(crate) state: Vec<u8>,
+    pub(crate) state: TaggedJson<RawEventState>,
 }
 
 impl EventStreamState {
@@ -69,21 +68,23 @@ impl EventStreamState {
             None => Ok(None),
             Some(Helper { height, state }) => {
                 let height = height.try_into()?;
+                let state = Sha256Hash::from_hash(&state)?;
                 let state = get_state_payload(pool, &state).await?;
+                let state = TaggedJson::try_from_string(state)?;
                 Ok(Some(EventStreamState { height, state }))
             }
         }
     }
 }
 
-pub(crate) struct ExecutionStreamState {
+pub(crate) struct ExecutionStreamState<App: KolmeApp> {
     pub(crate) height: EventHeight,
-    pub(crate) framework: Vec<u8>,
-    pub(crate) app: Vec<u8>,
+    pub(crate) framework: TaggedJson<RawExecutionState>,
+    pub(crate) app: TaggedJson<App::State>,
 }
 
-impl ExecutionStreamState {
-    async fn load(pool: &sqlx::SqlitePool) -> Result<Option<ExecutionStreamState>> {
+impl<App: KolmeApp> ExecutionStreamState<App> {
+    async fn load(pool: &sqlx::SqlitePool) -> Result<Option<ExecutionStreamState<App>>> {
         #[derive(serde::Deserialize)]
         struct Helper {
             height: i64,
@@ -98,39 +99,41 @@ impl ExecutionStreamState {
     .await? {
         None => Ok(None),
         Some(Helper { height, framework_state, app_state  }) => {
+            let framework_state=Sha256Hash::from_hash(&framework_state)?;
+            let app_state=Sha256Hash::from_hash(&app_state)?;
             let height = height.try_into()?;
             let framework=get_state_payload(pool, &framework_state).await?;
+            let framework=TaggedJson::try_from_string(framework)?;
             let app = get_state_payload(pool, &app_state).await?;
+            let app = TaggedJson::from_pair(App::load_state(&app)?,app);
             Ok(Some(ExecutionStreamState { height, framework, app }))
         },
     }
     }
 }
 
-async fn get_state_payload(pool: &sqlx::SqlitePool, hash: &[u8]) -> Result<Vec<u8>> {
-    Ok(
-        sqlx::query_scalar!("SELECT payload FROM state_payload WHERE hash=$1", hash)
-            .fetch_one(pool)
-            .await?,
-    )
+async fn get_state_payload(pool: &sqlx::SqlitePool, hash: &Sha256Hash) -> Result<String> {
+    sqlx::query_scalar!("SELECT payload FROM state_payload WHERE hash=$1", hash)
+        .fetch_one(pool)
+        .await
+        .map_err(Into::into)
 }
 
 /// Returns the hash of the content
 pub(crate) async fn insert_state_payload(
     e: &mut Transaction<'_, Sqlite>,
     payload: &[u8],
-) -> Result<Vec<u8>> {
-    let mut hasher = Sha256::new();
-    hasher.update(payload);
-    let hash = hasher.finalize().to_vec();
-    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM state_payload WHERE hash=$1", hash)
+) -> Result<Sha256Hash> {
+    let hash = Sha256Hash::hash(payload);
+    let hash_bin = hash.0.as_slice();
+    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM state_payload WHERE hash=$1", hash_bin)
         .fetch_one(&mut **e)
         .await?;
     match count {
         0 => {
             sqlx::query!(
                 "INSERT INTO state_payload(hash,payload) VALUES($1, $2)",
-                hash,
+                hash_bin,
                 payload
             )
             .execute(&mut **e)

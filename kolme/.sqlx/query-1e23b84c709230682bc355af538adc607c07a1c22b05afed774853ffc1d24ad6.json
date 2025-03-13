@@ -6,7 +6,7 @@
       {
         "name": "payload",
         "ordinal": 0,
-        "type_info": "Blob"
+        "type_info": "Text"
       }
     ],
     "parameters": {

@@ -73,7 +73,7 @@ impl<App: KolmeApp> Processor<App> {
         let SignedEvent {
             event,
             signature: _,
-        } = serde_json::from_slice(&payload)?;
+        } = serde_json::from_str(&payload)?;
         let ApprovedEvent::<App::Message> {
             event:
                 ProposedEvent {
@@ -88,7 +88,7 @@ impl<App: KolmeApp> Processor<App> {
                 },
             timestamp: _,
             processor: _,
-        } = serde_json::from_slice(&event)?;
+        } = event.into_inner();
 
         match guard.execute_messages(&messages).await {
             Ok(outputs) => {
@@ -166,11 +166,14 @@ impl<App: KolmeApp> Processor<App> {
 
         let framework_state = insert_state_payload(
             &mut trans,
-            guard.exec.serialize_and_store_framework_state()?,
+            guard.exec.serialize_and_store_framework_state()?.as_bytes(),
         )
         .await?;
-        let app_state =
-            insert_state_payload(&mut trans, guard.exec.serialize_and_store_app_state()?).await?;
+        let app_state = insert_state_payload(
+            &mut trans,
+            guard.exec.serialize_and_store_app_state()?.as_bytes(),
+        )
+        .await?;
 
         let now = Timestamp::now();
         let exec_value = ExecutedEvent {
@@ -180,10 +183,10 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             loads: outputs.into_iter().flat_map(|o| o.loads).collect(),
         };
-        let exec = serde_json::to_vec(&exec_value)?;
-        let signature = SigningKey::from(self.secret.clone()).sign(&exec);
-        let signed = SignedExec { exec, signature };
-        let signed = serde_json::to_vec(&signed)?;
+        let exec = TaggedJson::new(exec_value)?;
+        let signature = SigningKey::from(self.secret.clone()).sign(exec.as_bytes());
+        let signed_value = SignedExec { exec, signature };
+        let signed = serde_json::to_string(&signed_value)?;
         let now = now.to_string();
         let rendered_id = sqlx::query!(
             r#"
@@ -204,8 +207,8 @@ impl<App: KolmeApp> Processor<App> {
             VALUES($1, $2, $3, $4)
         "#,
             height,
-            exec_value.framework_state,
-            exec_value.app_state,
+            signed_value.exec.as_inner().framework_state,
+            signed_value.exec.as_inner().app_state,
             rendered_id
         )
         .execute(&mut *trans)
@@ -259,13 +262,10 @@ impl<App: KolmeApp> Processor<App> {
             timestamp: now,
             processor: self.secret.public_key(),
         };
-        let event_bytes = serde_json::to_vec(&approved_event)?;
-        let signature = SigningKey::from(&self.secret).sign(&event_bytes);
-        let signed_event = SignedEvent {
-            event: event_bytes,
-            signature,
-        };
-        let signed_event = serde_json::to_vec(&signed_event)?;
+        let event = TaggedJson::new(approved_event)?;
+        let signature = SigningKey::from(&self.secret).sign(event.as_bytes());
+        let signed_event = SignedEvent { event, signature };
+        let signed_event = serde_json::to_string(&signed_event)?;
 
         let mut trans = self.kolme.inner.pool.begin().await?;
         let height = height.try_into_i64()?;

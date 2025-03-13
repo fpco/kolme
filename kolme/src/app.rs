@@ -17,10 +17,10 @@ pub trait KolmeApp {
     ///
     /// Note that it may be useful to keep extra data for efficiency
     /// within the state, and then omit that data during serialization.
-    fn save_state(state: &Self::State) -> Result<Vec<u8>>;
+    fn save_state(state: &Self::State) -> Result<String>;
 
     /// Load state previously serialized with [Self::save_state].
-    fn load_state(v: &[u8]) -> Result<Self::State>;
+    fn load_state(v: &str) -> Result<Self::State>;
 
     /// Generate a blank state.
     fn new_state() -> Result<Self::State>;
