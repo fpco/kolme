@@ -12,6 +12,9 @@ use exec::ExecutionState;
 /// * App specific state: storage defined by each application, also updated only during execution.
 use crate::*;
 
+pub(crate) use event::RawEventState;
+pub(crate) use exec::RawExecutionState;
+
 mod event;
 mod exec;
 
@@ -24,7 +27,7 @@ impl<App: KolmeApp> KolmeState<App> {
     pub(crate) async fn new(
         app: &App,
         event: Option<EventStreamState>,
-        exec: Option<ExecutionStreamState>,
+        exec: Option<ExecutionStreamState<App>>,
         code_version: &str,
     ) -> Result<Self> {
         let info = App::genesis_info();

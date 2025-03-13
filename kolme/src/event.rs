@@ -10,11 +10,9 @@ use crate::*;
 
 /// An event that is signed by the processor.
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct SignedEvent {
-    /// An [ApprovedEvent], serialized to ensure the signature matches.
-    ///
-    /// FIXME: overall decide where to use Vec<u8> vs concrete types below, I'm being very inconsistent. Using a helper data type that wraps up the binary and parsed representations together may be advantageous.
-    pub event: Vec<u8>,
+#[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
+pub struct SignedEvent<AppMessage> {
+    pub event: TaggedJson<ApprovedEvent<AppMessage>>,
     pub signature: Signature,
 }
 

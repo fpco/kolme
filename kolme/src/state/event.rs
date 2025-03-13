@@ -16,7 +16,7 @@ struct Account {
 /// We build an [EventState] on top of this which has more helpful
 /// bidirectional lookup capabilities.
 #[derive(serde::Serialize, serde::Deserialize)]
-struct RawEventState {
+pub(crate) struct RawEventState {
     /// Unique identifier for this deployment, never changes.
     ///
     /// We store this in the raw event state to ensure we don't
@@ -134,7 +134,7 @@ impl EventState {
         expected_kolme_ident: &str,
         EventStreamState { height, state }: EventStreamState,
     ) -> Result<Self> {
-        let raw = serde_json::from_slice::<RawEventState>(&state)?;
+        let raw = state.into_inner();
         anyhow::ensure!(
             raw.kolme_ident == expected_kolme_ident,
             "Loaded an event state with ident {:?}, but expected ident {:?}",

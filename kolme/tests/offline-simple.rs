@@ -71,12 +71,12 @@ impl KolmeApp for SampleKolmeApp {
         Ok(SampleState {})
     }
 
-    fn save_state(state: &Self::State) -> anyhow::Result<Vec<u8>> {
-        serde_json::to_vec(state).map_err(anyhow::Error::from)
+    fn save_state(state: &Self::State) -> anyhow::Result<String> {
+        serde_json::to_string(state).map_err(anyhow::Error::from)
     }
 
-    fn load_state(v: &[u8]) -> anyhow::Result<Self::State> {
-        serde_json::from_slice(v).map_err(anyhow::Error::from)
+    fn load_state(v: &str) -> anyhow::Result<Self::State> {
+        serde_json::from_str(v).map_err(anyhow::Error::from)
     }
 }
 

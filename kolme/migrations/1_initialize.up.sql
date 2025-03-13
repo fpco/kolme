@@ -3,14 +3,14 @@ CREATE TABLE combined_stream(
     height INTEGER NOT NULL,
     added TIMESTAMP NOT NULL,
     is_execution BOOLEAN NOT NULL,
-    rendered BLOB NOT NULL,
+    rendered TEXT NOT NULL,
     UNIQUE (height, is_execution)
 );
 
 -- Unified table for state, just for code simplicity
 CREATE TABLE state_payload(
     hash BLOB PRIMARY KEY NOT NULL,
-    payload BLOB NOT NULL
+    payload TEXT NOT NULL
 );
 
 CREATE TABLE event_stream(
