@@ -1,4 +1,39 @@
-use crate::*;
+use crate::core::*;
+
+pub(super) struct ExecutionStreamState<App: KolmeApp> {
+    pub(super) height: EventHeight,
+    pub(super) framework: TaggedJson<RawExecutionState>,
+    pub(super) app: TaggedJson<App::State>,
+}
+
+impl<App: KolmeApp> ExecutionStreamState<App> {
+    pub(super) async fn load(pool: &sqlx::SqlitePool) -> Result<Option<ExecutionStreamState<App>>> {
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            height: i64,
+            framework_state: Vec<u8>,
+            app_state: Vec<u8>,
+        }
+        match sqlx::query_as!(
+        Helper,
+        "SELECT height, framework_state, app_state FROM execution_stream ORDER BY height DESC LIMIT 1"
+    )
+    .fetch_optional(pool)
+    .await? {
+        None => Ok(None),
+        Some(Helper { height, framework_state, app_state  }) => {
+            let framework_state=Sha256Hash::from_hash(&framework_state)?;
+            let app_state=Sha256Hash::from_hash(&app_state)?;
+            let height = height.try_into()?;
+            let framework=get_state_payload(pool, &framework_state).await?;
+            let framework=TaggedJson::try_from_string(framework)?;
+            let app = get_state_payload(pool, &app_state).await?;
+            let app = TaggedJson::from_pair(App::load_state(&app)?,app);
+            Ok(Some(ExecutionStreamState { height, framework, app }))
+        },
+    }
+    }
+}
 
 /// Raw framework state that can be serialized to the database.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]

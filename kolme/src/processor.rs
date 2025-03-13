@@ -13,21 +13,11 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn run_processor(self) -> Result<()> {
-        if self
-            .kolme
-            .inner
-            .state
-            .read()
-            .await
-            .event
-            .get_next_height()
-            .is_start()
-        {
+        let kolme = self.kolme.read().await;
+        if kolme.get_next_event_height().is_start() {
             self.create_genesis_event().await?;
         }
-        while self.kolme.inner.state.read().await.event.get_next_height()
-            > self.kolme.inner.state.read().await.exec.get_next_height()
-        {
+        while kolme.get_next_event_height() > kolme.get_next_exec_height() {
             self.produce_next_state().await?;
         }
         Err(anyhow::anyhow!(
@@ -40,11 +30,8 @@ impl<App: KolmeApp> Processor<App> {
             pubkey: self.secret.public_key(),
             nonce: self
                 .kolme
-                .inner
-                .state
                 .read()
                 .await
-                .event
                 .get_next_account_nonce(self.secret.public_key()),
             messages: vec![EventMessage::<App::Message>::Genesis(App::genesis_info())],
             created: Timestamp::now(),
@@ -55,25 +42,10 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn produce_next_state(&self) -> Result<()> {
-        let mut guard = self.kolme.inner.state.write().await;
-        let next_height = guard.exec.get_next_height();
+        let mut guard = self.kolme.write().await;
+        let next_height = guard.get_next_exec_height();
         let next_height_i64 = next_height.try_into_i64()?;
-        anyhow::ensure!(guard.event.get_next_height() > next_height);
-        let query = sqlx::query_scalar!(
-            r#"
-            SELECT rendered
-            FROM combined_stream
-            WHERE height=$1
-            AND NOT is_execution
-            LIMIT 1
-        "#,
-            next_height_i64
-        );
-        let payload = query.fetch_one(&self.kolme.inner.pool).await?;
-        let SignedEvent {
-            event,
-            signature: _,
-        } = serde_json::from_str(&payload)?;
+        anyhow::ensure!(guard.get_next_event_height() > next_height);
         let ApprovedEvent::<App::Message> {
             event:
                 ProposedEvent {
@@ -88,7 +60,7 @@ impl<App: KolmeApp> Processor<App> {
                 },
             timestamp: _,
             processor: _,
-        } = event.into_inner();
+        } = guard.load_event(next_height).await?.event.into_inner();
 
         match guard.execute_messages(&messages).await {
             Ok(outputs) => {
