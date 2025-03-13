@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT height,state FROM event_stream ORDER BY height DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "height",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "state",
+        "ordinal": 1,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "44dceac360657cf92bccc440a83ce72d48ee4efd22836a947be377726b53f648"
+}
