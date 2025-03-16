@@ -4,6 +4,7 @@ use crate::core::*;
 
 pub(super) struct EventStreamState {
     pub(super) height: EventHeight,
+    pub(super) hash: Sha256Hash,
     pub(super) state: TaggedJson<RawEventState>,
 }
 
@@ -11,22 +12,32 @@ impl EventStreamState {
     pub(super) async fn load(pool: &sqlx::SqlitePool) -> Result<Option<EventStreamState>> {
         struct Helper {
             height: i64,
+            hash: Vec<u8>,
             state: Vec<u8>,
         }
         match sqlx::query_as!(
             Helper,
-            "SELECT height,state FROM event_stream ORDER BY height DESC LIMIT 1"
+            "SELECT height,hash,state FROM event_stream ORDER BY height DESC LIMIT 1"
         )
         .fetch_optional(pool)
         .await?
         {
             None => Ok(None),
-            Some(Helper { height, state }) => {
+            Some(Helper {
+                height,
+                hash,
+                state,
+            }) => {
                 let height = height.try_into()?;
+                let hash = Sha256Hash::from_hash(&hash)?;
                 let state = Sha256Hash::from_hash(&state)?;
                 let state = get_state_payload(pool, &state).await?;
                 let state = TaggedJson::try_from_string(state)?;
-                Ok(Some(EventStreamState { height, state }))
+                Ok(Some(EventStreamState {
+                    height,
+                    hash,
+                    state,
+                }))
             }
         }
     }
@@ -74,6 +85,7 @@ struct PendingListenerMessage {
 pub struct EventState {
     raw: RawEventState,
     next_height: EventHeight,
+    current_hash: Sha256Hash,
 
     /// Reverse lookup information for public keys
     pubkeys: BTreeMap<k256::PublicKey, AccountId>,
@@ -142,6 +154,10 @@ impl EventState {
         self.next_height
     }
 
+    pub(crate) fn get_current_hash(&self) -> &Sha256Hash {
+        &self.current_hash
+    }
+
     pub fn increment_height(&mut self) {
         self.next_height = self.next_height.next();
     }
@@ -155,6 +171,7 @@ impl EventState {
                 last_bridge_event_id: BTreeMap::new(),
             },
             next_height: EventHeight::start(),
+            current_hash: Sha256Hash::genesis_parent(),
             pubkeys: BTreeMap::new(),
             wallets: HashMap::new(),
         })
@@ -162,7 +179,11 @@ impl EventState {
 
     pub(super) fn load(
         expected_kolme_ident: &str,
-        EventStreamState { height, state }: EventStreamState,
+        EventStreamState {
+            height,
+            hash,
+            state,
+        }: EventStreamState,
     ) -> Result<Self> {
         let raw = state.into_inner();
         anyhow::ensure!(
@@ -189,6 +210,7 @@ impl EventState {
             next_height: height.next(),
             pubkeys,
             wallets,
+            current_hash: hash,
         })
     }
 

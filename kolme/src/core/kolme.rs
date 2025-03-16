@@ -110,8 +110,11 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.state.event.get_next_height()
     }
 
-    pub fn increment_event_height(&mut self) {
-        self.state.event.increment_height();
+    /// Returns the hash of the most recent event.
+    ///
+    /// If there is no event present, returns the special parent for the genesis block.
+    pub fn get_current_event_hash(&self) -> &Sha256Hash {
+        self.state.event.get_current_hash()
     }
 
     pub fn get_next_exec_height(&self) -> EventHeight {
@@ -205,6 +208,23 @@ impl<App: KolmeApp> KolmeWrite<App> {
             kolme: self,
             trans: Arc::new(tokio::sync::Mutex::new(Some(trans))),
         })
+    }
+
+    /// Downgrade to a read-only version.
+    ///
+    /// Intended for safety of validation code. A common pattern is locking framework, performing validation in a read-only manner, and then continuing with mutations. We want to ensure that no one else can modify our storage between the validation and the mutations.
+    pub(crate) fn downgrade(&self) -> KolmeWriteDowngraded<App> {
+        KolmeWriteDowngraded(self)
+    }
+}
+
+pub struct KolmeWriteDowngraded<'a, App: KolmeApp>(&'a KolmeWrite<App>);
+
+impl<App: KolmeApp> Deref for KolmeWriteDowngraded<'_, App> {
+    type Target = KolmeInner<App>;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
     }
 }
 
@@ -342,19 +362,50 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
         .execute(&mut **self.trans.lock().await.as_mut().unwrap())
         .await?;
 
+        // FIXME when we redo this function, it would be better to move the commit to a higher level. Basically: keep commit and begin paired in the code.
         let mut kolme = self.commit().await?;
 
         kolme.increment_exec_height();
         Ok(kolme)
     }
 
+    /// Add the given event to storage
+    ///
+    /// FIXME: Determine if we need to perform data validation here or not.
+    pub async fn insert_event(&mut self, signed_event: &SignedEvent<App::Message>) -> Result<()> {
+        let height = self.get_next_event_height();
+        assert_eq!(height, signed_event.0.message.as_inner().height);
+        self.state.event.increment_height();
+        let account_id = self.get_or_insert_account_id(
+            &signed_event
+                .0
+                .message
+                .as_inner()
+                .event
+                .0
+                .message
+                .as_inner()
+                .pubkey,
+            height,
+        );
+        // TODO: review this code more carefully, do we need to check nonces more explicitly? Can we make a higher-level abstraction to avoid exposing too many internals to users of Kolme?
+        self.bump_nonce_for(account_id)?;
+        let now = Timestamp::now();
+
+        let height = height.try_into_i64()?;
+        let now = now.to_string();
+        // FIXME move this logic into core, notify subscribers of the new event
+        self.add_event_to_combined(height, now, signed_event).await
+    }
+
     // FIXME this function is probably the wrong level of abstraction
-    pub async fn add_event_to_combined<AppMessage>(
-        self,
+    async fn add_event_to_combined(
+        &mut self,
         height: i64,
         now: String,
-        signed_event: &SignedEvent<AppMessage>,
-    ) -> Result<KolmeWrite<App>> {
+        signed_event: &SignedEvent<App::Message>,
+    ) -> Result<()> {
+        let hash = signed_event.0.message_hash();
         let signed_event_str = serde_json::to_string(signed_event)?;
         let combined_id = sqlx::query!("INSERT INTO combined_stream(height,added,is_execution,rendered) VALUES($1,$2,FALSE,$3)", height, now, signed_event_str).execute(&mut **self.trans.lock().await.as_mut().unwrap()).await?.last_insert_rowid();
         let event_state = self.kolme.state.event.serialize_raw_state()?;
@@ -364,14 +415,15 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
         )
         .await?;
         sqlx::query!(
-            "INSERT INTO event_stream(height,state,rendered_id) VALUES($1,$2,$3)",
+            "INSERT INTO event_stream(height,hash,state,rendered_id) VALUES($1,$2,$3,$4)",
             height,
+            hash,
             event_state,
             combined_id
         )
         .execute(&mut **self.trans.lock().await.as_mut().unwrap())
         .await?;
-        self.commit().await
+        Ok(())
     }
 }
 

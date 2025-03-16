@@ -15,6 +15,7 @@ CREATE TABLE state_payload(
 
 CREATE TABLE event_stream(
     height INTEGER PRIMARY KEY NOT NULL,
+    hash BLOB NOT NULL UNIQUE,
     state BLOB NOT NULL REFERENCES state_payload(hash),
     rendered_id INTEGER NOT NULL REFERENCES combined_stream(id)
 );
