@@ -11,16 +11,43 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn run_processor(self) -> Result<()> {
-        let kolme = self.kolme.read().await;
-        if kolme.get_next_event_height().is_start() {
+        if self.kolme.read().await.get_next_event_height().is_start() {
+            tracing::info!("Creating genesis event");
             self.create_genesis_event().await?;
         }
-        while kolme.get_next_event_height() > kolme.get_next_exec_height() {
+
+        // Subscribe to any newly arrived events.
+        let mut receiver = self.kolme.subscribe();
+
+        // Now that we're subscribed, do an initial catch-up for any events
+        // that were in the database but not yet executed.
+        self.catch_up_exec_state().await?;
+        tracing::info!("Processor has caught up, waiting for new events.");
+
+        loop {
+            let notification = receiver.recv().await?;
+            match notification {
+                Notification::NewEvent(_event_height) => {
+                    // Any time a new event lands, make sure we're fully synchronized
+                    // up to the latest event. This avoids any race conditions from events
+                    // added between our previous catch-up and subscribing to the channel.
+                    self.catch_up_exec_state().await?;
+                }
+            }
+        }
+    }
+
+    async fn catch_up_exec_state(&self) -> Result<()> {
+        while self.kolme.read().await.get_next_event_height()
+            > self.kolme.read().await.get_next_exec_height()
+        {
+            tracing::info!(
+                "Calculating exec state for height {}",
+                self.kolme.read().await.get_next_exec_height()
+            );
             self.produce_next_state().await?;
         }
-        Err(anyhow::anyhow!(
-            "Need to figure out how to run the processor here exactly... axum + outgoing listener?"
-        ))
+        Ok(())
     }
 
     pub async fn create_genesis_event(&self) -> Result<()> {
@@ -113,6 +140,7 @@ impl<App: KolmeApp> Processor<App> {
 
         let height = height.try_into_i64()?;
         let now = now.to_string();
+        // FIXME move this logic into core, notify subscribers of the new event
         kolme
             .add_event_to_combined(height, now, &signed_event)
             .await

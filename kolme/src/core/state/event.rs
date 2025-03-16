@@ -192,7 +192,7 @@ impl EventState {
         })
     }
 
-    pub(crate) fn serialize_raw_state(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(&self.raw).map_err(anyhow::Error::from)
+    pub(crate) fn serialize_raw_state(&self) -> Result<String> {
+        serde_json::to_string(&self.raw).map_err(anyhow::Error::from)
     }
 }

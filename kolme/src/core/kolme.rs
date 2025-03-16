@@ -25,12 +25,14 @@ use crate::core::*;
 /// locked during write operations to prevent data races.
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<tokio::sync::RwLock<KolmeInner<App>>>,
+    broadcast: tokio::sync::broadcast::Sender<Notification>,
 }
 
 impl<App: KolmeApp> Clone for Kolme<App> {
     fn clone(&self) -> Self {
         Kolme {
             inner: self.inner.clone(),
+            broadcast: self.broadcast.clone(),
         }
     }
 }
@@ -94,7 +96,12 @@ impl<App: KolmeApp> Kolme<App> {
         let state = KolmeState::new(&app, &pool, code_version).await?;
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(KolmeInner { pool, state, app })),
+            broadcast: tokio::sync::broadcast::channel(100).0,
         })
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification> {
+        self.broadcast.subscribe()
     }
 }
 
@@ -283,7 +290,7 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
                 .state
                 .exec
                 .serialize_and_store_framework_state()?
-                .as_bytes(),
+                .as_str(),
         )
         .await?;
         let app_state = insert_state_payload(
@@ -292,7 +299,7 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
                 .state
                 .exec
                 .serialize_and_store_app_state()?
-                .as_bytes(),
+                .as_str(),
         )
         .await?;
 

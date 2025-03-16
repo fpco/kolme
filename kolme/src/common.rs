@@ -22,7 +22,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 /// debug messages for both the Kolme crate itself, and if provided
 /// the local crate, will be logged.
 pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
-    let env_directive = if verbose {
+    let env_filter = if verbose {
         match local_crate_name {
             None => format!("{}=debug,info", env!("CARGO_CRATE_NAME")),
             Some(name) => format!("{}=debug,{name}=debug,info", env!("CARGO_CRATE_NAME")),
@@ -30,14 +30,14 @@ pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
         .parse()
         .unwrap()
     } else {
-        Level::INFO.into()
+        EnvFilter::from_default_env().add_directive(Level::INFO.into())
     };
 
     tracing_subscriber::registry()
         .with(
             fmt::Layer::default()
                 .log_internal_errors(true)
-                .and_then(EnvFilter::from_default_env().add_directive(env_directive)),
+                .and_then(env_filter),
         )
         .init();
     tracing::info!("Initialized Logging");

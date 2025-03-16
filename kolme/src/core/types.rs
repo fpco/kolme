@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::*;
 use k256::{ecdsa::Signature, PublicKey};
 
@@ -76,6 +78,12 @@ impl EventHeight {
 
     pub(crate) fn try_into_i64(self) -> Result<i64> {
         self.0.try_into().map_err(anyhow::Error::from)
+    }
+}
+
+impl Display for EventHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -286,4 +294,10 @@ pub enum ExecAction {
 pub struct AssetAmount {
     pub id: AssetId,
     pub amount: u128, // FIXME use a Decimal representation
+}
+
+/// Notifications that can come from the Kolme framework to components.
+#[derive(Clone, Copy)]
+pub enum Notification {
+    NewEvent(EventHeight),
 }

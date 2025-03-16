@@ -26,7 +26,7 @@ pub(super) async fn get_state_payload(
 /// Returns the hash of the content
 pub(super) async fn insert_state_payload(
     e: &mut Transaction<'_, Sqlite>,
-    payload: &[u8],
+    payload: &str,
 ) -> Result<Sha256Hash> {
     let hash = Sha256Hash::hash(payload);
     let hash_bin = hash.0.as_slice();
