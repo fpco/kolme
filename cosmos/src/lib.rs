@@ -2,7 +2,7 @@ use std::num::TryFromIntError;
 
 use cosmwasm_std::{
     entry_point, from_json, to_json_binary, Api, Binary, Coin, CosmosMsg, Deps, DepsMut, Env,
-    Event, HexBinary, MessageInfo, Response,
+    Event, HexBinary, MessageInfo, RecoverPubkeyError, Response,
 };
 use cw_storage_plus::Item;
 use sha2::{Digest, Sha256};
@@ -29,12 +29,21 @@ pub enum Error {
     IncorrectOutgoingId { expected: u32, received: u32 },
     #[error("Insufficient executor signatures provided. Needed: {needed}. Provided: {provided}.")]
     InsufficientSignatures { needed: u16, provided: u16 },
-    #[error("Invalid signature {sig} for public key {key}.")]
-    InvalidSignature { sig: HexBinary, key: HexBinary },
+    #[error("Invalid signature {sig} with recovery_id {recid}: {source}.")]
+    InvalidSignature {
+        source: RecoverPubkeyError,
+        sig: HexBinary,
+        recid: u8,
+    },
     #[error("Public key {key} is not part of the executor set.")]
     NonExecutorKey { key: HexBinary },
     #[error("Duplicate public key provided: {key}.")]
     DuplicateKey { key: HexBinary },
+    #[error("Processor signature had the wrong public key. Expected key {expected}. Actually signed with {actual}.")]
+    NonProcessorKey {
+        expected: HexBinary,
+        actual: HexBinary,
+    },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -111,9 +120,9 @@ pub enum ExecuteMsg {
         /// Monotonically increasing ID to ensure messages are sent in the correct order.
         id: u32,
         /// Signature from the processor
-        processor: HexBinary,
+        processor: SignatureWithRecovery,
         /// Signatures from the executors
-        executors: Vec<ExecutorSignature>,
+        executors: Vec<SignatureWithRecovery>,
         /// The raw payload to execute
         payload: Binary,
     },
@@ -121,8 +130,8 @@ pub enum ExecuteMsg {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
-pub struct ExecutorSignature {
-    pub key: HexBinary,
+pub struct SignatureWithRecovery {
+    pub recid: u8,
     pub sig: HexBinary,
 }
 
@@ -180,8 +189,8 @@ fn signed(
     deps: DepsMut,
     info: MessageInfo,
     id: u32,
-    processor: HexBinary,
-    executors: Vec<ExecutorSignature>,
+    processor: SignatureWithRecovery,
+    executors: Vec<SignatureWithRecovery>,
     payload: Binary,
 ) -> Result<Response> {
     let mut state = STATE.load(deps.storage)?;
@@ -208,22 +217,23 @@ fn signed(
     hasher.update(&payload);
     let hash = hasher.finalize();
 
-    validate_signature(
-        deps.api,
-        &hash,
-        state.processor.as_slice(),
-        processor.as_slice(),
-    )?;
+    let processor = validate_signature(deps.api, &hash, &processor)?;
+    if processor != state.processor.as_slice() {
+        return Err(Error::NonProcessorKey {
+            expected: state.processor,
+            actual: HexBinary::from(processor),
+        });
+    }
 
     let mut used = vec![];
-    for ExecutorSignature { key, sig } in executors {
+    for executor in executors {
+        let key = HexBinary::from(validate_signature(deps.api, &hash, &executor)?);
         if !state.executors.contains(&key) {
             return Err(Error::NonExecutorKey { key });
         }
         if used.contains(&key) {
             return Err(Error::DuplicateKey { key });
         }
-        validate_signature(deps.api, &hash, key.as_slice(), sig.as_slice())?;
         used.push(key);
     }
 
@@ -236,15 +246,18 @@ fn signed(
     .add_messages(msgs))
 }
 
-fn validate_signature(api: &dyn Api, hash: &[u8], key: &[u8], sig: &[u8]) -> Result<()> {
-    if api.secp256k1_verify(hash, sig, key)? {
-        Ok(())
-    } else {
-        Err(Error::InvalidSignature {
-            sig: HexBinary::from(sig),
-            key: HexBinary::from(key),
+/// Validates the signature and returns the public key of the signer.
+fn validate_signature(
+    api: &dyn Api,
+    hash: &[u8],
+    SignatureWithRecovery { recid, sig }: &SignatureWithRecovery,
+) -> Result<Vec<u8>> {
+    api.secp256k1_recover_pubkey(hash, sig, *recid)
+        .map_err(|source| Error::InvalidSignature {
+            source,
+            sig: sig.clone(),
+            recid: *recid,
         })
-    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
