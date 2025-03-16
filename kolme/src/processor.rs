@@ -10,7 +10,7 @@ impl<App: KolmeApp> Processor<App> {
         Processor { kolme, secret }
     }
 
-    pub async fn run_processor(self) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
         if self.kolme.read().await.get_next_event_height().is_start() {
             tracing::info!("Creating genesis event");
             self.create_genesis_event().await?;
@@ -32,6 +32,23 @@ impl<App: KolmeApp> Processor<App> {
                     // up to the latest event. This avoids any race conditions from events
                     // added between our previous catch-up and subscribing to the channel.
                     self.catch_up_exec_state().await?;
+                }
+                Notification::NewExec(_) => continue,
+                Notification::GenesisInstantiation { chain, contract } => {
+                    // FIXME In the future, we need the listeners to pick this up, validate, and send to the processor for final checking. For now, taking a shortcut and simply trusting the message.
+                    let pubkey = self.secret.public_key();
+                    let nonce = self.kolme.read().await.get_next_account_nonce(pubkey);
+                    let payload = EventPayload::<App::Message> {
+                        pubkey,
+                        nonce,
+                        created: Timestamp::now(),
+                        messages: vec![EventMessage::BridgeCreated(BridgeCreated {
+                            chain,
+                            contract,
+                        })],
+                    };
+                    self.propose(ProposedEvent(TaggedJson::new(payload)?.sign(&self.secret)?))
+                        .await?;
                 }
             }
         }

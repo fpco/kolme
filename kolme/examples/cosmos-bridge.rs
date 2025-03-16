@@ -1,9 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    str::FromStr,
     sync::OnceLock,
 };
 
 use anyhow::Result;
+use cosmos::{SeedPhrase, Wallet};
 use k256::SecretKey;
 
 use kolme::*;
@@ -20,23 +22,24 @@ pub enum SampleMessage {
     SayHi,
 }
 
-pub fn get_sample_secret_key() -> &'static SecretKey {
-    static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
-}
+const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
+const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
-const OSMOSIS_TESTNET_CODE_ID: u64 = 123; // FIXME still need to actually write and store this contract
-const NEUTRON_TESTNET_CODE_ID: u64 = 456; // FIXME still need to actually write and store this contract
+const OSMOSIS_TESTNET_CODE_ID: u64 = 12247;
+const NEUTRON_TESTNET_CODE_ID: u64 = 11180;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
+
+fn my_secret_key() -> SecretKey {
+    SecretKey::from_slice(&hex::decode(SECRET_KEY_HEX).unwrap()).unwrap()
+}
 
 impl KolmeApp for SampleKolmeApp {
     type State = SampleState;
     type Message = SampleMessage;
 
     fn genesis_info() -> GenesisInfo {
-        let my_public_key = get_sample_secret_key().public_key();
+        let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
         let mut bridges = BTreeMap::new();
@@ -96,8 +99,10 @@ async fn main_inner() -> Result<()> {
 
     let mut set = JoinSet::new();
 
-    let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
-    set.spawn(processor.run_processor());
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(processor.run());
+    let submitter = Submitter::new(kolme, SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap());
+    set.spawn(submitter.run());
 
     while let Some(res) = set.join_next().await {
         match res {

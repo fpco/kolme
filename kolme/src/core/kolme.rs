@@ -48,6 +48,13 @@ impl<App: KolmeApp> Kolme<App> {
             broadcast: self.broadcast.clone(),
         }
     }
+
+    /// Notify the system of a genesis contract instantiation.
+    pub fn notify_genesis_instantiation(&self, chain: ExternalChain, contract: String) {
+        self.broadcast
+            .send(Notification::GenesisInstantiation { chain, contract })
+            .ok();
+    }
 }
 
 /// Read-only access to Kolme.
@@ -127,6 +134,11 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.state.exec.get_next_height()
     }
 
+    pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
+        self.state.exec.get_next_genesis_action()
+    }
+
+    // FIXME remove this function I think
     pub fn increment_exec_height(&mut self) {
         self.state.exec.increment_height();
     }
@@ -372,6 +384,10 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
         let mut kolme = self.commit().await?;
 
         kolme.increment_exec_height();
+        kolme
+            .broadcast
+            .send(Notification::NewExec(next_height))
+            .ok();
         Ok(kolme)
     }
 

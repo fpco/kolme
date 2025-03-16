@@ -4,7 +4,7 @@ use crate::*;
 use k256::{ecdsa::Signature, PublicKey};
 
 #[derive(
-    serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug,
+    serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash,
 )]
 pub enum ExternalChain {
     OsmosisTestnet,
@@ -26,6 +26,18 @@ pub struct AssetConfig {
 pub enum BridgeContract {
     NeededCosmosBridge { code_id: u64 },
     Deployed(String),
+}
+
+pub enum GenesisAction {
+    InstantiateCosmos {
+        chain: ExternalChain,
+        code_id: u64,
+        processor: PublicKey,
+        listeners: BTreeSet<PublicKey>,
+        needed_listeners: usize,
+        executors: BTreeSet<PublicKey>,
+        needed_executors: usize,
+    },
 }
 
 #[derive(
@@ -183,6 +195,7 @@ impl<AppMessage: serde::Serialize> EventPayload<AppMessage> {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum EventMessage<AppMessage> {
     Genesis(GenesisInfo),
+    BridgeCreated(BridgeCreated),
     App(AppMessage),
     Listener(ListenerMessage),
     Auth(AuthMessage),
@@ -234,6 +247,12 @@ pub struct GenesisInfo {
     pub needed_executors: usize,
     /// Initial configuration of different chains
     pub chains: BTreeMap<ExternalChain, ChainConfig>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct BridgeCreated {
+    pub chain: ExternalChain,
+    pub contract: String,
 }
 
 impl GenesisInfo {
@@ -297,7 +316,12 @@ pub struct AssetAmount {
 }
 
 /// Notifications that can come from the Kolme framework to components.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Notification {
     NewEvent(EventHeight),
+    NewExec(EventHeight),
+    GenesisInstantiation {
+        chain: ExternalChain,
+        contract: String,
+    },
 }

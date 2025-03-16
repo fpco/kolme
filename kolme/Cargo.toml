@@ -10,7 +10,7 @@ axum = "0.8.1"
 base64 = "0.22.1"
 chrono = { version = "0.4.40", features = ["serde"] }
 clap = { version = "4.5.20", features = ["derive", "env", "unicode"] }
-cosmos = { git = "https://github.com/fpco/cosmos-rs", branch = "main" }
+cosmos = { git = "https://github.com/fpco/cosmos-rs", branch = "main", features = ["config"] }
 dotenvy = "0.15.7"
 hex = "0.4.3"
 jiff = { version = "0.2.3", features = ["serde"] }
