@@ -1,10 +1,11 @@
-pub mod common;
-pub mod core;
-pub mod processor;
+mod common;
+mod core;
+mod processor;
 
-pub(crate) use common::*;
-pub(crate) use core::*;
+pub use common::*;
+pub use core::*;
 pub(crate) use k256::PublicKey;
+pub use processor::*;
 
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use jiff::Timestamp;

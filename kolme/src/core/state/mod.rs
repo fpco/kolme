@@ -12,9 +12,6 @@ use exec::{ExecutionState, ExecutionStreamState};
 /// * App specific state: storage defined by each application, also updated only during execution.
 use crate::*;
 
-pub(crate) use event::RawEventState;
-pub(crate) use exec::RawExecutionState;
-
 mod event;
 mod exec;
 
@@ -29,8 +26,8 @@ impl<App: KolmeApp> KolmeState<App> {
         pool: &sqlx::SqlitePool,
         code_version: &str,
     ) -> Result<Self> {
-        let event = EventStreamState::load(&pool).await?;
-        let exec = ExecutionStreamState::load(&pool).await?;
+        let event = EventStreamState::load(pool).await?;
+        let exec = ExecutionStreamState::load(pool).await?;
         let info = App::genesis_info();
         let event = match event {
             Some(event) => EventState::load(&info.kolme_ident, event)?,

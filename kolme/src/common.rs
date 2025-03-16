@@ -5,6 +5,7 @@ use crate::*;
 
 use base64::{prelude::BASE64_STANDARD_NO_PAD, Engine};
 use k256::{
+    ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey},
     elliptic_curve::generic_array::GenericArray,
     sha2::{digest::OutputSizeUser, Digest, Sha256},
 };
@@ -51,6 +52,43 @@ pub struct TaggedJson<T> {
     value: T,
 }
 
+/// Wrap up a [TaggedJson] with a signature and recovery information.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(bound(serialize = "", deserialize = "T: serde::de::DeserializeOwned"))]
+pub struct SignedTaggedJson<T> {
+    pub message: TaggedJson<T>,
+    pub signature: Signature,
+    #[serde(with = "recovery")]
+    pub recovery_id: RecoveryId,
+}
+
+impl<T> SignedTaggedJson<T> {
+    pub fn verify_signature(&self) -> Result<PublicKey> {
+        VerifyingKey::recover_from_msg(self.message.as_bytes(), &self.signature, self.recovery_id)
+            .map(PublicKey::from)
+            .map_err(anyhow::Error::from)
+    }
+}
+
+mod recovery {
+    use k256::ecdsa::RecoveryId;
+    use serde::{Deserialize, Serialize};
+
+    pub(super) fn serialize<S: serde::Serializer>(
+        id: &RecoveryId,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        id.to_byte().serialize(s)
+    }
+
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<RecoveryId, D::Error> {
+        let byte = u8::deserialize(d)?;
+        RecoveryId::from_byte(byte).ok_or_else(|| serde::de::Error::custom("Invalid recovery ID"))
+    }
+}
+
 impl<T> PartialEq for TaggedJson<T> {
     fn eq(&self, other: &Self) -> bool {
         self.serialized == other.serialized
@@ -77,9 +115,19 @@ impl<T: serde::Serialize> TaggedJson<T> {
             value,
         })
     }
+
+    pub fn sign(self, key: &k256::SecretKey) -> Result<SignedTaggedJson<T>> {
+        let (signature, recovery_id) =
+            SigningKey::from(key.clone()).sign_recoverable(self.as_bytes())?;
+        Ok(SignedTaggedJson {
+            message: self,
+            signature,
+            recovery_id,
+        })
+    }
 }
 
-impl<'de, T: serde::de::DeserializeOwned> TaggedJson<T> {
+impl<T: serde::de::DeserializeOwned> TaggedJson<T> {
     pub fn try_from_string(serialized: String) -> Result<Self> {
         let value = serde_json::from_str(&serialized)?;
         Ok(TaggedJson { value, serialized })
