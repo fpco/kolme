@@ -43,7 +43,10 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     pub async fn write(&self) -> KolmeWrite<App> {
-        KolmeWrite(self.inner.clone().write_owned().await)
+        KolmeWrite {
+            inner: self.inner.clone().write_owned().await,
+            broadcast: self.broadcast.clone(),
+        }
     }
 }
 
@@ -59,19 +62,22 @@ impl<App: KolmeApp> Deref for KolmeRead<App> {
 }
 
 /// Read/write access to Kolme.
-pub struct KolmeWrite<App: KolmeApp>(tokio::sync::OwnedRwLockWriteGuard<KolmeInner<App>>);
+pub struct KolmeWrite<App: KolmeApp> {
+    inner: tokio::sync::OwnedRwLockWriteGuard<KolmeInner<App>>,
+    broadcast: tokio::sync::broadcast::Sender<Notification>,
+}
 
 impl<App: KolmeApp> Deref for KolmeWrite<App> {
     type Target = KolmeInner<App>;
 
     fn deref(&self) -> &Self::Target {
-        self.0.deref()
+        self.inner.deref()
     }
 }
 
 impl<App: KolmeApp> DerefMut for KolmeWrite<App> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.deref_mut()
+        self.inner.deref_mut()
     }
 }
 
@@ -392,10 +398,17 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
         self.bump_nonce_for(account_id)?;
         let now = Timestamp::now();
 
-        let height = height.try_into_i64()?;
+        let height_i64 = height.try_into_i64()?;
         let now = now.to_string();
-        // FIXME move this logic into core, notify subscribers of the new event
-        self.add_event_to_combined(height, now, signed_event).await
+        self.add_event_to_combined(height_i64, now, signed_event)
+            .await?;
+
+        // We ignore errors from .send. These only occur when there are no receivers, which is a normal state in the framework (it means no components need updates).
+        self.kolme
+            .broadcast
+            .send(Notification::NewEvent(height))
+            .ok();
+        Ok(())
     }
 
     // FIXME this function is probably the wrong level of abstraction

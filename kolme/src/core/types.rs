@@ -132,8 +132,8 @@ pub struct ApprovedEvent<AppMessage> {
     pub event: ProposedEvent<AppMessage>,
     pub timestamp: Timestamp,
     pub processor: PublicKey,
-    // FIXME include a hash of the previous event in the stream
-    // FIXME include the event height too
+    pub height: EventHeight,
+    pub parent: Sha256Hash,
 }
 
 /// A proposed event from a client, not yet added to the stream
@@ -297,7 +297,7 @@ pub struct AssetAmount {
 }
 
 /// Notifications that can come from the Kolme framework to components.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Notification {
     NewEvent(EventHeight),
 }
