@@ -24,8 +24,8 @@ pub enum SampleMessage {
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
-const OSMOSIS_TESTNET_CODE_ID: u64 = 12247;
-const NEUTRON_TESTNET_CODE_ID: u64 = 11180;
+const OSMOSIS_TESTNET_CODE_ID: u64 = 12248;
+const NEUTRON_TESTNET_CODE_ID: u64 = 11182;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
@@ -42,19 +42,39 @@ impl KolmeApp for SampleKolmeApp {
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
         let mut bridges = BTreeMap::new();
+        let mut assets = BTreeMap::new();
+        assets.insert(
+            AssetName(
+                "factory/osmo1mgcky4e24969532hee55ly4rrl30z4tkzgfvq7/kolmeoutgoing".to_owned(),
+            ),
+            AssetConfig {
+                decimals: 6,
+                asset_id: AssetId(1),
+            },
+        );
         bridges.insert(
             ExternalChain::OsmosisTestnet,
             ChainConfig {
-                assets: BTreeMap::new(),
+                assets,
                 bridge: BridgeContract::NeededCosmosBridge {
                     code_id: OSMOSIS_TESTNET_CODE_ID,
                 },
             },
         );
+        let mut assets = BTreeMap::new();
+        assets.insert(
+            AssetName(
+                "factory/neutron1mgcky4e24969532hee55ly4rrl30z4tkwvn7vt/kolmeincoming".to_owned(),
+            ),
+            AssetConfig {
+                decimals: 6,
+                asset_id: AssetId(1),
+            },
+        );
         bridges.insert(
             ExternalChain::NeutronTestnet,
             ChainConfig {
-                assets: BTreeMap::new(),
+                assets,
                 bridge: BridgeContract::NeededCosmosBridge {
                     code_id: NEUTRON_TESTNET_CODE_ID,
                 },
