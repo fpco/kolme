@@ -1,11 +1,5 @@
 use crate::*;
-use k256::{
-    ecdsa::{
-        signature::{SignerMut, Verifier},
-        Signature,
-    },
-    PublicKey,
-};
+use k256::{ecdsa::Signature, PublicKey};
 
 #[derive(
     serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug,
@@ -114,16 +108,18 @@ pub struct BridgeEventId(pub u64);
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]
 pub struct BridgeActionId(pub u64);
+
 /// An event that is signed by the processor.
 #[derive(serde::Serialize, serde::Deserialize)]
-#[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
-pub struct SignedEvent<AppMessage> {
-    pub event: TaggedJson<ApprovedEvent<AppMessage>>,
-    pub signature: Signature,
-}
+#[serde(bound(
+    serialize = "",
+    deserialize = "AppMessage: serde::de::DeserializeOwned"
+))]
+pub struct SignedEvent<AppMessage>(pub SignedTaggedJson<ApprovedEvent<AppMessage>>);
 
 /// An event that has been accepted by the processor.
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
 pub struct ApprovedEvent<AppMessage> {
     pub event: ProposedEvent<AppMessage>,
     pub timestamp: Timestamp,
@@ -134,27 +130,27 @@ pub struct ApprovedEvent<AppMessage> {
 
 /// A proposed event from a client, not yet added to the stream
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct ProposedEvent<AppMessage> {
-    pub payload: EventPayload<AppMessage>,
-    pub signature: Signature,
-}
+#[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
+pub struct ProposedEvent<AppMessage>(pub SignedTaggedJson<EventPayload<AppMessage>>);
 
 impl<AppMessage: serde::Serialize> ProposedEvent<AppMessage> {
     pub fn validate_signature(&self) -> Result<()> {
-        let key = k256::ecdsa::VerifyingKey::from(self.payload.pubkey);
-        let msg = serde_json::to_vec(&self.payload)?;
-        key.verify(&msg, &self.signature)?;
+        let pubkey = self.0.verify_signature()?;
+        anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
         Ok(())
     }
 
     pub fn ensure_is_genesis(&self) -> Result<()> {
-        anyhow::ensure!(self.payload.messages.len() == 1);
-        anyhow::ensure!(matches!(self.payload.messages[0], EventMessage::Genesis(_)));
+        anyhow::ensure!(self.0.message.as_inner().messages.len() == 1);
+        anyhow::ensure!(matches!(
+            self.0.message.as_inner().messages[0],
+            EventMessage::Genesis(_)
+        ));
         Ok(())
     }
 
     pub fn ensure_no_genesis(&self) -> Result<()> {
-        for msg in &self.payload.messages {
+        for msg in &self.0.message.as_inner().messages {
             anyhow::ensure!(!matches!(msg, EventMessage::Genesis(_)));
         }
         Ok(())
@@ -172,13 +168,7 @@ pub struct EventPayload<AppMessage> {
 
 impl<AppMessage: serde::Serialize> EventPayload<AppMessage> {
     pub fn sign(self, key: &k256::SecretKey) -> Result<ProposedEvent<AppMessage>> {
-        let mut signing = k256::ecdsa::SigningKey::from(key);
-        let msg = serde_json::to_vec(&self)?;
-        let signature = signing.sign(&msg);
-        Ok(ProposedEvent {
-            payload: self,
-            signature,
-        })
+        Ok(ProposedEvent(TaggedJson::new(self)?.sign(key)?))
     }
 }
 

@@ -2,11 +2,11 @@ use crate::core::*;
 
 /// Execution context for a single message.
 pub struct ExecutionContext<'a, App: KolmeApp> {
-    state: &'a mut KolmeState<App>,
+    state: &'a mut KolmeInner<App>,
     output: MessageOutput,
 }
 
-impl<App: KolmeApp> KolmeState<App> {
+impl<App: KolmeApp> KolmeInner<App> {
     pub(crate) async fn execute_messages(
         &mut self,
         messages: &[EventMessage<App::Message>],
