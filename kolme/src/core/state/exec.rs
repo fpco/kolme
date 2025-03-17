@@ -4,6 +4,7 @@ pub(super) struct ExecutionStreamState<App: KolmeApp> {
     pub(super) height: EventHeight,
     pub(super) framework: TaggedJson<RawExecutionState>,
     pub(super) app: TaggedJson<App::State>,
+    pub(super) genesis_info: GenesisInfo,
 }
 
 impl<App: KolmeApp> ExecutionStreamState<App> {
@@ -29,9 +30,36 @@ impl<App: KolmeApp> ExecutionStreamState<App> {
             let framework=TaggedJson::try_from_string(framework)?;
             let app = get_state_payload(pool, &app_state).await?;
             let app = TaggedJson::from_pair(App::load_state(&app)?,app);
-            Ok(Some(ExecutionStreamState { height, framework, app }))
+            let genesis_info = load_genesis_info(pool).await?;
+            Ok(Some(ExecutionStreamState { height, framework, app, genesis_info }))
         },
     }
+    }
+}
+
+async fn load_genesis_info(pool: &sqlx::SqlitePool) -> Result<GenesisInfo> {
+    let s = sqlx::query_scalar!(
+        r#"
+        SELECT rendered
+        FROM combined_stream
+        WHERE NOT is_execution AND height=0
+    "#
+    )
+    .fetch_one(pool)
+    .await?;
+    let SignedEvent::<()>(signed) = serde_json::from_str(&s)?;
+    let mut messages = signed
+        .message
+        .into_inner()
+        .event
+        .0
+        .message
+        .into_inner()
+        .messages;
+    anyhow::ensure!(messages.len() == 1);
+    match messages.remove(0) {
+        EventMessage::Genesis(genesis_info) => Ok(genesis_info),
+        _ => Err(anyhow::anyhow!("Invalid messages in first event")),
     }
 }
 
@@ -109,9 +137,12 @@ impl<App: KolmeApp> ExecutionState<App> {
             height,
             framework: exec_serialized,
             app: app_serialized,
+            genesis_info,
         }: ExecutionStreamState<App>,
         code_version: &str,
+        expected_genesis_info: &GenesisInfo,
     ) -> Result<Self> {
+        anyhow::ensure!(&genesis_info == expected_genesis_info);
         let exec = exec_serialized.as_inner().clone();
         exec.validate()?;
         anyhow::ensure!(exec.code_version == code_version);

@@ -61,26 +61,6 @@ impl<App: KolmeApp> Submitter<App> {
                 executors,
                 needed_executors,
             } => {
-                // FIXME only present to speed up local testing, definitely needs to be removed!
-                if chain == ExternalChain::OsmosisTestnet {
-                    self.kolme.notify_genesis_instantiation(
-                        chain,
-                        "osmo1nvkclywdmx6hpf6hdzuehwkxsf9sjk989v537y8fxqsw7rzpu0vslgmarx"
-                            .parse()
-                            .unwrap(),
-                    );
-                    return Ok(());
-                }
-                if chain == ExternalChain::NeutronTestnet {
-                    self.kolme.notify_genesis_instantiation(
-                        chain,
-                        "neutron1m376qzded52rwufzwg33gn72ap9g9v20wazzpvvjjv0ueweqk2ksgget9f"
-                            .parse()
-                            .unwrap(),
-                    );
-                    return Ok(());
-                }
-
                 let cosmos = self.get_cosmos(chain).await?;
                 let wallet = self.seed_phrase.with_hrp(cosmos.get_address_hrp())?;
 

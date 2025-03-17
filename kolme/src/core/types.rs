@@ -11,18 +11,18 @@ pub enum ExternalChain {
     NeutronTestnet,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
 }
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct AssetConfig {
     pub decimals: u8,
     pub asset_id: AssetId,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub enum BridgeContract {
     NeededCosmosBridge { code_id: u64 },
     Deployed(String),
@@ -232,7 +232,7 @@ pub enum AuthMessage {
 }
 
 /// Information defining the initial state of an app.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
 pub struct GenesisInfo {
     /// Unique identifier for this application, never changes.
     pub kolme_ident: String,
