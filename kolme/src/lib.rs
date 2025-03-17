@@ -1,11 +1,13 @@
 mod common;
 mod core;
 mod processor;
+mod submitter;
 
 pub use common::*;
 pub use core::*;
 pub(crate) use k256::PublicKey;
-pub use processor::*;
+pub use processor::Processor;
+pub use submitter::Submitter;
 
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use jiff::Timestamp;

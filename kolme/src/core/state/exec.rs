@@ -150,4 +150,42 @@ impl<App: KolmeApp> ExecutionState<App> {
         self.app_serialized = TaggedJson::from_pair(app, rendered);
         Ok(&self.app_serialized)
     }
+
+    pub(in crate::core) fn get_next_genesis_action(&self) -> Option<GenesisAction> {
+        for (chain, config) in &self.exec.chains {
+            match config.bridge {
+                BridgeContract::NeededCosmosBridge { code_id } => {
+                    return Some(GenesisAction::InstantiateCosmos {
+                        chain: *chain,
+                        code_id,
+                        processor: self.exec.processor,
+                        listeners: self.exec.listeners.clone(),
+                        needed_listeners: self.exec.needed_listeners,
+                        executors: self.exec.executors.clone(),
+                        needed_executors: self.exec.needed_executors,
+                    })
+                }
+                BridgeContract::Deployed(_) => (),
+            }
+        }
+        None
+    }
+
+    pub(in crate::core) fn bridge_created(
+        &mut self,
+        chain: ExternalChain,
+        contract: &str,
+    ) -> Result<()> {
+        let chain_config = self
+            .exec
+            .chains
+            .get_mut(&chain)
+            .with_context(|| format!("bridge_created for unknown chain: {chain:?}"))?;
+        match &chain_config.bridge {
+            BridgeContract::NeededCosmosBridge { code_id:_ } => (),
+            BridgeContract::Deployed(deployed) => anyhow::bail!("Tried to set bridge contract for {chain:?} to {contract}, but we already have deployed contract {deployed}."),
+        }
+        chain_config.bridge = BridgeContract::Deployed(contract.to_owned());
+        Ok(())
+    }
 }

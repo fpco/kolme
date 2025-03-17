@@ -1,5 +1,5 @@
 /// Common helper functions and utilities.
-use std::{borrow::Cow, fmt::Display};
+use std::{borrow::Cow, fmt::Display, sync::OnceLock};
 
 use crate::*;
 
@@ -22,7 +22,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 /// debug messages for both the Kolme crate itself, and if provided
 /// the local crate, will be logged.
 pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
-    let env_directive = if verbose {
+    let env_filter = if verbose {
         match local_crate_name {
             None => format!("{}=debug,info", env!("CARGO_CRATE_NAME")),
             Some(name) => format!("{}=debug,{name}=debug,info", env!("CARGO_CRATE_NAME")),
@@ -30,14 +30,14 @@ pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
         .parse()
         .unwrap()
     } else {
-        Level::INFO.into()
+        EnvFilter::from_default_env().add_directive(Level::INFO.into())
     };
 
     tracing_subscriber::registry()
         .with(
             fmt::Layer::default()
                 .log_internal_errors(true)
-                .and_then(EnvFilter::from_default_env().add_directive(env_directive)),
+                .and_then(env_filter),
         )
         .init();
     tracing::info!("Initialized Logging");
@@ -67,6 +67,10 @@ impl<T> SignedTaggedJson<T> {
         VerifyingKey::recover_from_msg(self.message.as_bytes(), &self.signature, self.recovery_id)
             .map(PublicKey::from)
             .map_err(anyhow::Error::from)
+    }
+
+    pub(crate) fn message_hash(&self) -> Sha256Hash {
+        Sha256Hash::hash(self.message.as_bytes())
     }
 }
 
@@ -186,7 +190,7 @@ impl<'de, T: serde::de::DeserializeOwned> serde::Deserialize<'de> for TaggedJson
 }
 
 /// A binary value representing a SHA256 hash.
-#[derive(PartialEq, Eq, Debug, Hash)]
+#[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
 pub struct Sha256Hash(pub GenericArray<u8, <Sha256 as OutputSizeUser>::OutputSize>);
 
 impl Sha256Hash {
@@ -204,6 +208,12 @@ impl Sha256Hash {
                 state.len()
             ))
         }
+    }
+
+    /// A special hash which is used as the parent of all genesis events.
+    pub fn genesis_parent() -> Sha256Hash {
+        static LOCK: OnceLock<Sha256Hash> = OnceLock::new();
+        *LOCK.get_or_init(|| Sha256Hash::hash("genesis parent"))
     }
 }
 

@@ -29,8 +29,12 @@ impl<App: KolmeApp> KolmeInner<App> {
         };
         match message {
             EventMessage::Genesis(_genesis_info) => {
-                // We could do some sanity checks that the genesis info lines up with
+                // FIXME We could do some sanity checks that the genesis info lines up with
                 // the stored state, but just trusting the system for now.
+            }
+            // FIXME where do we ensure that the processor signed off on the BridgeCreated message?
+            EventMessage::BridgeCreated(BridgeCreated { chain, contract }) => {
+                context.state.state.exec.bridge_created(*chain, contract)?;
             }
             EventMessage::App(_) => todo!(),
             EventMessage::Listener(_listener_message) => todo!(),

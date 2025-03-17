@@ -10,17 +10,61 @@ impl<App: KolmeApp> Processor<App> {
         Processor { kolme, secret }
     }
 
-    pub async fn run_processor(self) -> Result<()> {
-        let kolme = self.kolme.read().await;
-        if kolme.get_next_event_height().is_start() {
+    pub async fn run(self) -> Result<()> {
+        if self.kolme.read().await.get_next_event_height().is_start() {
+            tracing::info!("Creating genesis event");
             self.create_genesis_event().await?;
         }
-        while kolme.get_next_event_height() > kolme.get_next_exec_height() {
+
+        // Subscribe to any newly arrived events.
+        let mut receiver = self.kolme.subscribe();
+
+        // Now that we're subscribed, do an initial catch-up for any events
+        // that were in the database but not yet executed.
+        self.catch_up_exec_state().await?;
+        tracing::info!("Processor has caught up, waiting for new events.");
+
+        loop {
+            let notification = receiver.recv().await?;
+            match notification {
+                Notification::NewEvent(_event_height) => {
+                    // Any time a new event lands, make sure we're fully synchronized
+                    // up to the latest event. This avoids any race conditions from events
+                    // added between our previous catch-up and subscribing to the channel.
+                    self.catch_up_exec_state().await?;
+                }
+                Notification::NewExec(_) => continue,
+                Notification::GenesisInstantiation { chain, contract } => {
+                    // FIXME In the future, we need the listeners to pick this up, validate, and send to the processor for final checking. For now, taking a shortcut and simply trusting the message.
+                    let pubkey = self.secret.public_key();
+                    let nonce = self.kolme.read().await.get_next_account_nonce(pubkey);
+                    let payload = EventPayload::<App::Message> {
+                        pubkey,
+                        nonce,
+                        created: Timestamp::now(),
+                        messages: vec![EventMessage::BridgeCreated(BridgeCreated {
+                            chain,
+                            contract,
+                        })],
+                    };
+                    self.propose(ProposedEvent(TaggedJson::new(payload)?.sign(&self.secret)?))
+                        .await?;
+                }
+            }
+        }
+    }
+
+    async fn catch_up_exec_state(&self) -> Result<()> {
+        while self.kolme.read().await.get_next_event_height()
+            > self.kolme.read().await.get_next_exec_height()
+        {
+            tracing::info!(
+                "Calculating exec state for height {}",
+                self.kolme.read().await.get_next_exec_height()
+            );
             self.produce_next_state().await?;
         }
-        Err(anyhow::anyhow!(
-            "Need to figure out how to run the processor here exactly... axum + outgoing listener?"
-        ))
+        Ok(())
     }
 
     pub async fn create_genesis_event(&self) -> Result<()> {
@@ -47,7 +91,10 @@ impl<App: KolmeApp> Processor<App> {
             event,
             timestamp: _,
             processor: _,
+            height,
+            parent: _,
         } = kolme.load_event(next_height).await?.0.message.into_inner();
+        anyhow::ensure!(height == next_height);
         let EventPayload {
             pubkey: _,
             nonce: _,
@@ -74,47 +121,43 @@ impl<App: KolmeApp> Processor<App> {
         event.validate_signature()?;
 
         // Take a write lock to ensure nothing else tries to mutate the database at the same time.
-        let kolme = self.kolme.write().await.begin_db_transaction().await?;
+        let kolme = self.kolme.write().await;
 
-        // Make sure the nonce is correct
-        let expected_nonce = kolme.get_next_account_nonce(event.0.message.as_inner().pubkey);
-        anyhow::ensure!(expected_nonce == event.0.message.as_inner().nonce);
+        // Do read-only validation of the data and sign the event.
+        let signed_event = {
+            let kolme = kolme.downgrade();
 
-        // Make sure this is a genesis event if and only if we have no events so far
-        if kolme.get_next_event_height().is_start() {
-            event.ensure_is_genesis()?;
-            anyhow::ensure!(event.0.message.as_inner().pubkey == kolme.get_processor_pubkey());
-        } else {
-            event.ensure_no_genesis()?;
+            // Make sure the nonce is correct
+            let expected_nonce = kolme.get_next_account_nonce(event.0.message.as_inner().pubkey);
+            // FIXME should we do some verification of the account ID? Make the user submit an account ID for anything beyond the first action?
+            anyhow::ensure!(expected_nonce == event.0.message.as_inner().nonce);
+
+            // Make sure this is a genesis event if and only if we have no events so far
+            let next_event_height = kolme.get_next_event_height();
+            let parent_hash = kolme.get_current_event_hash();
+            if kolme.get_next_event_height().is_start() {
+                event.ensure_is_genesis()?;
+                anyhow::ensure!(event.0.message.as_inner().pubkey == kolme.get_processor_pubkey());
+            } else {
+                event.ensure_no_genesis()?;
+            };
+
+            let now = Timestamp::now();
+            let approved_event = ApprovedEvent {
+                event,
+                timestamp: now,
+                processor: self.secret.public_key(),
+                height: next_event_height,
+                parent: *parent_hash,
+            };
+            let event = TaggedJson::new(approved_event)?;
+            SignedEvent(event.sign(&self.secret)?)
         };
 
-        self.insert_event(kolme, event).await?;
+        // Now that we have a signed event, reuse the existing write lock to insert it.
+        let mut kolme = kolme.begin_db_transaction().await?;
+        kolme.insert_event(&signed_event).await?;
+        kolme.commit().await?;
         Ok(())
-    }
-
-    async fn insert_event(
-        &self,
-        mut kolme: KolmeWriteDb<App>,
-        event: ProposedEvent<App::Message>,
-    ) -> Result<KolmeWrite<App>> {
-        let height = kolme.get_next_event_height();
-        kolme.increment_event_height();
-        let account_id = kolme.get_or_insert_account_id(&event.0.message.as_inner().pubkey, height);
-        // TODO: review this code more carefully, do we need to check nonces more explicitly? Can we make a higher-level abstraction to avoid exposing too many internals to users of Kolme?
-        kolme.bump_nonce_for(account_id)?;
-        let now = Timestamp::now();
-        let approved_event = ApprovedEvent {
-            event,
-            timestamp: now,
-            processor: self.secret.public_key(),
-        };
-        let event = TaggedJson::new(approved_event)?;
-        let signed_event = SignedEvent(event.sign(&self.secret)?);
-
-        let height = height.try_into_i64()?;
-        let now = now.to_string();
-        kolme
-            .add_event_to_combined(height, now, &signed_event)
-            .await
     }
 }

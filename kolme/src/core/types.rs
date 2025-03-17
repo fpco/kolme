@@ -1,8 +1,10 @@
+use std::fmt::Display;
+
 use crate::*;
 use k256::{ecdsa::Signature, PublicKey};
 
 #[derive(
-    serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug,
+    serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash,
 )]
 pub enum ExternalChain {
     OsmosisTestnet,
@@ -24,6 +26,18 @@ pub struct AssetConfig {
 pub enum BridgeContract {
     NeededCosmosBridge { code_id: u64 },
     Deployed(String),
+}
+
+pub enum GenesisAction {
+    InstantiateCosmos {
+        chain: ExternalChain,
+        code_id: u64,
+        processor: PublicKey,
+        listeners: BTreeSet<PublicKey>,
+        needed_listeners: usize,
+        executors: BTreeSet<PublicKey>,
+        needed_executors: usize,
+    },
 }
 
 #[derive(
@@ -79,6 +93,12 @@ impl EventHeight {
     }
 }
 
+impl Display for EventHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl TryFrom<i64> for EventHeight {
     type Error = anyhow::Error;
 
@@ -124,8 +144,8 @@ pub struct ApprovedEvent<AppMessage> {
     pub event: ProposedEvent<AppMessage>,
     pub timestamp: Timestamp,
     pub processor: PublicKey,
-    // FIXME include a hash of the previous event in the stream
-    // FIXME include the event height too
+    pub height: EventHeight,
+    pub parent: Sha256Hash,
 }
 
 /// A proposed event from a client, not yet added to the stream
@@ -175,6 +195,7 @@ impl<AppMessage: serde::Serialize> EventPayload<AppMessage> {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum EventMessage<AppMessage> {
     Genesis(GenesisInfo),
+    BridgeCreated(BridgeCreated),
     App(AppMessage),
     Listener(ListenerMessage),
     Auth(AuthMessage),
@@ -226,6 +247,12 @@ pub struct GenesisInfo {
     pub needed_executors: usize,
     /// Initial configuration of different chains
     pub chains: BTreeMap<ExternalChain, ChainConfig>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct BridgeCreated {
+    pub chain: ExternalChain,
+    pub contract: String,
 }
 
 impl GenesisInfo {
@@ -286,4 +313,15 @@ pub enum ExecAction {
 pub struct AssetAmount {
     pub id: AssetId,
     pub amount: u128, // FIXME use a Decimal representation
+}
+
+/// Notifications that can come from the Kolme framework to components.
+#[derive(Clone, Debug)]
+pub enum Notification {
+    NewEvent(EventHeight),
+    NewExec(EventHeight),
+    GenesisInstantiation {
+        chain: ExternalChain,
+        contract: String,
+    },
 }
