@@ -34,7 +34,7 @@ impl<App: KolmeApp> KolmeState<App> {
             None => EventState::new(&info.kolme_ident)?,
         };
         let exec = match exec {
-            Some(exec) => ExecutionState::load(app, exec, code_version)?,
+            Some(exec) => ExecutionState::load(app, exec, code_version, &info)?,
             None => ExecutionState::new(code_version, info)?,
         };
         anyhow::ensure!(event.get_next_height() >= exec.get_next_height());
