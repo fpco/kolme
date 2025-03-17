@@ -25,7 +25,7 @@ use crate::core::*;
 /// locked during write operations to prevent data races.
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<tokio::sync::RwLock<KolmeInner<App>>>,
-    broadcast: tokio::sync::broadcast::Sender<Notification>,
+    broadcast: tokio::sync::broadcast::Sender<Notification<App>>,
 }
 
 impl<App: KolmeApp> Clone for Kolme<App> {
@@ -55,6 +55,18 @@ impl<App: KolmeApp> Kolme<App> {
             .send(Notification::GenesisInstantiation { chain, contract })
             .ok();
     }
+
+    /// Propose a new event for the processor to add to the chain.
+    pub fn propose_event(&self, event: ProposedEvent<App::Message>) -> Result<()> {
+        self.broadcast
+            .send(Notification::ProposeEvent { event })
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "Tried to propose an event, but no one is listening to our notifications"
+                )
+            })
+            .map(|_| ())
+    }
 }
 
 /// Read-only access to Kolme.
@@ -71,7 +83,7 @@ impl<App: KolmeApp> Deref for KolmeRead<App> {
 /// Read/write access to Kolme.
 pub struct KolmeWrite<App: KolmeApp> {
     inner: tokio::sync::OwnedRwLockWriteGuard<KolmeInner<App>>,
-    broadcast: tokio::sync::broadcast::Sender<Notification>,
+    broadcast: tokio::sync::broadcast::Sender<Notification<App>>,
 }
 
 impl<App: KolmeApp> Deref for KolmeWrite<App> {
@@ -113,7 +125,7 @@ impl<App: KolmeApp> Kolme<App> {
         })
     }
 
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification> {
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App>> {
         self.broadcast.subscribe()
     }
 }
@@ -128,6 +140,34 @@ impl<App: KolmeApp> KolmeInner<App> {
     /// If there is no event present, returns the special parent for the genesis block.
     pub fn get_current_event_hash(&self) -> &Sha256Hash {
         self.state.event.get_current_hash()
+    }
+
+    /// Get the ID of the next bridge event pending for the given chain.
+    pub async fn get_next_bridge_event_id(
+        &self,
+        chain: ExternalChain,
+        pubkey: PublicKey,
+    ) -> Result<BridgeEventId> {
+        let pubkey = pubkey.to_sec1_bytes();
+        let chain = chain.as_ref();
+        let bridge_event_id = sqlx::query_scalar!(
+            r#"
+            SELECT bridge_event_id
+            FROM listener_bridge_events
+            WHERE chain=$1
+            AND public_key=$2
+            ORDER BY bridge_event_id DESC
+            LIMIT 1
+        "#,
+            chain,
+            pubkey
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(match bridge_event_id {
+            None => BridgeEventId::start(),
+            Some(bridge_event_id) => BridgeEventId::try_from_i64(bridge_event_id)?.next(),
+        })
     }
 
     pub fn get_next_exec_height(&self) -> EventHeight {

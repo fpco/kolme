@@ -11,12 +11,13 @@ use kolme::*;
 use tokio::task::JoinSet;
 
 /// In the future, move to an example and convert the binary to a library.
+#[derive(Clone, Debug)]
 pub struct SampleKolmeApp;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct SampleState {}
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum SampleMessage {
     SayHi,
 }
@@ -112,14 +113,14 @@ async fn main() -> Result<()> {
 async fn main_inner() -> Result<()> {
     const DB_PATH: &str = "example-cosmos-bridge.sqlite3";
     kolme::init_logger(true, None);
-    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH)
-        .await
-        .unwrap();
+    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
 
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
+    let listener = Listener::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(listener.run());
     let submitter = Submitter::new(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),

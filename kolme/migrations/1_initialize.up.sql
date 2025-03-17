@@ -51,3 +51,12 @@ CREATE TABLE execution_actions(
     payload TEXT NOT NULL,
     UNIQUE(height, message, position)
 );
+
+CREATE TABLE listener_bridge_events(
+    chain TEXT NOT NULL,
+    bridge_event_id INTEGER NOT NULL,
+    public_key BLOB NOT NULL,
+    signature BLOB NOT NULL,
+    height INTEGER REFERENCES event_stream(height),
+    UNIQUE(chain, bridge_event_id, public_key)
+);

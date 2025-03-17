@@ -33,6 +33,7 @@ impl<App: KolmeApp> Submitter<App> {
                     chain: _,
                     contract: _,
                 } => continue,
+                Notification::ProposeEvent { event: _ } => continue,
             }
             self.submit_zero_or_one().await?;
         }
@@ -110,11 +111,7 @@ impl<App: KolmeApp> Submitter<App> {
         if let Some(cosmos) = self.cosmos.get(&chain) {
             return Ok(cosmos.clone());
         }
-        let network = match chain {
-            ExternalChain::OsmosisTestnet => CosmosNetwork::OsmosisTestnet,
-            ExternalChain::NeutronTestnet => CosmosNetwork::NeutronTestnet,
-        };
-        let cosmos = network.builder_with_config().await?.build()?;
+        let cosmos = chain.make_cosmos().await?;
         self.cosmos.insert(chain, cosmos.clone());
         Ok(cosmos)
     }

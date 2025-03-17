@@ -50,6 +50,7 @@ impl<App: KolmeApp> Processor<App> {
                     self.propose(ProposedEvent(TaggedJson::new(payload)?.sign(&self.secret)?))
                         .await?;
                 }
+                Notification::ProposeEvent { event } => self.propose(event).await?,
             }
         }
     }

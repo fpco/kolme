@@ -4,11 +4,32 @@ use crate::*;
 use k256::{ecdsa::Signature, PublicKey};
 
 #[derive(
-    serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    Hash,
+    strum::AsRefStr,
 )]
+#[strum(serialize_all = "kebab-case")]
 pub enum ExternalChain {
     OsmosisTestnet,
     NeutronTestnet,
+}
+
+impl ExternalChain {
+    pub async fn make_cosmos(self) -> Result<cosmos::Cosmos> {
+        let network = match self {
+            ExternalChain::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
+            ExternalChain::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
+        };
+        Ok(network.builder_with_config().await?.build()?)
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -123,6 +144,19 @@ pub struct Wallet(pub String);
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]
 pub struct BridgeEventId(pub u64);
+impl BridgeEventId {
+    pub fn start() -> BridgeEventId {
+        BridgeEventId(0)
+    }
+
+    pub(crate) fn try_from_i64(id: i64) -> Result<Self> {
+        Ok(BridgeEventId(id.try_into()?))
+    }
+
+    pub(crate) fn next(self) -> BridgeEventId {
+        BridgeEventId(self.0 + 1)
+    }
+}
 
 /// Monotonically increasing identifier for actions sent to a bridge contract.
 #[derive(
@@ -150,7 +184,7 @@ pub struct ApprovedEvent<AppMessage> {
 }
 
 /// A proposed event from a client, not yet added to the stream
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
 pub struct ProposedEvent<AppMessage>(pub SignedTaggedJson<EventPayload<AppMessage>>);
 
@@ -179,7 +213,7 @@ impl<AppMessage: serde::Serialize> ProposedEvent<AppMessage> {
 }
 
 /// The content of an event, sent by a client to be included in the event series.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct EventPayload<AppMessage> {
     pub pubkey: PublicKey,
     pub nonce: AccountNonce,
@@ -193,7 +227,7 @@ impl<AppMessage: serde::Serialize> EventPayload<AppMessage> {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum EventMessage<AppMessage> {
     Genesis(GenesisInfo),
     BridgeCreated(BridgeCreated),
@@ -212,7 +246,7 @@ pub enum EventMessage<AppMessage> {
     // TODO: admin actions: update code version, change processor/listeners/executors (need to update contracts too), modification to chain values (like asset definitions)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum ListenerMessage {
     Deposit {
         asset: String,
@@ -223,7 +257,7 @@ pub enum ListenerMessage {
     AddPublicKey { wallet: String, key: String },
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum AuthMessage {
     AddPublicKey { key: PublicKey },
     RemovePublicKey { key: PublicKey },
@@ -232,7 +266,7 @@ pub enum AuthMessage {
 }
 
 /// Information defining the initial state of an app.
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
 pub struct GenesisInfo {
     /// Unique identifier for this application, never changes.
     pub kolme_ident: String,
@@ -250,7 +284,7 @@ pub struct GenesisInfo {
     pub chains: BTreeMap<ExternalChain, ChainConfig>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct BridgeCreated {
     pub chain: ExternalChain,
     pub contract: String,
@@ -318,11 +352,14 @@ pub struct AssetAmount {
 
 /// Notifications that can come from the Kolme framework to components.
 #[derive(Clone, Debug)]
-pub enum Notification {
+pub enum Notification<App: KolmeApp> {
     NewEvent(EventHeight),
     NewExec(EventHeight),
     GenesisInstantiation {
         chain: ExternalChain,
         contract: String,
+    },
+    ProposeEvent {
+        event: ProposedEvent<App::Message>,
     },
 }
