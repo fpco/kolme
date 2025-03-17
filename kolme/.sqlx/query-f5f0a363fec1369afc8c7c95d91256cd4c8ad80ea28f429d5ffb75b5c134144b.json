@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT rendered\n        FROM combined_stream\n        WHERE NOT is_execution AND height=0\n    ",
+  "describe": {
+    "columns": [
+      {
+        "name": "rendered",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f5f0a363fec1369afc8c7c95d91256cd4c8ad80ea28f429d5ffb75b5c134144b"
+}
