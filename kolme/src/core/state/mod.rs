@@ -1,5 +1,5 @@
-use event::EventState;
-use exec::ExecutionState;
+use event::{EventState, EventStreamState};
+use exec::{ExecutionState, ExecutionStreamState};
 
 /// Internal Kolme state management.
 ///
@@ -12,13 +12,10 @@ use exec::ExecutionState;
 /// * App specific state: storage defined by each application, also updated only during execution.
 use crate::*;
 
-pub(crate) use event::RawEventState;
-pub(crate) use exec::RawExecutionState;
-
 mod event;
 mod exec;
 
-pub struct KolmeState<App: KolmeApp> {
+pub(in crate::core) struct KolmeState<App: KolmeApp> {
     pub event: EventState,
     pub exec: ExecutionState<App>,
 }
@@ -26,10 +23,11 @@ pub struct KolmeState<App: KolmeApp> {
 impl<App: KolmeApp> KolmeState<App> {
     pub(crate) async fn new(
         app: &App,
-        event: Option<EventStreamState>,
-        exec: Option<ExecutionStreamState<App>>,
+        pool: &sqlx::SqlitePool,
         code_version: &str,
     ) -> Result<Self> {
+        let event = EventStreamState::load(pool).await?;
+        let exec = ExecutionStreamState::load(pool).await?;
         let info = App::genesis_info();
         let event = match event {
             Some(event) => EventState::load(&info.kolme_ident, event)?,

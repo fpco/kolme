@@ -1,6 +1,36 @@
 use std::collections::HashMap;
 
-use crate::*;
+use crate::core::*;
+
+pub(super) struct EventStreamState {
+    pub(super) height: EventHeight,
+    pub(super) state: TaggedJson<RawEventState>,
+}
+
+impl EventStreamState {
+    pub(super) async fn load(pool: &sqlx::SqlitePool) -> Result<Option<EventStreamState>> {
+        struct Helper {
+            height: i64,
+            state: Vec<u8>,
+        }
+        match sqlx::query_as!(
+            Helper,
+            "SELECT height,state FROM event_stream ORDER BY height DESC LIMIT 1"
+        )
+        .fetch_optional(pool)
+        .await?
+        {
+            None => Ok(None),
+            Some(Helper { height, state }) => {
+                let height = height.try_into()?;
+                let state = Sha256Hash::from_hash(&state)?;
+                let state = get_state_payload(pool, &state).await?;
+                let state = TaggedJson::try_from_string(state)?;
+                Ok(Some(EventStreamState { height, state }))
+            }
+        }
+    }
+}
 
 /// Account information used at the event metadata layer.
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
