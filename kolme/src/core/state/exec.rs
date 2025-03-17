@@ -188,4 +188,8 @@ impl<App: KolmeApp> ExecutionState<App> {
         chain_config.bridge = BridgeContract::Deployed(contract.to_owned());
         Ok(())
     }
+
+    pub(crate) fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
+        &self.exec.chains
+    }
 }

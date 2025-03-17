@@ -1,11 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     str::FromStr,
-    sync::OnceLock,
 };
 
 use anyhow::Result;
-use cosmos::{SeedPhrase, Wallet};
+use cosmos::SeedPhrase;
 use k256::SecretKey;
 
 use kolme::*;
@@ -101,8 +100,13 @@ async fn main_inner() -> Result<()> {
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
-    let submitter = Submitter::new(kolme, SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap());
+    let submitter = Submitter::new(
+        kolme.clone(),
+        SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
+    );
     set.spawn(submitter.run());
+    let api_server = ApiServer::new(kolme);
+    set.spawn(api_server.run("[::]:3000"));
 
     while let Some(res) = set.join_next().await {
         match res {

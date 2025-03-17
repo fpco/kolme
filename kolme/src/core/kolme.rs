@@ -162,6 +162,10 @@ impl<App: KolmeApp> KolmeInner<App> {
     pub fn get_processor_pubkey(&self) -> PublicKey {
         self.state.exec.get_processor_pubkey()
     }
+
+    pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
+        self.state.exec.get_bridge_contracts()
+    }
 }
 
 // FIXME this code is pretty hairy, it would be nice to improve at some point in the future.

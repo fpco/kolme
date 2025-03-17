@@ -1,12 +1,12 @@
 use crate::*;
 
-pub trait KolmeApp {
+pub trait KolmeApp: Send + Sync + 'static {
     /// The state maintained in memory, may contain helper
     /// data structures for more efficient operations.
-    type State;
+    type State: Send + Sync + 'static;
 
     /// Messages that are understood by this app.
-    type Message: serde::Serialize + serde::de::DeserializeOwned;
+    type Message: serde::Serialize + serde::de::DeserializeOwned + 'static;
 
     /// Initial chain information.
     fn genesis_info() -> GenesisInfo;

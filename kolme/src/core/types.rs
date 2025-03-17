@@ -28,6 +28,7 @@ pub enum BridgeContract {
     Deployed(String),
 }
 
+#[derive(serde::Serialize)]
 pub enum GenesisAction {
     InstantiateCosmos {
         chain: ExternalChain,
