@@ -49,7 +49,6 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
 struct State {
     processor: HexBinary,
     executors: Vec<HexBinary>,
@@ -71,7 +70,6 @@ const STATE: Item<State> = Item::new("s");
 const TO_KOLME: Map<u32, Binary> = Map::new("t");
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
 pub struct InstantiateMsg {
     /// Public key for the processor
     pub processor: HexBinary,
@@ -79,6 +77,15 @@ pub struct InstantiateMsg {
     pub executors: Vec<HexBinary>,
     /// How many executors are needed to execute a message
     pub needed_executors: u16,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct Payload {
+    /// Monotonically increasing ID to ensure messages are sent in the correct order.
+    /// It must be included in the payload in order to prevent anyone to from re-submitting
+    /// a previously successfully executed message but with a different ID.
+    id: u32,
+    messages: Vec<CosmosMsg>
 }
 
 #[entry_point]
@@ -127,8 +134,6 @@ pub enum ExecuteMsg {
     ///
     /// Note that this message itself is not permissioned, so that anyone can relay signed messages from the chain.
     Signed {
-        /// Monotonically increasing ID to ensure messages are sent in the correct order.
-        id: u32,
         /// Signature from the processor
         processor: SignatureWithRecovery,
         /// Signatures from the executors
@@ -139,7 +144,6 @@ pub enum ExecuteMsg {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
 pub struct SignatureWithRecovery {
     pub recid: u8,
     pub sig: HexBinary,
@@ -150,11 +154,10 @@ pub fn execute(deps: DepsMut, _env: Env, info: MessageInfo, msg: ExecuteMsg) -> 
     match msg {
         ExecuteMsg::Regular { keys } => regular(deps, info, keys),
         ExecuteMsg::Signed {
-            id,
             processor,
             executors,
             payload,
-        } => signed(deps, info, id, processor, executors, payload),
+        } => signed(deps, info, processor, executors, payload),
     }
 }
 
@@ -201,11 +204,12 @@ fn regular(deps: DepsMut, info: MessageInfo, keys: Vec<HexBinary>) -> Result<Res
 fn signed(
     deps: DepsMut,
     info: MessageInfo,
-    id: u32,
     processor: SignatureWithRecovery,
     executors: Vec<SignatureWithRecovery>,
     payload: Binary,
 ) -> Result<Response> {
+    let Payload { id, messages } = from_json(&payload)?;
+
     let mut state = STATE.load(deps.storage)?;
     if id != state.next_from_kolme_id {
         return Err(Error::IncorrectOutgoingId {
@@ -213,6 +217,7 @@ fn signed(
             received: id,
         });
     }
+
     state.next_from_kolme_id += 1;
     let incoming_id = state.next_to_kolme_id;
     state.next_to_kolme_id += 1;
@@ -250,13 +255,12 @@ fn signed(
         used.push(key);
     }
 
-    let msgs = from_json::<Vec<CosmosMsg>>(&payload)?;
     Ok(Message::Signed {
         wallet: info.sender.into_string(),
         outgoing_id: id,
     }
     .to_response(incoming_id, deps.storage)?
-    .add_messages(msgs))
+    .add_messages(messages))
 }
 
 /// Validates the signature and returns the public key of the signer.
