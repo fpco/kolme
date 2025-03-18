@@ -8,12 +8,13 @@ use k256::SecretKey;
 use kolme::*;
 
 /// In the future, move to an example and convert the binary to a library.
+#[derive(Clone)]
 pub struct SampleKolmeApp;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct SampleState {}
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum SampleMessage {
     SayHi,
 }
