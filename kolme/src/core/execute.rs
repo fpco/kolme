@@ -9,16 +9,10 @@ pub struct ExecutionContext<App: KolmeApp> {
     validation_data_loads: Option<Vec<BlockDataLoad>>,
 }
 
-pub(crate) struct ExecutionResults<App: KolmeApp> {
-    pub(crate) framework_state: FrameworkState,
-    pub(crate) app_state: App::State,
-    pub(crate) outputs: Vec<MessageOutput>,
-}
-
-impl<App: KolmeApp> ExecutionContext<App> {
-    pub fn consume(self) -> (FrameworkState, App::State, MessageOutput) {
-        (self.framework_state, self.app_state, self.output)
-    }
+pub struct ExecutionResults<App: KolmeApp> {
+    pub framework_state: FrameworkState,
+    pub app_state: App::State,
+    pub outputs: Vec<MessageOutput>,
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
@@ -60,13 +54,8 @@ impl<App: KolmeApp> ExecutionContext<App> {
                 // FIXME We could do some sanity checks that the genesis info lines up with
                 // the stored state, but just trusting the system for now.
             }
-            // FIXME BridgeCreated should be part of the listener messages, and we should have a BridgeCreated Notification that the listeners wait for
-            Message::BridgeCreated(BridgeCreated { chain, contract }) => {
-                todo!()
-                // context.state.state.exec.bridge_created(*chain, contract)?;
-            }
             Message::App(_) => todo!(),
-            Message::Listener(_listener_message) => todo!(),
+            Message::Listener { chain, event } => todo!(),
             Message::Auth(_auth_message) => todo!(),
         }
         Ok(())

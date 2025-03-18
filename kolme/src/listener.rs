@@ -17,6 +17,7 @@ impl<App: KolmeApp> Listener<App> {
     pub async fn run(self) -> Result<()> {
         let contracts = self.wait_for_contracts().await?;
         let mut set = JoinSet::new();
+        set.spawn(subscribe(self.kolme.clone(), self.secret.clone()));
         for (chain, contract) in contracts {
             set.spawn(listen(
                 self.kolme.clone(),
@@ -64,13 +65,48 @@ impl<App: KolmeApp> Listener<App> {
     }
 }
 
+async fn subscribe<App: KolmeApp>(kolme: Kolme<App>, secret: k256::SecretKey) -> Result<()> {
+    let mut receiver = kolme.subscribe();
+    loop {
+        let notification = receiver.recv().await?;
+        match notification {
+            Notification::NewBlock(_) => (),
+            Notification::GenesisInstantiation { chain, contract } => {
+                // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
+                let pubkey = secret.public_key();
+                let signed = kolme
+                    .read()
+                    .await
+                    .create_signed_transaction(
+                        &secret,
+                        vec![Message::Listener {
+                            chain,
+                            event: BridgeEvent::Instantiated { contract },
+                        }],
+                    )
+                    .await?;
+                let nonce = kolme.read().await.get_next_account_nonce(pubkey).await?;
+                let payload = Transaction::<App::Message> {
+                    pubkey,
+                    nonce,
+                    created: Timestamp::now(),
+                    messages: vec![],
+                };
+                let signed = payload.sign(&secret)?;
+                kolme.propose_transaction(signed)?;
+            }
+            Notification::Broadcast { tx: _ } => (),
+        }
+    }
+}
+
 async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: k256::SecretKey,
     chain: ExternalChain,
     contract: String,
 ) -> Result<()> {
-    let cosmos = chain.make_cosmos().await?;
+    let cosmos = kolme.read().await.get_cosmos(chain).await?;
     let contract = cosmos.make_contract(contract.parse()?);
     tracing::info!("Beginning listener loop on contract {contract}");
     let mut next_bridge_event_id = kolme
@@ -81,7 +117,7 @@ async fn listen<App: KolmeApp>(
     // We _should_ be subscribing to events. I tried doing that and failed miserably.
     // So we're trying this polling approach instead.
     loop {
-        listen_once(&kolme, &secret, &contract, &mut next_bridge_event_id).await?;
+        listen_once(&kolme, &secret, chain, &contract, &mut next_bridge_event_id).await?;
         tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
     }
 }
@@ -89,6 +125,7 @@ async fn listen<App: KolmeApp>(
 async fn listen_once<App: KolmeApp>(
     kolme: &Kolme<App>,
     secret: &k256::SecretKey,
+    chain: ExternalChain,
     contract: &Contract,
     next_bridge_event_id: &mut BridgeEventId,
 ) -> Result<()> {
@@ -112,7 +149,7 @@ async fn listen_once<App: KolmeApp>(
         GetToKolmeMessageResp::Found { message } => {
             let message = BASE64_STANDARD.decode(&message)?;
             let message = serde_json::from_slice::<BridgeEventContents>(&message)?;
-            broadcast_listener_event(kolme, secret, *next_bridge_event_id, &message).await?;
+            broadcast_listener_event(kolme, secret, chain, *next_bridge_event_id, &message).await?;
             *next_bridge_event_id = next_bridge_event_id.next();
             Ok(())
         }
@@ -123,6 +160,7 @@ async fn listen_once<App: KolmeApp>(
 async fn broadcast_listener_event<App: KolmeApp>(
     kolme: &Kolme<App>,
     secret: &k256::SecretKey,
+    chain: ExternalChain,
     bridge_event_id: BridgeEventId,
     message: &BridgeEventContents,
 ) -> Result<()> {
@@ -134,11 +172,14 @@ async fn broadcast_listener_event<App: KolmeApp>(
             keys,
         } => {
             for Coin { denom, amount } in funds {
-                messages.push(Message::Listener(BridgeEvent::Deposit {
-                    asset: denom.clone(),
-                    wallet: wallet.clone(),
-                    amount: amount.parse()?,
-                }));
+                messages.push(Message::Listener {
+                    chain,
+                    event: BridgeEvent::Deposit {
+                        asset: denom.clone(),
+                        wallet: wallet.clone(),
+                        amount: amount.parse()?,
+                    },
+                });
             }
             for key in keys {
                 let key = hex::decode(key)?;

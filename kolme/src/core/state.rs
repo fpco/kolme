@@ -2,7 +2,7 @@ use crate::*;
 
 /// Raw framework state that can be serialized to the database.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
-pub(crate) struct FrameworkState {
+pub struct FrameworkState {
     pub(super) processor: PublicKey,
     pub(super) listeners: BTreeSet<PublicKey>,
     pub(super) needed_listeners: usize,

@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
@@ -22,31 +24,19 @@ impl<App: KolmeApp> Processor<App> {
         loop {
             let notification = receiver.recv().await?;
             match notification {
-                Notification::NewBlock(block) => {
-                    // We probably need to add the new block, just in case it came from another node
-                    todo!()
+                Notification::NewBlock(_) => {
+                    // Safe to ignore, either we generated the new block ourself,
+                    // in which case it's already added, or it came from another
+                    // component which is responsible for adding it.
                 }
-                Notification::GenesisInstantiation { chain, contract } => {
-                    // FIXME In the future, we need the listeners to pick this up, validate, and send to the processor for final checking. For now, taking a shortcut and simply trusting the message.
-                    let pubkey = self.secret.public_key();
-                    let nonce = self
-                        .kolme
-                        .read()
-                        .await
-                        .get_next_account_nonce(pubkey)
-                        .await?;
-                    let payload = Transaction::<App::Message> {
-                        pubkey,
-                        nonce,
-                        created: Timestamp::now(),
-                        messages: vec![Message::BridgeCreated(BridgeCreated { chain, contract })],
-                    };
-                    self.add_transaction(SignedTransaction(
-                        TaggedJson::new(payload)?.sign(&self.secret)?,
-                    ))
-                    .await?;
+                Notification::GenesisInstantiation {
+                    chain: _,
+                    contract: _,
+                } => (),
+                Notification::Broadcast { tx } => {
+                    let tx = Arc::try_unwrap(tx).unwrap_or_else(|tx| tx.deref().clone());
+                    self.add_transaction(tx).await?
                 }
-                Notification::Broadcast { tx } => self.add_transaction(tx).await?,
             }
         }
     }
@@ -68,44 +58,10 @@ impl<App: KolmeApp> Processor<App> {
         Ok(())
     }
 
-    pub async fn produce_next_state(&self) -> Result<()> {
-        todo!();
-        // let mut kolme = self.kolme.write().await.begin_db_transaction().await?;
-        // let next_height = kolme.get_next_exec_height();
-        // anyhow::ensure!(kolme.get_next_event_height() > next_height);
-        // let Block::<App::Message> {
-        //     event,
-        //     timestamp: _,
-        //     processor: _,
-        //     height,
-        //     parent: _,
-        // } = kolme.load_block(next_height).await?.0.message.into_inner();
-        // anyhow::ensure!(height == next_height);
-        // let Transaction {
-        //     pubkey: _,
-        //     nonce: _,
-        //     created: _,
-        //     messages,
-        // } = event.0.message.into_inner();
-
-        // match kolme.execute_messages(&messages).await {
-        //     Ok(outputs) => {
-        //         assert_eq!(outputs.len(), messages.len());
-        //         kolme
-        //             .save_execution_state(next_height, outputs, &self.secret)
-        //             .await?;
-        //     }
-        //     Err(e) => {
-        //         todo!("Implement a rollback: {e}")
-        //     }
-        // }
-        // Ok(())
-    }
-
     async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
         match self.construct_block(tx).await {
             Ok(block) => {
-                self.kolme.add_block(&block).await?;
+                self.kolme.add_block(block).await?;
                 Ok(())
             }
             Err(e) => {

@@ -1,12 +1,9 @@
 use std::{
+    collections::HashMap,
     ops::{Deref, DerefMut},
     path::Path,
 };
 
-use k256::{
-    ecdsa::{signature::SignerMut, SigningKey},
-    SecretKey,
-};
 use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::core::*;
@@ -42,11 +39,8 @@ impl<App: KolmeApp> Kolme<App> {
         KolmeRead(self.inner.clone().read_owned().await)
     }
 
-    pub async fn write(&self) -> KolmeWrite<App> {
-        KolmeWrite {
-            inner: self.inner.clone().write_owned().await,
-            broadcast: self.notify.clone(),
-        }
+    async fn write(&self) -> KolmeWrite<App> {
+        KolmeWrite(self.inner.clone().write_owned().await)
     }
 
     /// Notify the system of a genesis contract instantiation.
@@ -59,7 +53,7 @@ impl<App: KolmeApp> Kolme<App> {
     /// Propose a new event for the processor to add to the chain.
     pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
         self.notify
-            .send(Notification::Broadcast { tx })
+            .send(Notification::Broadcast { tx: Arc::new(tx) })
             .map_err(|_| {
                 anyhow::anyhow!(
                     "Tried to propose an event, but no one is listening to our notifications"
@@ -69,7 +63,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Validate and append the given block.
-    pub async fn add_block(&self, signed_block: &SignedBlock<App::Message>) -> Result<()> {
+    pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
         let exec_results = self
             .read()
             .await
@@ -87,8 +81,11 @@ impl<App: KolmeApp> Kolme<App> {
             )
             .await?;
         let mut kolme = self.write().await.begin_db_transaction().await?;
-        kolme.store_block(signed_block, exec_results).await?;
+        kolme.store_block(&signed_block, exec_results).await?;
         kolme.commit().await?;
+        self.notify
+            .send(Notification::NewBlock(Arc::new(signed_block)))
+            .ok();
         Ok(())
     }
 }
@@ -105,22 +102,19 @@ impl<App: KolmeApp> Deref for KolmeRead<App> {
 }
 
 /// Read/write access to Kolme.
-pub struct KolmeWrite<App: KolmeApp> {
-    inner: tokio::sync::OwnedRwLockWriteGuard<KolmeInner<App>>,
-    broadcast: tokio::sync::broadcast::Sender<Notification<App>>,
-}
+pub struct KolmeWrite<App: KolmeApp>(tokio::sync::OwnedRwLockWriteGuard<KolmeInner<App>>);
 
 impl<App: KolmeApp> Deref for KolmeWrite<App> {
     type Target = KolmeInner<App>;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.deref()
+        self.0.deref()
     }
 }
 
 impl<App: KolmeApp> DerefMut for KolmeWrite<App> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner.deref_mut()
+        self.0.deref_mut()
     }
 }
 
@@ -131,6 +125,7 @@ pub struct KolmeInner<App: KolmeApp> {
     pub(super) app_state: App::State,
     pub(super) next_height: BlockHeight,
     pub(super) current_block_hash: BlockHash,
+    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<ExternalChain, cosmos::Cosmos>>,
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -161,6 +156,7 @@ impl<App: KolmeApp> Kolme<App> {
             app_state,
             next_height,
             current_block_hash,
+            cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
         };
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),
@@ -174,6 +170,21 @@ impl<App: KolmeApp> Kolme<App> {
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
+    pub async fn get_cosmos(&self, chain: ExternalChain) -> Result<cosmos::Cosmos> {
+        if let Some(cosmos) = self.cosmos_conns.read().await.get(&chain) {
+            return Ok(cosmos.clone());
+        }
+        let mut guard = self.cosmos_conns.write().await;
+        match guard.get(&chain) {
+            Some(cosmos) => Ok(cosmos.clone()),
+            None => {
+                let cosmos = chain.make_cosmos().await?;
+                guard.insert(chain, cosmos.clone());
+                Ok(cosmos)
+            }
+        }
+    }
+
     pub fn get_next_height(&self) -> BlockHeight {
         self.next_height
     }
@@ -242,6 +253,22 @@ impl<App: KolmeApp> KolmeInner<App> {
     pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
         &self.framework_state.chains
     }
+
+    pub async fn create_signed_transaction(
+        &self,
+        secret: &k256::SecretKey,
+        messages: Vec<Message<App::Message>>,
+    ) -> Result<()> {
+        let pubkey = secret.public_key();
+        let nonce = self.get_next_account_nonce(pubkey).await?;
+        let tx = Transaction::<App::Message> {
+            pubkey,
+            nonce,
+            created: Timestamp::now(),
+            messages: vec![],
+        };
+        tx.sign(secret)
+    }
 }
 
 // FIXME this code is pretty hairy, it would be nice to improve at some point in the future.
@@ -283,6 +310,7 @@ pub trait KolmeDbReader {
         serde_json::from_str(&payload).map_err(anyhow::Error::from)
     }
 
+    #[allow(async_fn_in_trait)]
     async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
         let key = key.to_sec1_bytes();
         let query = sqlx::query_scalar!(
@@ -465,65 +493,6 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
         }
 
         Ok(())
-    }
-
-    // self.state.event.increment_height();
-    // let account_id = self.get_or_insert_account_id(
-    //     &signed_block
-    //         .0
-    //         .message
-    //         .as_inner()
-    //         .event
-    //         .0
-    //         .message
-    //         .as_inner()
-    //         .pubkey,
-    //     height,
-    // );
-    // // TODO: review this code more carefully, do we need to check nonces more explicitly? Can we make a higher-level abstraction to avoid exposing too many internals to users of Kolme?
-    // self.bump_nonce_for(account_id)?;
-    // let now = Timestamp::now();
-
-    // let height_i64 = height.try_into_i64()?;
-    // let now = now.to_string();
-    // self.add_event_to_combined(height_i64, now, &signed_block)
-    //     .await?;
-
-    // // We ignore errors from .send. These only occur when there are no receivers, which is a normal state in the framework (it means no components need updates).
-    // self.kolme
-    //     .broadcast
-    //     .send(Notification::NewBlock(signed_block))
-    //     .ok();
-    // Ok(())
-    // }
-
-    // FIXME this function is probably the wrong level of abstraction
-    async fn add_event_to_combined(
-        &mut self,
-        height: i64,
-        now: String,
-        signed_block: &SignedBlock<App::Message>,
-    ) -> Result<()> {
-        todo!()
-        // let hash = signed_block.0.message_hash();
-        // let signed_event_str = serde_json::to_string(signed_block)?;
-        // let combined_id = sqlx::query!("INSERT INTO combined_stream(height,added,is_execution,rendered) VALUES($1,$2,FALSE,$3)", height, now, signed_event_str).execute(&mut **self.trans.lock().await.as_mut().unwrap()).await?.last_insert_rowid();
-        // let event_state = self.kolme.state.event.serialize_raw_state()?;
-        // let event_state = insert_state_payload(
-        //     &mut *self.trans.lock().await.as_mut().unwrap(),
-        //     &event_state,
-        // )
-        // .await?;
-        // sqlx::query!(
-        //     "INSERT INTO event_stream(height,hash,state,rendered_id) VALUES($1,$2,$3,$4)",
-        //     height,
-        //     hash,
-        //     event_state,
-        //     combined_id
-        // )
-        // .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-        // .await?;
-        // Ok(())
     }
 
     async fn get_or_insert_account_id_and_next_nonce(

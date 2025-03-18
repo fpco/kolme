@@ -90,10 +90,6 @@ impl AccountNonce {
     pub fn next(self) -> Self {
         AccountNonce(self.0 + 1)
     }
-
-    pub(crate) fn increment(&mut self) {
-        self.0 += 1;
-    }
 }
 
 impl TryFrom<i64> for AccountNonce {
@@ -259,9 +255,11 @@ impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum Message<AppMessage> {
     Genesis(GenesisInfo),
-    BridgeCreated(BridgeCreated),
     App(AppMessage),
-    Listener(BridgeEvent),
+    Listener {
+        chain: ExternalChain,
+        event: BridgeEvent,
+    },
     Auth(AuthMessage),
     // TODO Bank, with things like
     // Transfer {
@@ -278,6 +276,8 @@ pub enum Message<AppMessage> {
 /// An event emitted by a bridge contract and reported by a listener.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum BridgeEvent {
+    /// A bridge was instantiated
+    Instantiated { contract: String },
     Deposit {
         asset: String,
         wallet: String,
@@ -314,12 +314,6 @@ pub struct GenesisInfo {
     pub chains: BTreeMap<ExternalChain, ChainConfig>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct BridgeCreated {
-    pub chain: ExternalChain,
-    pub contract: String,
-}
-
 impl GenesisInfo {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
@@ -331,10 +325,10 @@ impl GenesisInfo {
 }
 
 #[derive(Default)]
-pub(crate) struct MessageOutput {
-    pub(crate) logs: Vec<String>,
-    pub(crate) loads: Vec<BlockDataLoad>,
-    pub(crate) actions: Vec<ExecAction>,
+pub struct MessageOutput {
+    pub logs: Vec<String>,
+    pub loads: Vec<BlockDataLoad>,
+    pub actions: Vec<ExecAction>,
 }
 
 /// Input and output for a single data load while processing a block.
@@ -366,7 +360,7 @@ pub struct AssetAmount {
 /// TODO this will ultimately be incorporated into a p2p network of events.
 #[derive(Clone, Debug)]
 pub enum Notification<App: KolmeApp> {
-    NewBlock(SignedBlock<App::Message>),
+    NewBlock(Arc<SignedBlock<App::Message>>),
     /// A claim by a submitter that it has instantiated a bridge contract.
     ///
     /// TODO for now we simply accept this as truth, in the future this will be used by listeners to review and confirm that the contract was created correctly.
@@ -376,6 +370,6 @@ pub enum Notification<App: KolmeApp> {
     },
     /// Broadcast a transaction to be included in the chain.
     Broadcast {
-        tx: SignedTransaction<App::Message>,
+        tx: Arc<SignedTransaction<App::Message>>,
     },
 }
