@@ -57,7 +57,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Propose a new event for the processor to add to the chain.
-    pub fn propose_event(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
+    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
         self.notify
             .send(Notification::Broadcast { tx })
             .map_err(|_| {
@@ -66,6 +66,30 @@ impl<App: KolmeApp> Kolme<App> {
                 )
             })
             .map(|_| ())
+    }
+
+    /// Validate and append the given block.
+    pub async fn add_block(&self, signed_block: &SignedBlock<App::Message>) -> Result<()> {
+        let exec_results = self
+            .read()
+            .await
+            .execute_messages(
+                &signed_block
+                    .0
+                    .message
+                    .as_inner()
+                    .tx
+                    .0
+                    .message
+                    .as_inner()
+                    .messages,
+                Some(signed_block.0.message.as_inner().loads.clone()),
+            )
+            .await?;
+        let mut kolme = self.write().await.begin_db_transaction().await?;
+        kolme.store_block(signed_block, exec_results).await?;
+        kolme.commit().await?;
+        Ok(())
     }
 }
 
@@ -192,28 +216,23 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
-        todo!()
-        // self.state.exec.get_next_genesis_action()
-    }
-
-    // FIXME remove this function I think
-    pub fn increment_exec_height(&mut self) {
-        todo!()
-        // self.state.exec.increment_height();
-    }
-
-    pub fn get_or_insert_account_id(
-        &mut self,
-        pubkey: &PublicKey,
-        height: BlockHeight,
-    ) -> AccountId {
-        todo!()
-        // self.state.event.get_or_insert_account_id(pubkey, height)
-    }
-
-    pub fn bump_nonce_for(&mut self, account_id: AccountId) -> Result<()> {
-        todo!()
-        // self.state.event.bump_nonce_for(account_id)
+        for (chain, config) in &self.framework_state.chains {
+            match config.bridge {
+                BridgeContract::NeededCosmosBridge { code_id } => {
+                    return Some(GenesisAction::InstantiateCosmos {
+                        chain: *chain,
+                        code_id,
+                        processor: self.framework_state.processor,
+                        listeners: self.framework_state.listeners.clone(),
+                        needed_listeners: self.framework_state.needed_listeners,
+                        executors: self.framework_state.executors.clone(),
+                        needed_executors: self.framework_state.needed_executors,
+                    })
+                }
+                BridgeContract::Deployed(_) => (),
+            }
+        }
+        None
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
@@ -221,8 +240,7 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
-        todo!()
-        // self.state.exec.get_bridge_contracts()
+        &self.framework_state.chains
     }
 }
 
@@ -334,15 +352,62 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
         }
     }
 
-    /// FIXME: this function is probably too specific to include on KolmeWriteDb, need to think through abstractions better
-    pub(crate) async fn save_execution_state(
-        mut self,
-        next_height: BlockHeight,
-        outputs: Vec<MessageOutput>,
-        key: &SecretKey,
-    ) -> Result<KolmeWrite<App>> {
-        assert_eq!(self.get_next_height(), next_height);
-        let next_height_i64 = next_height.try_into_i64()?;
+    /// Also performs validation of the data
+    async fn store_block(
+        &mut self,
+        signed_block: &SignedBlock<App::Message>,
+        ExecutionResults {
+            framework_state,
+            app_state,
+            outputs,
+        }: ExecutionResults<App>,
+    ) -> Result<()> {
+        let block = signed_block.0.message.as_inner();
+        let tx = block.tx.0.message.as_inner();
+
+        let height = block.height;
+        assert_eq!(self.get_next_height(), height);
+        let height_i64 = height.try_into_i64()?;
+
+        let (account_id, nonce) = self
+            .get_or_insert_account_id_and_next_nonce(tx.pubkey, height)
+            .await?;
+        anyhow::ensure!(nonce == tx.nonce);
+        let account_id = i64::try_from(account_id.0)?;
+        let nonce = i64::try_from(nonce.0)?;
+
+        let blockhash = signed_block.0.message_hash();
+        let rendered = serde_json::to_string(&signed_block)?;
+        let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
+
+        let framework_state_rendered = serde_json::to_string(&framework_state)?;
+        let framework_state_hash = insert_state_payload(
+            self.trans.lock().await.as_mut().unwrap(),
+            &framework_state_rendered,
+        )
+        .await?;
+        let app_state_rendered = App::save_state(&app_state)?;
+        let app_state_hash = insert_state_payload(
+            self.trans.lock().await.as_mut().unwrap(),
+            &app_state_rendered,
+        )
+        .await?;
+
+        sqlx::query!(
+            r#"
+                INSERT INTO
+                blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, account_id, nonce)
+                VALUES($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+            height_i64,
+            blockhash,
+            rendered,
+            txhash,
+            framework_state_hash,
+            app_state_hash,
+            account_id,
+            nonce,
+        ).execute(&mut **self.trans.lock().await.as_mut().unwrap()).await?;
 
         for (
             message,
@@ -356,7 +421,7 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
             let message = i64::try_from(message)?;
             let message = sqlx::query!(
                 "INSERT INTO messages(height, message) VALUES($1, $2)",
-                next_height_i64,
+                height_i64,
                 message
             )
             .execute(&mut **self.trans.lock().await.as_mut().unwrap())
@@ -399,112 +464,38 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
             }
         }
 
-        let framework_state = insert_state_payload(
-            &mut *self.trans.lock().await.as_mut().unwrap(),
-            todo!(),
-            // self.kolme
-            //     .state
-            //     .exec
-            //     .serialize_and_store_framework_state()?
-            //     .as_str(),
-        )
-        .await?;
-        let app_state = insert_state_payload(
-            &mut *self.trans.lock().await.as_mut().unwrap(),
-            todo!(), // self.kolme
-                     //     .state
-                     //     .exec
-                     //     .serialize_and_store_app_state()?
-                     //     .as_str(),
-        )
-        .await?;
-
-        let now = Timestamp::now();
-        todo!()
-        // let exec_value = Block {
-        //     height: next_height,
-        //     timestamp: now,
-        //     framework_state,
-        //     app_state,
-        //     loads: outputs.into_iter().flat_map(|o| o.loads).collect(),
-        // };
-        // let exec = TaggedJson::new(exec_value)?;
-        // let signature = SigningKey::from(key.clone()).sign(exec.as_bytes());
-        // let signed_value = SignedExec { exec, signature };
-        // let signed = serde_json::to_string(&signed_value)?;
-        // let now = now.to_string();
-        // let rendered_id = sqlx::query!(
-        //     r#"
-        //     INSERT INTO combined_stream(height, added, is_execution, rendered)
-        //     VALUES($1, $2, TRUE, $3)
-        //     "#,
-        //     next_height_i64,
-        //     now,
-        //     signed
-        // )
-        // .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-        // .await?
-        // .last_insert_rowid();
-
-        // sqlx::query!(
-        //     r#"
-        //     INSERT INTO execution_stream(height, framework_state, app_state, rendered_id)
-        //     VALUES($1, $2, $3, $4)
-        // "#,
-        //     next_height_i64,
-        //     signed_value.exec.as_inner().framework_state,
-        //     signed_value.exec.as_inner().app_state,
-        //     rendered_id
-        // )
-        // .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-        // .await?;
-
-        // // FIXME when we redo this function, it would be better to move the commit to a higher level. Basically: keep commit and begin paired in the code.
-        // let mut kolme = self.commit().await?;
-
-        // kolme.increment_exec_height();
-        // kolme
-        //     .broadcast
-        //     .send(Notification::NewExec(next_height))
-        //     .ok();
-        // Ok(kolme)
+        Ok(())
     }
 
-    /// Validate and append the given block.
-    pub async fn add_block(&mut self, signed_block: SignedBlock<App::Message>) -> Result<()> {
-        // FIXME we should run through the complete data validation step here first. Blocks can arrive from anyone on the p2p network in theory.
-        let height = self.get_next_height();
-        assert_eq!(height, signed_block.0.message.as_inner().height);
-        todo!();
-        // self.state.event.increment_height();
-        // let account_id = self.get_or_insert_account_id(
-        //     &signed_block
-        //         .0
-        //         .message
-        //         .as_inner()
-        //         .event
-        //         .0
-        //         .message
-        //         .as_inner()
-        //         .pubkey,
-        //     height,
-        // );
-        // // TODO: review this code more carefully, do we need to check nonces more explicitly? Can we make a higher-level abstraction to avoid exposing too many internals to users of Kolme?
-        // self.bump_nonce_for(account_id)?;
-        // let now = Timestamp::now();
+    // self.state.event.increment_height();
+    // let account_id = self.get_or_insert_account_id(
+    //     &signed_block
+    //         .0
+    //         .message
+    //         .as_inner()
+    //         .event
+    //         .0
+    //         .message
+    //         .as_inner()
+    //         .pubkey,
+    //     height,
+    // );
+    // // TODO: review this code more carefully, do we need to check nonces more explicitly? Can we make a higher-level abstraction to avoid exposing too many internals to users of Kolme?
+    // self.bump_nonce_for(account_id)?;
+    // let now = Timestamp::now();
 
-        // let height_i64 = height.try_into_i64()?;
-        // let now = now.to_string();
-        // self.add_event_to_combined(height_i64, now, &signed_block)
-        //     .await?;
+    // let height_i64 = height.try_into_i64()?;
+    // let now = now.to_string();
+    // self.add_event_to_combined(height_i64, now, &signed_block)
+    //     .await?;
 
-        // // We ignore errors from .send. These only occur when there are no receivers, which is a normal state in the framework (it means no components need updates).
-        // self.kolme
-        //     .broadcast
-        //     .send(Notification::NewBlock(signed_block))
-        //     .ok();
-        // Ok(())
-    }
+    // // We ignore errors from .send. These only occur when there are no receivers, which is a normal state in the framework (it means no components need updates).
+    // self.kolme
+    //     .broadcast
+    //     .send(Notification::NewBlock(signed_block))
+    //     .ok();
+    // Ok(())
+    // }
 
     // FIXME this function is probably the wrong level of abstraction
     async fn add_event_to_combined(
@@ -533,6 +524,58 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
         // .execute(&mut **self.trans.lock().await.as_mut().unwrap())
         // .await?;
         // Ok(())
+    }
+
+    async fn get_or_insert_account_id_and_next_nonce(
+        &self,
+        pubkey: PublicKey,
+        height: BlockHeight,
+    ) -> Result<(AccountId, AccountNonce)> {
+        let mut guard = self.trans.lock().await;
+        let trans = guard.as_mut().unwrap();
+        let pubkey = pubkey.to_sec1_bytes();
+        let account_id = sqlx::query_scalar!(
+            "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
+            pubkey
+        )
+        .fetch_optional(&mut **trans)
+        .await?;
+        match account_id {
+            None => {
+                let height = height.try_into_i64()?;
+                let account_id = sqlx::query!("INSERT INTO accounts(created) VALUES($1)", height)
+                    .execute(&mut **trans)
+                    .await?
+                    .last_insert_rowid();
+                sqlx::query!(
+                    "INSERT INTO account_pubkeys(account_id, pubkey) VALUES($1, $2)",
+                    account_id,
+                    pubkey
+                )
+                .execute(&mut **trans)
+                .await?;
+                Ok((AccountId(account_id.try_into()?), AccountNonce::start()))
+            }
+            Some(account_id) => {
+                let nonce = sqlx::query_scalar!(
+                    r#"
+                        SELECT nonce
+                        FROM blocks
+                        WHERE account_id=$1
+                        ORDER BY nonce DESC
+                        LIMIT 1
+                    "#,
+                    account_id
+                )
+                .fetch_optional(&mut **trans)
+                .await?;
+                let nonce = match nonce {
+                    Some(nonce) => AccountNonce(nonce.try_into()?),
+                    None => AccountNonce::start(),
+                };
+                Ok((AccountId(account_id.try_into()?), nonce))
+            }
+        }
     }
 }
 

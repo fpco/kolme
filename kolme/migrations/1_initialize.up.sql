@@ -1,6 +1,7 @@
 CREATE TABLE accounts(
     id INTEGER PRIMARY KEY NOT NULL,    
-    created INTEGER NOT NULL REFERENCES blocks(height)
+    -- We'd like to have a reference here, but sqlite barfs on inserts if we do
+    created INTEGER NOT NULL -- REFERENCES blocks(height)
 );
 
 CREATE TABLE account_wallets(

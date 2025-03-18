@@ -105,9 +105,7 @@ impl<App: KolmeApp> Processor<App> {
     async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
         match self.construct_block(tx).await {
             Ok(block) => {
-                let mut kolme = self.kolme.write().await.begin_db_transaction().await?;
-                kolme.add_block(block).await?;
-                kolme.commit().await?;
+                self.kolme.add_block(&block).await?;
                 Ok(())
             }
             Err(e) => {
@@ -151,7 +149,7 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             outputs,
         } = kolme
-            .execute_messages(&tx.0.message.as_inner().messages)
+            .execute_messages(&tx.0.message.as_inner().messages, None)
             .await?;
 
         let framework_state = Sha256Hash::hash(serde_json::to_string(&framework_state)?);

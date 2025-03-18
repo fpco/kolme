@@ -162,7 +162,7 @@ async fn broadcast_listener_event<App: KolmeApp>(
         messages,
     };
     let proposed = SignedTransaction(TaggedJson::new(payload)?.sign(secret)?);
-    kolme.propose_event(proposed)?;
+    kolme.propose_transaction(proposed)?;
     Ok(())
 }
 
