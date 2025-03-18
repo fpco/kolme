@@ -17,7 +17,6 @@ impl<App: KolmeApp> Listener<App> {
     pub async fn run(self) -> Result<()> {
         let contracts = self.wait_for_contracts().await?;
         let mut set = JoinSet::new();
-        set.spawn(subscribe(self.kolme.clone(), self.secret.clone()));
         for (chain, contract) in contracts {
             set.spawn(listen(
                 self.kolme.clone(),
@@ -47,7 +46,23 @@ impl<App: KolmeApp> Listener<App> {
             if let Some(contracts) = self.get_contracts().await {
                 return Ok(contracts);
             }
-            receiver.recv().await?;
+            if let Notification::GenesisInstantiation { chain, contract } = receiver.recv().await? {
+                // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
+                let signed = self
+                    .kolme
+                    .read()
+                    .await
+                    .create_signed_transaction(
+                        &self.secret,
+                        vec![Message::Listener {
+                            chain,
+                            event: BridgeEvent::Instantiated { contract },
+                            event_id: BridgeEventId::start(),
+                        }],
+                    )
+                    .await?;
+                self.kolme.propose_transaction(signed)?;
+            }
         }
     }
 
@@ -62,32 +77,6 @@ impl<App: KolmeApp> Listener<App> {
             }
         }
         Some(res)
-    }
-}
-
-async fn subscribe<App: KolmeApp>(kolme: Kolme<App>, secret: k256::SecretKey) -> Result<()> {
-    let mut receiver = kolme.subscribe();
-    loop {
-        let notification = receiver.recv().await?;
-        match notification {
-            Notification::NewBlock(_) => (),
-            Notification::GenesisInstantiation { chain, contract } => {
-                // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
-                let signed = kolme
-                    .read()
-                    .await
-                    .create_signed_transaction(
-                        &secret,
-                        vec![Message::Listener {
-                            chain,
-                            event: BridgeEvent::Instantiated { contract },
-                        }],
-                    )
-                    .await?;
-                kolme.propose_transaction(signed)?;
-            }
-            Notification::Broadcast { tx: _ } => (),
-        }
     }
 }
 
@@ -155,43 +144,50 @@ async fn broadcast_listener_event<App: KolmeApp>(
     bridge_event_id: BridgeEventId,
     message: &BridgeEventContents,
 ) -> Result<()> {
-    let mut messages = vec![];
-    match message {
+    let message = match message {
         BridgeEventContents::Regular {
             wallet,
             funds,
             keys,
         } => {
+            let mut new_funds = vec![];
+            let mut new_keys = vec![];
+
             for Coin { denom, amount } in funds {
-                messages.push(Message::Listener {
-                    chain,
-                    event: BridgeEvent::Deposit {
-                        asset: denom.clone(),
-                        wallet: wallet.clone(),
-                        amount: amount.parse()?,
-                    },
+                let amount = amount.parse()?;
+                new_funds.push(BridgedAssetAmount {
+                    denom: denom.clone(),
+                    amount,
                 });
             }
             for key in keys {
                 let key = hex::decode(key)?;
-                let key = PublicKey::from_sec1_bytes(&key);
-                panic!("{key:#?}");
-                // messages.push(EventMessage::Listener(ListenerMessage::AddPublicKey { wallet: wallet.clone(), key: () }))
-                todo!()
+                let key = PublicKey::from_sec1_bytes(&key)?;
+                new_keys.push(key);
+            }
+
+            Message::Listener {
+                chain,
+                event_id: bridge_event_id,
+                event: BridgeEvent::Regular {
+                    wallet: wallet.clone(),
+                    funds: new_funds,
+                    keys: new_keys,
+                },
             }
         }
         BridgeEventContents::Signed {
             wallet,
             outgoing_id,
         } => todo!(),
-    }
+    };
     let pubkey = secret.public_key();
     let nonce = kolme.read().await.get_next_account_nonce(pubkey).await?;
     let payload = Transaction {
         pubkey,
         nonce,
         created: Timestamp::now(),
-        messages,
+        messages: vec![message],
     };
     let proposed = SignedTransaction(TaggedJson::new(payload)?.sign(secret)?);
     kolme.propose_transaction(proposed)?;

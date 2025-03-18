@@ -258,6 +258,7 @@ pub enum Message<AppMessage> {
     App(AppMessage),
     Listener {
         chain: ExternalChain,
+        event_id: BridgeEventId,
         event: BridgeEvent,
     },
     Auth(AuthMessage),
@@ -278,13 +279,20 @@ pub enum Message<AppMessage> {
 pub enum BridgeEvent {
     /// A bridge was instantiated
     Instantiated { contract: String },
-    Deposit {
-        asset: String,
+    /// Regular action performed by the user
+    Regular {
         wallet: String,
-        amount: u128,
+        funds: Vec<BridgedAssetAmount>,
+        keys: Vec<PublicKey>,
     },
-    /// Only include the bare-bones necessary to bootstrap into the auth system
-    AddPublicKey { wallet: String, key: String },
+    // FIXME also handle when an action is executed
+}
+
+/// An event emitted by a bridge contract and reported by a listener.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct BridgedAssetAmount {
+    pub denom: String,
+    pub amount: u128,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -349,7 +357,7 @@ pub enum ExecAction {
     },
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct AssetAmount {
     pub id: AssetId,
     pub amount: u128, // FIXME use a Decimal representation

@@ -50,12 +50,18 @@ impl<App: KolmeApp> KolmeInner<App> {
 impl<App: KolmeApp> ExecutionContext<App> {
     async fn execute_message(&mut self, message: &Message<App::Message>) -> Result<()> {
         match message {
-            Message::Genesis(_genesis_info) => {
-                // FIXME We could do some sanity checks that the genesis info lines up with
-                // the stored state, but just trusting the system for now.
+            Message::Genesis(actual) => {
+                let expected = App::genesis_info();
+                anyhow::ensure!(&expected == actual);
             }
             Message::App(_) => todo!(),
-            Message::Listener { chain, event } => todo!(),
+            Message::Listener {
+                chain,
+                event,
+                event_id,
+            } => {
+                todo!("{chain:?} {event:?} {event_id:?}")
+            }
             Message::Auth(_auth_message) => todo!(),
         }
         Ok(())
