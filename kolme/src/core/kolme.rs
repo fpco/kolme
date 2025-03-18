@@ -18,7 +18,7 @@ use crate::core::*;
 /// locked during write operations to prevent data races.
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<tokio::sync::RwLock<KolmeInner<App>>>,
-    notify: tokio::sync::broadcast::Sender<Notification<App>>,
+    notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
 }
 
 impl<App: KolmeApp> Clone for Kolme<App> {
@@ -149,7 +149,7 @@ impl<App: KolmeApp> Kolme<App> {
         })
     }
 
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App>> {
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App::Message>> {
         self.notify.subscribe()
     }
 }

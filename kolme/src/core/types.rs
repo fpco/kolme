@@ -359,8 +359,8 @@ pub struct AssetAmount {
 ///
 /// TODO this will ultimately be incorporated into a p2p network of events.
 #[derive(Clone, Debug)]
-pub enum Notification<App: KolmeApp> {
-    NewBlock(Arc<SignedBlock<App::Message>>),
+pub enum Notification<AppMessage> {
+    NewBlock(Arc<SignedBlock<AppMessage>>),
     /// A claim by a submitter that it has instantiated a bridge contract.
     ///
     /// TODO for now we simply accept this as truth, in the future this will be used by listeners to review and confirm that the contract was created correctly.
@@ -370,6 +370,6 @@ pub enum Notification<App: KolmeApp> {
     },
     /// Broadcast a transaction to be included in the chain.
     Broadcast {
-        tx: Arc<SignedTransaction<App::Message>>,
+        tx: Arc<SignedTransaction<AppMessage>>,
     },
 }

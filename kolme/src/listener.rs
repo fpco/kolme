@@ -73,7 +73,6 @@ async fn subscribe<App: KolmeApp>(kolme: Kolme<App>, secret: k256::SecretKey) ->
             Notification::NewBlock(_) => (),
             Notification::GenesisInstantiation { chain, contract } => {
                 // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
-                let pubkey = secret.public_key();
                 let signed = kolme
                     .read()
                     .await
@@ -85,14 +84,6 @@ async fn subscribe<App: KolmeApp>(kolme: Kolme<App>, secret: k256::SecretKey) ->
                         }],
                     )
                     .await?;
-                let nonce = kolme.read().await.get_next_account_nonce(pubkey).await?;
-                let payload = Transaction::<App::Message> {
-                    pubkey,
-                    nonce,
-                    created: Timestamp::now(),
-                    messages: vec![],
-                };
-                let signed = payload.sign(&secret)?;
                 kolme.propose_transaction(signed)?;
             }
             Notification::Broadcast { tx: _ } => (),

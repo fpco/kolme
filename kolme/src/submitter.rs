@@ -1,4 +1,4 @@
-use cosmos::{Cosmos, HasAddressHrp, SeedPhrase, TxBuilder};
+use cosmos::{HasAddressHrp, SeedPhrase, TxBuilder};
 
 use crate::*;
 
