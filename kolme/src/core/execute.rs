@@ -1,45 +1,64 @@
 use crate::core::*;
 
 /// Execution context for a single message.
-pub struct ExecutionContext<'a, App: KolmeApp> {
-    state: &'a mut KolmeInner<App>,
+pub struct ExecutionContext<App: KolmeApp> {
+    framework_state: FrameworkState,
+    app_state: App::State,
     output: MessageOutput,
 }
 
-impl<App: KolmeApp> KolmeInner<App> {
-    pub(crate) async fn execute_messages(
-        &mut self,
-        messages: &[EventMessage<App::Message>],
-    ) -> Result<Vec<MessageOutput>> {
-        let mut ret = vec![];
-        for message in messages {
-            let output = self.execute_message(message).await?;
-            ret.push(output);
-        }
-        Ok(ret)
-    }
+pub(crate) struct ExecutionResults<App: KolmeApp> {
+    pub(crate) framework_state: FrameworkState,
+    pub(crate) app_state: App::State,
+    pub(crate) outputs: Vec<MessageOutput>,
+}
 
-    async fn execute_message(
-        &mut self,
-        message: &EventMessage<App::Message>,
-    ) -> Result<MessageOutput> {
-        let context = ExecutionContext {
-            state: self,
+impl<App: KolmeApp> ExecutionContext<App> {
+    pub fn consume(self) -> (FrameworkState, App::State, MessageOutput) {
+        (self.framework_state, self.app_state, self.output)
+    }
+}
+
+impl<App: KolmeApp> KolmeInner<App> {
+    pub async fn execute_messages(
+        &self,
+        messages: &[Message<App::Message>],
+    ) -> Result<ExecutionResults<App>> {
+        let mut outputs = vec![];
+        let mut execution_context = ExecutionContext::<App> {
+            framework_state: self.framework_state.clone(),
+            app_state: self.app_state.clone(),
             output: MessageOutput::default(),
         };
+        for message in messages {
+            execution_context.execute_message(message).await?;
+            let output = std::mem::take(&mut execution_context.output);
+            outputs.push(output);
+        }
+        Ok(ExecutionResults {
+            framework_state: execution_context.framework_state,
+            app_state: execution_context.app_state,
+            outputs,
+        })
+    }
+}
+
+impl<App: KolmeApp> ExecutionContext<App> {
+    async fn execute_message(&mut self, message: &Message<App::Message>) -> Result<()> {
         match message {
-            EventMessage::Genesis(_genesis_info) => {
+            Message::Genesis(_genesis_info) => {
                 // FIXME We could do some sanity checks that the genesis info lines up with
                 // the stored state, but just trusting the system for now.
             }
-            // FIXME where do we ensure that the processor signed off on the BridgeCreated message?
-            EventMessage::BridgeCreated(BridgeCreated { chain, contract }) => {
-                context.state.state.exec.bridge_created(*chain, contract)?;
+            // FIXME BridgeCreated should be part of the listener messages, and we should have a BridgeCreated Notification that the listeners wait for
+            Message::BridgeCreated(BridgeCreated { chain, contract }) => {
+                todo!()
+                // context.state.state.exec.bridge_created(*chain, contract)?;
             }
-            EventMessage::App(_) => todo!(),
-            EventMessage::Listener(_listener_message) => todo!(),
-            EventMessage::Auth(_auth_message) => todo!(),
+            Message::App(_) => todo!(),
+            Message::Listener(_listener_message) => todo!(),
+            Message::Auth(_auth_message) => todo!(),
         }
-        Ok(context.output)
+        Ok(())
     }
 }

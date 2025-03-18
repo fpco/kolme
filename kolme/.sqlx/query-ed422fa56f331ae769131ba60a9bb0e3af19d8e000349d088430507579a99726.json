@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM state_payload WHERE hash=$1",
+  "query": "SELECT COUNT(*) FROM hashes WHERE hash=$1",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "1efff7f3621996fa6cb4ea3f7b58619e851d5ac7373f271e49af8c769cb46ead"
+  "hash": "ed422fa56f331ae769131ba60a9bb0e3af19d8e000349d088430507579a99726"
 }

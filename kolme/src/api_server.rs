@@ -36,16 +36,14 @@ impl<App: KolmeApp> ApiServer<App> {
 async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResponse {
     #[derive(serde::Serialize)]
     struct Basics<'a> {
-        next_event_height: EventHeight,
-        next_exec_height: EventHeight,
+        next_height: BlockHeight,
         next_genesis_action: Option<GenesisAction>,
         bridges: &'a BTreeMap<ExternalChain, ChainConfig>,
     }
 
     let kolme = kolme.read().await;
     let basics = Basics {
-        next_event_height: kolme.get_next_event_height(),
-        next_exec_height: kolme.get_next_exec_height(),
+        next_height: kolme.get_next_height(),
         next_genesis_action: kolme.get_next_genesis_action(),
         bridges: kolme.get_bridge_contracts(),
     };

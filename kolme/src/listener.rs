@@ -111,7 +111,7 @@ async fn listen_once<App: KolmeApp>(
     {
         GetToKolmeMessageResp::Found { message } => {
             let message = BASE64_STANDARD.decode(&message)?;
-            let message = serde_json::from_slice::<Message>(&message)?;
+            let message = serde_json::from_slice::<BridgeEventContents>(&message)?;
             broadcast_listener_event(kolme, secret, *next_bridge_event_id, &message).await?;
             *next_bridge_event_id = next_bridge_event_id.next();
             Ok(())
@@ -124,17 +124,17 @@ async fn broadcast_listener_event<App: KolmeApp>(
     kolme: &Kolme<App>,
     secret: &k256::SecretKey,
     bridge_event_id: BridgeEventId,
-    message: &Message,
+    message: &BridgeEventContents,
 ) -> Result<()> {
     let mut messages = vec![];
     match message {
-        Message::Regular {
+        BridgeEventContents::Regular {
             wallet,
             funds,
             keys,
         } => {
             for Coin { denom, amount } in funds {
-                messages.push(EventMessage::Listener(ListenerMessage::Deposit {
+                messages.push(Message::Listener(BridgeEvent::Deposit {
                     asset: denom.clone(),
                     wallet: wallet.clone(),
                     amount: amount.parse()?,
@@ -148,27 +148,27 @@ async fn broadcast_listener_event<App: KolmeApp>(
                 todo!()
             }
         }
-        Message::Signed {
+        BridgeEventContents::Signed {
             wallet,
             outgoing_id,
         } => todo!(),
     }
     let pubkey = secret.public_key();
-    let nonce = kolme.read().await.get_next_account_nonce(pubkey);
-    let payload = EventPayload {
+    let nonce = kolme.read().await.get_next_account_nonce(pubkey).await?;
+    let payload = Transaction {
         pubkey,
         nonce,
         created: Timestamp::now(),
         messages,
     };
-    let proposed = ProposedEvent(TaggedJson::new(payload)?.sign(secret)?);
+    let proposed = SignedTransaction(TaggedJson::new(payload)?.sign(secret)?);
     kolme.propose_event(proposed)?;
     Ok(())
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
-enum Message {
+enum BridgeEventContents {
     Regular {
         wallet: String,
         funds: Vec<Coin>,

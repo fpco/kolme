@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO actions(message, position, payload) VALUES($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "7323196e95e2071a49a8c1013e7f3646f2b4e8ef8c049ff1e63c3691e7fedf56"
+}

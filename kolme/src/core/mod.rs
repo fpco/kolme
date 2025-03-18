@@ -7,7 +7,7 @@ mod types;
 pub use execute::*;
 pub use kolme::*;
 pub use kolme_app::*;
-use sqlx::{Sqlite, Transaction};
+use sqlx::Sqlite;
 pub use types::*;
 
 use crate::*;
@@ -17,7 +17,7 @@ pub(super) async fn get_state_payload(
     pool: &sqlx::SqlitePool,
     hash: &Sha256Hash,
 ) -> Result<String> {
-    sqlx::query_scalar!("SELECT payload FROM state_payload WHERE hash=$1", hash)
+    sqlx::query_scalar!("SELECT content FROM hashes WHERE hash=$1", hash)
         .fetch_one(pool)
         .await
         .map_err(Into::into)
@@ -25,19 +25,18 @@ pub(super) async fn get_state_payload(
 
 /// Returns the hash of the content
 pub(super) async fn insert_state_payload(
-    e: &mut Transaction<'_, Sqlite>,
+    e: &mut sqlx::Transaction<'_, Sqlite>,
     payload: &str,
 ) -> Result<Sha256Hash> {
     let hash = Sha256Hash::hash(payload);
-    let hash_bin = hash.0.as_slice();
-    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM state_payload WHERE hash=$1", hash_bin)
+    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM hashes WHERE hash=$1", hash)
         .fetch_one(&mut **e)
         .await?;
     match count {
         0 => {
             sqlx::query!(
-                "INSERT INTO state_payload(hash,payload) VALUES($1, $2)",
-                hash_bin,
+                "INSERT INTO hashes(hash,content) VALUES($1, $2)",
+                hash,
                 payload
             )
             .execute(&mut **e)

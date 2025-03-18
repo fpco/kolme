@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cosmos::{Cosmos, CosmosNetwork, HasAddressHrp, SeedPhrase, TxBuilder};
+use cosmos::{Cosmos, HasAddressHrp, SeedPhrase, TxBuilder};
 
 use crate::*;
 
@@ -27,13 +27,12 @@ impl<App: KolmeApp> Submitter<App> {
 
         loop {
             match receiver.recv().await? {
-                Notification::NewEvent(_) => continue,
-                Notification::NewExec(_) => (),
+                Notification::NewBlock(_) => (),
                 Notification::GenesisInstantiation {
                     chain: _,
                     contract: _,
                 } => continue,
-                Notification::ProposeEvent { event: _ } => continue,
+                Notification::Broadcast { tx: _ } => continue,
             }
             self.submit_zero_or_one().await?;
         }

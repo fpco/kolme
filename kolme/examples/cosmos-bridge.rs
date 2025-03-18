@@ -14,7 +14,7 @@ use tokio::task::JoinSet;
 #[derive(Clone, Debug)]
 pub struct SampleKolmeApp;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
