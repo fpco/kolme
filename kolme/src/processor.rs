@@ -54,7 +54,8 @@ impl<App: KolmeApp> Processor<App> {
             created: Timestamp::now(),
         };
         let proposed = payload.sign(&self.secret)?;
-        self.add_transaction(proposed).await?;
+        let block = self.construct_block(proposed).await?;
+        self.kolme.add_block(block).await?;
         Ok(())
     }
 

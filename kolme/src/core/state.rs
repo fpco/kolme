@@ -104,7 +104,10 @@ pub(super) async fn load_state<App: KolmeApp>(
 }
 
 async fn load_by_raw_hash(pool: &sqlx::SqlitePool, hash: &[u8]) -> Result<String> {
-    get_state_payload(pool, &Sha256Hash::from_hash(hash)?).await
+    sqlx::query_scalar!("SELECT content FROM hashes WHERE hash=$1", hash)
+        .fetch_one(pool)
+        .await
+        .map_err(Into::into)
 }
 
 /// Ensures that either we have no blocks yet, or the first block has matching genesis info.

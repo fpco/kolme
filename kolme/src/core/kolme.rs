@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-    path::Path,
-};
+use std::{collections::HashMap, ops::Deref, path::Path};
 
 use sqlx::sqlite::SqliteConnectOptions;
 
@@ -35,12 +31,15 @@ impl<App: KolmeApp> Clone for Kolme<App> {
 }
 
 impl<App: KolmeApp> Kolme<App> {
+    /// Lock the local storage and the database.
+    ///
+    /// Purpose: ensure that nothing else is able to modify the Kolme
+    /// state and give us inconsistent results.
+    ///
+    /// Under the surface, this uses an [tokio::sync::RwLock], so
+    /// multiple reads do not block each other.
     pub async fn read(&self) -> KolmeRead<App> {
         KolmeRead(self.inner.clone().read_owned().await)
-    }
-
-    async fn write(&self) -> KolmeWrite<App> {
-        KolmeWrite(self.inner.clone().write_owned().await)
     }
 
     /// Notify the system of a genesis contract instantiation.
@@ -80,9 +79,12 @@ impl<App: KolmeApp> Kolme<App> {
                 Some(signed_block.0.message.as_inner().loads.clone()),
             )
             .await?;
-        let mut kolme = self.write().await.begin_db_transaction().await?;
-        kolme.store_block(&signed_block, exec_results).await?;
-        kolme.commit().await?;
+        let mut kolme = self.inner.write().await;
+        let mut trans = kolme.pool.begin().await?;
+        store_block(&mut kolme, &mut trans, &signed_block, exec_results).await?;
+        trans.commit().await?;
+        kolme.next_height = signed_block.0.message.as_inner().height.next();
+        kolme.current_block_hash = BlockHash(signed_block.0.message_hash());
         self.notify
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
@@ -98,23 +100,6 @@ impl<App: KolmeApp> Deref for KolmeRead<App> {
 
     fn deref(&self) -> &Self::Target {
         self.0.deref()
-    }
-}
-
-/// Read/write access to Kolme.
-pub struct KolmeWrite<App: KolmeApp>(tokio::sync::OwnedRwLockWriteGuard<KolmeInner<App>>);
-
-impl<App: KolmeApp> Deref for KolmeWrite<App> {
-    type Target = KolmeInner<App>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.deref()
-    }
-}
-
-impl<App: KolmeApp> DerefMut for KolmeWrite<App> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.deref_mut()
     }
 }
 
@@ -258,39 +243,22 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self,
         secret: &k256::SecretKey,
         messages: Vec<Message<App::Message>>,
-    ) -> Result<()> {
+    ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key();
         let nonce = self.get_next_account_nonce(pubkey).await?;
         let tx = Transaction::<App::Message> {
             pubkey,
             nonce,
             created: Timestamp::now(),
-            messages: vec![],
+            messages,
         };
         tx.sign(secret)
     }
-}
-
-// FIXME this code is pretty hairy, it would be nice to improve at some point in the future.
-pub enum KolmeDbExecutor {
-    Pool(sqlx::SqlitePool),
-    Trans(std::sync::Arc<tokio::sync::Mutex<Option<sqlx::SqliteTransaction<'static>>>>),
-}
-
-/// Something which provides read access to a Kolme database.
-pub trait KolmeDbReader {
-    type App: KolmeApp;
-
-    fn get_executor(&self) -> KolmeDbExecutor;
 
     /// Load the block details from the database
-    #[allow(async_fn_in_trait)]
-    async fn load_block(
-        &self,
-        height: BlockHeight,
-    ) -> Result<SignedBlock<<Self::App as KolmeApp>::Message>> {
+    pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
         let height = height.try_into_i64()?;
-        let query = sqlx::query_scalar!(
+        let payload = sqlx::query_scalar!(
             r#"
                 SELECT rendered
                 FROM blocks
@@ -298,22 +266,15 @@ pub trait KolmeDbReader {
                 LIMIT 1
             "#,
             height
-        );
-        let payload = match self.get_executor() {
-            KolmeDbExecutor::Pool(pool) => query.fetch_one(&pool).await,
-            KolmeDbExecutor::Trans(mutex) => {
-                query
-                    .fetch_one(&mut **mutex.lock().await.as_mut().unwrap())
-                    .await
-            }
-        }?;
+        )
+        .fetch_one(&self.pool)
+        .await?;
         serde_json::from_str(&payload).map_err(anyhow::Error::from)
     }
 
-    #[allow(async_fn_in_trait)]
-    async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
+    pub async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
         let key = key.to_sec1_bytes();
-        let query = sqlx::query_scalar!(
+        let nonce = sqlx::query_scalar!(
             r#"
                 SELECT nonce
                 FROM blocks
@@ -324,15 +285,9 @@ pub trait KolmeDbReader {
                 LIMIT 1
             "#,
             key
-        );
-        let nonce = match self.get_executor() {
-            KolmeDbExecutor::Pool(pool) => query.fetch_optional(&pool).await?,
-            KolmeDbExecutor::Trans(mutex) => {
-                query
-                    .fetch_optional(&mut **mutex.lock().await.as_mut().unwrap())
-                    .await?
-            }
-        };
+        )
+        .fetch_optional(&self.pool)
+        .await?;
         match nonce {
             Some(nonce) => Ok(AccountNonce::try_from(nonce)?.next()),
             None => Ok(AccountNonce::start()),
@@ -340,88 +295,40 @@ pub trait KolmeDbReader {
     }
 }
 
-impl<App: KolmeApp> KolmeDbReader for KolmeRead<App> {
-    type App = App;
+/// Also performs validation of the data
+async fn store_block<App: KolmeApp>(
+    kolme: &mut KolmeInner<App>,
+    trans: &mut sqlx::SqliteTransaction<'_>,
+    signed_block: &SignedBlock<App::Message>,
+    ExecutionResults {
+        framework_state,
+        app_state,
+        outputs,
+    }: ExecutionResults<App>,
+) -> Result<()> {
+    let block = signed_block.0.message.as_inner();
+    let tx = block.tx.0.message.as_inner();
 
-    fn get_executor(&self) -> KolmeDbExecutor {
-        KolmeDbExecutor::Pool(self.pool.clone())
-    }
-}
+    let height = block.height;
+    assert_eq!(kolme.get_next_height(), height);
+    let height_i64 = height.try_into_i64()?;
 
-/// An upgraded [KolmeWrite] which also has an active DB transaction.
-pub struct KolmeWriteDb<App: KolmeApp> {
-    kolme: KolmeWrite<App>,
-    trans: Arc<tokio::sync::Mutex<Option<sqlx::SqliteTransaction<'static>>>>,
-}
+    let (account_id, nonce) =
+        get_or_insert_account_id_and_next_nonce(trans, tx.pubkey, height).await?;
+    anyhow::ensure!(nonce == tx.nonce);
+    let account_id = i64::try_from(account_id.0)?;
+    let nonce = i64::try_from(nonce.0)?;
 
-impl<App: KolmeApp> KolmeWrite<App> {
-    pub async fn begin_db_transaction(self) -> Result<KolmeWriteDb<App>> {
-        let trans = self.pool.begin().await?;
-        Ok(KolmeWriteDb {
-            kolme: self,
-            trans: Arc::new(tokio::sync::Mutex::new(Some(trans))),
-        })
-    }
-}
+    let blockhash = signed_block.0.message_hash();
+    let rendered = serde_json::to_string(&signed_block)?;
+    let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
 
-impl<App: KolmeApp> KolmeWriteDb<App> {
-    pub async fn commit(self) -> Result<KolmeWrite<App>> {
-        match self
-            .trans
-            .lock()
-            .await
-            .take()
-            .expect("Impossible None in KolmeWriteDb::commit")
-            .commit()
-            .await
-        {
-            Ok(()) => Ok(self.kolme),
-            Err(e) => Err(e.into()),
-        }
-    }
+    let framework_state_rendered = serde_json::to_string(&framework_state)?;
+    let framework_state_hash = insert_state_payload(trans, &framework_state_rendered).await?;
+    let app_state_rendered = App::save_state(&app_state)?;
+    let app_state_hash = insert_state_payload(trans, &app_state_rendered).await?;
 
-    /// Also performs validation of the data
-    async fn store_block(
-        &mut self,
-        signed_block: &SignedBlock<App::Message>,
-        ExecutionResults {
-            framework_state,
-            app_state,
-            outputs,
-        }: ExecutionResults<App>,
-    ) -> Result<()> {
-        let block = signed_block.0.message.as_inner();
-        let tx = block.tx.0.message.as_inner();
-
-        let height = block.height;
-        assert_eq!(self.get_next_height(), height);
-        let height_i64 = height.try_into_i64()?;
-
-        let (account_id, nonce) = self
-            .get_or_insert_account_id_and_next_nonce(tx.pubkey, height)
-            .await?;
-        anyhow::ensure!(nonce == tx.nonce);
-        let account_id = i64::try_from(account_id.0)?;
-        let nonce = i64::try_from(nonce.0)?;
-
-        let blockhash = signed_block.0.message_hash();
-        let rendered = serde_json::to_string(&signed_block)?;
-        let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
-
-        let framework_state_rendered = serde_json::to_string(&framework_state)?;
-        let framework_state_hash = insert_state_payload(
-            self.trans.lock().await.as_mut().unwrap(),
-            &framework_state_rendered,
-        )
-        .await?;
-        let app_state_rendered = App::save_state(&app_state)?;
-        let app_state_hash = insert_state_payload(
-            self.trans.lock().await.as_mut().unwrap(),
-            &app_state_rendered,
-        )
-        .await?;
-
-        sqlx::query!(
+    sqlx::query!(
             r#"
                 INSERT INTO
                 blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, account_id, nonce)
@@ -435,137 +342,137 @@ impl<App: KolmeApp> KolmeWriteDb<App> {
             app_state_hash,
             account_id,
             nonce,
-        ).execute(&mut **self.trans.lock().await.as_mut().unwrap()).await?;
+        ).execute(&mut **trans).await?;
 
-        for (
-            message,
-            MessageOutput {
-                logs,
-                loads,
-                actions,
-            },
-        ) in outputs.iter().enumerate()
-        {
-            let message = i64::try_from(message)?;
-            let message = sqlx::query!(
-                "INSERT INTO messages(height, message) VALUES($1, $2)",
-                height_i64,
-                message
+    for (
+        message,
+        MessageOutput {
+            logs,
+            loads,
+            actions,
+        },
+    ) in outputs.iter().enumerate()
+    {
+        let message = i64::try_from(message)?;
+        let message = sqlx::query!(
+            "INSERT INTO messages(height, message) VALUES($1, $2)",
+            height_i64,
+            message
+        )
+        .execute(&mut **trans)
+        .await?
+        .last_insert_rowid();
+        for (position, log) in logs.iter().enumerate() {
+            let position = i64::try_from(position)?;
+            sqlx::query!(
+                "INSERT INTO logs(message, position, payload) VALUES($1, $2, $3)",
+                message,
+                position,
+                log
             )
-            .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-            .await?
-            .last_insert_rowid();
-            for (position, log) in logs.iter().enumerate() {
-                let position = i64::try_from(position)?;
-                sqlx::query!(
-                    "INSERT INTO logs(message, position, payload) VALUES($1, $2, $3)",
-                    message,
-                    position,
-                    log
-                )
-                .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-                .await?;
-            }
-            for (position, load) in loads.iter().enumerate() {
-                let position = i64::try_from(position)?;
-                let load = serde_json::to_string(&load)?;
-                sqlx::query!(
-                    "INSERT INTO loads(message, position, payload) VALUES($1, $2, $3)",
-                    message,
-                    position,
-                    load
-                )
-                .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-                .await?;
-            }
-            for (position, action) in actions.iter().enumerate() {
-                let position = i64::try_from(position)?;
-                let action = serde_json::to_string(&action)?;
-                sqlx::query!(
-                    "INSERT INTO actions(message, position, payload) VALUES($1, $2, $3)",
-                    message,
-                    position,
-                    action
-                )
-                .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-                .await?;
-            }
+            .execute(&mut **trans)
+            .await?;
         }
-
-        Ok(())
+        for (position, load) in loads.iter().enumerate() {
+            let position = i64::try_from(position)?;
+            let load = serde_json::to_string(&load)?;
+            sqlx::query!(
+                "INSERT INTO loads(message, position, payload) VALUES($1, $2, $3)",
+                message,
+                position,
+                load
+            )
+            .execute(&mut **trans)
+            .await?;
+        }
+        for (position, action) in actions.iter().enumerate() {
+            let position = i64::try_from(position)?;
+            let action = serde_json::to_string(&action)?;
+            sqlx::query!(
+                "INSERT INTO actions(message, position, payload) VALUES($1, $2, $3)",
+                message,
+                position,
+                action
+            )
+            .execute(&mut **trans)
+            .await?;
+        }
     }
 
-    async fn get_or_insert_account_id_and_next_nonce(
-        &self,
-        pubkey: PublicKey,
-        height: BlockHeight,
-    ) -> Result<(AccountId, AccountNonce)> {
-        let mut guard = self.trans.lock().await;
-        let trans = guard.as_mut().unwrap();
-        let pubkey = pubkey.to_sec1_bytes();
-        let account_id = sqlx::query_scalar!(
-            "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
-            pubkey
-        )
-        .fetch_optional(&mut **trans)
+    Ok(())
+}
+
+/// Returns the hash of the content
+async fn insert_state_payload(
+    e: &mut sqlx::SqliteTransaction<'_>,
+    payload: &str,
+) -> Result<Sha256Hash> {
+    let hash = Sha256Hash::hash(payload);
+    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM hashes WHERE hash=$1", hash)
+        .fetch_one(&mut **e)
         .await?;
-        match account_id {
-            None => {
-                let height = height.try_into_i64()?;
-                let account_id = sqlx::query!("INSERT INTO accounts(created) VALUES($1)", height)
-                    .execute(&mut **trans)
-                    .await?
-                    .last_insert_rowid();
-                sqlx::query!(
-                    "INSERT INTO account_pubkeys(account_id, pubkey) VALUES($1, $2)",
-                    account_id,
-                    pubkey
-                )
+    match count {
+        0 => {
+            sqlx::query!(
+                "INSERT INTO hashes(hash,content) VALUES($1, $2)",
+                hash,
+                payload
+            )
+            .execute(&mut **e)
+            .await?;
+        }
+        1 => (),
+        _ => anyhow::bail!("insert_state_payload: impossible result of {count} entries"),
+    }
+    Ok(hash)
+}
+
+async fn get_or_insert_account_id_and_next_nonce(
+    trans: &mut sqlx::SqliteTransaction<'_>,
+    pubkey: PublicKey,
+    height: BlockHeight,
+) -> Result<(AccountId, AccountNonce)> {
+    let pubkey = pubkey.to_sec1_bytes();
+    let account_id = sqlx::query_scalar!(
+        "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
+        pubkey
+    )
+    .fetch_optional(&mut **trans)
+    .await?;
+    match account_id {
+        None => {
+            let height = height.try_into_i64()?;
+            let account_id = sqlx::query!("INSERT INTO accounts(created) VALUES($1)", height)
                 .execute(&mut **trans)
-                .await?;
-                Ok((AccountId(account_id.try_into()?), AccountNonce::start()))
-            }
-            Some(account_id) => {
-                let nonce = sqlx::query_scalar!(
-                    r#"
+                .await?
+                .last_insert_rowid();
+            sqlx::query!(
+                "INSERT INTO account_pubkeys(account_id, pubkey) VALUES($1, $2)",
+                account_id,
+                pubkey
+            )
+            .execute(&mut **trans)
+            .await?;
+            Ok((AccountId(account_id.try_into()?), AccountNonce::start()))
+        }
+        Some(account_id) => {
+            let nonce = sqlx::query_scalar!(
+                r#"
                         SELECT nonce
                         FROM blocks
                         WHERE account_id=$1
                         ORDER BY nonce DESC
                         LIMIT 1
                     "#,
-                    account_id
-                )
-                .fetch_optional(&mut **trans)
-                .await?;
-                let nonce = match nonce {
-                    Some(nonce) => AccountNonce(nonce.try_into()?),
-                    None => AccountNonce::start(),
-                };
-                Ok((AccountId(account_id.try_into()?), nonce))
-            }
+                account_id
+            )
+            .fetch_optional(&mut **trans)
+            .await?;
+            let nonce = match nonce {
+                Some(nonce) => AccountNonce(nonce.try_into()?),
+                None => AccountNonce::start(),
+            };
+            Ok((AccountId(account_id.try_into()?), nonce))
         }
-    }
-}
-
-impl<App: KolmeApp> KolmeDbReader for KolmeWriteDb<App> {
-    type App = App;
-
-    fn get_executor(&self) -> KolmeDbExecutor {
-        KolmeDbExecutor::Trans(self.trans.clone())
-    }
-}
-
-impl<App: KolmeApp> Deref for KolmeWriteDb<App> {
-    type Target = KolmeInner<App>;
-
-    fn deref(&self) -> &Self::Target {
-        self.kolme.deref()
-    }
-}
-
-impl<App: KolmeApp> DerefMut for KolmeWriteDb<App> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.kolme.deref_mut()
     }
 }
