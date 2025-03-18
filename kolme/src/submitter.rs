@@ -54,6 +54,17 @@ impl<App: KolmeApp> Submitter<App> {
                 executors,
                 needed_executors,
             } => {
+                if chain == ExternalChain::OsmosisTestnet {
+                    self.kolme
+                        .notify_genesis_instantiation(chain, "osmofixme".to_owned());
+                    return Ok(());
+                }
+                if chain == ExternalChain::NeutronTestnet {
+                    self.kolme
+                        .notify_genesis_instantiation(chain, "ntrnfixme".to_owned());
+                    return Ok(());
+                }
+
                 let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
                 let wallet = self.seed_phrase.with_hrp(cosmos.get_address_hrp())?;
 

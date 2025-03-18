@@ -67,15 +67,7 @@ impl<App: KolmeApp> Kolme<App> {
             .read()
             .await
             .execute_messages(
-                &signed_block
-                    .0
-                    .message
-                    .as_inner()
-                    .tx
-                    .0
-                    .message
-                    .as_inner()
-                    .messages,
+                signed_block.0.message.as_inner().tx.0.message.as_inner(),
                 Some(signed_block.0.message.as_inner().loads.clone()),
             )
             .await?;
@@ -398,6 +390,8 @@ async fn store_block<App: KolmeApp>(
             .await?;
         }
     }
+
+    todo!("store listener events, don't forget about bridge_events.accepted");
 
     Ok(())
 }

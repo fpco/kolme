@@ -106,7 +106,7 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             outputs,
         } = kolme
-            .execute_messages(&tx.0.message.as_inner().messages, None)
+            .execute_messages(tx.0.message.as_inner(), None)
             .await?;
 
         let framework_state = Sha256Hash::hash(serde_json::to_string(&framework_state)?);
