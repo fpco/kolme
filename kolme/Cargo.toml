@@ -10,7 +10,7 @@ axum = "0.8.1"
 base64 = "0.22.1"
 chrono = { version = "0.4.40", features = ["serde"] }
 clap = { version = "4.5.20", features = ["derive", "env", "unicode"] }
-cosmos = { git = "https://github.com/fpco/cosmos-rs", branch = "main", features = ["config"] }
+cosmos = { git = "https://github.com/fpco/cosmos-rs", rev = "e71787b2a43ce84451631a3521c9b9e4d299b691", features = ["config"] }
 dotenvy = "0.15.7"
 hex = "0.4.3"
 jiff = { version = "0.2.3", features = ["serde"] }
@@ -20,6 +20,7 @@ reqwest = { version = "0.12.12", default-features = false, features = ["rustls-t
 serde = { version = "1.0.218", features = ["derive"] }
 serde_json = "1.0.140"
 sqlx = { version = "0.8.3", features = ["migrate", "runtime-tokio", "sqlite"] }
+strum = { version = "0.27.1", features = ["derive"] }
 tokio = { version = "1.43.0", features = ["full"] }
 tower-http = { version = "0.6.2", features = ["cors"] }
 tracing = "0.1.41"
