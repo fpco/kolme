@@ -13,6 +13,7 @@ pub use listener::Listener;
 pub use processor::Processor;
 pub use submitter::Submitter;
 
+#[allow(unused_imports)]
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use jiff::Timestamp;
 pub(crate) use std::collections::{BTreeMap, BTreeSet};

@@ -1,12 +1,5 @@
-use std::{
-    ops::{Deref, DerefMut},
-    path::Path,
-};
+use std::{collections::HashMap, ops::Deref, path::Path};
 
-use k256::{
-    ecdsa::{signature::SignerMut, SigningKey},
-    SecretKey,
-};
 use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::core::*;
@@ -25,47 +18,69 @@ use crate::core::*;
 /// locked during write operations to prevent data races.
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<tokio::sync::RwLock<KolmeInner<App>>>,
-    broadcast: tokio::sync::broadcast::Sender<Notification<App>>,
+    notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
 }
 
 impl<App: KolmeApp> Clone for Kolme<App> {
     fn clone(&self) -> Self {
         Kolme {
             inner: self.inner.clone(),
-            broadcast: self.broadcast.clone(),
+            notify: self.notify.clone(),
         }
     }
 }
 
 impl<App: KolmeApp> Kolme<App> {
+    /// Lock the local storage and the database.
+    ///
+    /// Purpose: ensure that nothing else is able to modify the Kolme
+    /// state and give us inconsistent results.
+    ///
+    /// Under the surface, this uses an [tokio::sync::RwLock], so
+    /// multiple reads do not block each other.
     pub async fn read(&self) -> KolmeRead<App> {
         KolmeRead(self.inner.clone().read_owned().await)
     }
 
-    pub async fn write(&self) -> KolmeWrite<App> {
-        KolmeWrite {
-            inner: self.inner.clone().write_owned().await,
-            broadcast: self.broadcast.clone(),
-        }
-    }
-
     /// Notify the system of a genesis contract instantiation.
     pub fn notify_genesis_instantiation(&self, chain: ExternalChain, contract: String) {
-        self.broadcast
+        self.notify
             .send(Notification::GenesisInstantiation { chain, contract })
             .ok();
     }
 
     /// Propose a new event for the processor to add to the chain.
-    pub fn propose_event(&self, event: ProposedEvent<App::Message>) -> Result<()> {
-        self.broadcast
-            .send(Notification::ProposeEvent { event })
+    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
+        self.notify
+            .send(Notification::Broadcast { tx: Arc::new(tx) })
             .map_err(|_| {
                 anyhow::anyhow!(
                     "Tried to propose an event, but no one is listening to our notifications"
                 )
             })
             .map(|_| ())
+    }
+
+    /// Validate and append the given block.
+    pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
+        let exec_results = self
+            .read()
+            .await
+            .execute_messages(
+                signed_block.0.message.as_inner().tx.0.message.as_inner(),
+                Some(signed_block.0.message.as_inner().loads.clone()),
+            )
+            .await?;
+        let mut kolme = self.inner.write().await;
+        let mut trans = kolme.pool.begin().await?;
+        store_block(&mut kolme, &mut trans, &signed_block, exec_results).await?;
+        trans.commit().await?;
+        kolme.next_height = signed_block.0.message.as_inner().height.next();
+        kolme.current_block_hash = BlockHash(signed_block.0.message_hash());
+        self.notify
+            .send(Notification::NewBlock(Arc::new(signed_block)))
+            .ok();
+        Ok(())
     }
 }
 
@@ -80,66 +95,82 @@ impl<App: KolmeApp> Deref for KolmeRead<App> {
     }
 }
 
-/// Read/write access to Kolme.
-pub struct KolmeWrite<App: KolmeApp> {
-    inner: tokio::sync::OwnedRwLockWriteGuard<KolmeInner<App>>,
-    broadcast: tokio::sync::broadcast::Sender<Notification<App>>,
-}
-
-impl<App: KolmeApp> Deref for KolmeWrite<App> {
-    type Target = KolmeInner<App>;
-
-    fn deref(&self) -> &Self::Target {
-        self.inner.deref()
-    }
-}
-
-impl<App: KolmeApp> DerefMut for KolmeWrite<App> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner.deref_mut()
-    }
-}
-
 pub struct KolmeInner<App: KolmeApp> {
     pub(super) pool: sqlx::SqlitePool,
-    pub(super) state: KolmeState<App>,
     pub(super) app: App,
+    pub(super) framework_state: FrameworkState,
+    pub(super) app_state: App::State,
+    pub(super) next_height: BlockHeight,
+    pub(super) current_block_hash: BlockHash,
+    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<ExternalChain, cosmos::Cosmos>>,
 }
 
 impl<App: KolmeApp> Kolme<App> {
     pub async fn new(
         app: App,
-        code_version: impl AsRef<str>,
+        _code_version: impl AsRef<str>,
         db_path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let code_version = code_version.as_ref();
+        // FIXME in the future do some validation of code version, and allow
+        // for explicit events for upgrading to a newer code version
         let options = SqliteConnectOptions::new()
             .filename(db_path)
             .create_if_missing(true);
         let pool = sqlx::SqlitePool::connect_with(options).await?;
         sqlx::migrate!().run(&pool).await?;
-        let state = KolmeState::new(&app, &pool, code_version).await?;
+        let info = App::genesis_info();
+        validate_genesis_info(&pool, &info).await?;
+        let LoadStateResult {
+            framework_state,
+            app_state,
+            next_height,
+            current_block_hash,
+        } = state::load_state::<App>(&pool, &info).await?;
+        let inner = KolmeInner {
+            pool,
+            app,
+            framework_state,
+            app_state,
+            next_height,
+            current_block_hash,
+            cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
+        };
         Ok(Kolme {
-            inner: Arc::new(tokio::sync::RwLock::new(KolmeInner { pool, state, app })),
-            broadcast: tokio::sync::broadcast::channel(100).0,
+            inner: Arc::new(tokio::sync::RwLock::new(inner)),
+            notify: tokio::sync::broadcast::channel(100).0,
         })
     }
 
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App>> {
-        self.broadcast.subscribe()
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App::Message>> {
+        self.notify.subscribe()
     }
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
-    pub fn get_next_event_height(&self) -> EventHeight {
-        self.state.event.get_next_height()
+    pub async fn get_cosmos(&self, chain: ExternalChain) -> Result<cosmos::Cosmos> {
+        if let Some(cosmos) = self.cosmos_conns.read().await.get(&chain) {
+            return Ok(cosmos.clone());
+        }
+        let mut guard = self.cosmos_conns.write().await;
+        match guard.get(&chain) {
+            Some(cosmos) => Ok(cosmos.clone()),
+            None => {
+                let cosmos = chain.make_cosmos().await?;
+                guard.insert(chain, cosmos.clone());
+                Ok(cosmos)
+            }
+        }
     }
 
-    /// Returns the hash of the most recent event.
+    pub fn get_next_height(&self) -> BlockHeight {
+        self.next_height
+    }
+
+    /// Returns the hash of the most recent block.
     ///
     /// If there is no event present, returns the special parent for the genesis block.
-    pub fn get_current_event_hash(&self) -> &Sha256Hash {
-        self.state.event.get_current_hash()
+    pub fn get_current_block_hash(&self) -> BlockHash {
+        self.current_block_hash
     }
 
     /// Get the ID of the next bridge event pending for the given chain.
@@ -152,13 +183,15 @@ impl<App: KolmeApp> KolmeInner<App> {
         let chain = chain.as_ref();
         let bridge_event_id = sqlx::query_scalar!(
             r#"
-            SELECT bridge_event_id
-            FROM listener_bridge_events
-            WHERE chain=$1
-            AND public_key=$2
-            ORDER BY bridge_event_id DESC
-            LIMIT 1
-        "#,
+                SELECT event_id
+                FROM bridge_events
+                LEFT JOIN bridge_event_attestations
+                ON bridge_events.id=bridge_event_attestations.event
+                WHERE chain=$1
+                AND (public_key=$2 OR accepted IS NOT NULL)
+                ORDER BY event_id DESC
+                LIMIT 1
+            "#,
             chain,
             pubkey
         )
@@ -170,354 +203,270 @@ impl<App: KolmeApp> KolmeInner<App> {
         })
     }
 
-    pub fn get_next_exec_height(&self) -> EventHeight {
-        self.state.exec.get_next_height()
-    }
-
     pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
-        self.state.exec.get_next_genesis_action()
-    }
-
-    // FIXME remove this function I think
-    pub fn increment_exec_height(&mut self) {
-        self.state.exec.increment_height();
-    }
-
-    pub fn get_or_insert_account_id(
-        &mut self,
-        pubkey: &PublicKey,
-        height: EventHeight,
-    ) -> AccountId {
-        self.state.event.get_or_insert_account_id(pubkey, height)
-    }
-
-    pub fn bump_nonce_for(&mut self, account_id: AccountId) -> Result<()> {
-        self.state.event.bump_nonce_for(account_id)
-    }
-
-    pub fn get_next_account_nonce(&self, key: PublicKey) -> AccountNonce {
-        self.state.event.get_next_account_nonce(key)
+        for (chain, config) in &self.framework_state.chains {
+            match config.bridge {
+                BridgeContract::NeededCosmosBridge { code_id } => {
+                    return Some(GenesisAction::InstantiateCosmos {
+                        chain: *chain,
+                        code_id,
+                        processor: self.framework_state.processor,
+                        listeners: self.framework_state.listeners.clone(),
+                        needed_listeners: self.framework_state.needed_listeners,
+                        executors: self.framework_state.executors.clone(),
+                        needed_executors: self.framework_state.needed_executors,
+                    })
+                }
+                BridgeContract::Deployed(_) => (),
+            }
+        }
+        None
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.state.exec.get_processor_pubkey()
+        self.framework_state.processor
     }
 
     pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
-        self.state.exec.get_bridge_contracts()
+        &self.framework_state.chains
     }
-}
 
-// FIXME this code is pretty hairy, it would be nice to improve at some point in the future.
-pub enum KolmeDbExecutor {
-    Pool(sqlx::SqlitePool),
-    Trans(std::sync::Arc<tokio::sync::Mutex<Option<sqlx::SqliteTransaction<'static>>>>),
-}
-
-/// Something which provides read access to a Kolme database.
-pub trait KolmeDbReader {
-    type App: KolmeApp;
-
-    fn get_executor(&self) -> KolmeDbExecutor;
-
-    /// Load the event details from the database
-    #[allow(async_fn_in_trait)]
-    async fn load_event(
+    pub async fn create_signed_transaction(
         &self,
-        height: EventHeight,
-    ) -> Result<SignedEvent<<Self::App as KolmeApp>::Message>> {
+        secret: &k256::SecretKey,
+        messages: Vec<Message<App::Message>>,
+    ) -> Result<SignedTransaction<App::Message>> {
+        let pubkey = secret.public_key();
+        let nonce = self.get_next_account_nonce(pubkey).await?;
+        let tx = Transaction::<App::Message> {
+            pubkey,
+            nonce,
+            created: Timestamp::now(),
+            messages,
+        };
+        tx.sign(secret)
+    }
+
+    /// Load the block details from the database
+    pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
         let height = height.try_into_i64()?;
-        let query = sqlx::query_scalar!(
+        let payload = sqlx::query_scalar!(
             r#"
                 SELECT rendered
-                FROM combined_stream
+                FROM blocks
                 WHERE height=$1
-                AND NOT is_execution
                 LIMIT 1
             "#,
             height
-        );
-        let payload = match self.get_executor() {
-            KolmeDbExecutor::Pool(pool) => query.fetch_one(&pool).await,
-            KolmeDbExecutor::Trans(mutex) => {
-                query
-                    .fetch_one(&mut **mutex.lock().await.as_mut().unwrap())
-                    .await
-            }
-        }?;
+        )
+        .fetch_one(&self.pool)
+        .await?;
         serde_json::from_str(&payload).map_err(anyhow::Error::from)
     }
-}
 
-impl<App: KolmeApp> KolmeDbReader for KolmeRead<App> {
-    type App = App;
-
-    fn get_executor(&self) -> KolmeDbExecutor {
-        KolmeDbExecutor::Pool(self.pool.clone())
-    }
-}
-
-/// An upgraded [KolmeWrite] which also has an active DB transaction.
-pub struct KolmeWriteDb<App: KolmeApp> {
-    kolme: KolmeWrite<App>,
-    trans: Arc<tokio::sync::Mutex<Option<sqlx::SqliteTransaction<'static>>>>,
-}
-
-impl<App: KolmeApp> KolmeWrite<App> {
-    pub async fn begin_db_transaction(self) -> Result<KolmeWriteDb<App>> {
-        let trans = self.pool.begin().await?;
-        Ok(KolmeWriteDb {
-            kolme: self,
-            trans: Arc::new(tokio::sync::Mutex::new(Some(trans))),
-        })
-    }
-
-    /// Downgrade to a read-only version.
-    ///
-    /// Intended for safety of validation code. A common pattern is locking framework, performing validation in a read-only manner, and then continuing with mutations. We want to ensure that no one else can modify our storage between the validation and the mutations.
-    pub(crate) fn downgrade(&self) -> KolmeWriteDowngraded<App> {
-        KolmeWriteDowngraded(self)
-    }
-}
-
-pub struct KolmeWriteDowngraded<'a, App: KolmeApp>(&'a KolmeWrite<App>);
-
-impl<App: KolmeApp> Deref for KolmeWriteDowngraded<'_, App> {
-    type Target = KolmeInner<App>;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.deref()
-    }
-}
-
-impl<App: KolmeApp> KolmeWriteDb<App> {
-    pub async fn commit(self) -> Result<KolmeWrite<App>> {
-        match self
-            .trans
-            .lock()
-            .await
-            .take()
-            .expect("Impossible None in KolmeWriteDb::commit")
-            .commit()
-            .await
-        {
-            Ok(()) => Ok(self.kolme),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    /// FIXME: this function is probably too specific to include on KolmeWriteDb, need to think through abstractions better
-    pub(crate) async fn save_execution_state(
-        mut self,
-        next_height: EventHeight,
-        outputs: Vec<MessageOutput>,
-        key: &SecretKey,
-    ) -> Result<KolmeWrite<App>> {
-        assert_eq!(self.get_next_exec_height(), next_height);
-        let next_height_i64 = next_height.try_into_i64()?;
-
-        for (
-            message,
-            MessageOutput {
-                logs,
-                loads,
-                actions,
-            },
-        ) in outputs.iter().enumerate()
-        {
-            let message = i64::try_from(message)?;
-            for (position, log) in logs.iter().enumerate() {
-                let position = i64::try_from(position)?;
-                sqlx::query!(
-                    "INSERT INTO execution_logs(height, message, position, payload) VALUES($1, $2, $3, $4)",
-                    next_height_i64,
-                    message,
-                    position,
-                    log
-                )
-                .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-                .await?;
-            }
-            for (position, load) in loads.iter().enumerate() {
-                let position = i64::try_from(position)?;
-                let load = serde_json::to_string(&load)?;
-                sqlx::query!(
-                    "INSERT INTO execution_loads(height, message, position, payload) VALUES($1, $2, $3, $4)",
-                    next_height_i64,
-                    message,
-                    position,
-                    load
-                )
-                .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-                .await?;
-            }
-            for (position, action) in actions.iter().enumerate() {
-                let position = i64::try_from(position)?;
-                let action = serde_json::to_string(&action)?;
-                sqlx::query!(
-                    "INSERT INTO execution_actions(height, message, position, payload) VALUES($1, $2, $3, $4)",
-                    next_height_i64,
-                    message,
-                    position,
-                    action
-                )
-                .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-                .await?;
-            }
-        }
-
-        let framework_state = insert_state_payload(
-            &mut *self.trans.lock().await.as_mut().unwrap(),
-            self.kolme
-                .state
-                .exec
-                .serialize_and_store_framework_state()?
-                .as_str(),
-        )
-        .await?;
-        let app_state = insert_state_payload(
-            &mut *self.trans.lock().await.as_mut().unwrap(),
-            self.kolme
-                .state
-                .exec
-                .serialize_and_store_app_state()?
-                .as_str(),
-        )
-        .await?;
-
-        let now = Timestamp::now();
-        let exec_value = ExecutedEvent {
-            height: next_height,
-            timestamp: now,
-            framework_state,
-            app_state,
-            loads: outputs.into_iter().flat_map(|o| o.loads).collect(),
-        };
-        let exec = TaggedJson::new(exec_value)?;
-        let signature = SigningKey::from(key.clone()).sign(exec.as_bytes());
-        let signed_value = SignedExec { exec, signature };
-        let signed = serde_json::to_string(&signed_value)?;
-        let now = now.to_string();
-        let rendered_id = sqlx::query!(
+    pub async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
+        let key = key.to_sec1_bytes();
+        let nonce = sqlx::query_scalar!(
             r#"
-            INSERT INTO combined_stream(height, added, is_execution, rendered)
-            VALUES($1, $2, TRUE, $3)
+                SELECT nonce
+                FROM blocks
+                INNER JOIN account_pubkeys
+                ON account_pubkeys.account_id=blocks.account_id
+                WHERE account_pubkeys.pubkey=$1
+                ORDER BY nonce DESC
+                LIMIT 1
             "#,
-            next_height_i64,
-            now,
-            signed
+            key
         )
-        .execute(&mut **self.trans.lock().await.as_mut().unwrap())
+        .fetch_optional(&self.pool)
+        .await?;
+        match nonce {
+            Some(nonce) => Ok(AccountNonce::try_from(nonce)?.next()),
+            None => Ok(AccountNonce::start()),
+        }
+    }
+}
+
+/// Also performs validation of the data
+async fn store_block<App: KolmeApp>(
+    kolme: &mut KolmeInner<App>,
+    trans: &mut sqlx::SqliteTransaction<'_>,
+    signed_block: &SignedBlock<App::Message>,
+    ExecutionResults {
+        framework_state,
+        app_state,
+        outputs,
+    }: ExecutionResults<App>,
+) -> Result<()> {
+    let block = signed_block.0.message.as_inner();
+    let tx = block.tx.0.message.as_inner();
+
+    let height = block.height;
+    assert_eq!(kolme.get_next_height(), height);
+    let height_i64 = height.try_into_i64()?;
+
+    let (account_id, nonce) =
+        get_or_insert_account_id_and_next_nonce(trans, tx.pubkey, height).await?;
+    anyhow::ensure!(nonce == tx.nonce);
+    let account_id = i64::try_from(account_id.0)?;
+    let nonce = i64::try_from(nonce.0)?;
+
+    let blockhash = signed_block.0.message_hash();
+    let rendered = serde_json::to_string(&signed_block)?;
+    let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
+
+    let framework_state_rendered = serde_json::to_string(&framework_state)?;
+    let framework_state_hash = insert_state_payload(trans, &framework_state_rendered).await?;
+    let app_state_rendered = App::save_state(&app_state)?;
+    let app_state_hash = insert_state_payload(trans, &app_state_rendered).await?;
+
+    sqlx::query!(
+            r#"
+                INSERT INTO
+                blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, account_id, nonce)
+                VALUES($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+            height_i64,
+            blockhash,
+            rendered,
+            txhash,
+            framework_state_hash,
+            app_state_hash,
+            account_id,
+            nonce,
+        ).execute(&mut **trans).await?;
+
+    for (
+        message,
+        MessageOutput {
+            logs,
+            loads,
+            actions,
+        },
+    ) in outputs.iter().enumerate()
+    {
+        let message = i64::try_from(message)?;
+        let message = sqlx::query!(
+            "INSERT INTO messages(height, message) VALUES($1, $2)",
+            height_i64,
+            message
+        )
+        .execute(&mut **trans)
         .await?
         .last_insert_rowid();
-
-        sqlx::query!(
-            r#"
-            INSERT INTO execution_stream(height, framework_state, app_state, rendered_id)
-            VALUES($1, $2, $3, $4)
-        "#,
-            next_height_i64,
-            signed_value.exec.as_inner().framework_state,
-            signed_value.exec.as_inner().app_state,
-            rendered_id
-        )
-        .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-        .await?;
-
-        // FIXME when we redo this function, it would be better to move the commit to a higher level. Basically: keep commit and begin paired in the code.
-        let mut kolme = self.commit().await?;
-
-        kolme.increment_exec_height();
-        kolme
-            .broadcast
-            .send(Notification::NewExec(next_height))
-            .ok();
-        Ok(kolme)
-    }
-
-    /// Add the given event to storage
-    ///
-    /// FIXME: Determine if we need to perform data validation here or not.
-    pub async fn insert_event(&mut self, signed_event: &SignedEvent<App::Message>) -> Result<()> {
-        let height = self.get_next_event_height();
-        assert_eq!(height, signed_event.0.message.as_inner().height);
-        self.state.event.increment_height();
-        let account_id = self.get_or_insert_account_id(
-            &signed_event
-                .0
-                .message
-                .as_inner()
-                .event
-                .0
-                .message
-                .as_inner()
-                .pubkey,
-            height,
-        );
-        // TODO: review this code more carefully, do we need to check nonces more explicitly? Can we make a higher-level abstraction to avoid exposing too many internals to users of Kolme?
-        self.bump_nonce_for(account_id)?;
-        let now = Timestamp::now();
-
-        let height_i64 = height.try_into_i64()?;
-        let now = now.to_string();
-        self.add_event_to_combined(height_i64, now, signed_event)
+        for (position, log) in logs.iter().enumerate() {
+            let position = i64::try_from(position)?;
+            sqlx::query!(
+                "INSERT INTO logs(message, position, payload) VALUES($1, $2, $3)",
+                message,
+                position,
+                log
+            )
+            .execute(&mut **trans)
             .await?;
-
-        // We ignore errors from .send. These only occur when there are no receivers, which is a normal state in the framework (it means no components need updates).
-        self.kolme
-            .broadcast
-            .send(Notification::NewEvent(height))
-            .ok();
-        Ok(())
+        }
+        for (position, load) in loads.iter().enumerate() {
+            let position = i64::try_from(position)?;
+            let load = serde_json::to_string(&load)?;
+            sqlx::query!(
+                "INSERT INTO loads(message, position, payload) VALUES($1, $2, $3)",
+                message,
+                position,
+                load
+            )
+            .execute(&mut **trans)
+            .await?;
+        }
+        for (position, action) in actions.iter().enumerate() {
+            let position = i64::try_from(position)?;
+            let action = serde_json::to_string(&action)?;
+            sqlx::query!(
+                "INSERT INTO actions(message, position, payload) VALUES($1, $2, $3)",
+                message,
+                position,
+                action
+            )
+            .execute(&mut **trans)
+            .await?;
+        }
     }
 
-    // FIXME this function is probably the wrong level of abstraction
-    async fn add_event_to_combined(
-        &mut self,
-        height: i64,
-        now: String,
-        signed_event: &SignedEvent<App::Message>,
-    ) -> Result<()> {
-        let hash = signed_event.0.message_hash();
-        let signed_event_str = serde_json::to_string(signed_event)?;
-        let combined_id = sqlx::query!("INSERT INTO combined_stream(height,added,is_execution,rendered) VALUES($1,$2,FALSE,$3)", height, now, signed_event_str).execute(&mut **self.trans.lock().await.as_mut().unwrap()).await?.last_insert_rowid();
-        let event_state = self.kolme.state.event.serialize_raw_state()?;
-        let event_state = insert_state_payload(
-            &mut *self.trans.lock().await.as_mut().unwrap(),
-            &event_state,
-        )
+    todo!("store listener events, don't forget about bridge_events.accepted");
+
+    Ok(())
+}
+
+/// Returns the hash of the content
+async fn insert_state_payload(
+    e: &mut sqlx::SqliteTransaction<'_>,
+    payload: &str,
+) -> Result<Sha256Hash> {
+    let hash = Sha256Hash::hash(payload);
+    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM hashes WHERE hash=$1", hash)
+        .fetch_one(&mut **e)
         .await?;
-        sqlx::query!(
-            "INSERT INTO event_stream(height,hash,state,rendered_id) VALUES($1,$2,$3,$4)",
-            height,
-            hash,
-            event_state,
-            combined_id
-        )
-        .execute(&mut **self.trans.lock().await.as_mut().unwrap())
-        .await?;
-        Ok(())
+    match count {
+        0 => {
+            sqlx::query!(
+                "INSERT INTO hashes(hash,content) VALUES($1, $2)",
+                hash,
+                payload
+            )
+            .execute(&mut **e)
+            .await?;
+        }
+        1 => (),
+        _ => anyhow::bail!("insert_state_payload: impossible result of {count} entries"),
     }
+    Ok(hash)
 }
 
-impl<App: KolmeApp> KolmeDbReader for KolmeWriteDb<App> {
-    type App = App;
-
-    fn get_executor(&self) -> KolmeDbExecutor {
-        KolmeDbExecutor::Trans(self.trans.clone())
-    }
-}
-
-impl<App: KolmeApp> Deref for KolmeWriteDb<App> {
-    type Target = KolmeInner<App>;
-
-    fn deref(&self) -> &Self::Target {
-        self.kolme.deref()
-    }
-}
-
-impl<App: KolmeApp> DerefMut for KolmeWriteDb<App> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.kolme.deref_mut()
+async fn get_or_insert_account_id_and_next_nonce(
+    trans: &mut sqlx::SqliteTransaction<'_>,
+    pubkey: PublicKey,
+    height: BlockHeight,
+) -> Result<(AccountId, AccountNonce)> {
+    let pubkey = pubkey.to_sec1_bytes();
+    let account_id = sqlx::query_scalar!(
+        "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
+        pubkey
+    )
+    .fetch_optional(&mut **trans)
+    .await?;
+    match account_id {
+        None => {
+            let height = height.try_into_i64()?;
+            let account_id = sqlx::query!("INSERT INTO accounts(created) VALUES($1)", height)
+                .execute(&mut **trans)
+                .await?
+                .last_insert_rowid();
+            sqlx::query!(
+                "INSERT INTO account_pubkeys(account_id, pubkey) VALUES($1, $2)",
+                account_id,
+                pubkey
+            )
+            .execute(&mut **trans)
+            .await?;
+            Ok((AccountId(account_id.try_into()?), AccountNonce::start()))
+        }
+        Some(account_id) => {
+            let nonce = sqlx::query_scalar!(
+                r#"
+                        SELECT nonce
+                        FROM blocks
+                        WHERE account_id=$1
+                        ORDER BY nonce DESC
+                        LIMIT 1
+                    "#,
+                account_id
+            )
+            .fetch_optional(&mut **trans)
+            .await?;
+            let nonce = match nonce {
+                Some(nonce) => AccountNonce(nonce.try_into()?),
+                None => AccountNonce::start(),
+            };
+            Ok((AccountId(account_id.try_into()?), nonce))
+        }
     }
 }

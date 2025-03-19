@@ -3,7 +3,7 @@ use crate::*;
 pub trait KolmeApp: Send + Sync + Clone + 'static {
     /// The state maintained in memory, may contain helper
     /// data structures for more efficient operations.
-    type State: Send + Sync + 'static;
+    type State: Send + Sync + Clone + 'static;
 
     /// Messages that are understood by this app.
     type Message: serde::Serialize

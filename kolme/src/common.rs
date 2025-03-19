@@ -1,5 +1,5 @@
 /// Common helper functions and utilities.
-use std::{borrow::Cow, fmt::Display, sync::OnceLock};
+use std::{borrow::Cow, fmt::Display};
 
 use crate::*;
 
@@ -207,12 +207,6 @@ impl Sha256Hash {
                 state.len()
             ))
         }
-    }
-
-    /// A special hash which is used as the parent of all genesis events.
-    pub fn genesis_parent() -> Sha256Hash {
-        static LOCK: OnceLock<Sha256Hash> = OnceLock::new();
-        *LOCK.get_or_init(|| Sha256Hash::hash("genesis parent"))
     }
 }
 

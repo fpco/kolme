@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT rendered\n        FROM combined_stream\n        WHERE NOT is_execution AND height=0\n    ",
+  "query": "\n            SELECT rendered\n            FROM blocks\n            WHERE height=0\n        ",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "f5f0a363fec1369afc8c7c95d91256cd4c8ad80ea28f429d5ffb75b5c134144b"
+  "hash": "0e7f5a8c2fbccfaf54a71050bc2f780f3e96557ed9559d722f0021550c0ab2a6"
 }

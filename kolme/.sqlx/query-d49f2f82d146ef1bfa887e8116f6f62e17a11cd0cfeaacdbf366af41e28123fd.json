@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        SELECT nonce\n                        FROM blocks\n                        WHERE account_id=$1\n                        ORDER BY nonce DESC\n                        LIMIT 1\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "name": "nonce",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d49f2f82d146ef1bfa887e8116f6f62e17a11cd0cfeaacdbf366af41e28123fd"
+}

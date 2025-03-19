@@ -11,7 +11,7 @@ use kolme::*;
 #[derive(Clone)]
 pub struct SampleKolmeApp;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -92,36 +92,20 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            kolme.read().await.get_next_event_height(),
-            EventHeight::start()
-        );
-        assert_eq!(
-            kolme.read().await.get_next_exec_height(),
-            EventHeight::start()
-        );
+        assert_eq!(kolme.read().await.get_next_height(), BlockHeight::start());
 
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         processor.create_genesis_event().await.unwrap();
         assert_eq!(
-            kolme.read().await.get_next_event_height(),
-            EventHeight::start().next()
-        );
-        assert_eq!(
-            kolme.read().await.get_next_exec_height(),
-            EventHeight::start()
+            kolme.read().await.get_next_height(),
+            BlockHeight::start().next()
         );
         processor.create_genesis_event().await.unwrap_err();
 
-        processor.produce_next_state().await.unwrap();
+        // processor.produce_next_state().await.unwrap();
         assert_eq!(
-            kolme.read().await.get_next_event_height(),
-            EventHeight::start().next()
+            kolme.read().await.get_next_height(),
+            BlockHeight::start().next()
         );
-        assert_eq!(
-            kolme.read().await.get_next_exec_height(),
-            EventHeight::start().next()
-        );
-        processor.produce_next_state().await.unwrap_err();
     }
 }

@@ -1,7 +1,7 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::OnceLock};
 
 use crate::*;
-use k256::{ecdsa::Signature, PublicKey};
+use k256::PublicKey;
 
 #[derive(
     serde::Serialize,
@@ -87,23 +87,31 @@ impl AccountNonce {
         AccountNonce(0)
     }
 
-    pub(crate) fn increment(&mut self) {
-        self.0 += 1;
+    pub fn next(self) -> Self {
+        AccountNonce(self.0 + 1)
     }
 }
 
-/// Height of an event
+impl TryFrom<i64> for AccountNonce {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self> {
+        Ok(AccountNonce(value.try_into()?))
+    }
+}
+
+/// Height of a block
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]
-pub struct EventHeight(pub u64);
-impl EventHeight {
-    pub fn next(self) -> EventHeight {
-        EventHeight(self.0 + 1)
+pub struct BlockHeight(pub u64);
+impl BlockHeight {
+    pub fn next(self) -> BlockHeight {
+        BlockHeight(self.0 + 1)
     }
 
-    pub fn start() -> EventHeight {
-        EventHeight(0)
+    pub fn start() -> BlockHeight {
+        BlockHeight(0)
     }
 
     pub(crate) fn is_start(&self) -> bool {
@@ -115,13 +123,13 @@ impl EventHeight {
     }
 }
 
-impl Display for EventHeight {
+impl Display for BlockHeight {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl TryFrom<i64> for EventHeight {
+impl TryFrom<i64> for BlockHeight {
     type Error = anyhow::Error;
 
     fn try_from(value: i64) -> Result<Self> {
@@ -164,31 +172,47 @@ impl BridgeEventId {
 )]
 pub struct BridgeActionId(pub u64);
 
-/// An event that is signed by the processor.
-#[derive(serde::Serialize, serde::Deserialize)]
+/// A block that is signed by the processor.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(bound(
     serialize = "",
     deserialize = "AppMessage: serde::de::DeserializeOwned"
 ))]
-pub struct SignedEvent<AppMessage>(pub SignedTaggedJson<ApprovedEvent<AppMessage>>);
+pub struct SignedBlock<AppMessage>(pub SignedTaggedJson<Block<AppMessage>>);
 
-/// An event that has been accepted by the processor.
-#[derive(serde::Serialize, serde::Deserialize)]
+/// The hash of a [Block].
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
+pub struct BlockHash(pub Sha256Hash);
+impl BlockHash {
+    pub(crate) fn genesis_parent() -> BlockHash {
+        static LOCK: OnceLock<BlockHash> = OnceLock::new();
+        *LOCK.get_or_init(|| BlockHash(Sha256Hash::hash("genesis parent")))
+    }
+}
+
+/// A block containing a single transaction.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
-pub struct ApprovedEvent<AppMessage> {
-    pub event: ProposedEvent<AppMessage>,
+pub struct Block<AppMessage> {
+    pub tx: SignedTransaction<AppMessage>,
     pub timestamp: Timestamp,
     pub processor: PublicKey,
-    pub height: EventHeight,
-    pub parent: Sha256Hash,
+    pub height: BlockHeight,
+    pub parent: BlockHash,
+    /// New framework state at the end of execution
+    pub framework_state: Sha256Hash,
+    /// New app state at the end of execution
+    pub app_state: Sha256Hash,
+    /// Any data loads that were used for execution.
+    pub loads: Vec<BlockDataLoad>,
 }
 
 /// A proposed event from a client, not yet added to the stream
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
-pub struct ProposedEvent<AppMessage>(pub SignedTaggedJson<EventPayload<AppMessage>>);
+pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMessage>>);
 
-impl<AppMessage: serde::Serialize> ProposedEvent<AppMessage> {
+impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
     pub fn validate_signature(&self) -> Result<()> {
         let pubkey = self.0.verify_signature()?;
         anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
@@ -199,40 +223,44 @@ impl<AppMessage: serde::Serialize> ProposedEvent<AppMessage> {
         anyhow::ensure!(self.0.message.as_inner().messages.len() == 1);
         anyhow::ensure!(matches!(
             self.0.message.as_inner().messages[0],
-            EventMessage::Genesis(_)
+            Message::Genesis(_)
         ));
         Ok(())
     }
 
     pub fn ensure_no_genesis(&self) -> Result<()> {
         for msg in &self.0.message.as_inner().messages {
-            anyhow::ensure!(!matches!(msg, EventMessage::Genesis(_)));
+            anyhow::ensure!(!matches!(msg, Message::Genesis(_)));
         }
         Ok(())
     }
 }
 
-/// The content of an event, sent by a client to be included in the event series.
+/// A transaction, proposed by clients to be included in a block.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct EventPayload<AppMessage> {
+pub struct Transaction<AppMessage> {
     pub pubkey: PublicKey,
     pub nonce: AccountNonce,
     pub created: Timestamp,
-    pub messages: Vec<EventMessage<AppMessage>>,
+    pub messages: Vec<Message<AppMessage>>,
 }
 
-impl<AppMessage: serde::Serialize> EventPayload<AppMessage> {
-    pub fn sign(self, key: &k256::SecretKey) -> Result<ProposedEvent<AppMessage>> {
-        Ok(ProposedEvent(TaggedJson::new(self)?.sign(key)?))
+impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
+    pub fn sign(self, key: &k256::SecretKey) -> Result<SignedTransaction<AppMessage>> {
+        Ok(SignedTransaction(TaggedJson::new(self)?.sign(key)?))
     }
 }
 
+/// An individual message included in a transaction.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub enum EventMessage<AppMessage> {
+pub enum Message<AppMessage> {
     Genesis(GenesisInfo),
-    BridgeCreated(BridgeCreated),
     App(AppMessage),
-    Listener(ListenerMessage),
+    Listener {
+        chain: ExternalChain,
+        event_id: BridgeEventId,
+        event: BridgeEvent,
+    },
     Auth(AuthMessage),
     // TODO Bank, with things like
     // Transfer {
@@ -246,15 +274,25 @@ pub enum EventMessage<AppMessage> {
     // TODO: admin actions: update code version, change processor/listeners/executors (need to update contracts too), modification to chain values (like asset definitions)
 }
 
+/// An event emitted by a bridge contract and reported by a listener.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub enum ListenerMessage {
-    Deposit {
-        asset: String,
+pub enum BridgeEvent {
+    /// A bridge was instantiated
+    Instantiated { contract: String },
+    /// Regular action performed by the user
+    Regular {
         wallet: String,
-        amount: u128,
+        funds: Vec<BridgedAssetAmount>,
+        keys: Vec<PublicKey>,
     },
-    /// Only include the bare-bones necessary to bootstrap into the auth system
-    AddPublicKey { wallet: String, key: String },
+    // FIXME also handle when an action is executed
+}
+
+/// An event emitted by a bridge contract and reported by a listener.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct BridgedAssetAmount {
+    pub denom: String,
+    pub amount: u128,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -284,12 +322,6 @@ pub struct GenesisInfo {
     pub chains: BTreeMap<ExternalChain, ChainConfig>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct BridgeCreated {
-    pub chain: ExternalChain,
-    pub contract: String,
-}
-
 impl GenesisInfo {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
@@ -300,35 +332,16 @@ impl GenesisInfo {
     }
 }
 
-/// An executed event that is signed by the processor.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct SignedExec {
-    /// An [ExecutedEvent], see [SignedEvent::event] for details.
-    pub exec: TaggedJson<ExecutedEvent>,
-    pub signature: Signature,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ExecutedEvent {
-    pub height: EventHeight,
-    pub timestamp: Timestamp,
-    // FIXME pub event_hash: EventHash
-    // pub previous_executed_event: Option<ExecHash>
-    pub framework_state: Sha256Hash,
-    pub app_state: Sha256Hash,
-    pub loads: Vec<ExecLoad>,
-}
-
 #[derive(Default)]
-pub(crate) struct MessageOutput {
-    pub(crate) logs: Vec<String>,
-    pub(crate) loads: Vec<ExecLoad>,
-    pub(crate) actions: Vec<ExecAction>,
+pub struct MessageOutput {
+    pub logs: Vec<String>,
+    pub loads: Vec<BlockDataLoad>,
+    pub actions: Vec<ExecAction>,
 }
 
-/// Input and output for a single data load.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ExecLoad {
+/// Input and output for a single data load while processing a block.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct BlockDataLoad {
     /// Description of the query
     pub query: String,
     /// The resulting value
@@ -344,22 +357,27 @@ pub enum ExecAction {
     },
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct AssetAmount {
     pub id: AssetId,
     pub amount: u128, // FIXME use a Decimal representation
 }
 
 /// Notifications that can come from the Kolme framework to components.
+///
+/// TODO this will ultimately be incorporated into a p2p network of events.
 #[derive(Clone, Debug)]
-pub enum Notification<App: KolmeApp> {
-    NewEvent(EventHeight),
-    NewExec(EventHeight),
+pub enum Notification<AppMessage> {
+    NewBlock(Arc<SignedBlock<AppMessage>>),
+    /// A claim by a submitter that it has instantiated a bridge contract.
+    ///
+    /// TODO for now we simply accept this as truth, in the future this will be used by listeners to review and confirm that the contract was created correctly.
     GenesisInstantiation {
         chain: ExternalChain,
         contract: String,
     },
-    ProposeEvent {
-        event: ProposedEvent<App::Message>,
+    /// Broadcast a transaction to be included in the chain.
+    Broadcast {
+        tx: Arc<SignedTransaction<AppMessage>>,
     },
 }

@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use cosmos::{Cosmos, CosmosNetwork, HasAddressHrp, SeedPhrase, TxBuilder};
+use cosmos::{HasAddressHrp, SeedPhrase, TxBuilder};
 
 use crate::*;
 
@@ -8,16 +6,11 @@ use crate::*;
 pub struct Submitter<App: KolmeApp> {
     kolme: Kolme<App>,
     seed_phrase: SeedPhrase,
-    cosmos: HashMap<ExternalChain, Cosmos>,
 }
 
 impl<App: KolmeApp> Submitter<App> {
     pub fn new(kolme: Kolme<App>, seed_phrase: SeedPhrase) -> Self {
-        Submitter {
-            kolme,
-            seed_phrase,
-            cosmos: HashMap::new(),
-        }
+        Submitter { kolme, seed_phrase }
     }
 
     pub async fn run(mut self) -> Result<()> {
@@ -27,13 +20,12 @@ impl<App: KolmeApp> Submitter<App> {
 
         loop {
             match receiver.recv().await? {
-                Notification::NewEvent(_) => continue,
-                Notification::NewExec(_) => (),
+                Notification::NewBlock(_) => (),
                 Notification::GenesisInstantiation {
                     chain: _,
                     contract: _,
                 } => continue,
-                Notification::ProposeEvent { event: _ } => continue,
+                Notification::Broadcast { tx: _ } => continue,
             }
             self.submit_zero_or_one().await?;
         }
@@ -62,7 +54,18 @@ impl<App: KolmeApp> Submitter<App> {
                 executors,
                 needed_executors,
             } => {
-                let cosmos = self.get_cosmos(chain).await?;
+                if chain == ExternalChain::OsmosisTestnet {
+                    self.kolme
+                        .notify_genesis_instantiation(chain, "osmofixme".to_owned());
+                    return Ok(());
+                }
+                if chain == ExternalChain::NeutronTestnet {
+                    self.kolme
+                        .notify_genesis_instantiation(chain, "ntrnfixme".to_owned());
+                    return Ok(());
+                }
+
+                let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
                 let wallet = self.seed_phrase.with_hrp(cosmos.get_address_hrp())?;
 
                 // TODO create a shared crate and use the same definitions in the contracts and this code
@@ -105,14 +108,5 @@ impl<App: KolmeApp> Submitter<App> {
                 Ok(())
             }
         }
-    }
-
-    async fn get_cosmos(&mut self, chain: ExternalChain) -> Result<Cosmos> {
-        if let Some(cosmos) = self.cosmos.get(&chain) {
-            return Ok(cosmos.clone());
-        }
-        let cosmos = chain.make_cosmos().await?;
-        self.cosmos.insert(chain, cosmos.clone());
-        Ok(cosmos)
     }
 }
