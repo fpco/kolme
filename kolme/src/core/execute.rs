@@ -10,22 +10,42 @@ pub struct ExecutionContext<App: KolmeApp> {
     /// Who signed the transaction
     pubkey: PublicKey,
     pool: sqlx::SqlitePool,
-    listener_attestations: Vec<ListenerAttestation>,
+    db_updates: Vec<DatabaseUpdate>,
+    /// Next account ID to assign out
+    next_account_id: AccountId,
 }
 
 pub struct ExecutionResults<App: KolmeApp> {
     pub framework_state: FrameworkState,
     pub app_state: App::State,
     pub outputs: Vec<MessageOutput>,
-    pub listener_attestations: Vec<ListenerAttestation>,
+    pub db_updates: Vec<DatabaseUpdate>,
 }
 
-pub struct ListenerAttestation {
-    pub chain: ExternalChain,
-    pub event_id: BridgeEventId,
-    pub event_content: String,
-    pub msg_index: usize,
-    pub was_accepted: bool,
+pub enum DatabaseUpdate {
+    ListenerAttestation {
+        chain: ExternalChain,
+        event_id: BridgeEventId,
+        event_content: String,
+        msg_index: usize,
+        was_accepted: bool,
+        /// If this is a signed action, what's the action ID?
+        action_id: Option<BridgeActionId>,
+    },
+
+    AddAccount {
+        id: AccountId,
+    },
+
+    AddWalletToAccount {
+        id: AccountId,
+        wallet: String,
+    },
+
+    AddPubkeyToAccount {
+        id: AccountId,
+        pubkey: PublicKey,
+    },
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
@@ -43,7 +63,9 @@ impl<App: KolmeApp> KolmeInner<App> {
             validation_data_loads,
             pubkey: tx.pubkey,
             pool: self.pool.clone(),
-            listener_attestations: vec![],
+            db_updates: vec![],
+            // FIXME need to investigate how we know if the current transaction signer will also get a new account ID
+            next_account_id: self.get_next_account_id().await?,
         };
         for (msg_index, message) in tx.messages.iter().enumerate() {
             execution_context
@@ -60,7 +82,8 @@ impl<App: KolmeApp> KolmeInner<App> {
             validation_data_loads,
             pubkey: _,
             pool: _,
-            listener_attestations,
+            db_updates,
+            next_account_id: _,
         } = execution_context;
 
         if let Some(loads) = validation_data_loads {
@@ -73,7 +96,7 @@ impl<App: KolmeApp> KolmeInner<App> {
             framework_state,
             app_state,
             outputs,
-            listener_attestations,
+            db_updates,
         })
     }
 }
@@ -121,6 +144,7 @@ impl<App: KolmeApp> ExecutionContext<App> {
         // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
         // FIXME do we need to check that the listeners in the database match our current set of listeners?
         let was_accepted = existing_signatures + 1 >= self.framework_state.needed_listeners;
+        let mut action_id = None;
         if was_accepted {
             match event {
                 BridgeEvent::Instantiated { contract } => {
@@ -135,17 +159,79 @@ impl<App: KolmeApp> ExecutionContext<App> {
                     }
                     config.bridge = BridgeContract::Deployed(contract.clone());
                 }
-                BridgeEvent::Regular { .. } => todo!(),
+                BridgeEvent::Regular {
+                    wallet,
+                    funds,
+                    keys,
+                } => {
+                    let account_id = self.get_account_id_for_wallet(wallet).await?;
+                    for key in keys {
+                        self.db_updates.push(DatabaseUpdate::AddPubkeyToAccount {
+                            id: account_id,
+                            pubkey: *key,
+                        });
+                    }
+                    for BridgedAssetAmount { denom, amount } in funds {
+                        let Some(asset_config) = self
+                            .framework_state
+                            .chains
+                            .get(&chain)
+                            .context("Unknown chain")?
+                            .assets
+                            .get(&AssetName(denom.clone()))
+                        else {
+                            continue;
+                        };
+
+                        *self
+                            .framework_state
+                            .balances
+                            .entry(account_id)
+                            .or_default()
+                            .entry(asset_config.asset_id)
+                            .or_default() += amount;
+                    }
+                }
+                BridgeEvent::Signed {
+                    wallet: _,
+                    action_id: action_id_tmp,
+                } => {
+                    // TODO in the future we may track wallet addresses that submitted signed actions to give them rewards.
+                    action_id = Some(*action_id_tmp);
+                }
             }
         }
-        self.listener_attestations.push(ListenerAttestation {
+        self.db_updates.push(DatabaseUpdate::ListenerAttestation {
             chain,
             event_id,
             event_content,
             msg_index,
             was_accepted,
+            action_id,
         });
         Ok(())
+    }
+
+    async fn get_account_id_for_wallet(&mut self, wallet: &str) -> Result<AccountId> {
+        let account_id = sqlx::query_scalar!(
+            "SELECT account_id FROM account_wallets WHERE wallet=$1",
+            wallet
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(match account_id {
+            Some(id) => AccountId(id.try_into()?),
+            None => {
+                let id = self.next_account_id;
+                self.next_account_id = self.next_account_id.next();
+                self.db_updates.push(DatabaseUpdate::AddAccount { id });
+                self.db_updates.push(DatabaseUpdate::AddWalletToAccount {
+                    id,
+                    wallet: wallet.to_owned(),
+                });
+                id
+            }
+        })
     }
 }
 

@@ -76,6 +76,11 @@ pub struct AssetName(pub String);
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]
 pub struct AccountId(pub u64);
+impl AccountId {
+    pub fn next(self) -> AccountId {
+        AccountId(self.0 + 1)
+    }
+}
 
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
@@ -172,11 +177,23 @@ impl BridgeEventId {
     }
 }
 
+impl Display for BridgeEventId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Monotonically increasing identifier for actions sent to a bridge contract.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]
 pub struct BridgeActionId(pub u64);
+
+impl Display for BridgeActionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// A block that is signed by the processor.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -291,7 +308,10 @@ pub enum BridgeEvent {
         funds: Vec<BridgedAssetAmount>,
         keys: Vec<PublicKey>,
     },
-    // FIXME also handle when an action is executed
+    Signed {
+        wallet: String,
+        action_id: BridgeActionId,
+    },
 }
 
 /// An event emitted by a bridge contract and reported by a listener.

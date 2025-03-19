@@ -39,6 +39,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         next_height: BlockHeight,
         next_genesis_action: Option<GenesisAction>,
         bridges: &'a BTreeMap<ExternalChain, ChainConfig>,
+        balances: &'a BTreeMap<AccountId, BTreeMap<AssetId, u128>>,
     }
 
     let kolme = kolme.read().await;
@@ -46,6 +47,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         next_height: kolme.get_next_height(),
         next_genesis_action: kolme.get_next_genesis_action(),
         bridges: kolme.get_bridge_contracts(),
+        balances: kolme.get_balances(),
     };
 
     Json(basics).into_response()

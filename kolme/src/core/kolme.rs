@@ -233,6 +233,10 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self.framework_state.chains
     }
 
+    pub fn get_balances(&self) -> &BTreeMap<AccountId, BTreeMap<AssetId, u128>> {
+        &self.framework_state.balances
+    }
+
     pub async fn create_signed_transaction(
         &self,
         secret: &k256::SecretKey,
@@ -264,6 +268,17 @@ impl<App: KolmeApp> KolmeInner<App> {
         .fetch_one(&self.pool)
         .await?;
         serde_json::from_str(&payload).map_err(anyhow::Error::from)
+    }
+
+    /// Get the next available account ID in the database.
+    pub async fn get_next_account_id(&self) -> Result<AccountId> {
+        match sqlx::query_scalar!("SELECT id FROM accounts ORDER BY id DESC LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await?
+        {
+            Some(id) => Ok(AccountId(id.try_into()?).next()),
+            None => Ok(AccountId(1)),
+        }
     }
 
     pub async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
@@ -328,7 +343,7 @@ async fn store_block<App: KolmeApp>(
         framework_state,
         app_state,
         outputs,
-        listener_attestations,
+        db_updates,
     }: &ExecutionResults<App>,
 ) -> Result<()> {
     let block = signed_block.0.message.as_inner();
@@ -427,77 +442,116 @@ async fn store_block<App: KolmeApp>(
         }
     }
 
-    for ListenerAttestation {
-        chain,
-        event_id,
-        msg_index,
-        event_content,
-        was_accepted,
-    } in listener_attestations
-    {
-        let message_db_id = message_db_ids[*msg_index];
-        let chain = chain.as_ref();
-        let event_id = i64::try_from(event_id.0)?;
+    for update in db_updates {
+        match update {
+            DatabaseUpdate::ListenerAttestation {
+                chain,
+                event_id,
+                event_content,
+                msg_index,
+                was_accepted,
+                action_id,
+            } => {
+                let message_db_id = message_db_ids[*msg_index];
+                let chain = chain.as_ref();
+                let event_id = i64::try_from(event_id.0)?;
 
-        let event_db_id = sqlx::query_scalar!(
-            r#"
-                SELECT id
-                FROM bridge_events
-                WHERE chain=$1
-                AND event_id=$2
-            "#,
-            chain,
-            event_id
-        )
-        .fetch_optional(&mut **trans)
-        .await?;
-        let event_db_id = match event_db_id {
-            Some(id) => id,
-            None => sqlx::query!(
-                r#"
+                let event_db_id = sqlx::query_scalar!(
+                    r#"
+                        SELECT id
+                        FROM bridge_events
+                        WHERE chain=$1
+                        AND event_id=$2
+                    "#,
+                    chain,
+                    event_id
+                )
+                .fetch_optional(&mut **trans)
+                .await?;
+                let event_db_id = match event_db_id {
+                    Some(id) => id,
+                    None => sqlx::query!(
+                        r#"
+                            INSERT INTO
+                            bridge_events(chain, event_id, event)
+                            VALUES($1, $2, $3)
+                        "#,
+                        chain,
+                        event_id,
+                        event_content
+                    )
+                    .execute(&mut **trans)
+                    .await?
+                    .last_insert_rowid(),
+                };
+
+                let pubkey = tx.pubkey.to_sec1_bytes();
+                sqlx::query!(
+                    r#"
                         INSERT INTO
-                        bridge_events(chain, event_id, event)
+                        bridge_event_attestations(event, public_key, message)
                         VALUES($1, $2, $3)
                     "#,
-                chain,
-                event_id,
-                event_content
-            )
-            .execute(&mut **trans)
-            .await?
-            .last_insert_rowid(),
-        };
+                    event_db_id,
+                    pubkey,
+                    message_db_id,
+                )
+                .execute(&mut **trans)
+                .await?;
 
-        let pubkey = tx.pubkey.to_sec1_bytes();
-        sqlx::query!(
-            r#"
-                INSERT INTO
-                bridge_event_attestations(event, public_key, message)
-                VALUES($1, $2, $3)
-            "#,
-            event_db_id,
-            pubkey,
-            message_db_id,
-        )
-        .execute(&mut **trans)
-        .await?;
+                if *was_accepted {
+                    let rows = sqlx::query!(
+                        r#"
+                            UPDATE bridge_events
+                            SET accepted=$1
+                            WHERE chain=$2
+                            AND event_id=$3
+                        "#,
+                        message_db_id,
+                        chain,
+                        event_id,
+                    )
+                    .execute(&mut **trans)
+                    .await?
+                    .rows_affected();
+                    anyhow::ensure!(rows == 1);
 
-        if *was_accepted {
-            let rows = sqlx::query!(
-                r#"
-                UPDATE bridge_events
-                SET accepted=$1
-                WHERE chain=$2
-                AND event_id=$3
-            "#,
-                message_db_id,
-                chain,
-                event_id,
-            )
-            .execute(&mut **trans)
-            .await?
-            .rows_affected();
-            anyhow::ensure!(rows == 1);
+                    if let Some(action_id) = *action_id {
+                        todo!("Need to log completion of the action: {action_id}");
+                    }
+                }
+            }
+            DatabaseUpdate::AddAccount { id } => {
+                let id = i64::try_from(id.0)?;
+                sqlx::query!(
+                    "INSERT INTO accounts(id, created) VALUES($1, $2)",
+                    id,
+                    height_i64
+                )
+                .execute(&mut **trans)
+                .await?;
+            }
+            DatabaseUpdate::AddWalletToAccount { id, wallet } => {
+                let id = i64::try_from(id.0)?;
+                sqlx::query!(
+                    "INSERT INTO account_wallets(account_id,wallet) VALUES($1, $2)",
+                    id,
+                    wallet
+                )
+                .execute(&mut **trans)
+                .await?;
+            }
+            DatabaseUpdate::AddPubkeyToAccount { id, pubkey } => {
+                let id = i64::try_from(id.0)?;
+                let pubkey = pubkey.to_sec1_bytes();
+                sqlx::query!(
+                    "INSERT INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+                    id,
+                    pubkey
+                )
+                .execute(&mut **trans)
+                .await?;
+            }
         }
     }
 

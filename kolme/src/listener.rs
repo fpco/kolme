@@ -95,12 +95,14 @@ async fn listen<App: KolmeApp>(
 ) -> Result<()> {
     let cosmos = kolme.read().await.get_cosmos(chain).await?;
     let contract = cosmos.make_contract(contract.parse()?);
-    tracing::info!("Beginning listener loop on contract {contract}");
     let mut next_bridge_event_id = kolme
         .read()
         .await
         .get_next_bridge_event_id(chain, secret.public_key())
         .await?;
+    tracing::info!(
+        "Beginning listener loop on contract {contract}, next event ID: {next_bridge_event_id}"
+    );
     // We _should_ be subscribing to events. I tried doing that and failed miserably.
     // So we're trying this polling approach instead.
     loop {
@@ -183,10 +185,14 @@ async fn broadcast_listener_event<App: KolmeApp>(
                 },
             }
         }
-        BridgeEventContents::Signed {
-            wallet,
-            outgoing_id,
-        } => todo!(),
+        BridgeEventContents::Signed { wallet, action_id } => Message::Listener {
+            chain,
+            event_id: bridge_event_id,
+            event: BridgeEvent::Signed {
+                wallet: wallet.clone(),
+                action_id: *action_id,
+            },
+        },
     };
     let signed = kolme
         .read()
@@ -207,7 +213,7 @@ enum BridgeEventContents {
     },
     Signed {
         wallet: String,
-        outgoing_id: u32,
+        action_id: BridgeActionId,
     },
 }
 

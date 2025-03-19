@@ -102,7 +102,7 @@ impl<App: KolmeApp> Processor<App> {
             framework_state,
             app_state,
             outputs,
-            listener_attestations: _,
+            db_updates: _,
         } = kolme
             .execute_messages(tx.0.message.as_inner(), None)
             .await?;

@@ -108,7 +108,8 @@ pub fn instantiate(
         processor,
         executors,
         needed_executors,
-        next_event_id: 0,
+        // We start events at ID 1, since the instantiation itself is event 0.
+        next_event_id: 1,
         next_action_id: 0,
     };
     STATE.save(deps.storage, &state)?;
