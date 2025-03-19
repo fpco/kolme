@@ -69,7 +69,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         };
         for (msg_index, message) in tx.messages.iter().enumerate() {
             execution_context
-                .execute_message(message, msg_index)
+                .execute_message(&self.app, message, msg_index)
                 .await?;
             let output = std::mem::take(&mut execution_context.output);
             outputs.push(output);
@@ -104,6 +104,7 @@ impl<App: KolmeApp> KolmeInner<App> {
 impl<App: KolmeApp> ExecutionContext<App> {
     async fn execute_message(
         &mut self,
+        app: &App,
         message: &Message<App::Message>,
         msg_index: usize,
     ) -> Result<()> {
@@ -112,7 +113,9 @@ impl<App: KolmeApp> ExecutionContext<App> {
                 let expected = App::genesis_info();
                 anyhow::ensure!(&expected == actual);
             }
-            Message::App(_) => todo!(),
+            Message::App(msg) => {
+                app.execute(self, msg).await?;
+            }
             Message::Listener {
                 chain,
                 event,
@@ -232,6 +235,10 @@ impl<App: KolmeApp> ExecutionContext<App> {
                 id
             }
         })
+    }
+
+    pub fn state_mut(&mut self) -> &mut App::State {
+        &mut self.app_state
     }
 }
 

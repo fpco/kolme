@@ -28,4 +28,8 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
 
     /// Generate a blank state.
     fn new_state() -> Result<Self::State>;
+
+    /// Execute a message.
+    #[allow(async_fn_in_trait)]
+    async fn execute(&self, ctx: &mut ExecutionContext<Self>, msg: &Self::Message) -> Result<()>;
 }

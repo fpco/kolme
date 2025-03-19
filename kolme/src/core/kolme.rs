@@ -224,6 +224,10 @@ impl<App: KolmeApp> KolmeInner<App> {
         None
     }
 
+    pub fn get_app_state(&self) -> &App::State {
+        &self.app_state
+    }
+
     pub fn get_processor_pubkey(&self) -> PublicKey {
         self.framework_state.processor
     }

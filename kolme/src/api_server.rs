@@ -1,7 +1,11 @@
 use axum::{
-    extract::State, http::header::CONTENT_TYPE, response::IntoResponse, routing::get, Json,
+    extract::{Query, State},
+    http::header::CONTENT_TYPE,
+    response::IntoResponse,
+    routing::{get, put},
+    Json,
 };
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::*;
@@ -23,6 +27,8 @@ impl<App: KolmeApp> ApiServer<App> {
 
         let app = axum::Router::new()
             .route("/", get(basics))
+            .route("/broadcast", put(broadcast))
+            .route("/get-next-nonce", get(get_next_nonce))
             .layer(cors)
             .with_state(self.kolme);
 
@@ -40,6 +46,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         next_genesis_action: Option<GenesisAction>,
         bridges: &'a BTreeMap<ExternalChain, ChainConfig>,
         balances: &'a BTreeMap<AccountId, BTreeMap<AssetId, u128>>,
+        app_state: serde_json::Value,
     }
 
     let kolme = kolme.read().await;
@@ -48,7 +55,42 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         next_genesis_action: kolme.get_next_genesis_action(),
         bridges: kolme.get_bridge_contracts(),
         balances: kolme.get_balances(),
+        app_state: serde_json::from_str(&App::save_state(kolme.get_app_state()).unwrap()).unwrap(),
     };
 
     Json(basics).into_response()
+}
+
+async fn broadcast<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Json(tx): Json<SignedTransaction<App::Message>>,
+) -> impl IntoResponse {
+    let txhash = tx.0.message_hash();
+    match kolme.propose_transaction(tx) {
+        Ok(()) => Json(serde_json::json!({"txhash":txhash})).into_response(),
+        Err(e) => {
+            let mut res = e.to_string().into_response();
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            res
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct NextNonce {
+    pubkey: PublicKey,
+}
+
+async fn get_next_nonce<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Query(NextNonce { pubkey }): Query<NextNonce>,
+) -> impl IntoResponse {
+    match kolme.read().await.get_next_account_nonce(pubkey).await {
+        Ok(nonce) => Json(serde_json::json!({"next_nonce":nonce})).into_response(),
+        Err(e) => {
+            let mut res = e.to_string().into_response();
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            res
+        }
+    }
 }
