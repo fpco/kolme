@@ -42,19 +42,16 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn create_genesis_event(&self) -> Result<()> {
-        let payload = Transaction {
-            pubkey: self.secret.public_key(),
-            nonce: self
-                .kolme
-                .read()
-                .await
-                .get_next_account_nonce(self.secret.public_key())
-                .await?,
-            messages: vec![Message::<App::Message>::Genesis(App::genesis_info())],
-            created: Timestamp::now(),
-        };
-        let proposed = payload.sign(&self.secret)?;
-        let block = self.construct_block(proposed).await?;
+        let signed = self
+            .kolme
+            .read()
+            .await
+            .create_signed_transaction(
+                &self.secret,
+                vec![Message::<App::Message>::Genesis(App::genesis_info())],
+            )
+            .await?;
+        let block = self.construct_block(signed).await?;
         self.kolme.add_block(block).await?;
         Ok(())
     }
@@ -105,6 +102,7 @@ impl<App: KolmeApp> Processor<App> {
             framework_state,
             app_state,
             outputs,
+            listener_attestations: _,
         } = kolme
             .execute_messages(tx.0.message.as_inner(), None)
             .await?;

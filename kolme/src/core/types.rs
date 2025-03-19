@@ -92,6 +92,12 @@ impl AccountNonce {
     }
 }
 
+impl Display for AccountNonce {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl TryFrom<i64> for AccountNonce {
     type Error = anyhow::Error;
 
