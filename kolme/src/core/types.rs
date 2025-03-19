@@ -1,7 +1,6 @@
 use std::{fmt::Display, sync::OnceLock};
 
 use crate::*;
-use k256::PublicKey;
 
 #[derive(
     serde::Serialize,

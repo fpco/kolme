@@ -113,7 +113,7 @@ impl<App: KolmeApp> Processor<App> {
         let approved_block = Block {
             tx,
             timestamp: now,
-            processor: self.secret.public_key(),
+            processor: PublicKey(self.secret.public_key()),
             height: next_event_height,
             parent: parent_hash,
             framework_state,

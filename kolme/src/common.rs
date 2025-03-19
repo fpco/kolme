@@ -1,5 +1,5 @@
 /// Common helper functions and utilities.
-use std::{borrow::Cow, fmt::Display};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 
 use crate::*;
 
@@ -259,8 +259,98 @@ impl Decode<'_, sqlx::Sqlite> for Sha256Hash {
     }
 }
 
+/// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PublicKey(pub k256::PublicKey);
+
+impl PublicKey {
+    pub fn as_bytes(&self) -> Box<[u8]> {
+        self.0.to_sec1_bytes()
+    }
+}
+
+impl From<k256::PublicKey> for PublicKey {
+    fn from(value: k256::PublicKey) -> Self {
+        PublicKey(value)
+    }
+}
+
+impl From<VerifyingKey> for PublicKey {
+    fn from(value: VerifyingKey) -> Self {
+        k256::PublicKey::from(value).into()
+    }
+}
+
+impl serde::Serialize for PublicKey {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicKey {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl FromStr for PublicKey {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let bytes = hex::decode(s)?;
+        let pubkey = k256::PublicKey::from_sec1_bytes(&bytes)?;
+        Ok(PublicKey(pubkey))
+    }
+}
+
+impl Display for PublicKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&hex::encode(self.0.to_sec1_bytes()))
+    }
+}
+
+impl std::fmt::Debug for PublicKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+impl std::hash::Hash for PublicKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_sec1_bytes().hash(state)
+    }
+}
+
+impl sqlx::Type<sqlx::Sqlite> for PublicKey {
+    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
+        <&[u8] as sqlx::Type<Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::sqlite::SqliteTypeInfo) -> bool {
+        <&[u8] as sqlx::Type<Sqlite>>::compatible(ty)
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Sqlite> for PublicKey {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <sqlx::Sqlite as sqlx::Database>::ArgumentBuffer<'_>,
+    ) -> std::result::Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        self.as_bytes().encode_by_ref(buf)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use k256::SecretKey;
+
     use super::*;
 
     #[test]
@@ -302,5 +392,25 @@ mod tests {
         assert_eq!(hash1, hash2);
         assert_eq!(Sha256Hash::from_hash(&hash1.0).unwrap(), hash1);
         Sha256Hash::from_hash(b"invalid input").unwrap_err();
+    }
+
+    #[test]
+    fn round_trip_public_key() {
+        let mut rng = rand::thread_rng();
+        let secret = SecretKey::random(&mut rng);
+        let public = PublicKey::from(secret.public_key());
+
+        assert_eq!(
+            serde_json::to_value(public).unwrap(),
+            serde_json::Value::String(public.to_string())
+        );
+
+        let json = serde_json::to_vec(&public).unwrap();
+        let json_parsed = serde_json::from_slice::<PublicKey>(&json).unwrap();
+        assert_eq!(public, json_parsed);
+
+        let s = public.to_string();
+        let display_parsed = s.parse().unwrap();
+        assert_eq!(public, display_parsed);
     }
 }

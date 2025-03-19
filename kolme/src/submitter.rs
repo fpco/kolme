@@ -63,16 +63,13 @@ impl<App: KolmeApp> Submitter<App> {
                 // TODO create a shared crate and use the same definitions in the contracts and this code
                 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
                 struct InstantiateMsg {
-                    processor: String,
-                    executors: Vec<String>,
+                    processor: PublicKey,
+                    executors: Vec<PublicKey>,
                     needed_executors: u16,
                 }
                 let msg = InstantiateMsg {
-                    processor: hex::encode(processor.to_sec1_bytes()),
-                    executors: executors
-                        .into_iter()
-                        .map(|e| hex::encode(e.to_sec1_bytes()))
-                        .collect(),
+                    processor,
+                    executors: executors.into_iter().collect(),
                     needed_executors: needed_executors.try_into()?,
                 };
 
