@@ -117,24 +117,16 @@ async fn main_inner() -> Result<()> {
 
     let mut set = JoinSet::new();
 
-    println!("main_inner1");
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-    println!("main_inner2");
     set.spawn(processor.run());
-    println!("main_inner3");
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    println!("main_inner4");
     set.spawn(listener.run());
-    println!("main_inner5");
     let submitter = Submitter::new(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
     );
-    println!("main_inner6");
     set.spawn(submitter.run());
-    println!("main_inner7");
     let api_server = ApiServer::new(kolme);
-    println!("main_inner8");
     set.spawn(api_server.run("[::]:3000"));
 
     while let Some(res) = set.join_next().await {

@@ -14,6 +14,9 @@ impl<App: KolmeApp> Submitter<App> {
     }
 
     pub async fn run(mut self) -> Result<()> {
+        // FIXME Looks like there may be a bug where a contract is instantiated twice on a chain, needs investigation
+        // Best guess: minor race condition between the NewBlock event arriving and the state being updated, leading to basing the operation on the previous out-of-date state.
+
         let mut receiver = self.kolme.subscribe();
         self.submit_zero_or_one().await?;
         tracing::info!("Submitter has caught up, waiting for new events.");
@@ -54,17 +57,6 @@ impl<App: KolmeApp> Submitter<App> {
                 executors,
                 needed_executors,
             } => {
-                if chain == ExternalChain::OsmosisTestnet {
-                    self.kolme
-                        .notify_genesis_instantiation(chain, "osmofixme".to_owned());
-                    return Ok(());
-                }
-                if chain == ExternalChain::NeutronTestnet {
-                    self.kolme
-                        .notify_genesis_instantiation(chain, "ntrnfixme".to_owned());
-                    return Ok(());
-                }
-
                 let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
                 let wallet = self.seed_phrase.with_hrp(cosmos.get_address_hrp())?;
 
