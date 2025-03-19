@@ -117,6 +117,9 @@ impl<App: KolmeApp> ExecutionContext<App> {
 
         // OK, valid event. Let's find out how many existing signatures there are so we can decide if we can execute.
         let existing_signatures = count_listener_signatures(&self.pool, chain, event_id).await?;
+
+        // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
+        // FIXME do we need to check that the listeners in the database match our current set of listeners?
         let was_accepted = existing_signatures + 1 >= self.framework_state.needed_listeners;
         if was_accepted {
             match event {
