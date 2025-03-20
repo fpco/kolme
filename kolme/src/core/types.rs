@@ -63,6 +63,15 @@ pub enum GenesisAction {
     },
 }
 
+pub struct PendingBridgeAction {
+    pub chain: ExternalChain,
+    pub payload: String,
+    pub height: BlockHeight,
+    /// Index of the message within the block
+    pub message: usize,
+    pub action_id: BridgeActionId,
+}
+
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]

@@ -274,6 +274,49 @@ impl<App: KolmeApp> KolmeInner<App> {
         None
     }
 
+    pub async fn get_next_bridge_action(
+        &self,
+        chain: ExternalChain,
+    ) -> Result<Option<PendingBridgeAction>> {
+        struct Helper {
+            height: i64,
+            message: i64,
+            payload: String,
+            action_id: i64,
+        }
+        let chain_str = chain.as_ref();
+        let helper = sqlx::query_as!(
+            Helper,
+            r#"
+                SELECT messages.height, messages.message, actions.payload, actions.action_id
+                FROM actions
+                INNER JOIN messages
+                ON actions.approved=messages.id
+                WHERE chain=$1
+                AND confirmed IS NULL
+            "#,
+            chain_str
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(Helper {
+            payload,
+            height,
+            message,
+            action_id,
+        }) = helper
+        else {
+            return Ok(None);
+        };
+        Ok(Some(PendingBridgeAction {
+            chain,
+            payload,
+            height: BlockHeight::try_from(height)?,
+            message: message.try_into()?,
+            action_id: BridgeActionId(action_id.try_into()?),
+        }))
+    }
+
     pub fn get_app_state(&self) -> &App::State {
         &self.app_state
     }
