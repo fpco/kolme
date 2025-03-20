@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref, path::Path};
+use std::{backtrace::Backtrace, collections::HashMap, ops::Deref, path::Path};
 
 use sqlx::sqlite::SqliteConnectOptions;
 
@@ -39,7 +39,19 @@ impl<App: KolmeApp> Kolme<App> {
     /// Under the surface, this uses an [tokio::sync::RwLock], so
     /// multiple reads do not block each other.
     pub async fn read(&self) -> KolmeRead<App> {
-        KolmeRead(self.inner.clone().read_owned().await)
+        let backtrace = Backtrace::force_capture();
+        let id = {
+            let guard = self.inner.read().await;
+            let mut guard = guard.deadlock_detector.write().unwrap();
+            let id = guard.next_read_id;
+            guard.next_read_id += 1;
+            guard.active_reads.insert(id, backtrace);
+            id
+        };
+        KolmeRead {
+            guard: self.inner.clone().read_owned().await,
+            id,
+        }
     }
 
     /// Notify the system of a genesis contract instantiation.
@@ -72,6 +84,19 @@ impl<App: KolmeApp> Kolme<App> {
                 Some(signed_block.0.message.as_inner().loads.clone()),
             )
             .await?;
+        {
+            for (id, backtrace) in &self
+                .inner
+                .read()
+                .await
+                .deadlock_detector
+                .read()
+                .unwrap()
+                .active_reads
+            {
+                println!("{id}: {backtrace}");
+            }
+        }
         let mut kolme = self.inner.write().await;
         let mut trans = kolme.pool.begin().await?;
         store_block(&mut kolme, &mut trans, &signed_block, &exec_results).await?;
@@ -88,13 +113,27 @@ impl<App: KolmeApp> Kolme<App> {
 }
 
 /// Read-only access to Kolme.
-pub struct KolmeRead<App: KolmeApp>(tokio::sync::OwnedRwLockReadGuard<KolmeInner<App>>);
+pub struct KolmeRead<App: KolmeApp> {
+    guard: tokio::sync::OwnedRwLockReadGuard<KolmeInner<App>>,
+    id: usize,
+}
+
+impl<App: KolmeApp> Drop for KolmeRead<App> {
+    fn drop(&mut self) {
+        self.guard
+            .deadlock_detector
+            .write()
+            .unwrap()
+            .active_reads
+            .remove(&self.id);
+    }
+}
 
 impl<App: KolmeApp> Deref for KolmeRead<App> {
     type Target = KolmeInner<App>;
 
     fn deref(&self) -> &Self::Target {
-        self.0.deref()
+        self.guard.deref()
     }
 }
 
@@ -106,6 +145,15 @@ pub struct KolmeInner<App: KolmeApp> {
     pub(super) next_height: BlockHeight,
     pub(super) current_block_hash: BlockHash,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<ExternalChain, cosmos::Cosmos>>,
+    // TODO Intended only for dev-time, we should either remove in the future
+    // or gate with feature flags/optimization flags.
+    pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
+}
+
+#[derive(Default)]
+pub(super) struct DeadlockDetector {
+    pub(super) next_read_id: usize,
+    pub(super) active_reads: HashMap<usize, Backtrace>,
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -137,6 +185,7 @@ impl<App: KolmeApp> Kolme<App> {
             next_height,
             current_block_hash,
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
+            deadlock_detector: Default::default(),
         };
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),
