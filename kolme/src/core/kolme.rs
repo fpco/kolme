@@ -73,10 +73,12 @@ impl<App: KolmeApp> Kolme<App> {
             .await?;
         let mut kolme = self.inner.write().await;
         let mut trans = kolme.pool.begin().await?;
-        store_block(&mut kolme, &mut trans, &signed_block, exec_results).await?;
+        store_block(&mut kolme, &mut trans, &signed_block, &exec_results).await?;
         trans.commit().await?;
         kolme.next_height = signed_block.0.message.as_inner().height.next();
         kolme.current_block_hash = BlockHash(signed_block.0.message_hash());
+        kolme.framework_state = exec_results.framework_state;
+        kolme.app_state = exec_results.app_state;
         self.notify
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
@@ -231,6 +233,10 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self.framework_state.chains
     }
 
+    pub fn get_balances(&self) -> &BTreeMap<AccountId, BTreeMap<AssetId, u128>> {
+        &self.framework_state.balances
+    }
+
     pub async fn create_signed_transaction(
         &self,
         secret: &k256::SecretKey,
@@ -264,6 +270,17 @@ impl<App: KolmeApp> KolmeInner<App> {
         serde_json::from_str(&payload).map_err(anyhow::Error::from)
     }
 
+    /// Get the next available account ID in the database.
+    pub async fn get_next_account_id(&self) -> Result<AccountId> {
+        match sqlx::query_scalar!("SELECT id FROM accounts ORDER BY id DESC LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await?
+        {
+            Some(id) => Ok(AccountId(id.try_into()?).next()),
+            None => Ok(AccountId(1)),
+        }
+    }
+
     pub async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
         let key = key.to_sec1_bytes();
         let nonce = sqlx::query_scalar!(
@@ -285,6 +302,36 @@ impl<App: KolmeApp> KolmeInner<App> {
             None => Ok(AccountNonce::start()),
         }
     }
+
+    pub async fn received_listener_attestation(
+        &self,
+        chain: ExternalChain,
+        pubkey: PublicKey,
+        event_id: BridgeEventId,
+    ) -> Result<bool> {
+        let pubkey = pubkey.to_sec1_bytes();
+        let chain = chain.as_ref();
+        let event_id = i64::try_from(event_id.0)?;
+
+        let count = sqlx::query_scalar!(
+            r#"
+                SELECT COUNT(*)
+                FROM bridge_events
+                INNER JOIN bridge_event_attestations
+                ON bridge_events.id=bridge_event_attestations.event
+                WHERE bridge_events.chain=$1
+                AND bridge_events.event_id=$2
+                AND public_key=$3
+            "#,
+            chain,
+            event_id,
+            pubkey
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        assert!(count == 0 || count == 1);
+        Ok(count == 1)
+    }
 }
 
 /// Also performs validation of the data
@@ -296,7 +343,8 @@ async fn store_block<App: KolmeApp>(
         framework_state,
         app_state,
         outputs,
-    }: ExecutionResults<App>,
+        db_updates,
+    }: &ExecutionResults<App>,
 ) -> Result<()> {
     let block = signed_block.0.message.as_inner();
     let tx = block.tx.0.message.as_inner();
@@ -307,7 +355,7 @@ async fn store_block<App: KolmeApp>(
 
     let (account_id, nonce) =
         get_or_insert_account_id_and_next_nonce(trans, tx.pubkey, height).await?;
-    anyhow::ensure!(nonce == tx.nonce);
+    anyhow::ensure!(nonce == tx.nonce, "Tried to store block, but expected nonce {nonce} didn't match actual nonce {}. Signed block:\n{}\nTransaction:\n{}", tx.nonce, signed_block.0.message.as_str(), serde_json::to_string_pretty(tx)?);
     let account_id = i64::try_from(account_id.0)?;
     let nonce = i64::try_from(nonce.0)?;
 
@@ -317,7 +365,7 @@ async fn store_block<App: KolmeApp>(
 
     let framework_state_rendered = serde_json::to_string(&framework_state)?;
     let framework_state_hash = insert_state_payload(trans, &framework_state_rendered).await?;
-    let app_state_rendered = App::save_state(&app_state)?;
+    let app_state_rendered = App::save_state(app_state)?;
     let app_state_hash = insert_state_payload(trans, &app_state_rendered).await?;
 
     sqlx::query!(
@@ -335,6 +383,8 @@ async fn store_block<App: KolmeApp>(
             account_id,
             nonce,
         ).execute(&mut **trans).await?;
+
+    let mut message_db_ids = vec![];
 
     for (
         message,
@@ -354,6 +404,7 @@ async fn store_block<App: KolmeApp>(
         .execute(&mut **trans)
         .await?
         .last_insert_rowid();
+        message_db_ids.push(message);
         for (position, log) in logs.iter().enumerate() {
             let position = i64::try_from(position)?;
             sqlx::query!(
@@ -391,7 +442,118 @@ async fn store_block<App: KolmeApp>(
         }
     }
 
-    todo!("store listener events, don't forget about bridge_events.accepted");
+    for update in db_updates {
+        match update {
+            DatabaseUpdate::ListenerAttestation {
+                chain,
+                event_id,
+                event_content,
+                msg_index,
+                was_accepted,
+                action_id,
+            } => {
+                let message_db_id = message_db_ids[*msg_index];
+                let chain = chain.as_ref();
+                let event_id = i64::try_from(event_id.0)?;
+
+                let event_db_id = sqlx::query_scalar!(
+                    r#"
+                        SELECT id
+                        FROM bridge_events
+                        WHERE chain=$1
+                        AND event_id=$2
+                    "#,
+                    chain,
+                    event_id
+                )
+                .fetch_optional(&mut **trans)
+                .await?;
+                let event_db_id = match event_db_id {
+                    Some(id) => id,
+                    None => sqlx::query!(
+                        r#"
+                            INSERT INTO
+                            bridge_events(chain, event_id, event)
+                            VALUES($1, $2, $3)
+                        "#,
+                        chain,
+                        event_id,
+                        event_content
+                    )
+                    .execute(&mut **trans)
+                    .await?
+                    .last_insert_rowid(),
+                };
+
+                let pubkey = tx.pubkey.to_sec1_bytes();
+                sqlx::query!(
+                    r#"
+                        INSERT INTO
+                        bridge_event_attestations(event, public_key, message)
+                        VALUES($1, $2, $3)
+                    "#,
+                    event_db_id,
+                    pubkey,
+                    message_db_id,
+                )
+                .execute(&mut **trans)
+                .await?;
+
+                if *was_accepted {
+                    let rows = sqlx::query!(
+                        r#"
+                            UPDATE bridge_events
+                            SET accepted=$1
+                            WHERE chain=$2
+                            AND event_id=$3
+                        "#,
+                        message_db_id,
+                        chain,
+                        event_id,
+                    )
+                    .execute(&mut **trans)
+                    .await?
+                    .rows_affected();
+                    anyhow::ensure!(rows == 1);
+
+                    if let Some(action_id) = *action_id {
+                        todo!("Need to log completion of the action: {action_id}");
+                    }
+                }
+            }
+            DatabaseUpdate::AddAccount { id } => {
+                let id = i64::try_from(id.0)?;
+                sqlx::query!(
+                    "INSERT INTO accounts(id, created) VALUES($1, $2)",
+                    id,
+                    height_i64
+                )
+                .execute(&mut **trans)
+                .await?;
+            }
+            DatabaseUpdate::AddWalletToAccount { id, wallet } => {
+                let id = i64::try_from(id.0)?;
+                sqlx::query!(
+                    "INSERT INTO account_wallets(account_id,wallet) VALUES($1, $2)",
+                    id,
+                    wallet
+                )
+                .execute(&mut **trans)
+                .await?;
+            }
+            DatabaseUpdate::AddPubkeyToAccount { id, pubkey } => {
+                let id = i64::try_from(id.0)?;
+                let pubkey = pubkey.to_sec1_bytes();
+                sqlx::query!(
+                    "INSERT INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+                    id,
+                    pubkey
+                )
+                .execute(&mut **trans)
+                .await?;
+            }
+        }
+    }
 
     Ok(())
 }
@@ -463,7 +625,7 @@ async fn get_or_insert_account_id_and_next_nonce(
             .fetch_optional(&mut **trans)
             .await?;
             let nonce = match nonce {
-                Some(nonce) => AccountNonce(nonce.try_into()?),
+                Some(nonce) => AccountNonce(nonce.try_into()?).next(),
                 None => AccountNonce::start(),
             };
             Ok((AccountId(account_id.try_into()?), nonce))

@@ -9,7 +9,8 @@ pub struct FrameworkState {
     pub(super) executors: BTreeSet<PublicKey>,
     pub(super) needed_executors: usize,
     pub(super) chains: BTreeMap<ExternalChain, ChainConfig>,
-    // TODO: add in balances, something like this: pub balances: BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>
+    #[serde(default)]
+    pub(super) balances: BTreeMap<AccountId, BTreeMap<AssetId, u128>>, // TODO we want to use a decimal representation instead most likely
 }
 
 impl FrameworkState {
@@ -31,6 +32,7 @@ impl FrameworkState {
             executors: executors.clone(),
             needed_executors: *needed_executors,
             chains: chains.clone(),
+            balances: BTreeMap::new(),
         }
     }
 

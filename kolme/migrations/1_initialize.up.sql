@@ -85,7 +85,6 @@ CREATE TABLE bridge_events(
 CREATE TABLE bridge_event_attestations(
     event INTEGER NOT NULL REFERENCES bridge_events(id),
     public_key BLOB NOT NULL,
-    signature BLOB NOT NULL,
     message INTEGER NOT NULL UNIQUE REFERENCES messages(id),
     UNIQUE(event, public_key)
 );

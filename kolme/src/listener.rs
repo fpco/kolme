@@ -47,21 +47,28 @@ impl<App: KolmeApp> Listener<App> {
                 return Ok(contracts);
             }
             if let Notification::GenesisInstantiation { chain, contract } = receiver.recv().await? {
-                // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
-                let signed = self
-                    .kolme
-                    .read()
-                    .await
-                    .create_signed_transaction(
-                        &self.secret,
-                        vec![Message::Listener {
-                            chain,
-                            event: BridgeEvent::Instantiated { contract },
-                            event_id: BridgeEventId::start(),
-                        }],
+                let kolme = self.kolme.read().await;
+                if !kolme
+                    .received_listener_attestation(
+                        chain,
+                        self.secret.public_key(),
+                        BridgeEventId::start(),
                     )
-                    .await?;
-                self.kolme.propose_transaction(signed)?;
+                    .await?
+                {
+                    // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
+                    let signed = kolme
+                        .create_signed_transaction(
+                            &self.secret,
+                            vec![Message::Listener {
+                                chain,
+                                event: BridgeEvent::Instantiated { contract },
+                                event_id: BridgeEventId::start(),
+                            }],
+                        )
+                        .await?;
+                    self.kolme.propose_transaction(signed)?;
+                }
             }
         }
     }
@@ -88,12 +95,14 @@ async fn listen<App: KolmeApp>(
 ) -> Result<()> {
     let cosmos = kolme.read().await.get_cosmos(chain).await?;
     let contract = cosmos.make_contract(contract.parse()?);
-    tracing::info!("Beginning listener loop on contract {contract}");
     let mut next_bridge_event_id = kolme
         .read()
         .await
         .get_next_bridge_event_id(chain, secret.public_key())
         .await?;
+    tracing::info!(
+        "Beginning listener loop on contract {contract}, next event ID: {next_bridge_event_id}"
+    );
     // We _should_ be subscribing to events. I tried doing that and failed miserably.
     // So we're trying this polling approach instead.
     loop {
@@ -176,21 +185,21 @@ async fn broadcast_listener_event<App: KolmeApp>(
                 },
             }
         }
-        BridgeEventContents::Signed {
-            wallet,
-            outgoing_id,
-        } => todo!(),
+        BridgeEventContents::Signed { wallet, action_id } => Message::Listener {
+            chain,
+            event_id: bridge_event_id,
+            event: BridgeEvent::Signed {
+                wallet: wallet.clone(),
+                action_id: *action_id,
+            },
+        },
     };
-    let pubkey = secret.public_key();
-    let nonce = kolme.read().await.get_next_account_nonce(pubkey).await?;
-    let payload = Transaction {
-        pubkey,
-        nonce,
-        created: Timestamp::now(),
-        messages: vec![message],
-    };
-    let proposed = SignedTransaction(TaggedJson::new(payload)?.sign(secret)?);
-    kolme.propose_transaction(proposed)?;
+    let signed = kolme
+        .read()
+        .await
+        .create_signed_transaction(secret, vec![message])
+        .await?;
+    kolme.propose_transaction(signed)?;
     Ok(())
 }
 
@@ -204,7 +213,7 @@ enum BridgeEventContents {
     },
     Signed {
         wallet: String,
-        outgoing_id: u32,
+        action_id: BridgeActionId,
     },
 }
 
