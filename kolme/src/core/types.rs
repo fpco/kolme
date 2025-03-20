@@ -1,5 +1,6 @@
 use std::{fmt::Display, sync::OnceLock};
 
+use cosmwasm_std::Uint128;
 use k256::ecdsa::VerifyingKey;
 
 use crate::*;
@@ -426,13 +427,67 @@ pub struct BlockDataLoad {
 }
 
 /// A specific action to be taken as a result of an execution.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum ExecAction {
     Transfer {
         chain: ExternalChain,
         recipient: String,
         funds: Vec<AssetAmount>,
     },
+}
+impl ExecAction {
+    pub(crate) fn to_payload(
+        &self,
+        chain: ExternalChain,
+        configs: &BTreeMap<ExternalChain, ChainConfig>,
+        id: BridgeActionId,
+    ) -> Result<String> {
+        match chain {
+            ExternalChain::OsmosisTestnet | ExternalChain::NeutronTestnet => {
+                #[derive(serde::Serialize)]
+                struct Payload {
+                    id: BridgeActionId,
+                    messages: Vec<cosmwasm_std::CosmosMsg>,
+                }
+                let message = match self {
+                    ExecAction::Transfer {
+                        chain: chain2,
+                        recipient,
+                        funds,
+                    } => {
+                        assert_eq!(&chain, chain2);
+                        let mut coins = vec![];
+                        for AssetAmount { id, amount } in funds {
+                            let denom = configs
+                                .get(&chain)
+                                .context("Missing chain")?
+                                .assets
+                                .iter()
+                                .find(|(_name, config)| config.asset_id == *id)
+                                .context("Unsupported asset ID")?
+                                .0;
+                            let denom = denom.0.clone();
+                            coins.push(cosmwasm_std::Coin {
+                                denom,
+                                amount: Uint128::new(*amount),
+                            });
+                        }
+                        cosmwasm_std::CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
+                            to_address: recipient.clone(),
+                            amount: coins,
+                        })
+                    }
+                };
+
+                let payload = Payload {
+                    id,
+                    messages: vec![message],
+                };
+                let payload = serde_json::to_string(&payload)?;
+                Ok(payload)
+            }
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

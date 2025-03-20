@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use base64::{prelude::BASE64_STANDARD, Engine};
 use cosmos::{HasAddressHrp, SeedPhrase, TxBuilder};
 
 use crate::*;
@@ -56,7 +55,8 @@ impl<App: KolmeApp> Submitter<App> {
     /// We only do 0 or 1, since we always wait for listeners to confirm that our actions succeeded before continuing.
     async fn submit_zero_or_one(&mut self, chains: &[ExternalChain]) -> Result<()> {
         // TODO we can probably unify genesis and other actions into a single per-chain feed
-        if let Some(genesis_action) = self.kolme.read().await.get_next_genesis_action() {
+        let genesis_action = self.kolme.read().await.get_next_genesis_action();
+        if let Some(genesis_action) = genesis_action {
             return self.handle_genesis(genesis_action).await;
         }
 
@@ -168,10 +168,11 @@ impl<App: KolmeApp> Submitter<App> {
         };
         anyhow::ensure!(&chain == chain2);
         anyhow::ensure!(&action_id == action_id2);
+
         let msg = ExecuteMsg::Signed {
             processor,
             executors,
-            payload: BASE64_STANDARD.encode(&payload),
+            payload,
         };
         let contract = {
             let kolme = self.kolme.read().await;

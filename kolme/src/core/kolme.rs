@@ -720,27 +720,32 @@ async fn store_block<App: KolmeApp>(
                     funds: _,
                 } => *chain,
             };
-            let chain = chain.as_ref();
-            let action = serde_json::to_string(&action)?;
+            let chain_str = chain.as_ref();
 
             let latest_action_id = sqlx::query_scalar!(
                 "SELECT action_id FROM actions WHERE chain=$1 ORDER BY action_id DESC LIMIT 1",
-                chain
+                chain_str
             )
             .fetch_optional(&mut **trans)
             .await?;
             let action_id = latest_action_id.map_or(0, |x| x + 1);
+
+            let payload = action.to_payload(
+                chain,
+                kolme.get_bridge_contracts(),
+                BridgeActionId(action_id.try_into()?),
+            )?;
 
             sqlx::query!(
                 r#"
                     INSERT INTO actions(chain, action_id, message, position, payload)
                     VALUES($1, $2, $3, $4, $5)
                 "#,
-                chain,
+                chain_str,
                 action_id,
                 message,
                 position,
-                action
+                payload,
             )
             .execute(&mut **trans)
             .await?;
