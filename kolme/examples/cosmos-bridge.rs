@@ -39,7 +39,7 @@ impl KolmeApp for SampleKolmeApp {
     type Message = SampleMessage;
 
     fn genesis_info() -> GenesisInfo {
-        let my_public_key = my_secret_key().public_key();
+        let my_public_key = PublicKey(my_secret_key().public_key());
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
         let mut bridges = BTreeMap::new();

@@ -242,7 +242,6 @@ async fn has_already_listened(
     pubkey: &PublicKey,
 ) -> Result<bool> {
     let chain = chain.as_ref();
-    let pubkey = pubkey.to_sec1_bytes();
     let event_id = i64::try_from(event_id.0)?;
     let count = sqlx::query_scalar!(
         r#"

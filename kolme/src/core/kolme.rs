@@ -181,7 +181,6 @@ impl<App: KolmeApp> KolmeInner<App> {
         chain: ExternalChain,
         pubkey: PublicKey,
     ) -> Result<BridgeEventId> {
-        let pubkey = pubkey.to_sec1_bytes();
         let chain = chain.as_ref();
         let bridge_event_id = sqlx::query_scalar!(
             r#"
@@ -242,7 +241,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         secret: &k256::SecretKey,
         messages: Vec<Message<App::Message>>,
     ) -> Result<SignedTransaction<App::Message>> {
-        let pubkey = secret.public_key();
+        let pubkey = secret.public_key().into();
         let nonce = self.get_next_account_nonce(pubkey).await?;
         let tx = Transaction::<App::Message> {
             pubkey,
@@ -282,7 +281,6 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
-        let key = key.to_sec1_bytes();
         let nonce = sqlx::query_scalar!(
             r#"
                 SELECT nonce
@@ -309,7 +307,6 @@ impl<App: KolmeApp> KolmeInner<App> {
         pubkey: PublicKey,
         event_id: BridgeEventId,
     ) -> Result<bool> {
-        let pubkey = pubkey.to_sec1_bytes();
         let chain = chain.as_ref();
         let event_id = i64::try_from(event_id.0)?;
 
@@ -485,7 +482,6 @@ async fn store_block<App: KolmeApp>(
                     .last_insert_rowid(),
                 };
 
-                let pubkey = tx.pubkey.to_sec1_bytes();
                 sqlx::query!(
                     r#"
                         INSERT INTO
@@ -493,7 +489,7 @@ async fn store_block<App: KolmeApp>(
                         VALUES($1, $2, $3)
                     "#,
                     event_db_id,
-                    pubkey,
+                    tx.pubkey,
                     message_db_id,
                 )
                 .execute(&mut **trans)
@@ -543,7 +539,6 @@ async fn store_block<App: KolmeApp>(
             }
             DatabaseUpdate::AddPubkeyToAccount { id, pubkey } => {
                 let id = i64::try_from(id.0)?;
-                let pubkey = pubkey.to_sec1_bytes();
                 sqlx::query!(
                     "INSERT INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
                     id,
@@ -588,7 +583,6 @@ async fn get_or_insert_account_id_and_next_nonce(
     pubkey: PublicKey,
     height: BlockHeight,
 ) -> Result<(AccountId, AccountNonce)> {
-    let pubkey = pubkey.to_sec1_bytes();
     let account_id = sqlx::query_scalar!(
         "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
         pubkey

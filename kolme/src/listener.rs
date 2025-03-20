@@ -51,7 +51,7 @@ impl<App: KolmeApp> Listener<App> {
                 if !kolme
                     .received_listener_attestation(
                         chain,
-                        self.secret.public_key(),
+                        PublicKey(self.secret.public_key()),
                         BridgeEventId::start(),
                     )
                     .await?
@@ -98,7 +98,7 @@ async fn listen<App: KolmeApp>(
     let mut next_bridge_event_id = kolme
         .read()
         .await
-        .get_next_bridge_event_id(chain, secret.public_key())
+        .get_next_bridge_event_id(chain, PublicKey(secret.public_key()))
         .await?;
     tracing::info!(
         "Beginning listener loop on contract {contract}, next event ID: {next_bridge_event_id}"
@@ -170,9 +170,7 @@ async fn broadcast_listener_event<App: KolmeApp>(
                 });
             }
             for key in keys {
-                let key = hex::decode(key)?;
-                let key = PublicKey::from_sec1_bytes(&key)?;
-                new_keys.push(key);
+                new_keys.push(key.parse()?);
             }
 
             Message::Listener {
