@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT COUNT(*)\n                FROM actions\n                INNER JOIN action_approvals\n                ON actions.id=action_approvals.action\n                WHERE chain=$1\n                AND action_id=$2\n                AND public_key=$3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b285d2b5d8aadf008b5cbdd1e3b02b6aeb0256c5b27db0dc3243380a0ef8a8ce"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        SELECT id\n                        FROM actions\n                        WHERE chain=$1\n                        AND action_id=$2\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2d04010f07ce8e6ef043a718fec3a52a42e8b82d1adc73ec5da0d8375a14e427"
+}

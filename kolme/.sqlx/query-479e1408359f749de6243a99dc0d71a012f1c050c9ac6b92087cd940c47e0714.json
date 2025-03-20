@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        INSERT INTO action_approvals\n                        (action, public_key, signature, recovery, message)\n                        VALUES($1, $2, $3, $4, $5)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "479e1408359f749de6243a99dc0d71a012f1c050c9ac6b92087cd940c47e0714"
+}

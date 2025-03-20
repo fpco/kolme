@@ -30,8 +30,11 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
     fn new_state() -> Result<Self::State>;
 
     /// Execute a message.
-    #[allow(async_fn_in_trait)]
-    async fn execute(&self, ctx: &mut ExecutionContext<Self>, msg: &Self::Message) -> Result<()>;
+    fn execute(
+        &self,
+        ctx: &mut ExecutionContext<Self>,
+        msg: &Self::Message,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 pub trait KolmeDataRequest<App>:

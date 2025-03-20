@@ -226,6 +226,8 @@ async fn serve(bind: SocketAddr) -> Result<()> {
     set.spawn(processor.run());
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run());
+    let executor = Executor::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(executor.run());
     let submitter = Submitter::new(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
@@ -284,14 +286,18 @@ async fn broadcast(message: String, secret: String, host: String) -> Result<()> 
     struct Res {
         txhash: Sha256Hash,
     }
-    let Res { txhash } = client
+    let res = client
         .put(format!("{host}/broadcast"))
         .json(&signed)
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
+
+    if let Err(e) = res.error_for_status_ref() {
+        let t = res.text().await?;
+        anyhow::bail!("Error broadcasting:\n{e}\n{t}");
+    }
+
+    let Res { txhash } = res.json().await?;
     println!("txhash: {txhash}");
     Ok(())
 }

@@ -1,5 +1,7 @@
 use std::{fmt::Display, sync::OnceLock};
 
+use k256::ecdsa::VerifyingKey;
+
 use crate::*;
 
 #[derive(
@@ -199,6 +201,15 @@ impl Display for BridgeEventId {
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]
 pub struct BridgeActionId(pub u64);
+impl BridgeActionId {
+    pub fn start() -> Self {
+        BridgeActionId(0)
+    }
+
+    pub fn next(self) -> BridgeActionId {
+        BridgeActionId(self.0 + 1)
+    }
+}
 
 impl Display for BridgeActionId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -301,6 +312,19 @@ pub enum Message<AppMessage> {
         chain: ExternalChain,
         event_id: BridgeEventId,
         event: BridgeEvent,
+    },
+    Approve {
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+        signature: k256::ecdsa::Signature,
+        #[serde(with = "crate::common::recovery")]
+        recovery: k256::ecdsa::RecoveryId,
+    },
+    ProcessorApprove {
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+        processor: SignatureWithRecovery,
+        executors: Vec<SignatureWithRecovery>,
     },
     Auth(AuthMessage),
     // TODO Bank, with things like
@@ -425,4 +449,20 @@ pub enum Notification<AppMessage> {
     Broadcast {
         tx: Arc<SignedTransaction<AppMessage>>,
     },
+}
+
+/// A signature paired with its recovery ID
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
+pub struct SignatureWithRecovery {
+    pub sig: k256::ecdsa::Signature,
+    #[serde(with = "crate::common::recovery")]
+    pub recid: k256::ecdsa::RecoveryId,
+}
+
+impl SignatureWithRecovery {
+    pub fn validate(&self, msg: &[u8]) -> Result<PublicKey> {
+        Ok(PublicKey(
+            VerifyingKey::recover_from_msg(msg, &self.sig, self.recid)?.into(),
+        ))
+    }
 }
