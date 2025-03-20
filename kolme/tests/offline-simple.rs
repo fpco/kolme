@@ -79,6 +79,14 @@ impl KolmeApp for SampleKolmeApp {
     fn load_state(v: &str) -> anyhow::Result<Self::State> {
         serde_json::from_str(v).map_err(anyhow::Error::from)
     }
+
+    async fn execute(
+        &self,
+        ctx: &mut ExecutionContext<'_, Self>,
+        msg: &Self::Message,
+    ) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("execute not implemented"))
+    }
 }
 
 #[cfg(test)]

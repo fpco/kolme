@@ -28,4 +28,22 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
 
     /// Generate a blank state.
     fn new_state() -> Result<Self::State>;
+
+    /// Execute a message.
+    #[allow(async_fn_in_trait)]
+    async fn execute(&self, ctx: &mut ExecutionContext<Self>, msg: &Self::Message) -> Result<()>;
+}
+
+pub trait KolmeDataRequest<App>:
+    serde::Serialize + serde::de::DeserializeOwned + PartialEq
+{
+    type Response: serde::Serialize + serde::de::DeserializeOwned;
+
+    /// Do an initial load of the data
+    #[allow(async_fn_in_trait)]
+    async fn load(self, app: &App) -> Result<Self::Response>;
+
+    /// Validate previously loaded data
+    #[allow(async_fn_in_trait)]
+    async fn validate(self, app: &App, prev_res: &Self::Response) -> Result<()>;
 }

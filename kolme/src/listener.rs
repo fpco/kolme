@@ -121,7 +121,7 @@ async fn listen_once<App: KolmeApp>(
     #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
     #[serde(rename_all = "snake_case")]
     enum QueryMsg {
-        GetToKolmeMessage { id: BridgeEventId },
+        GetEvent { id: BridgeEventId },
     }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[serde(rename_all = "snake_case")]
@@ -130,7 +130,7 @@ async fn listen_once<App: KolmeApp>(
         NotFound {},
     }
     match contract
-        .query(&QueryMsg::GetToKolmeMessage {
+        .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
         })
         .await?

@@ -210,6 +210,12 @@ impl Sha256Hash {
     }
 }
 
+impl Display for Sha256Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(self.0.as_slice()))
+    }
+}
+
 impl serde::Serialize for Sha256Hash {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where

@@ -1,10 +1,12 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    net::SocketAddr,
     str::FromStr,
 };
 
 use anyhow::Result;
-use cosmos::SeedPhrase;
+use clap::Parser;
+use cosmos::{HasAddressHrp, SeedPhrase};
 use k256::SecretKey;
 
 use kolme::*;
@@ -15,18 +17,34 @@ use tokio::task::JoinSet;
 pub struct SampleKolmeApp;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
-pub struct SampleState {}
+pub struct SampleState {
+    #[serde(default)]
+    hi_count: u32,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum SampleMessage {
-    SayHi,
+    SayHi {},
+    /// Generate a random number, for no particular reason at all
+    Random {},
+    /// The address itself tells us whether to send to Osmosis or Neutron
+    /// FIXME: maybe this should be part of the bank module instead. Then our bridge is just a default Kolme app!
+    SendTo {
+        address: cosmos::Address,
+        amount: u128,
+    },
 }
+
+// Another keypair for client testing:
+// Public key: 02c2b386e42945d4c11712a5bc1d20d085a7da63e57c214e2742a684a97d436599
+// Secret key: 127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
-const OSMOSIS_TESTNET_CODE_ID: u64 = 12248;
-const NEUTRON_TESTNET_CODE_ID: u64 = 11182;
+const OSMOSIS_TESTNET_CODE_ID: u64 = 12268;
+const NEUTRON_TESTNET_CODE_ID: u64 = 11225;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
@@ -93,7 +111,7 @@ impl KolmeApp for SampleKolmeApp {
     }
 
     fn new_state() -> Result<Self::State> {
-        Ok(SampleState {})
+        Ok(SampleState { hi_count: 0 })
     }
 
     fn save_state(state: &Self::State) -> Result<String> {
@@ -103,6 +121,74 @@ impl KolmeApp for SampleKolmeApp {
     fn load_state(v: &str) -> Result<Self::State> {
         serde_json::from_str(v).map_err(anyhow::Error::from)
     }
+
+    async fn execute(
+        &self,
+        ctx: &mut ExecutionContext<'_, Self>,
+        msg: &Self::Message,
+    ) -> Result<()> {
+        match msg {
+            SampleMessage::SayHi {} => ctx.state_mut().hi_count += 1,
+            SampleMessage::SendTo { address, amount } => {
+                let chain = match address.get_address_hrp().as_str() {
+                    "osmo" => ExternalChain::OsmosisTestnet,
+                    "neutron" => ExternalChain::NeutronTestnet,
+                    _ => anyhow::bail!("Unsupported wallet address: {address}"),
+                };
+                ctx.withdraw_asset(
+                    AssetId(1),
+                    chain,
+                    ctx.get_sender_id(),
+                    address.to_string(),
+                    *amount,
+                )?;
+            }
+            SampleMessage::Random {} => {
+                let value = ctx.load_data(RandomU32).await?;
+                ctx.log(format!("Calculated a random number: {value}"));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(PartialEq, serde::Serialize, serde::Deserialize)]
+struct RandomU32;
+
+impl<App> KolmeDataRequest<App> for RandomU32 {
+    type Response = u32;
+
+    async fn load(self, _: &App) -> Result<Self::Response> {
+        Ok(rand::random())
+    }
+
+    async fn validate(self, _: &App, _: &Self::Response) -> Result<()> {
+        // No validation possible
+        Ok(())
+    }
+}
+
+#[derive(clap::Parser)]
+struct Opt {
+    #[clap(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(clap::Parser)]
+enum Cmd {
+    Serve {
+        #[clap(long, default_value = "[::]:3000")]
+        bind: SocketAddr,
+    },
+    GenPair {},
+    Broadcast {
+        #[clap(long, default_value = r#"{"say_hi":{}}"#)]
+        message: String,
+        #[clap(long)]
+        secret: String,
+        #[clap(long, default_value = "http://localhost:3000")]
+        host: String,
+    },
 }
 
 #[tokio::main]
@@ -111,6 +197,25 @@ async fn main() -> Result<()> {
 }
 
 async fn main_inner() -> Result<()> {
+    match Opt::parse().cmd {
+        Cmd::Serve { bind } => serve(bind).await,
+        Cmd::GenPair {} => {
+            let mut rng = rand::thread_rng();
+            let secret = SecretKey::random(&mut rng);
+            let public = secret.public_key();
+            println!("Public key: {}", hex::encode(public.to_sec1_bytes()));
+            println!("Secret key: {}", hex::encode(secret.to_bytes()));
+            Ok(())
+        }
+        Cmd::Broadcast {
+            message,
+            secret,
+            host,
+        } => broadcast(message, secret, host).await,
+    }
+}
+
+async fn serve(bind: SocketAddr) -> Result<()> {
     const DB_PATH: &str = "example-cosmos-bridge.sqlite3";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
@@ -127,7 +232,7 @@ async fn main_inner() -> Result<()> {
     );
     set.spawn(submitter.run());
     let api_server = ApiServer::new(kolme);
-    set.spawn(api_server.run("[::]:3000"));
+    set.spawn(api_server.run(bind));
 
     while let Some(res) = set.join_next().await {
         match res {
@@ -143,5 +248,50 @@ async fn main_inner() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
+    let message = serde_json::from_str::<SampleMessage>(&message)?;
+    let secret = SecretKey::from_slice(&hex::decode(secret.as_bytes())?)?;
+    let public = PublicKey(secret.public_key());
+    let client = reqwest::Client::new();
+
+    println!("Public sec1: {public}");
+    println!("Public serialized: {}", serde_json::to_string(&public)?);
+
+    #[derive(serde::Deserialize)]
+    struct NonceResp {
+        next_nonce: AccountNonce,
+    }
+    let NonceResp { next_nonce: nonce } = client
+        .get(format!("{host}/get-next-nonce"))
+        .query(&[("pubkey", public)])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let signed = Transaction {
+        pubkey: public,
+        nonce,
+        created: jiff::Timestamp::now(),
+        messages: vec![Message::App(message)],
+    }
+    .sign(&secret)?;
+    #[derive(serde::Deserialize)]
+    struct Res {
+        txhash: Sha256Hash,
+    }
+    let Res { txhash } = client
+        .put(format!("{host}/broadcast"))
+        .json(&signed)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    println!("txhash: {txhash}");
     Ok(())
 }
