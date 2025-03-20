@@ -73,28 +73,8 @@ impl<App: KolmeApp> Processor<App> {
         &self,
         tx: SignedTransaction<App::Message>,
     ) -> Result<SignedBlock<App::Message>> {
-        // Ensure that the signature is valid
-        tx.validate_signature()?;
-
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read().await;
-
-        // Make sure the nonce is correct
-        let expected_nonce = kolme
-            .get_next_account_nonce(tx.0.message.as_inner().pubkey)
-            .await?;
-        // FIXME should we do some verification of the account ID? Make the user submit an account ID for anything beyond the first action?
-        anyhow::ensure!(expected_nonce == tx.0.message.as_inner().nonce);
-
-        // Make sure this is a genesis event if and only if we have no events so far
-        let next_event_height = kolme.get_next_height();
-        let parent_hash = kolme.get_current_block_hash();
-        if kolme.get_next_height().is_start() {
-            tx.ensure_is_genesis()?;
-            anyhow::ensure!(tx.0.message.as_inner().pubkey == kolme.get_processor_pubkey());
-        } else {
-            tx.ensure_no_genesis()?;
-        };
 
         let now = Timestamp::now();
 
@@ -103,9 +83,7 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             outputs,
             db_updates: _,
-        } = kolme
-            .execute_messages(tx.0.message.as_inner(), None)
-            .await?;
+        } = kolme.execute_transaction(&tx, None).await?;
 
         let framework_state = Sha256Hash::hash(serde_json::to_string(&framework_state)?);
         let app_state = Sha256Hash::hash(&App::save_state(&app_state)?);
@@ -114,8 +92,8 @@ impl<App: KolmeApp> Processor<App> {
             tx,
             timestamp: now,
             processor: PublicKey(self.secret.public_key()),
-            height: next_event_height,
-            parent: parent_hash,
+            height: kolme.get_next_height(),
+            parent: kolme.get_current_block_hash(),
             framework_state,
             app_state,
             loads: outputs

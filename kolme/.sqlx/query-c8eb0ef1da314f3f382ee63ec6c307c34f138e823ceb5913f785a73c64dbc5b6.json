@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        SELECT id\n                        FROM bridge_events\n                        WHERE chain=$1\n                        AND event_id=$2\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c8eb0ef1da314f3f382ee63ec6c307c34f138e823ceb5913f785a73c64dbc5b6"
+}

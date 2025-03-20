@@ -82,7 +82,7 @@ impl KolmeApp for SampleKolmeApp {
 
     async fn execute(
         &self,
-        ctx: &mut ExecutionContext<Self>,
+        ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
     ) -> anyhow::Result<()> {
         Err(anyhow::anyhow!("execute not implemented"))

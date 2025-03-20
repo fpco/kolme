@@ -66,6 +66,12 @@ pub enum GenesisAction {
 )]
 pub struct AssetId(pub u64);
 
+impl Display for AssetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug,
 )]
@@ -78,6 +84,12 @@ pub struct AccountId(pub u64);
 impl AccountId {
     pub fn next(self) -> AccountId {
         AccountId(self.0 + 1)
+    }
+}
+
+impl Display for AccountId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -202,6 +214,14 @@ impl Display for BridgeActionId {
 ))]
 pub struct SignedBlock<AppMessage>(pub SignedTaggedJson<Block<AppMessage>>);
 
+impl<AppMessage> SignedBlock<AppMessage> {
+    pub fn validate_signature(&self) -> Result<()> {
+        let pubkey = self.0.verify_signature()?;
+        anyhow::ensure!(pubkey == self.0.message.as_inner().processor);
+        Ok(())
+    }
+}
+
 /// The hash of a [Block].
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 pub struct BlockHash(pub Sha256Hash);
@@ -240,18 +260,17 @@ impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
         anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
         Ok(())
     }
+}
 
+impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
     pub fn ensure_is_genesis(&self) -> Result<()> {
-        anyhow::ensure!(self.0.message.as_inner().messages.len() == 1);
-        anyhow::ensure!(matches!(
-            self.0.message.as_inner().messages[0],
-            Message::Genesis(_)
-        ));
+        anyhow::ensure!(self.messages.len() == 1);
+        anyhow::ensure!(matches!(self.messages[0], Message::Genesis(_)));
         Ok(())
     }
 
     pub fn ensure_no_genesis(&self) -> Result<()> {
-        for msg in &self.0.message.as_inner().messages {
+        for msg in &self.messages {
             anyhow::ensure!(!matches!(msg, Message::Genesis(_)));
         }
         Ok(())
@@ -367,8 +386,8 @@ pub struct MessageOutput {
 /// Input and output for a single data load while processing a block.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct BlockDataLoad {
-    /// Description of the query
-    pub query: String,
+    /// Description of the request
+    pub request: String,
     /// The resulting value
     pub response: String,
 }
@@ -377,6 +396,7 @@ pub struct BlockDataLoad {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum ExecAction {
     Transfer {
+        chain: ExternalChain,
         recipient: String,
         funds: Vec<AssetAmount>,
     },

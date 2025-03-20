@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT COUNT(*)\n                FROM bridge_events\n                INNER JOIN bridge_event_attestations\n                ON bridge_events.id=bridge_event_attestations.event\n                WHERE bridge_events.chain=$1\n                AND bridge_events.event_id=$2\n                AND public_key=$3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9701a45cc050a89a088928dd65b78edffb1110c76fa2cb79940b22f7b140e3e3"
+}

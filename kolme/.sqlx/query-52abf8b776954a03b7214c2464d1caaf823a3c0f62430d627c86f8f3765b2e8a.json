@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO account_wallets(account_id,wallet) VALUES($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "52abf8b776954a03b7214c2464d1caaf823a3c0f62430d627c86f8f3765b2e8a"
+}

@@ -63,11 +63,12 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
+        signed_block.validate_signature()?;
         let exec_results = self
             .read()
             .await
-            .execute_messages(
-                signed_block.0.message.as_inner().tx.0.message.as_inner(),
+            .execute_transaction(
+                &signed_block.0.message.as_inner().tx,
                 Some(signed_block.0.message.as_inner().loads.clone()),
             )
             .await?;
@@ -246,7 +247,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         messages: Vec<Message<App::Message>>,
     ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key().into();
-        let nonce = self.get_next_account_nonce(pubkey).await?;
+        let nonce = self.get_account_and_next_nonce(pubkey).await?.next_nonce;
         let tx = Transaction::<App::Message> {
             pubkey,
             nonce,
@@ -284,10 +285,15 @@ impl<App: KolmeApp> KolmeInner<App> {
         }
     }
 
-    pub async fn get_next_account_nonce(&self, key: PublicKey) -> Result<AccountNonce> {
-        let nonce = sqlx::query_scalar!(
+    pub async fn get_account_and_next_nonce(&self, key: PublicKey) -> Result<AccountAndNextNonce> {
+        struct Helper {
+            account_id: i64,
+            nonce: i64,
+        }
+        let helper = sqlx::query_as!(
+            Helper,
             r#"
-                SELECT nonce
+                SELECT blocks.account_id, nonce
                 FROM blocks
                 INNER JOIN account_pubkeys
                 ON account_pubkeys.account_id=blocks.account_id
@@ -299,9 +305,17 @@ impl<App: KolmeApp> KolmeInner<App> {
         )
         .fetch_optional(&self.pool)
         .await?;
-        match nonce {
-            Some(nonce) => Ok(AccountNonce::try_from(nonce)?.next()),
-            None => Ok(AccountNonce::start()),
+        match helper {
+            Some(Helper { account_id, nonce }) => Ok(AccountAndNextNonce {
+                id: AccountId(account_id.try_into()?),
+                exists: true,
+                next_nonce: AccountNonce(nonce.try_into()?).next(),
+            }),
+            None => Ok(AccountAndNextNonce {
+                id: self.get_next_account_id().await?,
+                exists: false,
+                next_nonce: AccountNonce::start(),
+            }),
         }
     }
 
@@ -333,6 +347,16 @@ impl<App: KolmeApp> KolmeInner<App> {
         assert!(count == 0 || count == 1);
         Ok(count == 1)
     }
+}
+
+/// Response from [get_account_and_next_nonce]
+pub struct AccountAndNextNonce {
+    /// The account ID
+    pub id: AccountId,
+    /// Is this already in the database?
+    pub exists: bool,
+    /// The next nonce to be used
+    pub next_nonce: AccountNonce,
 }
 
 /// Also performs validation of the data
@@ -544,12 +568,15 @@ async fn store_block<App: KolmeApp>(
             DatabaseUpdate::AddPubkeyToAccount { id, pubkey } => {
                 let id = i64::try_from(id.0)?;
                 sqlx::query!(
-                    "INSERT INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+                    "INSERT OR IGNORE INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
                     id,
                     pubkey
                 )
                 .execute(&mut **trans)
-                .await?;
+                .await
+                .with_context(|| {
+                    format!("Error while adding pubkey from DatabaseUpdate: {id}/{pubkey}")
+                })?;
             }
         }
     }
@@ -606,7 +633,8 @@ async fn get_or_insert_account_id_and_next_nonce(
                 pubkey
             )
             .execute(&mut **trans)
-            .await?;
+            .await
+            .with_context(|| format!("Error while adding pubkey {pubkey}"))?;
             Ok((AccountId(account_id.try_into()?), AccountNonce::start()))
         }
         Some(account_id) => {

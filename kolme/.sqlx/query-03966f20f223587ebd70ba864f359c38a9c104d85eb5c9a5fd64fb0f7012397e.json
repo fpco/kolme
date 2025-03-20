@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                            INSERT INTO\n                            bridge_events(chain, event_id, event)\n                            VALUES($1, $2, $3)\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "03966f20f223587ebd70ba864f359c38a9c104d85eb5c9a5fd64fb0f7012397e"
+}

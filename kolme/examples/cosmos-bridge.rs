@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use clap::Parser;
-use cosmos::SeedPhrase;
+use cosmos::{HasAddressHrp, SeedPhrase};
 use k256::SecretKey;
 
 use kolme::*;
@@ -26,6 +26,14 @@ pub struct SampleState {
 #[serde(rename_all = "snake_case")]
 pub enum SampleMessage {
     SayHi {},
+    /// Generate a random number, for no particular reason at all
+    Random {},
+    /// The address itself tells us whether to send to Osmosis or Neutron
+    /// FIXME: maybe this should be part of the bank module instead. Then our bridge is just a default Kolme app!
+    SendTo {
+        address: cosmos::Address,
+        amount: u128,
+    },
 }
 
 // Another keypair for client testing:
@@ -35,8 +43,8 @@ pub enum SampleMessage {
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
-const OSMOSIS_TESTNET_CODE_ID: u64 = 12248;
-const NEUTRON_TESTNET_CODE_ID: u64 = 11182;
+const OSMOSIS_TESTNET_CODE_ID: u64 = 12268;
+const NEUTRON_TESTNET_CODE_ID: u64 = 11225;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
@@ -114,10 +122,48 @@ impl KolmeApp for SampleKolmeApp {
         serde_json::from_str(v).map_err(anyhow::Error::from)
     }
 
-    async fn execute(&self, ctx: &mut ExecutionContext<Self>, msg: &Self::Message) -> Result<()> {
+    async fn execute(
+        &self,
+        ctx: &mut ExecutionContext<'_, Self>,
+        msg: &Self::Message,
+    ) -> Result<()> {
         match msg {
             SampleMessage::SayHi {} => ctx.state_mut().hi_count += 1,
+            SampleMessage::SendTo { address, amount } => {
+                let chain = match address.get_address_hrp().as_str() {
+                    "osmo" => ExternalChain::OsmosisTestnet,
+                    "neutron" => ExternalChain::NeutronTestnet,
+                    _ => anyhow::bail!("Unsupported wallet address: {address}"),
+                };
+                ctx.withdraw_asset(
+                    AssetId(1),
+                    chain,
+                    ctx.get_sender_id(),
+                    address.to_string(),
+                    *amount,
+                )?;
+            }
+            SampleMessage::Random {} => {
+                let value = ctx.load_data(RandomU32).await?;
+                ctx.log(format!("Calculated a random number: {value}"));
+            }
         }
+        Ok(())
+    }
+}
+
+#[derive(PartialEq, serde::Serialize, serde::Deserialize)]
+struct RandomU32;
+
+impl<App> KolmeDataRequest<App> for RandomU32 {
+    type Response = u32;
+
+    async fn load(self, _: &App) -> Result<Self::Response> {
+        Ok(rand::random())
+    }
+
+    async fn validate(self, _: &App, _: &Self::Response) -> Result<()> {
+        // No validation possible
         Ok(())
     }
 }
