@@ -57,12 +57,19 @@ CREATE TABLE loads(
 );
 
 CREATE TABLE actions(
+    -- Database-internal primary key
     id INTEGER PRIMARY KEY NOT NULL,
+    chain TEXT NOT NULL,
+    -- The monotonically increasing ID sent to the bridge contracts.
+    action_id INTEGER NOT NULL,
     message INTEGER NOT NULL REFERENCES messages(id),
     position INTEGER NOT NULL,
     payload TEXT NOT NULL,
+    -- The message sent by the processor indicating all approvals are met
+    approved INTEGER NULL REFERENCES messages(id),
     -- The message which confirms that the action occurred
     confirmed INTEGER NULL REFERENCES messages(id),
+    UNIQUE(chain, action_id),
     UNIQUE(message, position)
 );
 
@@ -87,4 +94,14 @@ CREATE TABLE bridge_event_attestations(
     public_key BLOB NOT NULL,
     message INTEGER NOT NULL UNIQUE REFERENCES messages(id),
     UNIQUE(event, public_key)
+);
+
+-- Approvals from executors for actions.
+CREATE TABLE action_approvals(
+    action INTEGER NOT NULL REFERENCES actions(id),
+    public_key BLOB NOT NULL,
+    signature BLOB NOT NULL UNIQUE,
+    recovery INTEGER NOT NULL,
+    message INTEGER NOT NULL UNIQUE REFERENCES messages(id),
+    UNIQUE(action, public_key)
 );

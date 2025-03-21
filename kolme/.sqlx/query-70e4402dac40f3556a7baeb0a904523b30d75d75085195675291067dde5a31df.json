@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "70e4402dac40f3556a7baeb0a904523b30d75d75085195675291067dde5a31df"
+}

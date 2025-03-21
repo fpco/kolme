@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT actions.action_id\n                FROM actions\n                INNER JOIN action_approvals\n                ON actions.id=action_approvals.action\n                WHERE chain=$1\n                AND public_key=$2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "action_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b6e4e5c5fdff8e4e3afd30ccbdac3ed57b416da2c29c959d702c955febe85cf7"
+}

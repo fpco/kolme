@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref, path::Path};
+use std::{backtrace::Backtrace, collections::HashMap, ops::Deref, path::Path};
 
 use sqlx::sqlite::SqliteConnectOptions;
 
@@ -39,7 +39,19 @@ impl<App: KolmeApp> Kolme<App> {
     /// Under the surface, this uses an [tokio::sync::RwLock], so
     /// multiple reads do not block each other.
     pub async fn read(&self) -> KolmeRead<App> {
-        KolmeRead(self.inner.clone().read_owned().await)
+        let backtrace = Backtrace::force_capture();
+        let id = {
+            let guard = self.inner.read().await;
+            let mut guard = guard.deadlock_detector.write().unwrap();
+            let id = guard.next_read_id;
+            guard.next_read_id += 1;
+            guard.active_reads.insert(id, backtrace);
+            id
+        };
+        KolmeRead {
+            guard: self.inner.clone().read_owned().await,
+            id,
+        }
     }
 
     /// Notify the system of a genesis contract instantiation.
@@ -72,6 +84,19 @@ impl<App: KolmeApp> Kolme<App> {
                 Some(signed_block.0.message.as_inner().loads.clone()),
             )
             .await?;
+        {
+            for (id, backtrace) in &self
+                .inner
+                .read()
+                .await
+                .deadlock_detector
+                .read()
+                .unwrap()
+                .active_reads
+            {
+                println!("{id}: {backtrace}");
+            }
+        }
         let mut kolme = self.inner.write().await;
         let mut trans = kolme.pool.begin().await?;
         store_block(&mut kolme, &mut trans, &signed_block, &exec_results).await?;
@@ -88,13 +113,27 @@ impl<App: KolmeApp> Kolme<App> {
 }
 
 /// Read-only access to Kolme.
-pub struct KolmeRead<App: KolmeApp>(tokio::sync::OwnedRwLockReadGuard<KolmeInner<App>>);
+pub struct KolmeRead<App: KolmeApp> {
+    guard: tokio::sync::OwnedRwLockReadGuard<KolmeInner<App>>,
+    id: usize,
+}
+
+impl<App: KolmeApp> Drop for KolmeRead<App> {
+    fn drop(&mut self) {
+        self.guard
+            .deadlock_detector
+            .write()
+            .unwrap()
+            .active_reads
+            .remove(&self.id);
+    }
+}
 
 impl<App: KolmeApp> Deref for KolmeRead<App> {
     type Target = KolmeInner<App>;
 
     fn deref(&self) -> &Self::Target {
-        self.0.deref()
+        self.guard.deref()
     }
 }
 
@@ -106,6 +145,15 @@ pub struct KolmeInner<App: KolmeApp> {
     pub(super) next_height: BlockHeight,
     pub(super) current_block_hash: BlockHash,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<ExternalChain, cosmos::Cosmos>>,
+    // TODO Intended only for dev-time, we should either remove in the future
+    // or gate with feature flags/optimization flags.
+    pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
+}
+
+#[derive(Default)]
+pub(super) struct DeadlockDetector {
+    pub(super) next_read_id: usize,
+    pub(super) active_reads: HashMap<usize, Backtrace>,
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -137,6 +185,7 @@ impl<App: KolmeApp> Kolme<App> {
             next_height,
             current_block_hash,
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
+            deadlock_detector: Default::default(),
         };
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),
@@ -225,12 +274,63 @@ impl<App: KolmeApp> KolmeInner<App> {
         None
     }
 
+    pub async fn get_next_bridge_action(
+        &self,
+        chain: ExternalChain,
+    ) -> Result<Option<PendingBridgeAction>> {
+        struct Helper {
+            height: i64,
+            message: i64,
+            payload: String,
+            action_id: i64,
+        }
+        let chain_str = chain.as_ref();
+        let helper = sqlx::query_as!(
+            Helper,
+            r#"
+                SELECT messages.height, messages.message, actions.payload, actions.action_id
+                FROM actions
+                INNER JOIN messages
+                ON actions.approved=messages.id
+                WHERE chain=$1
+                AND confirmed IS NULL
+            "#,
+            chain_str
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(Helper {
+            payload,
+            height,
+            message,
+            action_id,
+        }) = helper
+        else {
+            return Ok(None);
+        };
+        Ok(Some(PendingBridgeAction {
+            chain,
+            payload,
+            height: BlockHeight::try_from(height)?,
+            message: message.try_into()?,
+            action_id: BridgeActionId(action_id.try_into()?),
+        }))
+    }
+
     pub fn get_app_state(&self) -> &App::State {
         &self.app_state
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
         self.framework_state.processor
+    }
+
+    pub fn get_executor_pubkeys(&self) -> &BTreeSet<PublicKey> {
+        &self.framework_state.executors
+    }
+
+    pub fn get_needed_executors(&self) -> usize {
+        self.framework_state.needed_executors
     }
 
     pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
@@ -286,37 +386,42 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub async fn get_account_and_next_nonce(&self, key: PublicKey) -> Result<AccountAndNextNonce> {
-        struct Helper {
-            account_id: i64,
-            nonce: i64,
-        }
-        let helper = sqlx::query_as!(
-            Helper,
-            r#"
-                SELECT blocks.account_id, nonce
-                FROM blocks
-                INNER JOIN account_pubkeys
-                ON account_pubkeys.account_id=blocks.account_id
-                WHERE account_pubkeys.pubkey=$1
-                ORDER BY nonce DESC
-                LIMIT 1
-            "#,
+        let account_id = sqlx::query_scalar!(
+            "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
             key
         )
         .fetch_optional(&self.pool)
         .await?;
-        match helper {
-            Some(Helper { account_id, nonce }) => Ok(AccountAndNextNonce {
-                id: AccountId(account_id.try_into()?),
-                exists: true,
-                next_nonce: AccountNonce(nonce.try_into()?).next(),
-            }),
-            None => Ok(AccountAndNextNonce {
+
+        let Some(account_id) = account_id else {
+            return Ok(AccountAndNextNonce {
                 id: self.get_next_account_id().await?,
                 exists: false,
                 next_nonce: AccountNonce::start(),
-            }),
-        }
+            });
+        };
+
+        let last_nonce = sqlx::query_scalar!(
+            r#"
+                SELECT nonce
+                FROM blocks
+                WHERE account_id=$1
+                ORDER BY nonce DESC
+                LIMIT 1
+            "#,
+            account_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(AccountAndNextNonce {
+            id: AccountId(account_id.try_into()?),
+            exists: true,
+            next_nonce: match last_nonce {
+                Some(last_nonce) => AccountNonce(last_nonce.try_into()?).next(),
+                None => AccountNonce::start(),
+            },
+        })
     }
 
     pub async fn received_listener_attestation(
@@ -347,6 +452,159 @@ impl<App: KolmeApp> KolmeInner<App> {
         assert!(count == 0 || count == 1);
         Ok(count == 1)
     }
+
+    /// Get the ID of the latest action emitted for the given chain, if present.
+    pub async fn get_latest_action(&self, chain: ExternalChain) -> Result<Option<BridgeActionId>> {
+        let chain = chain.as_ref();
+        let id = sqlx::query_scalar!(
+            r#"
+                SELECT action_id
+                FROM actions
+                WHERE chain=$1
+                ORDER BY action_id DESC
+                LIMIT 1
+            "#,
+            chain
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        match id {
+            Some(id) => Ok(Some(BridgeActionId(id.try_into()?))),
+            None => Ok(None),
+        }
+    }
+
+    /// Get the ID of the latest action on the given chain signed by the given key.
+    pub async fn get_latest_approval(
+        &self,
+        chain: ExternalChain,
+        pubkey: PublicKey,
+    ) -> Result<Option<BridgeActionId>> {
+        let chain = chain.as_ref();
+        let latest_action_id = sqlx::query_scalar!(
+            r#"
+                SELECT actions.action_id
+                FROM actions
+                INNER JOIN action_approvals
+                ON actions.id=action_approvals.action
+                WHERE chain=$1
+                AND public_key=$2
+            "#,
+            chain,
+            pubkey,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(match latest_action_id {
+            Some(id) => Some(BridgeActionId(id.try_into()?).next()),
+            None => None,
+        })
+    }
+
+    /// Get the ID of the first action which has not yet been approved by the processor.
+    pub async fn get_first_unapproved_action(
+        &self,
+        chain: ExternalChain,
+    ) -> Result<Option<BridgeActionId>> {
+        let chain = chain.as_ref();
+        let id = sqlx::query_scalar!(
+            r#"
+                SELECT action_id
+                FROM actions
+                WHERE chain=$1
+                AND approved IS NULL
+                ORDER BY action_id ASC
+                LIMIT 1
+            "#,
+            chain
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        match id {
+            Some(id) => Ok(Some(BridgeActionId(id.try_into()?))),
+            None => Ok(None),
+        }
+    }
+
+    /// Get the public keys of all executor approvals on an action.
+    pub async fn get_action_approval_signatures(
+        &self,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    ) -> Result<BTreeMap<PublicKey, SignatureWithRecovery>> {
+        struct Helper {
+            public_key: Vec<u8>,
+            signature: Vec<u8>,
+            recovery: i64,
+        }
+        let chain = chain.as_ref();
+        let action_id = i64::try_from(action_id.0)?;
+        let helpers = sqlx::query_as!(
+            Helper,
+            r#"
+                SELECT public_key, signature, recovery
+                FROM actions
+                INNER JOIN action_approvals
+                ON actions.id=action_approvals.action
+                WHERE chain=$1
+                AND action_id=$2
+            "#,
+            chain,
+            action_id,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        helpers
+            .into_iter()
+            .map(
+                |Helper {
+                     public_key,
+                     signature,
+                     recovery,
+                 }| {
+                    Ok((
+                        PublicKey::try_from_bytes(&public_key)?,
+                        SignatureWithRecovery {
+                            sig: k256::ecdsa::Signature::from_slice(&signature)?,
+                            recid: k256::ecdsa::RecoveryId::from_byte(recovery.try_into()?)
+                                .context("Invalid recovery found")?,
+                        },
+                    ))
+                },
+            )
+            .collect()
+    }
+
+    /// Get the payload of a bridge action.
+    pub async fn get_action_payload(
+        &self,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    ) -> Result<String> {
+        get_action_payload(&self.pool, chain, action_id).await
+    }
+}
+
+pub(super) async fn get_action_payload(
+    pool: &sqlx::SqlitePool,
+    chain: ExternalChain,
+    action_id: BridgeActionId,
+) -> Result<String> {
+    let chain = chain.as_ref();
+    let action_id = i64::try_from(action_id.0)?;
+    let payload = sqlx::query_scalar!(
+        r#"
+                SELECT payload
+                FROM actions
+                WHERE chain=$1
+                AND action_id=$2
+            "#,
+        chain,
+        action_id
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(payload)
 }
 
 /// Response from [get_account_and_next_nonce]
@@ -455,12 +713,39 @@ async fn store_block<App: KolmeApp>(
         }
         for (position, action) in actions.iter().enumerate() {
             let position = i64::try_from(position)?;
-            let action = serde_json::to_string(&action)?;
+            let chain = match action {
+                ExecAction::Transfer {
+                    chain,
+                    recipient: _,
+                    funds: _,
+                } => *chain,
+            };
+            let chain_str = chain.as_ref();
+
+            let latest_action_id = sqlx::query_scalar!(
+                "SELECT action_id FROM actions WHERE chain=$1 ORDER BY action_id DESC LIMIT 1",
+                chain_str
+            )
+            .fetch_optional(&mut **trans)
+            .await?;
+            let action_id = latest_action_id.map_or(0, |x| x + 1);
+
+            let payload = action.to_payload(
+                chain,
+                kolme.get_bridge_contracts(),
+                BridgeActionId(action_id.try_into()?),
+            )?;
+
             sqlx::query!(
-                "INSERT INTO actions(message, position, payload) VALUES($1, $2, $3)",
+                r#"
+                    INSERT INTO actions(chain, action_id, message, position, payload)
+                    VALUES($1, $2, $3, $4, $5)
+                "#,
+                chain_str,
+                action_id,
                 message,
                 position,
-                action
+                payload,
             )
             .execute(&mut **trans)
             .await?;
@@ -577,6 +862,73 @@ async fn store_block<App: KolmeApp>(
                 .with_context(|| {
                     format!("Error while adding pubkey from DatabaseUpdate: {id}/{pubkey}")
                 })?;
+            }
+            DatabaseUpdate::ApproveAction {
+                pubkey,
+                signature,
+                recovery,
+                msg_index,
+                chain,
+                action_id,
+            } => {
+                let chain = chain.as_ref();
+                let action_id = i64::try_from(action_id.0)?;
+                let action = sqlx::query_scalar!(
+                    r#"
+                        SELECT id
+                        FROM actions
+                        WHERE chain=$1
+                        AND action_id=$2
+                    "#,
+                    chain,
+                    action_id,
+                )
+                .fetch_one(&mut **trans)
+                .await?;
+
+                let message_db_id = message_db_ids[*msg_index];
+                let signature = signature.to_bytes();
+                let signature = signature.as_slice();
+                let recovery = recovery.to_byte();
+                sqlx::query!(
+                    r#"
+                        INSERT INTO action_approvals
+                        (action, public_key, signature, recovery, message)
+                        VALUES($1, $2, $3, $4, $5)
+                    "#,
+                    action,
+                    pubkey,
+                    signature,
+                    recovery,
+                    message_db_id
+                )
+                .execute(&mut **trans)
+                .await?;
+            }
+            DatabaseUpdate::ProcessorApproveAction {
+                msg_index,
+                chain,
+                action_id,
+            } => {
+                let chain = chain.as_ref();
+                let action_id = i64::try_from(action_id.0)?;
+                let message_db_id = message_db_ids[*msg_index];
+
+                let rows = sqlx::query!(
+                    r#"
+                        UPDATE actions
+                        SET approved=$1
+                        WHERE chain=$2
+                        AND action_id=$3
+                    "#,
+                    message_db_id,
+                    chain,
+                    action_id
+                )
+                .execute(&mut **trans)
+                .await?
+                .rows_affected();
+                anyhow::ensure!(rows == 1);
             }
         }
     }

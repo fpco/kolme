@@ -1,6 +1,7 @@
 mod api_server;
 mod common;
 mod core;
+mod executor;
 mod listener;
 mod processor;
 mod submitter;
@@ -8,6 +9,7 @@ mod submitter;
 pub use api_server::ApiServer;
 pub use common::*;
 pub use core::*;
+pub use executor::Executor;
 pub use listener::Listener;
 pub use processor::Processor;
 pub use submitter::Submitter;

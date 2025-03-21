@@ -1959,6 +1959,7 @@ dependencies = [
  "chrono",
  "clap",
  "cosmos",
+ "cosmwasm-std",
  "dotenvy",
  "hex",
  "jiff",

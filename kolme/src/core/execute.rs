@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+use k256::ecdsa::VerifyingKey;
+
 use crate::core::*;
 
 /// Execution context for a single message.
@@ -50,6 +52,19 @@ pub enum DatabaseUpdate {
     AddPubkeyToAccount {
         id: AccountId,
         pubkey: PublicKey,
+    },
+    ApproveAction {
+        pubkey: PublicKey,
+        signature: k256::ecdsa::Signature,
+        recovery: k256::ecdsa::RecoveryId,
+        msg_index: usize,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    },
+    ProcessorApproveAction {
+        msg_index: usize,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
     },
 }
 
@@ -178,6 +193,24 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             } => {
                 self.listener(*chain, event, *event_id, msg_index).await?;
             }
+            Message::Approve {
+                chain,
+                action_id,
+                signature,
+                recovery,
+            } => {
+                self.approve(*chain, *action_id, *signature, *recovery, msg_index)
+                    .await?
+            }
+            Message::ProcessorApprove {
+                chain,
+                action_id,
+                processor,
+                executors,
+            } => {
+                self.processor_approve(*chain, *action_id, processor, executors, msg_index)
+                    .await?;
+            }
             Message::Auth(_auth_message) => todo!(),
         }
         Ok(())
@@ -267,6 +300,83 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             was_accepted,
             action_id,
         });
+        Ok(())
+    }
+
+    async fn approve(
+        &mut self,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+        signature: k256::ecdsa::Signature,
+        recovery: k256::ecdsa::RecoveryId,
+        msg_index: usize,
+    ) -> Result<()> {
+        let payload = get_action_payload(&self.pool, chain, action_id).await?;
+        let key = VerifyingKey::recover_from_msg(payload.as_bytes(), &signature, recovery)?;
+        let key = PublicKey(key.into());
+        anyhow::ensure!(self.framework_state.executors.contains(&key));
+        let chain_db = chain.as_ref();
+        let action_id_db = i64::try_from(action_id.0)?;
+        let count = sqlx::query_scalar!(
+            r#"
+                SELECT COUNT(*)
+                FROM actions
+                INNER JOIN action_approvals
+                ON actions.id=action_approvals.action
+                WHERE chain=$1
+                AND action_id=$2
+                AND public_key=$3
+            "#,
+            chain_db,
+            action_id_db,
+            key
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        anyhow::ensure!(count == 0);
+        self.db_updates.push(DatabaseUpdate::ApproveAction {
+            pubkey: key,
+            signature,
+            recovery,
+            msg_index,
+            chain,
+            action_id,
+        });
+        Ok(())
+    }
+
+    async fn processor_approve(
+        &mut self,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+        processor: &SignatureWithRecovery,
+        executors: &[SignatureWithRecovery],
+        msg_index: usize,
+    ) -> Result<()> {
+        anyhow::ensure!(executors.len() >= self.framework_state.needed_executors);
+
+        let payload = get_action_payload(&self.pool, chain, action_id).await?;
+
+        let processor = processor.validate(payload.as_bytes())?;
+        anyhow::ensure!(processor == self.framework_state.processor);
+
+        let executors_checked = executors
+            .iter()
+            .map(|sig| {
+                let pubkey = sig.validate(payload.as_bytes())?;
+                anyhow::ensure!(self.framework_state.executors.contains(&pubkey));
+                Ok(pubkey)
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        anyhow::ensure!(executors.len() == executors_checked.len());
+
+        self.db_updates
+            .push(DatabaseUpdate::ProcessorApproveAction {
+                msg_index,
+                chain,
+                action_id,
+            });
+
         Ok(())
     }
 

@@ -75,18 +75,18 @@ impl<T> SignedTaggedJson<T> {
     }
 }
 
-mod recovery {
+pub(crate) mod recovery {
     use k256::ecdsa::RecoveryId;
     use serde::{Deserialize, Serialize};
 
-    pub(super) fn serialize<S: serde::Serializer>(
+    pub(crate) fn serialize<S: serde::Serializer>(
         id: &RecoveryId,
         s: S,
     ) -> Result<S::Ok, S::Error> {
         id.to_byte().serialize(s)
     }
 
-    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
         d: D,
     ) -> Result<RecoveryId, D::Error> {
         let byte = u8::deserialize(d)?;
@@ -272,6 +272,10 @@ pub struct PublicKey(pub k256::PublicKey);
 impl PublicKey {
     pub fn as_bytes(&self) -> Box<[u8]> {
         self.0.to_sec1_bytes()
+    }
+
+    pub fn try_from_bytes(public_key: &[u8]) -> Result<Self> {
+        Ok(PublicKey(k256::PublicKey::from_sec1_bytes(public_key)?))
     }
 }
 

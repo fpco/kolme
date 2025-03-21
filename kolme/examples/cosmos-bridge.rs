@@ -44,7 +44,7 @@ const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de913
 const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
 const OSMOSIS_TESTNET_CODE_ID: u64 = 12268;
-const NEUTRON_TESTNET_CODE_ID: u64 = 11225;
+const NEUTRON_TESTNET_CODE_ID: u64 = 11227;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
@@ -226,6 +226,8 @@ async fn serve(bind: SocketAddr) -> Result<()> {
     set.spawn(processor.run());
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run());
+    let executor = Executor::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(executor.run());
     let submitter = Submitter::new(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
@@ -284,14 +286,18 @@ async fn broadcast(message: String, secret: String, host: String) -> Result<()> 
     struct Res {
         txhash: Sha256Hash,
     }
-    let Res { txhash } = client
+    let res = client
         .put(format!("{host}/broadcast"))
         .json(&signed)
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
+
+    if let Err(e) = res.error_for_status_ref() {
+        let t = res.text().await?;
+        anyhow::bail!("Error broadcasting:\n{e}\n{t}");
+    }
+
+    let Res { txhash } = res.json().await?;
     println!("txhash: {txhash}");
     Ok(())
 }

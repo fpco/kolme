@@ -1,5 +1,7 @@
 use std::ops::Deref;
 
+use k256::ecdsa::SigningKey;
+
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
@@ -13,6 +15,14 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn run(self) -> Result<()> {
+        let chains = self
+            .kolme
+            .read()
+            .await
+            .get_bridge_contracts()
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
         if self.kolme.read().await.get_next_height().is_start() {
             tracing::info!("Creating genesis event");
             self.create_genesis_event().await?;
@@ -21,13 +31,13 @@ impl<App: KolmeApp> Processor<App> {
         // Subscribe to any newly arrived events.
         let mut receiver = self.kolme.subscribe();
 
+        self.approve_actions_all(&chains).await?;
+
         loop {
             let notification = receiver.recv().await?;
             match notification {
                 Notification::NewBlock(_) => {
-                    // Safe to ignore, either we generated the new block ourself,
-                    // in which case it's already added, or it came from another
-                    // component which is responsible for adding it.
+                    self.approve_actions_all(&chains).await?;
                 }
                 Notification::GenesisInstantiation {
                     chain: _,
@@ -103,5 +113,62 @@ impl<App: KolmeApp> Processor<App> {
         };
         let event = TaggedJson::new(approved_block)?;
         Ok(SignedBlock(event.sign(&self.secret)?))
+    }
+
+    async fn approve_actions_all(&self, chains: &[ExternalChain]) -> Result<()> {
+        for chain in chains {
+            self.approve_actions(*chain).await?;
+        }
+        Ok(())
+    }
+
+    async fn approve_actions(&self, chain: ExternalChain) -> Result<()> {
+        // We only need to bother approving one action at a time. Each time we
+        // approve an action, it produces a new block, which will allow us to check if we
+        // need to approve anything else.
+        let kolme = self.kolme.read().await;
+
+        let Some(action_id) = kolme.get_first_unapproved_action(chain).await? else {
+            return Ok(());
+        };
+
+        let payload = kolme.get_action_payload(chain, action_id).await?;
+
+        let sigs = kolme
+            .get_action_approval_signatures(chain, action_id)
+            .await?;
+        let mut executors = vec![];
+        for (key, sig) in &sigs {
+            let key2 = sig.validate(payload.as_bytes())?;
+            anyhow::ensure!(key == &key2);
+            if kolme.get_executor_pubkeys().contains(key) {
+                executors.push(*sig);
+            }
+        }
+
+        if executors.len() < kolme.get_needed_executors() {
+            // Not enough approvals. Don't bother with later actions, we want to approve in order.
+            return Ok(());
+        }
+
+        let (sig, recid) = SigningKey::from(&self.secret).sign_recoverable(payload.as_bytes())?;
+        let processor = SignatureWithRecovery { sig, recid };
+
+        let tx = kolme
+            .create_signed_transaction(
+                &self.secret,
+                vec![Message::ProcessorApprove {
+                    chain,
+                    action_id,
+                    processor,
+                    executors,
+                }],
+            )
+            .await?;
+
+        std::mem::drop(kolme);
+        self.add_transaction(tx).await?;
+
+        Ok(())
     }
 }

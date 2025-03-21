@@ -66,6 +66,11 @@ async fn broadcast<App: KolmeApp>(
     Json(tx): Json<SignedTransaction<App::Message>>,
 ) -> impl IntoResponse {
     let txhash = tx.0.message_hash();
+    if let Err(e) = kolme.read().await.execute_transaction(&tx, None).await {
+        let mut res = e.to_string().into_response();
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        return res;
+    }
     match kolme.propose_transaction(tx) {
         Ok(()) => Json(serde_json::json!({"txhash":txhash})).into_response(),
         Err(e) => {
