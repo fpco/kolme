@@ -1,0 +1,367 @@
+pub use borsh;
+pub use pinocchio;
+pub use pinocchio_system as system;
+pub use pinocchio_token as token;
+
+use pinocchio::{
+    account_info::AccountInfo,
+    instruction::{Seed, Signer},
+    program_error::ProgramError,
+    pubkey::{create_program_address, find_program_address, Pubkey},
+    sysvars::{rent::Rent, Sysvar},
+};
+use bitflags::bitflags;
+use borsh::{BorshDeserialize, BorshSerialize};
+use smallvec::SmallVec;
+use once_cell::unsync::Lazy;
+
+pub type Result<T> = std::result::Result<T, ProgramError>;
+
+pub struct Context<'a> {
+    /// The currently executed program pubkey.
+    pub program_id: &'a Pubkey,
+    /// The raw unchecked accounts that were passed to the entrypoint.
+    pub accounts: &'a [AccountInfo],
+    rent: Lazy<Result<Rent>>
+}
+
+pub trait PdaDataSerialize {
+    fn serialized_size(&self) -> u64;
+    fn serialize(&self, storage: &mut [u8]) -> Result<()>;
+}
+
+pub trait PdaDataDeserialize: Sized {
+    fn deserialize(storage: &[u8]) -> Result<Self>;
+}
+
+pub struct PdaData<T, const D: u8> {
+    pub bump: u8,
+    pub data: T
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PdaDerivation<'a> {
+    /// Seeds bytes **excluding** a bump seed.
+    pub seeds: &'a [&'a [u8]],
+    /// A bump seed can be provided if the account is known ahead of time.
+    /// If deriving accounts based on instruction input this should most likely be [`None`].
+    pub bump: Option<u8>,
+}
+
+bitflags! {
+    pub struct AccountReq: u8 {
+        const SIGNER = 1;
+        const WRITABLE = 1 << 1;
+        const EXECUTABLE = 1 << 2;
+    }
+}
+
+#[macro_export]
+macro_rules! log {
+    ($msg:expr) => { $crate::log($msg) };
+    ($($arg:tt)*) => ($crate::log(&format!($($arg)*)));
+}
+
+#[inline]
+pub fn log(msg: &str) {
+    #[cfg(target_os = "solana")]
+    unsafe {
+        pinocchio::syscalls::sol_log_(msg.as_ptr(), msg.len() as u64);
+    }
+
+    #[cfg(not(target_os = "solana"))]
+    println!("{msg}");
+}
+
+#[inline]
+pub fn assert_owner(acc: &AccountInfo, owner_key: &Pubkey) -> Result<()> {
+    unsafe {
+        // SAFETY: acc.owner() requires unsafe because a call to acc.assign() would invalidate the reference.
+        // However we do not keep or receive any references to it.
+        if acc.owner() != owner_key {
+            return Err(ProgramError::InvalidAccountOwner);
+        }
+    }
+
+    Ok(())
+}
+
+impl<'a> Context<'a> {
+    #[inline]
+    pub fn new(program_id: &'a Pubkey, accounts: &'a [AccountInfo]) -> Self {
+        Self {
+            program_id,
+            accounts,
+            rent: Lazy::new(Rent::get)
+        }
+    }
+
+    #[inline]
+    pub fn rent(&self) -> Result<Rent> {
+        Lazy::force(&self.rent).as_ref().map_err(|e| e.clone()).cloned()
+    }
+
+    #[inline]
+    pub fn assert_accounts_len(&self, len: usize) -> Result<()> {
+        if self.accounts.len() != len {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn account(&self, index: usize, req: AccountReq) -> Result<AccountInfo> {
+        let acc = self.accounts[index].clone();
+
+        let not_ok =
+            (req.contains(AccountReq::SIGNER) & !acc.is_signer()) |
+            (req.contains(AccountReq::WRITABLE) & !acc.is_writable()) |
+            (req.contains(AccountReq::EXECUTABLE) & !acc.executable());
+
+        if not_ok {
+            return Err(ProgramError::InvalidArgument);
+        }
+
+        Ok(acc)
+    }
+
+    #[inline]
+    pub fn assert_is_system_program(&self, index: usize) -> Result<()> {
+        if self.accounts[index].key() != &system::ID {
+            return Err(ProgramError::IllegalOwner);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub fn assert_is_token_program(&self, index: usize) -> Result<()> {
+        if self.accounts[index].key() != &token::ID {
+            return Err(ProgramError::IllegalOwner);
+        }
+
+        Ok(())
+    }
+
+    /// Will create and initialize the account with the given data. Will return an error if the program is already the owner (account was already initialized).
+    /// Will check if the provided PDA address is legitimate by deriving its key and comparing it to the provided account.
+    pub fn init_pda<T: PdaDataSerialize, const D: u8>(
+        &self,
+        payer: &AccountInfo,
+        pda: &AccountInfo,
+        derivation: PdaDerivation,
+        data: T
+    ) -> Result<PdaData<T, D>> {
+        unsafe {
+            // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
+            // However we do not keep or receive any references to it.
+            if pda.owner() == self.program_id {
+                return Err(ProgramError::AccountAlreadyInitialized);
+            }
+        }
+
+        let (address, bump) = if let Some(bump) = derivation.bump {
+            let bump_slice = &[bump];
+            let mut seeds = SmallVec::<[&[u8]; 4]>::from_iter(derivation.seeds.into_iter().map(|x| *x));
+
+            // Can't use chain() like below because the compiler thinks it's being passed &u8 even when bump_slice is explicity typed as &[u8]...
+            seeds.push(bump_slice);
+
+            let address = create_program_address(seeds.as_slice(), &self.program_id)?;
+
+            (address, bump)
+        } else {
+            find_program_address(derivation.seeds, &self.program_id)
+        };
+
+        if pda.key() != &address {
+            return Err(ProgramError::InvalidArgument);
+        }
+
+        let bump_slice = &[bump];
+        let bump_seed = [Seed::from(bump_slice)];
+        let seeds: SmallVec<[Seed; 4]> = SmallVec::from_iter(derivation.seeds.into_iter()
+            .map(|x| Seed::from(*x))
+            .chain(bump_seed)
+        );
+
+        let rent = self.rent()?;
+        let space = data.serialized_size() + 2; // +1 for discriminator byte and +1 for bump seed
+        let signers = [Signer::from(seeds.as_slice())];
+
+        let existing_lamports = pda.lamports();
+
+        if existing_lamports == 0 {
+            system::instructions::CreateAccount {
+                from: payer,
+                to: pda,
+                lamports: rent.minimum_balance(space as usize).max(1),
+                space,
+                owner: self.program_id,
+            }
+            .invoke_signed(&signers)?;
+
+            return Ok(PdaData { bump, data });
+        }
+
+        // Anyone can transfer lamports to accounts before they're initialized - in that case, creating the account won't work.
+        // In order to get around it, we need to fund the account with enough lamports to be rent exempt,
+        // then allocate the required space and set the owner to the current program.
+
+        let required_lamports = rent
+            .minimum_balance(space as usize)
+            .max(1)
+            .saturating_sub(existing_lamports);
+
+        if required_lamports > 0 {
+            system::instructions::Transfer {
+                from: payer,
+                to: pda,
+                lamports: required_lamports,
+            }
+            .invoke()?;
+        }
+
+        system::instructions::Allocate {
+            account: pda,
+            space,
+        }
+        .invoke_signed(&signers)?;
+
+        system::instructions::Assign {
+            account: pda,
+            owner: self.program_id,
+        }
+        .invoke_signed(&signers)?;
+
+        Ok(PdaData { bump, data })
+    }
+
+    /// Will load the existing data or return an error if program isn't owner or data is empty (account is uninitialized).
+    /// The latter case means that account ownership was transferred from another program (or strictly speaking the PDA wasn't initialized using this library's code).
+    /// We currently don't have logic to handle this scenario but if we did it would be a separate method to explicitly opt-out of this data check.
+    /// Will check if the provided PDA address is legitimate by deriving its key and comparing it to the provided account.
+    pub fn load_pda<T: PdaDataDeserialize, const D: u8>(&self, pda: &AccountInfo, seeds: &[&[u8]]) -> Result<PdaData<T, D>> {
+        unsafe {
+            // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
+            // However we do not keep or receive any references to it.
+
+            // We check if data_len() is zero because it's possible for another program to have transferred ownership over.
+            // In such case it has to have set the storage to 0 and we catch this early.
+            if pda.owner() != self.program_id || pda.data_len() == 0 {
+                return Err(ProgramError::UninitializedAccount);
+            }
+        }
+
+        // Since the account contains data that it means that it was initialized before.
+        // We can verify that it was derived using the canonical bump by calling the much cheaper create_program_address()
+        assert!(pda.lamports() != 0);
+        let data = PdaData::<T, D>::deserialize_from(pda)?;
+
+        let bump_slice = &[data.bump];
+        let mut seeds = SmallVec::<[&[u8]; 4]>::from_iter(seeds.into_iter().map(|x| *x));
+
+        // Can't use chain() because the compiler thinks it's being passed &u8 even when bump_slice is explicity typed as &[u8]...
+        seeds.push(bump_slice);
+
+        let address = create_program_address(seeds.as_slice(), &self.program_id)?;
+
+        if pda.key() != &address {
+            return Err(ProgramError::InvalidArgument);
+        }
+
+        return Ok(data);
+    }
+
+    /// Will create the account if it hasn't been initialized. Otherwise will load the existing data.
+    /// Will check if the provided PDA address is legitimate by deriving its key and comparing it to the provided account.
+    pub fn load_or_init_pda<T: PdaDataSerialize + PdaDataDeserialize, const D: u8>(
+        &self,
+        payer: &AccountInfo,
+        pda: &AccountInfo,
+        derivation: PdaDerivation,
+        init: impl FnOnce() -> T
+    ) -> Result<PdaData<T, D>> {
+        // Note: load_pda() also checks for data_len being 0 (see the comment there).
+        // Here we don't because we still want to treat the account as initialized in such case.
+        let is_initialized = unsafe {
+            // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
+            // However we do not keep or receive any references to it.
+            pda.owner() == self.program_id
+        };
+
+        if is_initialized {
+            self.load_pda(pda, derivation.seeds)
+        } else {
+            self.init_pda(payer, pda, derivation, init())
+        }
+    }
+}
+
+impl<'a> PdaDerivation<'a> {
+    #[inline]
+    pub const fn new(seeds: &'a [&'a [u8]]) -> Self {
+        Self { seeds, bump: None }
+    }
+
+    #[inline]
+    pub const fn with_bump(seeds: &'a [&'a [u8]], bump: u8) -> Self {
+        Self { seeds, bump: Some(bump) }
+    }
+}
+
+impl<T: PdaDataSerialize, const D: u8> PdaData<T, D> {
+    pub fn serialize_into(&self, acc: &AccountInfo) -> Result<()> {
+        let bytes = &mut *acc.try_borrow_mut_data()?;
+
+        if bytes.len() < 2 {
+            return Err(ProgramError::AccountDataTooSmall);
+        }
+
+        bytes[0] = D;
+        bytes[1] = self.bump;
+
+        PdaDataSerialize::serialize(&self.data, &mut bytes[2..])
+    }
+}
+
+impl<T: PdaDataDeserialize, const D: u8> PdaData<T, D> {
+    pub fn deserialize_from(acc: &AccountInfo) -> Result<Self> {
+        let bytes = &*acc.try_borrow_data()?;
+
+        if bytes.len() < 2 {
+            return Err(ProgramError::AccountDataTooSmall);
+        }
+
+        let discriminator = bytes[0];
+        let bump = bytes[1];
+
+        if discriminator != D {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
+        let data = PdaDataDeserialize::deserialize(&bytes[2..])?;
+
+        Ok(Self { bump, data })
+    }
+}
+
+impl<T: BorshSerialize + Sized> PdaDataSerialize for T {
+    #[inline]
+    fn serialized_size(&self) -> u64 {
+        borsh::object_length(self).unwrap() as u64
+    }
+
+    #[inline]
+    fn serialize(&self, mut storage: &mut [u8]) -> Result<()> {
+        BorshSerialize::serialize(self, &mut storage).map_err(|_| ProgramError::BorshIoError)
+    }
+}
+
+impl<T: BorshDeserialize + Sized> PdaDataDeserialize for T {
+    #[inline]
+    fn deserialize(storage: &[u8]) -> Result<Self> {
+        BorshDeserialize::try_from_slice(storage).map_err(|_| ProgramError::BorshIoError)
+    }
+}

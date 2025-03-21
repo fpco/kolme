@@ -1,0 +1,13 @@
+[package]
+name = "solbox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pinocchio = "0.8.0"
+pinocchio-system = "0.2.2"
+pinocchio-token = "0.3.0"
+bitflags = "2.9.0"
+borsh = "1.5.5"
+smallvec = { version = "1.14.0", default-features = false, features = ["union", "const_generics", "const_new"]}
+once_cell = { version = "1.21.1", default-features = false }
