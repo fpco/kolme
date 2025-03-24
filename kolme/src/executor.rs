@@ -1,14 +1,12 @@
-use k256::ecdsa::SigningKey;
-
 use crate::*;
 
 pub struct Executor<App: KolmeApp> {
     kolme: Kolme<App>,
-    secret: k256::SecretKey,
+    secret: SecretKey,
 }
 
 impl<App: KolmeApp> Executor<App> {
-    pub fn new(kolme: Kolme<App>, secret: k256::SecretKey) -> Self {
+    pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
         Executor { kolme, secret }
     }
 
@@ -35,7 +33,7 @@ impl<App: KolmeApp> Executor<App> {
             return Ok(());
         };
         let my_latest = kolme
-            .get_latest_approval(chain, PublicKey(self.secret.public_key()))
+            .get_latest_approval(chain, self.secret.public_key())
             .await?;
         let mut next = match my_latest {
             None => BridgeActionId::start(),
@@ -57,8 +55,7 @@ impl<App: KolmeApp> Executor<App> {
         action_id: BridgeActionId,
     ) -> Result<()> {
         let payload = kolme.get_action_payload(chain, action_id).await?;
-        let (signature, recovery) =
-            SigningKey::from(&self.secret).sign_recoverable(payload.as_bytes())?;
+        let (signature, recovery) = self.secret.sign_recoverable(&payload)?;
         let tx = kolme
             .create_signed_transaction(
                 &self.secret,

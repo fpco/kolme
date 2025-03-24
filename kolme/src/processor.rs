@@ -1,16 +1,14 @@
 use std::ops::Deref;
 
-use k256::ecdsa::SigningKey;
-
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
-    secret: k256::SecretKey,
+    secret: SecretKey,
 }
 
 impl<App: KolmeApp> Processor<App> {
-    pub fn new(kolme: Kolme<App>, secret: k256::SecretKey) -> Self {
+    pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
         Processor { kolme, secret }
     }
 
@@ -101,7 +99,7 @@ impl<App: KolmeApp> Processor<App> {
         let approved_block = Block {
             tx,
             timestamp: now,
-            processor: PublicKey(self.secret.public_key()),
+            processor: self.secret.public_key(),
             height: kolme.get_next_height(),
             parent: kolme.get_current_block_hash(),
             framework_state,
@@ -151,7 +149,7 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
 
-        let (sig, recid) = SigningKey::from(&self.secret).sign_recoverable(payload.as_bytes())?;
+        let (sig, recid) = self.secret.sign_recoverable(payload.as_bytes())?;
         let processor = SignatureWithRecovery { sig, recid };
 
         let tx = kolme

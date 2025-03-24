@@ -7,7 +7,6 @@ use std::{
 use anyhow::Result;
 use clap::Parser;
 use cosmos::{HasAddressHrp, SeedPhrase};
-use k256::SecretKey;
 
 use kolme::*;
 use tokio::task::JoinSet;
@@ -49,7 +48,7 @@ const NEUTRON_TESTNET_CODE_ID: u64 = 11227;
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 fn my_secret_key() -> SecretKey {
-    SecretKey::from_slice(&hex::decode(SECRET_KEY_HEX).unwrap()).unwrap()
+    SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
 impl KolmeApp for SampleKolmeApp {
@@ -57,7 +56,7 @@ impl KolmeApp for SampleKolmeApp {
     type Message = SampleMessage;
 
     fn genesis_info() -> GenesisInfo {
-        let my_public_key = PublicKey(my_secret_key().public_key());
+        let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
         let mut bridges = BTreeMap::new();
@@ -203,8 +202,8 @@ async fn main_inner() -> Result<()> {
             let mut rng = rand::thread_rng();
             let secret = SecretKey::random(&mut rng);
             let public = secret.public_key();
-            println!("Public key: {}", hex::encode(public.to_sec1_bytes()));
-            println!("Secret key: {}", hex::encode(secret.to_bytes()));
+            println!("Public key: {public}");
+            println!("Secret key: {}", hex::encode(secret.reveal_as_hex()));
             Ok(())
         }
         Cmd::Broadcast {
@@ -255,8 +254,8 @@ async fn serve(bind: SocketAddr) -> Result<()> {
 
 async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
     let message = serde_json::from_str::<SampleMessage>(&message)?;
-    let secret = SecretKey::from_slice(&hex::decode(secret.as_bytes())?)?;
-    let public = PublicKey(secret.public_key());
+    let secret = SecretKey::from_hex(&secret)?;
+    let public = secret.public_key();
     let client = reqwest::Client::new();
 
     println!("Public sec1: {public}");
