@@ -343,7 +343,7 @@ impl<App: KolmeApp> KolmeInner<App> {
 
     pub async fn create_signed_transaction(
         &self,
-        secret: &k256::SecretKey,
+        secret: &SecretKey,
         messages: Vec<Message<App::Message>>,
     ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key().into();

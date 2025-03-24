@@ -1,7 +1,6 @@
 use std::{fmt::Display, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
-use k256::ecdsa::VerifyingKey;
 
 use crate::*;
 
@@ -308,7 +307,7 @@ pub struct Transaction<AppMessage> {
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
-    pub fn sign(self, key: &k256::SecretKey) -> Result<SignedTransaction<AppMessage>> {
+    pub fn sign(self, key: &SecretKey) -> Result<SignedTransaction<AppMessage>> {
         Ok(SignedTransaction(TaggedJson::new(self)?.sign(key)?))
     }
 }
@@ -521,8 +520,6 @@ pub struct SignatureWithRecovery {
 
 impl SignatureWithRecovery {
     pub fn validate(&self, msg: &[u8]) -> Result<PublicKey> {
-        Ok(PublicKey(
-            VerifyingKey::recover_from_msg(msg, &self.sig, self.recid)?.into(),
-        ))
+        PublicKey::recovery_from_msg(msg, &self.sig, self.recid)
     }
 }

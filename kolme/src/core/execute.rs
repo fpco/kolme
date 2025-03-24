@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-use k256::ecdsa::VerifyingKey;
-
 use crate::core::*;
 
 /// Execution context for a single message.
@@ -312,8 +310,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         msg_index: usize,
     ) -> Result<()> {
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
-        let key = VerifyingKey::recover_from_msg(payload.as_bytes(), &signature, recovery)?;
-        let key = PublicKey(key.into());
+        let key = PublicKey::recovery_from_msg(payload.as_bytes(), &signature, recovery)?;
         anyhow::ensure!(self.framework_state.executors.contains(&key));
         let chain_db = chain.as_ref();
         let action_id_db = i64::try_from(action_id.0)?;

@@ -6,11 +6,11 @@ use crate::*;
 
 pub struct Listener<App: KolmeApp> {
     kolme: Kolme<App>,
-    secret: k256::SecretKey,
+    secret: SecretKey,
 }
 
 impl<App: KolmeApp> Listener<App> {
-    pub fn new(kolme: Kolme<App>, secret: k256::SecretKey) -> Self {
+    pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
         Listener { kolme, secret }
     }
 
@@ -51,7 +51,7 @@ impl<App: KolmeApp> Listener<App> {
                 if !kolme
                     .received_listener_attestation(
                         chain,
-                        PublicKey(self.secret.public_key()),
+                        self.secret.public_key(),
                         BridgeEventId::start(),
                     )
                     .await?
@@ -89,7 +89,7 @@ impl<App: KolmeApp> Listener<App> {
 
 async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
-    secret: k256::SecretKey,
+    secret: SecretKey,
     chain: ExternalChain,
     contract: String,
 ) -> Result<()> {
@@ -98,7 +98,7 @@ async fn listen<App: KolmeApp>(
     let mut next_bridge_event_id = kolme
         .read()
         .await
-        .get_next_bridge_event_id(chain, PublicKey(secret.public_key()))
+        .get_next_bridge_event_id(chain, secret.public_key())
         .await?;
     tracing::info!(
         "Beginning listener loop on contract {contract}, next event ID: {next_bridge_event_id}"
@@ -113,7 +113,7 @@ async fn listen<App: KolmeApp>(
 
 async fn listen_once<App: KolmeApp>(
     kolme: &Kolme<App>,
-    secret: &k256::SecretKey,
+    secret: &SecretKey,
     chain: ExternalChain,
     contract: &Contract,
     next_bridge_event_id: &mut BridgeEventId,
@@ -148,7 +148,7 @@ async fn listen_once<App: KolmeApp>(
 
 async fn broadcast_listener_event<App: KolmeApp>(
     kolme: &Kolme<App>,
-    secret: &k256::SecretKey,
+    secret: &SecretKey,
     chain: ExternalChain,
     bridge_event_id: BridgeEventId,
     message: &BridgeEventContents,

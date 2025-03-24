@@ -121,9 +121,8 @@ impl<T: serde::Serialize> TaggedJson<T> {
         })
     }
 
-    pub fn sign(self, key: &k256::SecretKey) -> Result<SignedTaggedJson<T>> {
-        let (signature, recovery_id) =
-            SigningKey::from(key.clone()).sign_recoverable(self.as_bytes())?;
+    pub fn sign(self, key: &SecretKey) -> Result<SignedTaggedJson<T>> {
+        let (signature, recovery_id) = key.sign_recoverable(self.as_bytes())?;
         Ok(SignedTaggedJson {
             message: self,
             signature,
@@ -267,7 +266,7 @@ impl Decode<'_, sqlx::Sqlite> for Sha256Hash {
 
 /// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PublicKey(pub k256::PublicKey);
+pub struct PublicKey(k256::PublicKey);
 
 impl PublicKey {
     pub fn as_bytes(&self) -> Box<[u8]> {
@@ -276,6 +275,15 @@ impl PublicKey {
 
     pub fn try_from_bytes(public_key: &[u8]) -> Result<Self> {
         Ok(PublicKey(k256::PublicKey::from_sec1_bytes(public_key)?))
+    }
+
+    /// Validate a signature using a recovery ID, returning the public key used.
+    pub fn recovery_from_msg(
+        payload: impl AsRef<[u8]>,
+        signature: &Signature,
+        recovery: RecoveryId,
+    ) -> Result<Self> {
+        Ok(VerifyingKey::recover_from_msg(payload.as_ref(), signature, recovery)?.into())
     }
 }
 
@@ -338,6 +346,55 @@ impl std::hash::Hash for PublicKey {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct SecretKey(k256::SecretKey);
+
+impl SecretKey {
+    pub fn public_key(&self) -> PublicKey {
+        self.0.public_key().into()
+    }
+
+    pub fn sign_recoverable(&self, msg: impl AsRef<[u8]>) -> Result<(Signature, RecoveryId)> {
+        SigningKey::from(&self.0)
+            .sign_recoverable(msg.as_ref())
+            .map_err(anyhow::Error::from)
+    }
+
+    pub fn random(rng: &mut rand::rngs::ThreadRng) -> Self {
+        SecretKey(k256::SecretKey::random(rng))
+    }
+
+    pub fn from_hex(hex: &str) -> Result<Self> {
+        let bytes = ::hex::decode(hex)?;
+        Ok(SecretKey(
+            k256::SecretKey::from_slice(&bytes)
+                .context("Unable to convert from hex to SecretKey")?,
+        ))
+    }
+
+    /// Reveal the secret key contents as a hex string
+    ///
+    /// This could be a Display impl, but intentionally making it
+    /// more difficult so we don't accidentally leak secret keys.
+    pub fn reveal_as_hex(&self) -> String {
+        hex::encode(self.0.to_bytes())
+    }
+}
+
+impl FromStr for SecretKey {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        SecretKey::from_hex(s)
+    }
+}
+
+impl std::fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("SecretKey(contents redacted)")
+    }
+}
+
 impl sqlx::Type<sqlx::Sqlite> for PublicKey {
     fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
         <&[u8] as sqlx::Type<Sqlite>>::type_info()
@@ -359,8 +416,6 @@ impl sqlx::Encode<'_, sqlx::Sqlite> for PublicKey {
 
 #[cfg(test)]
 mod tests {
-    use k256::SecretKey;
-
     use super::*;
 
     #[test]
@@ -408,7 +463,7 @@ mod tests {
     fn round_trip_public_key() {
         let mut rng = rand::thread_rng();
         let secret = SecretKey::random(&mut rng);
-        let public = PublicKey::from(secret.public_key());
+        let public = secret.public_key();
 
         assert_eq!(
             serde_json::to_value(public).unwrap(),
@@ -422,5 +477,28 @@ mod tests {
         let s = public.to_string();
         let display_parsed = s.parse().unwrap();
         assert_eq!(public, display_parsed);
+    }
+
+    #[test]
+    fn round_trip_secret_key() {
+        let mut rng = rand::thread_rng();
+        let secret = SecretKey::random(&mut rng);
+        let s = secret.reveal_as_hex();
+        let secret2 = SecretKey::from_str(&s).unwrap();
+        assert_eq!(secret, secret2);
+        // Make sure the Debug impl doesn't leak key data
+        assert_ne!(format!("{secret:?}"), s);
+    }
+
+    #[test]
+    fn parse_secret_key() {
+        let secret =
+            SecretKey::from_hex("658c3528422eb527b4c108b8f6d1e5f629543c304ea49cf608c67794424291c4")
+                .unwrap();
+        let public = secret.public_key();
+        assert_eq!(
+            public.to_string(),
+            "0264eb26609d15e709227b9ddc46c11a738b210bb237949aa86d7d490a35ae0f0a"
+        );
     }
 }

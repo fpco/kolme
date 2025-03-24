@@ -7,7 +7,6 @@ use std::{
 use anyhow::Result;
 use clap::Parser;
 use cosmos::{HasAddressHrp, SeedPhrase};
-use k256::SecretKey;
 
 use kolme::*;
 use tokio::task::JoinSet;
@@ -43,13 +42,13 @@ pub enum SampleMessage {
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
-const OSMOSIS_TESTNET_CODE_ID: u64 = 12268;
-const NEUTRON_TESTNET_CODE_ID: u64 = 11227;
+const OSMOSIS_TESTNET_CODE_ID: u64 = 12279;
+const NEUTRON_TESTNET_CODE_ID: u64 = 11328;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 fn my_secret_key() -> SecretKey {
-    SecretKey::from_slice(&hex::decode(SECRET_KEY_HEX).unwrap()).unwrap()
+    SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
 impl KolmeApp for SampleKolmeApp {
@@ -57,7 +56,7 @@ impl KolmeApp for SampleKolmeApp {
     type Message = SampleMessage;
 
     fn genesis_info() -> GenesisInfo {
-        let my_public_key = PublicKey(my_secret_key().public_key());
+        let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
         let mut bridges = BTreeMap::new();
@@ -180,7 +179,16 @@ enum Cmd {
         #[clap(long, default_value = "[::]:3000")]
         bind: SocketAddr,
     },
+    /// Generate a new public/secret keypair
     GenPair {},
+    /// Sign an arbitrary message with the given secret key
+    Sign {
+        #[clap(long)]
+        payload: String,
+        /// Hex-encoded secret key
+        #[clap(long)]
+        secret: String,
+    },
     Broadcast {
         #[clap(long, default_value = r#"{"say_hi":{}}"#)]
         message: String,
@@ -203,8 +211,8 @@ async fn main_inner() -> Result<()> {
             let mut rng = rand::thread_rng();
             let secret = SecretKey::random(&mut rng);
             let public = secret.public_key();
-            println!("Public key: {}", hex::encode(public.to_sec1_bytes()));
-            println!("Secret key: {}", hex::encode(secret.to_bytes()));
+            println!("Public key: {public}");
+            println!("Secret key: {}", secret.reveal_as_hex());
             Ok(())
         }
         Cmd::Broadcast {
@@ -212,6 +220,14 @@ async fn main_inner() -> Result<()> {
             secret,
             host,
         } => broadcast(message, secret, host).await,
+        Cmd::Sign { payload, secret } => {
+            let secret = SecretKey::from_hex(&secret)?;
+            let (signature, recovery) = secret.sign_recoverable(&payload)?;
+            println!("Public key: {}", secret.public_key());
+            println!("Signature: {signature}");
+            println!("Recovery: {recovery:?}");
+            Ok(())
+        }
     }
 }
 
@@ -255,8 +271,8 @@ async fn serve(bind: SocketAddr) -> Result<()> {
 
 async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
     let message = serde_json::from_str::<SampleMessage>(&message)?;
-    let secret = SecretKey::from_slice(&hex::decode(secret.as_bytes())?)?;
-    let public = PublicKey(secret.public_key());
+    let secret = SecretKey::from_hex(&secret)?;
+    let public = secret.public_key();
     let client = reqwest::Client::new();
 
     println!("Public sec1: {public}");

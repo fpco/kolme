@@ -1,11 +1,14 @@
+mod signing;
+
 use std::num::TryFromIntError;
 
 use cosmwasm_std::{
-    entry_point, from_json, to_json_binary, Api, Binary, Coin, CosmosMsg, Deps, DepsMut, Env,
-    Event, HexBinary, MessageInfo, RecoverPubkeyError, Response, Storage,
+    entry_point, from_json, to_json_binary, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, Event,
+    HexBinary, MessageInfo, Response, Storage,
 };
 use cw_storage_plus::{Item, Map};
 use sha2::{Digest, Sha256};
+use signing::SignatureWithRecovery;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -13,6 +16,11 @@ pub enum Error {
     Cosmwasm {
         #[from]
         source: cosmwasm_std::StdError,
+    },
+    #[error(transparent)]
+    Signing {
+        #[from]
+        source: signing::SignatureError,
     },
     #[error("No executors provided")]
     NoExecutorsProvided,
@@ -24,12 +32,6 @@ pub enum Error {
     IncorrectActionId { expected: u32, received: u32 },
     #[error("Insufficient executor signatures provided. Needed: {needed}. Provided: {provided}.")]
     InsufficientSignatures { needed: u16, provided: u16 },
-    #[error("Invalid signature {sig} with recovery_id {recid}: {source}.")]
-    InvalidSignature {
-        source: RecoverPubkeyError,
-        sig: HexBinary,
-        recid: u8,
-    },
     #[error("Public key {key} is not part of the executor set.")]
     NonExecutorKey { key: HexBinary },
     #[error("Duplicate public key provided: {key}.")]
@@ -143,12 +145,6 @@ pub enum ExecuteMsg {
     },
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct SignatureWithRecovery {
-    pub recid: u8,
-    pub sig: HexBinary,
-}
-
 #[entry_point]
 pub fn execute(deps: DepsMut, _env: Env, info: MessageInfo, msg: ExecuteMsg) -> Result<Response> {
     match msg {
@@ -235,19 +231,18 @@ fn signed(
     hasher.update(&payload);
     let hash = hasher.finalize();
 
-    let processor = validate_signature(deps.api, &hash, &processor)?;
+    let processor = signing::validate_signature(deps.api, &hash, &processor)?;
 
-    // FIXME just want to get something working for now, need to investigate why this is broken
-    // if processor != state.processor.as_slice() {
-    //     return Err(Error::NonProcessorKey {
-    //         expected: state.processor,
-    //         actual: HexBinary::from(processor),
-    //     });
-    // }
+    if processor != state.processor.as_slice() {
+        return Err(Error::NonProcessorKey {
+            expected: state.processor,
+            actual: HexBinary::from(processor),
+        });
+    }
 
     let mut used = vec![];
     for executor in executors {
-        let key = HexBinary::from(validate_signature(deps.api, &hash, &executor)?);
+        let key = HexBinary::from(signing::validate_signature(deps.api, &hash, &executor)?);
         // FIXME just want to get something working for now, need to investigate why this is broken
         // if !state.executors.contains(&key) {
         //     return Err(Error::NonExecutorKey { key });
@@ -264,20 +259,6 @@ fn signed(
     }
     .to_response(incoming_id, deps.storage)?
     .add_messages(messages))
-}
-
-/// Validates the signature and returns the public key of the signer.
-fn validate_signature(
-    api: &dyn Api,
-    hash: &[u8],
-    SignatureWithRecovery { recid, sig }: &SignatureWithRecovery,
-) -> Result<Vec<u8>> {
-    api.secp256k1_recover_pubkey(hash, sig, *recid)
-        .map_err(|source| Error::InvalidSignature {
-            source,
-            sig: sig.clone(),
-            recid: *recid,
-        })
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
