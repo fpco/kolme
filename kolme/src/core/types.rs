@@ -344,8 +344,6 @@ pub enum Message<AppMessage> {
     //     dest: AccountId,
     // }
 
-    // TODO: outgoing actions
-
     // TODO: admin actions: update code version, change processor/listeners/executors (need to update contracts too), modification to chain values (like asset definitions)
 }
 
@@ -503,8 +501,6 @@ pub struct AssetAmount {
 pub enum Notification<AppMessage> {
     NewBlock(Arc<SignedBlock<AppMessage>>),
     /// A claim by a submitter that it has instantiated a bridge contract.
-    ///
-    /// TODO for now we simply accept this as truth, in the future this will be used by listeners to review and confirm that the contract was created correctly.
     GenesisInstantiation {
         chain: ExternalChain,
         contract: String,
