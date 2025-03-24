@@ -594,6 +594,7 @@ version = "0.1.0"
 dependencies = [
  "cosmwasm-std",
  "cw-storage-plus",
+ "hex",
  "serde",
  "sha2",
  "thiserror 2.0.12",

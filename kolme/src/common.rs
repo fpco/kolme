@@ -366,7 +366,10 @@ impl SecretKey {
 
     pub fn from_hex(hex: &str) -> Result<Self> {
         let bytes = ::hex::decode(hex)?;
-        Ok(SecretKey(k256::SecretKey::from_slice(&bytes)?))
+        Ok(SecretKey(
+            k256::SecretKey::from_slice(&bytes)
+                .context("Unable to convert from hex to SecretKey")?,
+        ))
     }
 
     /// Reveal the secret key contents as a hex string
@@ -485,5 +488,17 @@ mod tests {
         assert_eq!(secret, secret2);
         // Make sure the Debug impl doesn't leak key data
         assert_ne!(format!("{secret:?}"), s);
+    }
+
+    #[test]
+    fn parse_secret_key() {
+        let secret =
+            SecretKey::from_hex("658c3528422eb527b4c108b8f6d1e5f629543c304ea49cf608c67794424291c4")
+                .unwrap();
+        let public = secret.public_key();
+        assert_eq!(
+            public.to_string(),
+            "0264eb26609d15e709227b9ddc46c11a738b210bb237949aa86d7d490a35ae0f0a"
+        );
     }
 }

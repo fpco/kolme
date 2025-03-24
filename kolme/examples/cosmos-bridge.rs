@@ -179,7 +179,16 @@ enum Cmd {
         #[clap(long, default_value = "[::]:3000")]
         bind: SocketAddr,
     },
+    /// Generate a new public/secret keypair
     GenPair {},
+    /// Sign an arbitrary message with the given secret key
+    Sign {
+        #[clap(long)]
+        payload: String,
+        /// Hex-encoded secret key
+        #[clap(long)]
+        secret: String,
+    },
     Broadcast {
         #[clap(long, default_value = r#"{"say_hi":{}}"#)]
         message: String,
@@ -203,7 +212,7 @@ async fn main_inner() -> Result<()> {
             let secret = SecretKey::random(&mut rng);
             let public = secret.public_key();
             println!("Public key: {public}");
-            println!("Secret key: {}", hex::encode(secret.reveal_as_hex()));
+            println!("Secret key: {}", secret.reveal_as_hex());
             Ok(())
         }
         Cmd::Broadcast {
@@ -211,6 +220,14 @@ async fn main_inner() -> Result<()> {
             secret,
             host,
         } => broadcast(message, secret, host).await,
+        Cmd::Sign { payload, secret } => {
+            let secret = SecretKey::from_hex(&secret)?;
+            let (signature, recovery) = secret.sign_recoverable(&payload)?;
+            println!("Public key: {}", secret.public_key());
+            println!("Signature: {signature}");
+            println!("Recovery: {recovery:?}");
+            Ok(())
+        }
     }
 }
 
