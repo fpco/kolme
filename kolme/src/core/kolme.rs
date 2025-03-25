@@ -346,7 +346,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         secret: &SecretKey,
         messages: Vec<Message<App::Message>>,
     ) -> Result<SignedTransaction<App::Message>> {
-        let pubkey = secret.public_key().into();
+        let pubkey = secret.public_key();
         let nonce = self.get_account_and_next_nonce(pubkey).await?.next_nonce;
         let tx = Transaction::<App::Message> {
             pubkey,
