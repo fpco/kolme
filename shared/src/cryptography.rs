@@ -1,5 +1,17 @@
 use snafu::prelude::*;
 
+#[cfg(feature = "realcryptography")]
+mod real;
+
+#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm-std"))]
+mod cosmwasm;
+
+#[cfg(feature = "realcryptography")]
+pub use real::*;
+
+#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm-std"))]
+pub use cosmwasm::*;
+
 #[derive(Debug, Snafu)]
 pub enum CompressPublicKeyError {
     #[snafu(display("Wrong key length, expected {expected}, actual {actual}"))]
@@ -12,7 +24,7 @@ pub enum CompressPublicKeyError {
 ///
 /// This converts it from the uncompressed 65 byte representation to the
 /// compressed 33 byte representation.
-pub fn compress_public_key(uncompressed: &[u8]) -> Result<Vec<u8>, CompressPublicKeyError> {
+pub fn compress_public_key(uncompressed: &[u8]) -> Result<[u8; 33], CompressPublicKeyError> {
     if uncompressed.len() != 65 {
         return Err(CompressPublicKeyError::WrongUncompressedLen {
             expected: 65,
@@ -30,8 +42,9 @@ pub fn compress_public_key(uncompressed: &[u8]) -> Result<Vec<u8>, CompressPubli
 
     let x = &uncompressed[1..=32];
 
-    let mut res = vec![if is_even { 0x02 } else { 0x03 }];
-    res.extend_from_slice(x);
+    let mut res = [0; 33];
+    res[0] = if is_even { 0x02 } else { 0x03 };
+    res[1..].copy_from_slice(x);
 
     Ok(res)
 }

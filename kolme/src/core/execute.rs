@@ -53,8 +53,8 @@ pub enum DatabaseUpdate {
     },
     ApproveAction {
         pubkey: PublicKey,
-        signature: k256::ecdsa::Signature,
-        recovery: k256::ecdsa::RecoveryId,
+        signature: Signature,
+        recovery: RecoveryId,
         msg_index: usize,
         chain: ExternalChain,
         action_id: BridgeActionId,
@@ -305,12 +305,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         &mut self,
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: k256::ecdsa::Signature,
-        recovery: k256::ecdsa::RecoveryId,
+        signature: Signature,
+        recovery: RecoveryId,
         msg_index: usize,
     ) -> Result<()> {
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
-        let key = PublicKey::recovery_from_msg(payload.as_bytes(), &signature, recovery)?;
+        let key = PublicKey::recover_from_msg(payload.as_bytes(), &signature, recovery)?;
         anyhow::ensure!(self.framework_state.executors.contains(&key));
         let chain_db = chain.as_ref();
         let action_id_db = i64::try_from(action_id.0)?;

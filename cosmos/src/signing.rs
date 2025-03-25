@@ -1,6 +1,8 @@
-use cosmwasm_std::{Api, HexBinary, RecoverPubkeyError};
+use cosmwasm_std::{Api, RecoverPubkeyError};
 use shared::cosmos::*;
-use shared::cryptography::{compress_public_key, CompressPublicKeyError};
+use shared::cryptography::{
+    compress_public_key, CompressPublicKeyError, PublicKey, RecoveryId, Signature,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SignatureError {
@@ -12,8 +14,12 @@ pub enum SignatureError {
     #[error("Invalid signature {sig} with recovery_id {recid}: {source}.")]
     InvalidSignature {
         source: RecoverPubkeyError,
-        sig: HexBinary,
-        recid: u8,
+        sig: Signature,
+        recid: RecoveryId,
+    },
+    #[error("Invalid public key while validating signature: {source}")]
+    InvalidPublicKey {
+        source: shared::cryptography::PublicKeyError,
     },
 }
 
@@ -24,24 +30,26 @@ pub(super) fn validate_signature(
     api: &dyn Api,
     hash: &[u8],
     SignatureWithRecovery { recid, sig }: &SignatureWithRecovery,
-) -> Result<Vec<u8>, SignatureError> {
+) -> Result<PublicKey, SignatureError> {
     let uncompressed = api
-        .secp256k1_recover_pubkey(hash, sig, *recid)
+        .secp256k1_recover_pubkey(hash, &sig.to_bytes(), recid.to_byte())
         .map_err(|source| SignatureError::InvalidSignature {
             source,
-            sig: sig.clone(),
+            sig: *sig,
             recid: *recid,
         })?;
-    compress_public_key(&uncompressed).map_err(Into::into)
+    let array =
+        compress_public_key(&uncompressed).map_err(|source| SignatureError::Compress { source })?;
+    PublicKey::from_bytes(&array).map_err(|source| SignatureError::InvalidPublicKey { source })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{testing::MockApi, HexBinary};
-    use k256::ecdsa::SigningKey;
+    use cosmwasm_std::testing::MockApi;
     use rand::Rng;
     use sha2::{Digest, Sha256};
+    use shared::cryptography::{SecretKey, Signature};
 
     #[test]
     fn test_signature() {
@@ -58,13 +66,13 @@ mod tests {
             &MockApi::default(),
             &message_hash,
             &SignatureWithRecovery {
-                recid: RECOVERY,
-                sig: HexBinary::from_hex(SIGNATURE).unwrap(),
+                recid: RecoveryId::from_byte(RECOVERY).unwrap(),
+                sig: Signature::from_hex(SIGNATURE).unwrap(),
             },
         )
         .unwrap();
 
-        assert_eq!(&pubkey, &hex::decode(PUBLIC).unwrap());
+        assert_eq!(&*pubkey.as_bytes(), &hex::decode(PUBLIC).unwrap());
     }
 
     #[test]
@@ -75,11 +83,9 @@ mod tests {
             payload.push(rand::random::<u8>());
         }
 
-        let secret = k256::SecretKey::random(&mut rng);
+        let secret = SecretKey::random(&mut rng);
 
-        let (signature, recovery) = SigningKey::from(&secret)
-            .sign_recoverable(&payload)
-            .unwrap();
+        let (signature, recovery) = secret.sign_recoverable(&payload).unwrap();
 
         let hash = Sha256::digest(&payload);
 
@@ -87,12 +93,12 @@ mod tests {
             &MockApi::default(),
             &hash,
             &SignatureWithRecovery {
-                recid: recovery.to_byte(),
-                sig: HexBinary::from(signature.to_vec()),
+                recid: recovery,
+                sig: signature,
             },
         )
         .unwrap();
 
-        assert_eq!(&*secret.public_key().to_sec1_bytes(), &pubkey);
+        assert_eq!(secret.public_key(), pubkey);
     }
 }

@@ -565,8 +565,8 @@ impl<App: KolmeApp> KolmeInner<App> {
                     Ok((
                         PublicKey::try_from_bytes(&public_key)?,
                         SignatureWithRecovery {
-                            sig: k256::ecdsa::Signature::from_slice(&signature)?,
-                            recid: k256::ecdsa::RecoveryId::from_byte(recovery.try_into()?)
+                            sig: Signature::from_slice(&signature)?,
+                            recid: RecoveryId::from_byte(recovery.try_into()?)
                                 .context("Invalid recovery found")?,
                         },
                     ))

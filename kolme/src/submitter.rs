@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use cosmos::{HasAddressHrp, SeedPhrase, TxBuilder};
+use shared::cosmos::{ExecuteMsg, InstantiateMsg};
 
 use crate::*;
 
@@ -89,16 +90,9 @@ impl<App: KolmeApp> Submitter<App> {
                 let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
                 let wallet = self.seed_phrase.with_hrp(cosmos.get_address_hrp())?;
 
-                // TODO create a shared crate and use the same definitions in the contracts and this code
-                #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-                struct InstantiateMsg {
-                    processor: PublicKey,
-                    executors: Vec<PublicKey>,
-                    needed_executors: u16,
-                }
                 let msg = InstantiateMsg {
                     processor,
-                    executors: executors.into_iter().collect(),
+                    executors,
                     needed_executors: needed_executors.try_into()?,
                 };
 
@@ -170,8 +164,8 @@ impl<App: KolmeApp> Submitter<App> {
         anyhow::ensure!(&action_id == action_id2);
 
         let msg = ExecuteMsg::Signed {
-            processor,
-            executors,
+            processor: *processor,
+            executors: executors.clone(),
             payload,
         };
         let contract = {
@@ -199,13 +193,4 @@ impl<App: KolmeApp> Submitter<App> {
         self.last_submitted.insert(chain, action_id);
         Ok(())
     }
-}
-#[derive(serde::Serialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecuteMsg<'a> {
-    Signed {
-        processor: &'a SignatureWithRecovery,
-        executors: &'a [SignatureWithRecovery],
-        payload: String,
-    },
 }

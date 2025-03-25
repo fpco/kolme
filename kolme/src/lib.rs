@@ -12,6 +12,7 @@ pub use core::*;
 pub use executor::Executor;
 pub use listener::Listener;
 pub use processor::Processor;
+pub use shared::{cosmos::SignatureWithRecovery, cryptography::*, types::*};
 pub use submitter::Submitter;
 
 pub(crate) use anyhow::{Context, Result};

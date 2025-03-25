@@ -1,6 +1,7 @@
 use std::{fmt::Display, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
+use shared::cosmos::SignatureWithRecovery;
 
 use crate::*;
 
@@ -180,52 +181,6 @@ impl TryFrom<i64> for BlockHeight {
 )]
 pub struct Wallet(pub String);
 
-/// Monotonically increasing identifier for events coming from a bridge contract.
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct BridgeEventId(pub u64);
-impl BridgeEventId {
-    pub fn start() -> BridgeEventId {
-        BridgeEventId(0)
-    }
-
-    pub(crate) fn try_from_i64(id: i64) -> Result<Self> {
-        Ok(BridgeEventId(id.try_into()?))
-    }
-
-    pub(crate) fn next(self) -> BridgeEventId {
-        BridgeEventId(self.0 + 1)
-    }
-}
-
-impl Display for BridgeEventId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// Monotonically increasing identifier for actions sent to a bridge contract.
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct BridgeActionId(pub u64);
-impl BridgeActionId {
-    pub fn start() -> Self {
-        BridgeActionId(0)
-    }
-
-    pub fn next(self) -> BridgeActionId {
-        BridgeActionId(self.0 + 1)
-    }
-}
-
-impl Display for BridgeActionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 /// A block that is signed by the processor.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(bound(
@@ -325,9 +280,8 @@ pub enum Message<AppMessage> {
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: k256::ecdsa::Signature,
-        #[serde(with = "crate::common::recovery")]
-        recovery: k256::ecdsa::RecoveryId,
+        signature: Signature,
+        recovery: RecoveryId,
     },
     ProcessorApprove {
         chain: ExternalChain,
@@ -508,18 +462,4 @@ pub enum Notification<AppMessage> {
     Broadcast {
         tx: Arc<SignedTransaction<AppMessage>>,
     },
-}
-
-/// A signature paired with its recovery ID
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
-pub struct SignatureWithRecovery {
-    pub sig: k256::ecdsa::Signature,
-    #[serde(with = "crate::common::recovery")]
-    pub recid: k256::ecdsa::RecoveryId,
-}
-
-impl SignatureWithRecovery {
-    pub fn validate(&self, msg: &[u8]) -> Result<PublicKey> {
-        PublicKey::recovery_from_msg(msg, &self.sig, self.recid)
-    }
 }
