@@ -44,7 +44,8 @@ impl PublicKey {
             .map_err(|source| PublicKeyError::RecoverFromMessage { source })
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, PublicKeyError> {
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, PublicKeyError> {
+        let bytes = bytes.as_ref();
         k256::PublicKey::from_sec1_bytes(bytes)
             .map(Self)
             .map_err(|source| PublicKeyError::FromBytes {

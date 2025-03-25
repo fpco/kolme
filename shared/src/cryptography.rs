@@ -3,13 +3,13 @@ use snafu::prelude::*;
 #[cfg(feature = "realcryptography")]
 mod real;
 
-#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm-std"))]
+#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm"))]
 mod cosmwasm;
 
 #[cfg(feature = "realcryptography")]
 pub use real::*;
 
-#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm-std"))]
+#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm"))]
 pub use cosmwasm::*;
 
 #[derive(Debug, Snafu)]

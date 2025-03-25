@@ -40,7 +40,7 @@ pub(super) fn validate_signature(
         })?;
     let array =
         compress_public_key(&uncompressed).map_err(|source| SignatureError::Compress { source })?;
-    PublicKey::from_bytes(&array).map_err(|source| SignatureError::InvalidPublicKey { source })
+    PublicKey::from_bytes(array).map_err(|source| SignatureError::InvalidPublicKey { source })
 }
 
 #[cfg(test)]

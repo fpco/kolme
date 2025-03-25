@@ -57,7 +57,7 @@ impl Display for BridgeEventId {
     }
 }
 
-#[cfg(feature = "cw-storage-plus")]
+#[cfg(feature = "cosmwasm")]
 mod cw_impls {
     use super::*;
     use cw_storage_plus::{KeyDeserialize, PrimaryKey};

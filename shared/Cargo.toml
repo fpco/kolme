@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 realcryptography = ["dep:k256", "dep:hex", "dep:rand"]
+cosmwasm = ["dep:cosmwasm-std", "dep:cw-storage-plus"]
 
 [dependencies]
 cosmwasm-std = { version = "2", optional = true }
