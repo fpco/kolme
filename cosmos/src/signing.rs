@@ -1,17 +1,14 @@
 use cosmwasm_std::{Api, HexBinary, RecoverPubkeyError};
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct SignatureWithRecovery {
-    pub recid: u8,
-    pub sig: HexBinary,
-}
+use shared::cosmos::*;
+use shared::cryptography::{compress_public_key, CompressPublicKeyError};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SignatureError {
-    #[error("Wrong key length, expected {expected}, actual {actual}")]
-    WrongUncompressedLen { expected: u32, actual: u32 },
-    #[error("Wrong starting bytes, expected {expected}, actual {actual}")]
-    WrongStartingByte { expected: u8, actual: u8 },
+    #[error(transparent)]
+    Compress {
+        #[from]
+        source: CompressPublicKeyError,
+    },
     #[error("Invalid signature {sig} with recovery_id {recid}: {source}.")]
     InvalidSignature {
         source: RecoverPubkeyError,
@@ -35,31 +32,7 @@ pub(super) fn validate_signature(
             sig: sig.clone(),
             recid: *recid,
         })?;
-    compress_public_key(&uncompressed)
-}
-
-fn compress_public_key(uncompressed: &[u8]) -> Result<Vec<u8>, SignatureError> {
-    if uncompressed.len() != 65 {
-        return Err(SignatureError::WrongUncompressedLen {
-            expected: 65,
-            actual: uncompressed.len() as u32,
-        });
-    }
-    if uncompressed[0] != 0x04 {
-        return Err(SignatureError::WrongStartingByte {
-            expected: 0x04,
-            actual: uncompressed[0],
-        });
-    }
-
-    let is_even = (uncompressed[64] & 1) == 0;
-
-    let x = &uncompressed[1..=32];
-
-    let mut res = vec![if is_even { 0x02 } else { 0x03 }];
-    res.extend_from_slice(x);
-
-    Ok(res)
+    compress_public_key(&uncompressed).map_err(Into::into)
 }
 
 #[cfg(test)]

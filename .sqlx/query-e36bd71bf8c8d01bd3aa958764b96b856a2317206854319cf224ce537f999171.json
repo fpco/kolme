@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        UPDATE actions\n                        SET approved=$1\n                        WHERE chain=$2\n                        AND action_id=$3\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "e36bd71bf8c8d01bd3aa958764b96b856a2317206854319cf224ce537f999171"
+}
