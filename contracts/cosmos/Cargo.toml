@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 cosmwasm-std = { version = "2" }
 cw-storage-plus = "2.0.0"
 serde = { version = "1.0.219", features = ["derive"] }
-shared = { path = "../shared", features = ["cosmwasm"] }
+shared = { path = "../../shared", features = ["cosmwasm"] }
 sha2 = "0.10.8"
 thiserror = "2.0.12"
 
@@ -18,4 +18,4 @@ thiserror = "2.0.12"
 hex = "0.4.3"
 k256 = "0.13.4"
 rand = "0.8.0"
-shared = { path = "../shared", features = ["realcryptography"] }
+shared = { path = "../../shared", features = ["realcryptography"] }
