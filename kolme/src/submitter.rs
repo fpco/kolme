@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cosmos::{HasAddressHrp, SeedPhrase, TxBuilder};
 
@@ -8,6 +8,15 @@ use crate::*;
 pub struct Submitter<App: KolmeApp> {
     kolme: Kolme<App>,
     seed_phrase: SeedPhrase,
+    /// Keep track of which genesis contracts we've already created.
+    ///
+    /// Without this, we almost always end up double-instantiating the first contract.
+    /// Reason: we immediately instantiate a contract, then see the new block
+    /// for the genesis transaction, and then try to instantiate it again
+    /// because our new contract will only be recognized in a later transaction.
+    ///
+    /// Simple solution: only instantiate once per chain.
+    genesis_created: HashSet<ExternalChain>,
     last_submitted: HashMap<ExternalChain, BridgeActionId>,
 }
 
@@ -17,13 +26,11 @@ impl<App: KolmeApp> Submitter<App> {
             kolme,
             seed_phrase,
             last_submitted: HashMap::new(),
+            genesis_created: HashSet::new(),
         }
     }
 
     pub async fn run(mut self) -> Result<()> {
-        // FIXME Looks like there may be a bug where a contract is instantiated twice on a chain, needs investigation
-        // Best guess: minor race condition between the NewBlock event arriving and the state being updated, leading to basing the operation on the previous out-of-date state.
-
         let chains = self
             .kolme
             .read()
@@ -86,6 +93,9 @@ impl<App: KolmeApp> Submitter<App> {
                 executors,
                 needed_executors,
             } => {
+                if self.genesis_created.contains(&chain) {
+                    return Ok(());
+                }
                 let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
                 let wallet = self.seed_phrase.with_hrp(cosmos.get_address_hrp())?;
 
@@ -123,6 +133,7 @@ impl<App: KolmeApp> Submitter<App> {
                 );
                 self.kolme
                     .notify_genesis_instantiation(chain, contract.to_string());
+                self.genesis_created.insert(chain);
                 Ok(())
             }
         }
