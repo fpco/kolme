@@ -1,3 +1,4 @@
-#[cfg(feature = "cosmwasm-std")]
+#[cfg(feature = "cosmwasm")]
 pub mod cosmos;
 pub mod cryptography;
+pub mod types;

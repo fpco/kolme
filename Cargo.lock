@@ -1983,6 +1983,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "shared",
  "sqlx",
  "strum 0.27.1",
  "tempfile",
@@ -3184,8 +3185,13 @@ name = "shared"
 version = "0.1.0"
 dependencies = [
  "cosmwasm-std",
+ "cw-storage-plus",
+ "hex",
+ "k256",
+ "rand 0.8.5",
  "serde",
  "snafu",
+ "sqlx",
 ]
 
 [[package]]

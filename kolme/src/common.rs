@@ -1,10 +1,9 @@
 /// Common helper functions and utilities.
-use std::{borrow::Cow, fmt::Display, str::FromStr};
+use std::{borrow::Cow, fmt::Display};
 
 use crate::*;
 
 use k256::{
-    ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey},
     elliptic_curve::generic_array::GenericArray,
     sha2::{digest::OutputSizeUser, Digest, Sha256},
 };
@@ -58,38 +57,17 @@ pub struct TaggedJson<T> {
 pub struct SignedTaggedJson<T> {
     pub message: TaggedJson<T>,
     pub signature: Signature,
-    #[serde(with = "recovery")]
     pub recovery_id: RecoveryId,
 }
 
 impl<T> SignedTaggedJson<T> {
     pub fn verify_signature(&self) -> Result<PublicKey> {
-        VerifyingKey::recover_from_msg(self.message.as_bytes(), &self.signature, self.recovery_id)
-            .map(PublicKey::from)
+        PublicKey::recover_from_msg(self.message.as_bytes(), &self.signature, self.recovery_id)
             .map_err(anyhow::Error::from)
     }
 
     pub(crate) fn message_hash(&self) -> Sha256Hash {
         Sha256Hash::hash(self.message.as_bytes())
-    }
-}
-
-pub(crate) mod recovery {
-    use k256::ecdsa::RecoveryId;
-    use serde::{Deserialize, Serialize};
-
-    pub(crate) fn serialize<S: serde::Serializer>(
-        id: &RecoveryId,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        id.to_byte().serialize(s)
-    }
-
-    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(
-        d: D,
-    ) -> Result<RecoveryId, D::Error> {
-        let byte = u8::deserialize(d)?;
-        RecoveryId::from_byte(byte).ok_or_else(|| serde::de::Error::custom("Invalid recovery ID"))
     }
 }
 
@@ -261,158 +239,10 @@ impl Decode<'_, sqlx::Sqlite> for Sha256Hash {
     }
 }
 
-/// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PublicKey(k256::PublicKey);
-
-impl PublicKey {
-    pub fn as_bytes(&self) -> Box<[u8]> {
-        self.0.to_sec1_bytes()
-    }
-
-    pub fn try_from_bytes(public_key: &[u8]) -> Result<Self> {
-        Ok(PublicKey(k256::PublicKey::from_sec1_bytes(public_key)?))
-    }
-
-    /// Validate a signature using a recovery ID, returning the public key used.
-    pub fn recovery_from_msg(
-        payload: impl AsRef<[u8]>,
-        signature: &Signature,
-        recovery: RecoveryId,
-    ) -> Result<Self> {
-        Ok(VerifyingKey::recover_from_msg(payload.as_ref(), signature, recovery)?.into())
-    }
-}
-
-impl From<k256::PublicKey> for PublicKey {
-    fn from(value: k256::PublicKey) -> Self {
-        PublicKey(value)
-    }
-}
-
-impl From<VerifyingKey> for PublicKey {
-    fn from(value: VerifyingKey) -> Self {
-        k256::PublicKey::from(value).into()
-    }
-}
-
-impl serde::Serialize for PublicKey {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for PublicKey {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl FromStr for PublicKey {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let bytes = hex::decode(s)?;
-        let pubkey = k256::PublicKey::from_sec1_bytes(&bytes)?;
-        Ok(PublicKey(pubkey))
-    }
-}
-
-impl Display for PublicKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&hex::encode(self.0.to_sec1_bytes()))
-    }
-}
-
-impl std::fmt::Debug for PublicKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{self}")
-    }
-}
-
-impl std::hash::Hash for PublicKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.to_sec1_bytes().hash(state)
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct SecretKey(k256::SecretKey);
-
-impl SecretKey {
-    pub fn public_key(&self) -> PublicKey {
-        self.0.public_key().into()
-    }
-
-    pub fn sign_recoverable(&self, msg: impl AsRef<[u8]>) -> Result<(Signature, RecoveryId)> {
-        SigningKey::from(&self.0)
-            .sign_recoverable(msg.as_ref())
-            .map_err(anyhow::Error::from)
-    }
-
-    pub fn random(rng: &mut rand::rngs::ThreadRng) -> Self {
-        SecretKey(k256::SecretKey::random(rng))
-    }
-
-    pub fn from_hex(hex: &str) -> Result<Self> {
-        let bytes = ::hex::decode(hex)?;
-        Ok(SecretKey(
-            k256::SecretKey::from_slice(&bytes)
-                .context("Unable to convert from hex to SecretKey")?,
-        ))
-    }
-
-    /// Reveal the secret key contents as a hex string
-    ///
-    /// This could be a Display impl, but intentionally making it
-    /// more difficult so we don't accidentally leak secret keys.
-    pub fn reveal_as_hex(&self) -> String {
-        hex::encode(self.0.to_bytes())
-    }
-}
-
-impl FromStr for SecretKey {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        SecretKey::from_hex(s)
-    }
-}
-
-impl std::fmt::Debug for SecretKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("SecretKey(contents redacted)")
-    }
-}
-
-impl sqlx::Type<sqlx::Sqlite> for PublicKey {
-    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
-        <&[u8] as sqlx::Type<Sqlite>>::type_info()
-    }
-
-    fn compatible(ty: &sqlx::sqlite::SqliteTypeInfo) -> bool {
-        <&[u8] as sqlx::Type<Sqlite>>::compatible(ty)
-    }
-}
-
-impl sqlx::Encode<'_, sqlx::Sqlite> for PublicKey {
-    fn encode_by_ref(
-        &self,
-        buf: &mut <sqlx::Sqlite as sqlx::Database>::ArgumentBuffer<'_>,
-    ) -> std::result::Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        self.as_bytes().encode_by_ref(buf)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]

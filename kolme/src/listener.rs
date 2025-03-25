@@ -1,5 +1,7 @@
 use base64::{prelude::BASE64_STANDARD, Engine};
 use cosmos::Contract;
+use cosmwasm_std::Coin;
+use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
 use tokio::task::JoinSet;
 
 use crate::*;
@@ -118,31 +120,20 @@ async fn listen_once<App: KolmeApp>(
     contract: &Contract,
     next_bridge_event_id: &mut BridgeEventId,
 ) -> Result<()> {
-    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-    #[serde(rename_all = "snake_case")]
-    enum QueryMsg {
-        GetEvent { id: BridgeEventId },
-    }
-    #[derive(serde::Serialize, serde::Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum GetToKolmeMessageResp {
-        Found { message: String },
-        NotFound {},
-    }
     match contract
         .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
         })
         .await?
     {
-        GetToKolmeMessageResp::Found { message } => {
+        GetEventResp::Found { message } => {
             let message = BASE64_STANDARD.decode(&message)?;
-            let message = serde_json::from_slice::<BridgeEventContents>(&message)?;
+            let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
             broadcast_listener_event(kolme, secret, chain, *next_bridge_event_id, &message).await?;
             *next_bridge_event_id = next_bridge_event_id.next();
             Ok(())
         }
-        GetToKolmeMessageResp::NotFound {} => Ok(()),
+        GetEventResp::NotFound {} => Ok(()),
     }
 }
 
@@ -151,10 +142,10 @@ async fn broadcast_listener_event<App: KolmeApp>(
     secret: &SecretKey,
     chain: ExternalChain,
     bridge_event_id: BridgeEventId,
-    message: &BridgeEventContents,
+    message: &BridgeEventMessage,
 ) -> Result<()> {
     let message = match message {
-        BridgeEventContents::Regular {
+        BridgeEventMessage::Regular {
             wallet,
             funds,
             keys,
@@ -163,14 +154,14 @@ async fn broadcast_listener_event<App: KolmeApp>(
             let mut new_keys = vec![];
 
             for Coin { denom, amount } in funds {
-                let amount = amount.parse()?;
+                let amount = amount.u128();
                 new_funds.push(BridgedAssetAmount {
                     denom: denom.clone(),
                     amount,
                 });
             }
             for key in keys {
-                new_keys.push(key.parse()?);
+                new_keys.push(*key);
             }
 
             Message::Listener {
@@ -183,7 +174,7 @@ async fn broadcast_listener_event<App: KolmeApp>(
                 },
             }
         }
-        BridgeEventContents::Signed { wallet, action_id } => Message::Listener {
+        BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
             chain,
             event_id: bridge_event_id,
             event: BridgeEvent::Signed {
@@ -199,24 +190,4 @@ async fn broadcast_listener_event<App: KolmeApp>(
         .await?;
     kolme.propose_transaction(signed)?;
     Ok(())
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-enum BridgeEventContents {
-    Regular {
-        wallet: String,
-        funds: Vec<Coin>,
-        keys: Vec<String>,
-    },
-    Signed {
-        wallet: String,
-        action_id: BridgeActionId,
-    },
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct Coin {
-    denom: String,
-    amount: String,
 }

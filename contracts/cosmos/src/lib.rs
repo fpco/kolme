@@ -3,12 +3,16 @@ mod signing;
 use std::num::TryFromIntError;
 
 use cosmwasm_std::{
-    entry_point, from_json, to_json_binary, Binary, Coin, Deps, DepsMut, Env, Event, HexBinary,
-    MessageInfo, Response, Storage,
+    entry_point, from_json, to_json_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo,
+    Response, Storage,
 };
 use cw_storage_plus::{Item, Map};
 use sha2::{Digest, Sha256};
-use shared::cosmos::*;
+use shared::{
+    cosmos::*,
+    cryptography::PublicKey,
+    types::{BridgeActionId, BridgeEventId},
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -29,17 +33,20 @@ pub enum Error {
     #[error("Need at least {needed} executors, but only {provided} provided.")]
     InsufficientExecutors { needed: u16, provided: u16 },
     #[error("Incorrect action ID. Expected: {expected}. Received: {received}.")]
-    IncorrectActionId { expected: u32, received: u32 },
+    IncorrectActionId {
+        expected: BridgeActionId,
+        received: BridgeActionId,
+    },
     #[error("Insufficient executor signatures provided. Needed: {needed}. Provided: {provided}.")]
     InsufficientSignatures { needed: u16, provided: u16 },
     #[error("Public key {key} is not part of the executor set.")]
-    NonExecutorKey { key: HexBinary },
+    NonExecutorKey { key: PublicKey },
     #[error("Duplicate public key provided: {key}.")]
-    DuplicateKey { key: HexBinary },
+    DuplicateKey { key: PublicKey },
     #[error("Processor signature had the wrong public key. Expected key {expected}. Actually signed with {actual}.")]
     NonProcessorKey {
-        expected: HexBinary,
-        actual: HexBinary,
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
     },
 }
 
@@ -53,7 +60,7 @@ const STATE: Item<shared::cosmos::State> = Item::new("s");
 /// shouldn't be on-chain storage for events, just logs.
 /// However, I'm struggling to make the tx_search endpoints
 /// work correctly, so I'm cheating a bit.
-const EVENTS: Map<u32, Binary> = Map::new("t");
+const EVENTS: Map<BridgeEventId, Binary> = Map::new("t");
 
 #[entry_point]
 pub fn instantiate(
@@ -81,8 +88,8 @@ pub fn instantiate(
         executors,
         needed_executors,
         // We start events at ID 1, since the instantiation itself is event 0.
-        next_event_id: 1,
-        next_action_id: 0,
+        next_event_id: BridgeEventId::start().next(),
+        next_action_id: BridgeActionId::start(),
     };
     STATE.save(deps.storage, &state)?;
     Ok(Response::new())
@@ -100,44 +107,35 @@ pub fn execute(deps: DepsMut, _env: Env, info: MessageInfo, msg: ExecuteMsg) -> 
     }
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Message {
-    Regular {
-        wallet: String,
-        funds: Vec<Coin>,
-        keys: Vec<HexBinary>,
-    },
-    Signed {
-        wallet: String,
-        action_id: u32,
-    },
+fn bridge_event_message_to_response(
+    msg: &BridgeEventMessage,
+    id: BridgeEventId,
+    storage: &mut dyn Storage,
+) -> Result<Response> {
+    let message = to_json_binary(msg)?;
+    EVENTS.save(storage, id, &message)?;
+    Ok(Response::new().add_event(
+        Event::new("bridge-event")
+            .add_attribute("id", id.to_string())
+            .add_attribute("message", message.to_string()),
+    ))
 }
 
-impl Message {
-    fn to_response(&self, id: u32, storage: &mut dyn Storage) -> Result<Response> {
-        let message = to_json_binary(self)?;
-        EVENTS.save(storage, id, &message)?;
-        Ok(Response::new().add_event(
-            Event::new("bridge-event")
-                .add_attribute("id", id.to_string())
-                .add_attribute("message", message.to_string()),
-        ))
-    }
-}
-
-fn regular(deps: DepsMut, info: MessageInfo, keys: Vec<HexBinary>) -> Result<Response> {
+fn regular(deps: DepsMut, info: MessageInfo, keys: Vec<PublicKey>) -> Result<Response> {
     let mut state = STATE.load(deps.storage)?;
     let id = state.next_event_id;
-    state.next_event_id += 1;
+    state.next_event_id.increment();
     STATE.save(deps.storage, &state)?;
 
-    Message::Regular {
-        wallet: info.sender.into_string(),
-        funds: info.funds,
-        keys,
-    }
-    .to_response(id, deps.storage)
+    bridge_event_message_to_response(
+        &BridgeEventMessage::Regular {
+            wallet: info.sender.into_string(),
+            funds: info.funds,
+            keys,
+        },
+        id,
+        deps.storage,
+    )
 }
 
 fn signed(
@@ -157,9 +155,9 @@ fn signed(
         });
     }
 
-    state.next_action_id += 1;
+    state.next_action_id.increment();
     let incoming_id = state.next_event_id;
-    state.next_event_id += 1;
+    state.next_event_id.increment();
     STATE.save(deps.storage, &state)?;
 
     let executors_len = u16::try_from(executors.len()).map_err(Error::TooManyExecutors)?;
@@ -176,31 +174,33 @@ fn signed(
 
     let processor = signing::validate_signature(deps.api, &hash, &processor)?;
 
-    if processor != state.processor.as_slice() {
+    if processor != state.processor {
         return Err(Error::NonProcessorKey {
-            expected: state.processor,
-            actual: HexBinary::from(processor),
+            expected: state.processor.into(),
+            actual: processor.into(),
         });
     }
 
     let mut used = vec![];
     for executor in executors {
-        let key = HexBinary::from(signing::validate_signature(deps.api, &hash, &executor)?);
-        // FIXME just want to get something working for now, need to investigate why this is broken
-        // if !state.executors.contains(&key) {
-        //     return Err(Error::NonExecutorKey { key });
-        // }
+        let key = signing::validate_signature(deps.api, &hash, &executor)?;
+        if !state.executors.contains(&key) {
+            return Err(Error::NonExecutorKey { key });
+        }
         if used.contains(&key) {
             return Err(Error::DuplicateKey { key });
         }
         used.push(key);
     }
 
-    Ok(Message::Signed {
-        wallet: info.sender.into_string(),
-        action_id: id,
-    }
-    .to_response(incoming_id, deps.storage)?
+    Ok(bridge_event_message_to_response(
+        &BridgeEventMessage::Signed {
+            wallet: info.sender.into_string(),
+            action_id: id,
+        },
+        incoming_id,
+        deps.storage,
+    )?
     .add_messages(messages))
 }
 
