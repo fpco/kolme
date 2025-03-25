@@ -3,7 +3,6 @@ use std::{borrow::Cow, fmt::Display, str::FromStr};
 
 use crate::*;
 
-use base64::{prelude::BASE64_STANDARD, Engine};
 use k256::{
     ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey},
     elliptic_curve::generic_array::GenericArray,
@@ -44,7 +43,7 @@ pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
 }
 /// Tagged, consistent-binary JSON
 ///
-/// JSON data in a consistent format, serialized as Base64, with the parsed value available as well.
+/// JSON data in a consistent format, serialized as a JSON string, with the parsed value available as well.
 ///
 /// Equality is based on serialized representation only.
 #[derive(Clone)]
@@ -168,7 +167,7 @@ impl<T> serde::Serialize for TaggedJson<T> {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&BASE64_STANDARD.encode(&self.serialized))
+        serializer.serialize_str(&self.serialized)
     }
 }
 
@@ -179,9 +178,7 @@ impl<'de, T: serde::de::DeserializeOwned> serde::Deserialize<'de> for TaggedJson
     {
         use serde::de::Error;
 
-        let base64 = String::deserialize(deserializer)?;
-        let bytes = BASE64_STANDARD.decode(&base64).map_err(D::Error::custom)?;
-        let serialized = String::from_utf8(bytes).map_err(D::Error::custom)?;
+        let serialized = String::deserialize(deserializer)?;
         let value = serde_json::from_str::<T>(&serialized).map_err(D::Error::custom)?;
         Ok(TaggedJson { serialized, value })
     }
