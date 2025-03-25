@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT public_key, signature, recovery\n                FROM actions\n                INNER JOIN action_approvals\n                ON actions.id=action_approvals.action\n                WHERE chain=$1\n                AND action_id=$2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "public_key",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "signature",
+        "ordinal": 1,
+        "type_info": "Blob"
+      },
+      {
+        "name": "recovery",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a09046c0e4d3f2d1e475a1b673ed03ca764eedc48096522e8a4d68837fbcb2e4"
+}

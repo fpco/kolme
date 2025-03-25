@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT action_id\n                FROM actions\n                WHERE chain=$1\n                AND approved IS NULL\n                ORDER BY action_id ASC\n                LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "action_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "720f04a3fd813baca71a1e1e44c53acdf60202c6951360719fb398cd6549ef77"
+}
