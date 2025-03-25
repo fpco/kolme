@@ -3,8 +3,8 @@ mod signing;
 use std::num::TryFromIntError;
 
 use cosmwasm_std::{
-    entry_point, from_json, to_json_binary, Binary, Deps, DepsMut, Env, Event, HexBinary,
-    MessageInfo, Response, Storage,
+    entry_point, from_json, to_json_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo,
+    Response, Storage,
 };
 use cw_storage_plus::{Item, Map};
 use sha2::{Digest, Sha256};
@@ -40,7 +40,7 @@ pub enum Error {
     #[error("Insufficient executor signatures provided. Needed: {needed}. Provided: {provided}.")]
     InsufficientSignatures { needed: u16, provided: u16 },
     #[error("Public key {key} is not part of the executor set.")]
-    NonExecutorKey { key: HexBinary },
+    NonExecutorKey { key: PublicKey },
     #[error("Duplicate public key provided: {key}.")]
     DuplicateKey { key: PublicKey },
     #[error("Processor signature had the wrong public key. Expected key {expected}. Actually signed with {actual}.")]
@@ -184,10 +184,9 @@ fn signed(
     let mut used = vec![];
     for executor in executors {
         let key = signing::validate_signature(deps.api, &hash, &executor)?;
-        // FIXME just want to get something working for now, need to investigate why this is broken
-        // if !state.executors.contains(&key) {
-        //     return Err(Error::NonExecutorKey { key });
-        // }
+        if !state.executors.contains(&key) {
+            return Err(Error::NonExecutorKey { key });
+        }
         if used.contains(&key) {
             return Err(Error::DuplicateKey { key });
         }
