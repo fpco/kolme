@@ -60,8 +60,8 @@ impl KolmeApp for SampleKolmeApp {
             processor: my_public_key,
             listeners: set.clone(),
             needed_listeners: 1,
-            executors: set,
-            needed_executors: 1,
+            approvers: set,
+            needed_approvers: 1,
             chains: bridges,
         }
     }

@@ -103,8 +103,8 @@ impl KolmeApp for SampleKolmeApp {
             processor: my_public_key,
             listeners: set.clone(),
             needed_listeners: 1,
-            executors: set,
-            needed_executors: 1,
+            approvers: set,
+            needed_approvers: 1,
             chains: bridges,
         }
     }
@@ -242,8 +242,8 @@ async fn serve(bind: SocketAddr) -> Result<()> {
     set.spawn(processor.run());
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run());
-    let executor = Executor::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(executor.run());
+    let approver = Approver::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(approver.run());
     let submitter = Submitter::new(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),

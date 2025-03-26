@@ -1,15 +1,15 @@
 mod api_server;
+mod approver;
 mod common;
 mod core;
-mod executor;
 mod listener;
 mod processor;
 mod submitter;
 
 pub use api_server::ApiServer;
+pub use approver::Approver;
 pub use common::*;
 pub use core::*;
-pub use executor::Executor;
 pub use listener::Listener;
 pub use processor::Processor;
 pub use shared::{cosmos::SignatureWithRecovery, cryptography::*, types::*};

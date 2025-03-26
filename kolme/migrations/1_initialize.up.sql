@@ -95,7 +95,7 @@ CREATE TABLE bridge_event_attestations(
     UNIQUE(event, public_key)
 );
 
--- Approvals from executors for actions.
+-- Approvals from approvers for actions.
 CREATE TABLE action_approvals(
     action INTEGER NOT NULL REFERENCES actions(id),
     public_key BLOB NOT NULL,

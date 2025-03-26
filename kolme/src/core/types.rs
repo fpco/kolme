@@ -59,8 +59,8 @@ pub enum GenesisAction {
         processor: PublicKey,
         listeners: BTreeSet<PublicKey>,
         needed_listeners: usize,
-        executors: BTreeSet<PublicKey>,
-        needed_executors: usize,
+        approvers: BTreeSet<PublicKey>,
+        needed_approvers: usize,
     },
 }
 
@@ -277,17 +277,19 @@ pub enum Message<AppMessage> {
         event_id: BridgeEventId,
         event: BridgeEvent,
     },
+    /// Approval from a single approver for a bridge action
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
         signature: Signature,
         recovery: RecoveryId,
     },
+    /// Final approval from the processor to confirm approvals from approvers.
     ProcessorApprove {
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: SignatureWithRecovery,
-        executors: Vec<SignatureWithRecovery>,
+        approvers: Vec<SignatureWithRecovery>,
     },
     Auth(AuthMessage),
     // TODO Bank, with things like
@@ -297,7 +299,7 @@ pub enum Message<AppMessage> {
     //     dest: AccountId,
     // }
 
-    // TODO: admin actions: update code version, change processor/listeners/executors (need to update contracts too), modification to chain values (like asset definitions)
+    // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
@@ -343,10 +345,10 @@ pub struct GenesisInfo {
     pub listeners: BTreeSet<PublicKey>,
     /// How many of the listeners are needed to approve a reported bridge event?
     pub needed_listeners: usize,
-    /// Public keys of the executors for this app
-    pub executors: BTreeSet<PublicKey>,
-    /// How many of the executors are needed to approve a bridge action?
-    pub needed_executors: usize,
+    /// Public keys of the approvers for this app
+    pub approvers: BTreeSet<PublicKey>,
+    /// How many of the approvers are needed to approve a bridge action?
+    pub needed_approvers: usize,
     /// Initial configuration of different chains
     pub chains: BTreeMap<ExternalChain, ChainConfig>,
 }
@@ -355,8 +357,8 @@ impl GenesisInfo {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
         anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.executors.len() >= self.needed_executors);
-        anyhow::ensure!(self.needed_executors > 0);
+        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
+        anyhow::ensure!(self.needed_approvers > 0);
         Ok(())
     }
 }
