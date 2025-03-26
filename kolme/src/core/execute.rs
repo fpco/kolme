@@ -418,6 +418,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.sender
     }
 
+    /// Withdraw an asset to an external chain.
     pub fn withdraw_asset(
         &mut self,
         asset_id: AssetId,
@@ -452,6 +453,58 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 amount,
             }],
         });
+        Ok(())
+    }
+
+    /// Transfer an asset to another account.
+    pub fn transfer_asset(
+        &mut self,
+        asset_id: AssetId,
+        source: AccountId,
+        dest: AccountId,
+        amount: u128,
+    ) -> Result<()> {
+        self.burn_asset(asset_id, source, amount)?;
+        self.mint_asset(asset_id, dest, amount);
+        Ok(())
+    }
+
+    /// Mint new tokens and assign ownership to the given account.
+    pub fn mint_asset(&mut self, asset_id: AssetId, recipient: AccountId, amount: u128) {
+        *self
+            .framework_state
+            .balances
+            .entry(recipient)
+            .or_default()
+            .entry(asset_id)
+            .or_default() += amount;
+    }
+
+    /// Burn some tokens from the given account.
+    ///
+    /// This can be used if the application itself takes possession of some assets.
+    pub fn burn_asset(&mut self, asset_id: AssetId, owner: AccountId, amount: u128) -> Result<()> {
+        let account = self
+            .framework_state
+            .balances
+            .get_mut(&owner)
+            .context("Cannot burn asset from unknown account")?;
+        let mut entry = match account.entry(asset_id) {
+            std::collections::btree_map::Entry::Vacant(_) => {
+                anyhow::bail!("Account ID {owner} does not hold any balances for asset {asset_id}")
+            }
+            std::collections::btree_map::Entry::Occupied(entry) => entry,
+        };
+        entry
+            .get_mut()
+            .checked_sub(amount)
+            .context("Insufficient token balance for burning")?;
+        if *entry.get() == 0 {
+            entry.remove_entry();
+            if account.is_empty() {
+                self.framework_state.balances.remove(&owner);
+            }
+        }
         Ok(())
     }
 
