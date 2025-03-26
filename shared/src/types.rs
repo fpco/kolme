@@ -49,6 +49,10 @@ impl BridgeEventId {
     pub fn increment(&mut self) {
         self.0 += 1;
     }
+
+    pub fn prev(self) -> Option<BridgeEventId> {
+        self.0.checked_sub(1).map(BridgeEventId)
+    }
 }
 
 impl Display for BridgeEventId {
