@@ -100,15 +100,6 @@ impl<App: KolmeApp> Submitter<App> {
                 let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
                 let wallet = self.seed_phrase.with_hrp(cosmos.get_address_hrp())?;
 
-                if chain == ExternalChain::OsmosisTestnet {
-                    self.kolme.notify_genesis_instantiation(
-                        chain,
-                        "osmo1q9hrw3mm7zu0ymfw7x8nuu079pgvlpv6tgluq03ffrghhrhc2hdsdlwrzj"
-                            .to_owned(),
-                    );
-                    return Ok(());
-                }
-
                 let msg = InstantiateMsg {
                     processor,
                     executors,
