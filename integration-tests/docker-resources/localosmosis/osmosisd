@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# Check if the localosmosis container is running
+if ! docker ps | grep -q osmolocaltest
+then
+    echo "The osmolocaltest container is not running. Please start the container to use this script."
+    exit 1
+fi
+
+docker exec osmolocaltest osmosisd "$@"
+

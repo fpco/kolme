@@ -26,6 +26,7 @@ pub use balances::{Balances, BalancesError};
 pub enum ExternalChain {
     OsmosisTestnet,
     NeutronTestnet,
+    OsmosisLocal,
 }
 
 impl ExternalChain {
@@ -33,6 +34,7 @@ impl ExternalChain {
         let network = match self {
             ExternalChain::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
             ExternalChain::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
+            ExternalChain::OsmosisLocal => cosmos::CosmosNetwork::OsmosisLocal,
         };
         Ok(network.builder_with_config().await?.build()?)
     }
@@ -369,6 +371,7 @@ pub enum Message<AppMessage> {
 
 /// An event emitted by a bridge contract and reported by a listener.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
 pub enum BridgeEvent {
     /// A bridge was instantiated
     Instantiated { contract: String },
@@ -478,7 +481,9 @@ impl ExecAction {
         id: BridgeActionId,
     ) -> Result<String> {
         match chain {
-            ExternalChain::OsmosisTestnet | ExternalChain::NeutronTestnet => {
+            ExternalChain::OsmosisTestnet
+            | ExternalChain::NeutronTestnet
+            | ExternalChain::OsmosisLocal => {
                 #[derive(serde::Serialize)]
                 struct Payload {
                     id: BridgeActionId,
