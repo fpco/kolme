@@ -58,7 +58,11 @@ impl<App: KolmeApp> Listener<App> {
                     )
                     .await?
                 {
-                    // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
+                    if let Err(e) = self.sanity_check_contract(chain, &contract).await {
+                        tracing::error!(
+                            "Invalid genesis contract {contract} on {chain:?} found: {e}"
+                        );
+                    }
                     let signed = kolme
                         .create_signed_transaction(
                             &self.secret,
@@ -86,6 +90,46 @@ impl<App: KolmeApp> Listener<App> {
             }
         }
         Some(res)
+    }
+
+    async fn sanity_check_contract(&self, chain: ExternalChain, contract: &str) -> Result<()> {
+        let kolme = self.kolme.read().await;
+        let config = kolme
+            .get_bridge_contracts()
+            .get(&chain)
+            .with_context(|| format!("No chain config found for {chain:?}"))?;
+        let expected_code_id = match config.bridge {
+            BridgeContract::NeededCosmosBridge { code_id } => code_id,
+            BridgeContract::Deployed(_) => {
+                anyhow::bail!("Already have a deployed contract on {chain:?}")
+            }
+        };
+        let contract = kolme
+            .get_cosmos(chain)
+            .await?
+            .make_contract(contract.parse()?);
+        let actual_code_id = contract.info().await?.code_id;
+        anyhow::ensure!(
+            actual_code_id == expected_code_id,
+            "Code ID mismatch, expected {expected_code_id}, but {contract} has {actual_code_id}"
+        );
+
+        let shared::cosmos::State {
+            processor,
+            executors,
+            needed_executors,
+            next_event_id: _,
+            next_action_id: _,
+        } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
+
+        let info = App::genesis_info();
+
+        anyhow::ensure!(info.processor == processor);
+
+        anyhow::ensure!(executors == info.executors);
+        anyhow::ensure!(usize::from(needed_executors) == info.needed_executors);
+
+        Ok(())
     }
 }
 
