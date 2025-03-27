@@ -1969,7 +1969,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum 0.8.1",
- "base64",
  "chrono",
  "clap",
  "cosmos",
