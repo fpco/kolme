@@ -45,7 +45,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         next_height: BlockHeight,
         next_genesis_action: Option<GenesisAction>,
         bridges: &'a BTreeMap<ExternalChain, ChainConfig>,
-        balances: &'a BTreeMap<AccountId, BTreeMap<AssetId, u128>>,
+        balances: &'a Balances,
         app_state: serde_json::Value,
     }
 

@@ -209,6 +209,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 self.processor_approve(*chain, *action_id, processor, approvers, msg_index)
                     .await?;
             }
+            Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(_auth_message) => todo!(),
         }
         Ok(())
@@ -283,13 +284,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                             continue;
                         };
 
-                        *self
-                            .framework_state
-                            .balances
-                            .entry(account_id)
-                            .or_default()
-                            .entry(asset_config.asset_id)
-                            .or_default() += amount;
+                        self.framework_state.balances.mint(
+                            account_id,
+                            asset_config.asset_id,
+                            asset_config.to_decimal(*amount)?,
+                        )?;
                     }
                 }
                 BridgeEvent::Signed {
@@ -424,33 +423,21 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         asset_id: AssetId,
         chain: ExternalChain,
         source: AccountId,
-        wallet: String,
-        amount: u128,
+        wallet: &Wallet,
+        amount: Decimal,
     ) -> Result<()> {
-        let assets = self
-            .framework_state
+        let config = self.framework_state.get_asset_config(chain, asset_id)?;
+        let (amount_dec, amount_u128) = config.to_u128(amount)?;
+        self.framework_state
             .balances
-            .get_mut(&source)
-            .with_context(|| format!("No balances found for account ID {source}"))?;
-        let balance = assets.get_mut(&asset_id).with_context(|| {
-            format!("Account {source} does not have any balances for asset {asset_id}")
-        })?;
-        anyhow::ensure!(*balance >= amount, "Account {source} has insufficient balance of {asset_id}. Requested: {amount}. Balance: {balance}");
+            .burn(source, asset_id, amount_dec)?;
 
-        if *balance == amount {
-            assets.remove(&asset_id);
-            if assets.is_empty() {
-                self.framework_state.balances.remove(&source);
-            }
-        } else {
-            *balance -= amount;
-        }
         self.output.actions.push(ExecAction::Transfer {
             chain,
-            recipient: wallet,
+            recipient: wallet.clone(),
             funds: vec![AssetAmount {
                 id: asset_id,
-                amount,
+                amount: amount_u128,
             }],
         });
         Ok(())
@@ -462,49 +449,38 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         asset_id: AssetId,
         source: AccountId,
         dest: AccountId,
-        amount: u128,
+        amount: Decimal,
     ) -> Result<()> {
         self.burn_asset(asset_id, source, amount)?;
-        self.mint_asset(asset_id, dest, amount);
+        self.mint_asset(asset_id, dest, amount)?;
         Ok(())
     }
 
     /// Mint new tokens and assign ownership to the given account.
-    pub fn mint_asset(&mut self, asset_id: AssetId, recipient: AccountId, amount: u128) {
-        *self
-            .framework_state
+    pub fn mint_asset(
+        &mut self,
+        asset_id: AssetId,
+        recipient: AccountId,
+        amount: Decimal,
+    ) -> Result<()> {
+        self.framework_state
             .balances
-            .entry(recipient)
-            .or_default()
-            .entry(asset_id)
-            .or_default() += amount;
+            .mint(recipient, asset_id, amount)?;
+        Ok(())
     }
 
     /// Burn some tokens from the given account.
     ///
     /// This can be used if the application itself takes possession of some assets.
-    pub fn burn_asset(&mut self, asset_id: AssetId, owner: AccountId, amount: u128) -> Result<()> {
-        let account = self
-            .framework_state
+    pub fn burn_asset(
+        &mut self,
+        asset_id: AssetId,
+        owner: AccountId,
+        amount: Decimal,
+    ) -> Result<()> {
+        self.framework_state
             .balances
-            .get_mut(&owner)
-            .context("Cannot burn asset from unknown account")?;
-        let mut entry = match account.entry(asset_id) {
-            std::collections::btree_map::Entry::Vacant(_) => {
-                anyhow::bail!("Account ID {owner} does not hold any balances for asset {asset_id}")
-            }
-            std::collections::btree_map::Entry::Occupied(entry) => entry,
-        };
-        entry
-            .get_mut()
-            .checked_sub(amount)
-            .context("Insufficient token balance for burning")?;
-        if *entry.get() == 0 {
-            entry.remove_entry();
-            if account.is_empty() {
-                self.framework_state.balances.remove(&owner);
-            }
-        }
+            .burn(owner, asset_id, amount)?;
         Ok(())
     }
 
@@ -532,6 +508,28 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             response: serde_json::to_string(&res)?,
         });
         Ok(res)
+    }
+
+    async fn bank(&mut self, bank: &BankMessage) -> Result<()> {
+        match bank {
+            BankMessage::Withdraw {
+                asset,
+                chain,
+                dest,
+                amount,
+            } => self.withdraw_asset(*asset, *chain, self.sender, dest, *amount)?,
+            BankMessage::Transfer {
+                asset,
+                dest,
+                amount,
+            } => {
+                self.framework_state
+                    .balances
+                    .burn(self.sender, *asset, *amount)?;
+                self.framework_state.balances.mint(*dest, *asset, *amount)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn log(&mut self, msg: impl Into<String>) {
