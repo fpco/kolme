@@ -91,8 +91,8 @@ impl<App: KolmeApp> Submitter<App> {
                 processor,
                 listeners: _,
                 needed_listeners: _,
-                executors,
-                needed_executors,
+                approvers,
+                needed_approvers,
             } => {
                 if self.genesis_created.contains(&chain) {
                     return Ok(());
@@ -102,8 +102,8 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let msg = InstantiateMsg {
                     processor,
-                    executors,
-                    needed_executors: needed_executors.try_into()?,
+                    approvers,
+                    needed_approvers: needed_approvers.try_into()?,
                 };
 
                 let contract = cosmos
@@ -166,7 +166,7 @@ impl<App: KolmeApp> Submitter<App> {
             chain: chain2,
             action_id: action_id2,
             processor,
-            executors,
+            approvers,
         } = message
         else {
             anyhow::bail!("Wrong message type for {height}#{msg_index}");
@@ -176,7 +176,7 @@ impl<App: KolmeApp> Submitter<App> {
 
         let msg = ExecuteMsg::Signed {
             processor: *processor,
-            executors: executors.clone(),
+            approvers: approvers.clone(),
             payload,
         };
         let contract = {

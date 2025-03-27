@@ -6,8 +6,8 @@ pub struct FrameworkState {
     pub(super) processor: PublicKey,
     pub(super) listeners: BTreeSet<PublicKey>,
     pub(super) needed_listeners: usize,
-    pub(super) executors: BTreeSet<PublicKey>,
-    pub(super) needed_executors: usize,
+    pub(super) approvers: BTreeSet<PublicKey>,
+    pub(super) needed_approvers: usize,
     pub(super) chains: BTreeMap<ExternalChain, ChainConfig>,
     #[serde(default)]
     pub(super) balances: BTreeMap<AccountId, BTreeMap<AssetId, u128>>, // TODO we want to use a decimal representation instead most likely
@@ -20,8 +20,8 @@ impl FrameworkState {
             processor,
             listeners,
             needed_listeners,
-            executors,
-            needed_executors,
+            approvers,
+            needed_approvers,
             chains,
         }: &GenesisInfo,
     ) -> Self {
@@ -29,8 +29,8 @@ impl FrameworkState {
             processor: *processor,
             listeners: listeners.clone(),
             needed_listeners: *needed_listeners,
-            executors: executors.clone(),
-            needed_executors: *needed_executors,
+            approvers: approvers.clone(),
+            needed_approvers: *needed_approvers,
             chains: chains.clone(),
             balances: BTreeMap::new(),
         }
@@ -39,8 +39,8 @@ impl FrameworkState {
     fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
         anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.executors.len() >= self.needed_executors);
-        anyhow::ensure!(self.needed_executors > 0);
+        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
+        anyhow::ensure!(self.needed_approvers > 0);
         Ok(())
     }
 }

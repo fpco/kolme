@@ -204,9 +204,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 chain,
                 action_id,
                 processor,
-                executors,
+                approvers,
             } => {
-                self.processor_approve(*chain, *action_id, processor, executors, msg_index)
+                self.processor_approve(*chain, *action_id, processor, approvers, msg_index)
                     .await?;
             }
             Message::Auth(_auth_message) => todo!(),
@@ -322,7 +322,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     ) -> Result<()> {
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
         let key = PublicKey::recover_from_msg(payload.as_bytes(), &signature, recovery)?;
-        anyhow::ensure!(self.framework_state.executors.contains(&key));
+        anyhow::ensure!(self.framework_state.approvers.contains(&key));
         let chain_db = chain.as_ref();
         let action_id_db = i64::try_from(action_id.0)?;
         let count = sqlx::query_scalar!(
@@ -358,25 +358,25 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: &SignatureWithRecovery,
-        executors: &[SignatureWithRecovery],
+        approvers: &[SignatureWithRecovery],
         msg_index: usize,
     ) -> Result<()> {
-        anyhow::ensure!(executors.len() >= self.framework_state.needed_executors);
+        anyhow::ensure!(approvers.len() >= self.framework_state.needed_approvers);
 
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
 
         let processor = processor.validate(payload.as_bytes())?;
         anyhow::ensure!(processor == self.framework_state.processor);
 
-        let executors_checked = executors
+        let approvers_checked = approvers
             .iter()
             .map(|sig| {
                 let pubkey = sig.validate(payload.as_bytes())?;
-                anyhow::ensure!(self.framework_state.executors.contains(&pubkey));
+                anyhow::ensure!(self.framework_state.approvers.contains(&pubkey));
                 Ok(pubkey)
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
-        anyhow::ensure!(executors.len() == executors_checked.len());
+        anyhow::ensure!(approvers.len() == approvers_checked.len());
 
         self.db_updates
             .push(DatabaseUpdate::ProcessorApproveAction {

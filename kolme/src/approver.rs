@@ -1,13 +1,13 @@
 use crate::*;
 
-pub struct Executor<App: KolmeApp> {
+pub struct Approver<App: KolmeApp> {
     kolme: Kolme<App>,
     secret: SecretKey,
 }
 
-impl<App: KolmeApp> Executor<App> {
+impl<App: KolmeApp> Approver<App> {
     pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
-        Executor { kolme, secret }
+        Approver { kolme, secret }
     }
 
     pub async fn run(self) -> Result<()> {

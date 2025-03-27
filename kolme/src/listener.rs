@@ -116,8 +116,8 @@ impl<App: KolmeApp> Listener<App> {
 
         let shared::cosmos::State {
             processor,
-            executors,
-            needed_executors,
+            approvers,
+            needed_approvers,
             next_event_id: _,
             next_action_id: _,
         } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
@@ -126,8 +126,8 @@ impl<App: KolmeApp> Listener<App> {
 
         anyhow::ensure!(info.processor == processor);
 
-        anyhow::ensure!(executors == info.executors);
-        anyhow::ensure!(usize::from(needed_executors) == info.needed_executors);
+        anyhow::ensure!(approvers == info.approvers);
+        anyhow::ensure!(usize::from(needed_approvers) == info.needed_approvers);
 
         Ok(())
     }

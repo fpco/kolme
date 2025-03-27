@@ -26,21 +26,21 @@ pub enum Error {
         #[from]
         source: signing::SignatureError,
     },
-    #[error("No executors provided")]
-    NoExecutorsProvided,
-    #[error("Too many executors provided")]
-    TooManyExecutors(TryFromIntError),
-    #[error("Need at least {needed} executors, but only {provided} provided.")]
-    InsufficientExecutors { needed: u16, provided: u16 },
+    #[error("No approvers provided")]
+    NoApproversProvided,
+    #[error("Too many approvers provided")]
+    TooManyApprovers(TryFromIntError),
+    #[error("Need at least {needed} approvers , but only {provided} provided.")]
+    InsufficientApprovers { needed: u16, provided: u16 },
     #[error("Incorrect action ID. Expected: {expected}. Received: {received}.")]
     IncorrectActionId {
         expected: BridgeActionId,
         received: BridgeActionId,
     },
-    #[error("Insufficient executor signatures provided. Needed: {needed}. Provided: {provided}.")]
+    #[error("Insufficient approver signatures provided. Needed: {needed}. Provided: {provided}.")]
     InsufficientSignatures { needed: u16, provided: u16 },
-    #[error("Public key {key} is not part of the executor set.")]
-    NonExecutorKey { key: PublicKey },
+    #[error("Public key {key} is not part of the approver set.")]
+    NonApproverKey { key: PublicKey },
     #[error("Duplicate public key provided: {key}.")]
     DuplicateKey { key: PublicKey },
     #[error("Processor signature had the wrong public key. Expected key {expected}. Actually signed with {actual}.")]
@@ -69,24 +69,24 @@ pub fn instantiate(
     _info: MessageInfo,
     InstantiateMsg {
         processor,
-        executors,
-        needed_executors,
+        approvers,
+        needed_approvers,
     }: InstantiateMsg,
 ) -> Result<Response> {
-    if executors.is_empty() {
-        return Err(Error::NoExecutorsProvided);
+    if approvers.is_empty() {
+        return Err(Error::NoApproversProvided);
     }
-    let executors_len = u16::try_from(executors.len()).map_err(Error::TooManyExecutors)?;
-    if executors_len < needed_executors {
-        return Err(Error::InsufficientExecutors {
-            needed: needed_executors,
-            provided: executors_len,
+    let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
+    if approvers_len < needed_approvers {
+        return Err(Error::InsufficientApprovers {
+            needed: needed_approvers,
+            provided: approvers_len,
         });
     }
     let state = State {
         processor,
-        executors,
-        needed_executors,
+        approvers,
+        needed_approvers,
         // We start events at ID 1, since the instantiation itself is event 0.
         next_event_id: BridgeEventId::start().next(),
         next_action_id: BridgeActionId::start(),
@@ -101,9 +101,9 @@ pub fn execute(deps: DepsMut, _env: Env, info: MessageInfo, msg: ExecuteMsg) -> 
         ExecuteMsg::Regular { keys } => regular(deps, info, keys),
         ExecuteMsg::Signed {
             processor,
-            executors,
+            approvers,
             payload,
-        } => signed(deps, info, processor, executors, payload),
+        } => signed(deps, info, processor, approvers, payload),
     }
 }
 
@@ -142,7 +142,7 @@ fn signed(
     deps: DepsMut,
     info: MessageInfo,
     processor: SignatureWithRecovery,
-    executors: Vec<SignatureWithRecovery>,
+    approvers: Vec<SignatureWithRecovery>,
     payload: String,
 ) -> Result<Response> {
     let Payload { id, messages } = from_json(&payload)?;
@@ -160,11 +160,11 @@ fn signed(
     state.next_event_id.increment();
     STATE.save(deps.storage, &state)?;
 
-    let executors_len = u16::try_from(executors.len()).map_err(Error::TooManyExecutors)?;
-    if executors_len < state.needed_executors {
+    let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
+    if approvers_len < state.needed_approvers {
         return Err(Error::InsufficientSignatures {
-            needed: state.needed_executors,
-            provided: executors_len,
+            needed: state.needed_approvers,
+            provided: approvers_len,
         });
     }
 
@@ -182,10 +182,10 @@ fn signed(
     }
 
     let mut used = vec![];
-    for executor in executors {
-        let key = signing::validate_signature(deps.api, &hash, &executor)?;
-        if !state.executors.contains(&key) {
-            return Err(Error::NonExecutorKey { key });
+    for approver in approvers {
+        let key = signing::validate_signature(deps.api, &hash, &approver)?;
+        if !state.approvers.contains(&key) {
+            return Err(Error::NonApproverKey { key });
         }
         if used.contains(&key) {
             return Err(Error::DuplicateKey { key });
