@@ -9,6 +9,7 @@ use pinocchio::{
     program_error::ProgramError,
     pubkey::{create_program_address, find_program_address, Pubkey},
     sysvars::{rent::Rent, Sysvar},
+    syscalls
 };
 use bitflags::bitflags;
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -64,13 +65,17 @@ macro_rules! log {
 
 #[inline]
 pub fn log(msg: &str) {
-    #[cfg(target_os = "solana")]
     unsafe {
-        pinocchio::syscalls::sol_log_(msg.as_ptr(), msg.len() as u64);
+        syscalls::sol_log_(msg.as_ptr(), msg.len() as u64);
     }
+}
 
-    #[cfg(not(target_os = "solana"))]
-    println!("{msg}");
+/// Print some slices as base64.
+#[inline]
+pub fn log_base64(data: &[&[u8]]) {
+    unsafe {
+        syscalls::sol_log_data(data as *const _ as *const u8, data.len() as u64);
+    }
 }
 
 #[inline]
