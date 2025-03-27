@@ -1,4 +1,3 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
 use cosmos::Contract;
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
@@ -171,7 +170,6 @@ async fn listen_once<App: KolmeApp>(
         .await?
     {
         GetEventResp::Found { message } => {
-            let message = BASE64_STANDARD.decode(&message)?;
             let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
             broadcast_listener_event(kolme, secret, chain, *next_bridge_event_id, &message).await?;
             *next_bridge_event_id = next_bridge_event_id.next();
