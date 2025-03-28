@@ -523,10 +523,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 dest,
                 amount,
             } => {
-                self.framework_state
-                    .balances
-                    .burn(self.sender, *asset, *amount)?;
-                self.framework_state.balances.mint(*dest, *asset, *amount)?;
+                self.transfer_asset(self.sender, *dest, *asset, *amount)?;
             }
         }
         Ok(())
