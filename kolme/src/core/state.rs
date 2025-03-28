@@ -1,5 +1,16 @@
 use crate::*;
 
+#[derive(snafu::Snafu, Debug)]
+pub enum CoreStateError {
+    ChainNotSupported {
+        chain: ExternalChain,
+    },
+    AssetNotSupported {
+        chain: ExternalChain,
+        asset_id: AssetId,
+    },
+}
+
 /// Raw framework state that can be serialized to the database.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct FrameworkState {
@@ -10,7 +21,7 @@ pub struct FrameworkState {
     pub(super) needed_approvers: usize,
     pub(super) chains: BTreeMap<ExternalChain, ChainConfig>,
     #[serde(default)]
-    pub(super) balances: BTreeMap<AccountId, BTreeMap<AssetId, u128>>, // TODO we want to use a decimal representation instead most likely
+    pub(super) balances: Balances,
 }
 
 impl FrameworkState {
@@ -32,7 +43,7 @@ impl FrameworkState {
             approvers: approvers.clone(),
             needed_approvers: *needed_approvers,
             chains: chains.clone(),
-            balances: BTreeMap::new(),
+            balances: Balances::default(),
         }
     }
 
@@ -42,6 +53,20 @@ impl FrameworkState {
         anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
         anyhow::ensure!(self.needed_approvers > 0);
         Ok(())
+    }
+
+    pub(super) fn get_asset_config(
+        &self,
+        chain: ExternalChain,
+        asset_id: AssetId,
+    ) -> Result<&AssetConfig, CoreStateError> {
+        self.chains
+            .get(&chain)
+            .ok_or(CoreStateError::ChainNotSupported { chain })?
+            .assets
+            .values()
+            .find(|config| config.asset_id == asset_id)
+            .ok_or(CoreStateError::AssetNotSupported { chain, asset_id })
     }
 }
 

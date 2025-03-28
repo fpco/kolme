@@ -337,7 +337,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self.framework_state.chains
     }
 
-    pub fn get_balances(&self) -> &BTreeMap<AccountId, BTreeMap<AssetId, u128>> {
+    pub fn get_balances(&self) -> &Balances {
         &self.framework_state.balances
     }
 

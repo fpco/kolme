@@ -31,7 +31,7 @@ pub enum SampleMessage {
     /// FIXME: maybe this should be part of the bank module instead. Then our bridge is just a default Kolme app!
     SendTo {
         address: cosmos::Address,
-        amount: u128,
+        amount: Decimal,
     },
 }
 
@@ -138,7 +138,7 @@ impl KolmeApp for SampleKolmeApp {
                     AssetId(1),
                     chain,
                     ctx.get_sender_id(),
-                    address.to_string(),
+                    &Wallet(address.to_string()),
                     *amount,
                 )?;
             }

@@ -1,9 +1,13 @@
+mod balances;
+
 use std::{fmt::Display, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
 use shared::cosmos::SignatureWithRecovery;
 
 use crate::*;
+
+pub use balances::{Balances, BalancesError};
 
 #[derive(
     serde::Serialize,
@@ -43,6 +47,70 @@ pub struct ChainConfig {
 pub struct AssetConfig {
     pub decimals: u8,
     pub asset_id: AssetId,
+}
+
+#[derive(snafu::Snafu, Debug)]
+pub enum AssetError {
+    #[snafu(display(
+        "Could not convert {amount} to decimal using {decimals} decimal points: {source}"
+    ))]
+    CouldNotConvertToDecimal {
+        source: rust_decimal::Error,
+        amount: u128,
+        decimals: u8,
+    },
+    #[snafu(display("Amount {amount} too large to convert to decimal: {source}"))]
+    U128TooLarge {
+        source: std::num::TryFromIntError,
+        amount: u128,
+    },
+    #[snafu(display("Cannot convert {amount} to integer because it's negative: {source}"))]
+    ToU128WithNegative {
+        source: std::num::TryFromIntError,
+        amount: Decimal,
+    },
+}
+
+impl AssetConfig {
+    pub(crate) fn to_decimal(&self, amount: u128) -> Result<Decimal, AssetError> {
+        Decimal::try_from_i128_with_scale(
+            amount
+                .try_into()
+                .map_err(|source| AssetError::U128TooLarge { source, amount })?,
+            self.decimals.into(),
+        )
+        .map_err(|source| AssetError::CouldNotConvertToDecimal {
+            source,
+            amount,
+            decimals: self.decimals,
+        })
+    }
+
+    /// Convert a decimal amount to u128
+    ///
+    /// Note that this returns a potentially modified Decimal, to
+    /// account for potential rounding due to on-chain representation.
+    /// The idea is to allow dust to remain in the user account.
+    pub(crate) fn to_u128(&self, amount: Decimal) -> Result<(Decimal, u128), AssetError> {
+        let mut int = u128::try_from(amount.mantissa())
+            .map_err(|source| AssetError::ToU128WithNegative { source, amount })?;
+        let decimals = u32::from(self.decimals);
+        let scale = amount.scale();
+        match decimals.cmp(&scale) {
+            std::cmp::Ordering::Less => {
+                for _ in decimals..scale {
+                    int /= 10;
+                }
+            }
+            std::cmp::Ordering::Equal => (),
+            std::cmp::Ordering::Greater => {
+                for _ in scale..decimals {
+                    int *= 10;
+                }
+            }
+        }
+        Ok((self.to_decimal(int)?, int))
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -292,13 +360,7 @@ pub enum Message<AppMessage> {
         approvers: Vec<SignatureWithRecovery>,
     },
     Auth(AuthMessage),
-    // TODO Bank, with things like
-    // Transfer {
-    //     asset: AssetId,
-    //     amount: Decimal,
-    //     dest: AccountId,
-    // }
-
+    Bank(BankMessage),
     // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
 }
 
@@ -327,11 +389,28 @@ pub struct BridgedAssetAmount {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
 pub enum AuthMessage {
     AddPublicKey { key: PublicKey },
     RemovePublicKey { key: PublicKey },
     AddWallet { wallet: String },
     RemoveWallet { wallet: String },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum BankMessage {
+    Transfer {
+        asset: AssetId,
+        dest: AccountId,
+        amount: Decimal,
+    },
+    Withdraw {
+        asset: AssetId,
+        chain: ExternalChain,
+        dest: Wallet,
+        amount: Decimal,
+    },
 }
 
 /// Information defining the initial state of an app.
@@ -384,7 +463,7 @@ pub struct BlockDataLoad {
 pub enum ExecAction {
     Transfer {
         chain: ExternalChain,
-        recipient: String,
+        recipient: Wallet,
         funds: Vec<AssetAmount>,
     },
 }
@@ -426,7 +505,7 @@ impl ExecAction {
                             });
                         }
                         cosmwasm_std::CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
-                            to_address: recipient.clone(),
+                            to_address: recipient.0.clone(),
                             amount: coins,
                         })
                     }
@@ -464,4 +543,80 @@ pub enum Notification<AppMessage> {
     Broadcast {
         tx: Arc<SignedTransaction<AppMessage>>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::dec;
+
+    #[test]
+    fn to_decimal() {
+        let config_two = AssetConfig {
+            decimals: 2,
+            asset_id: AssetId(1),
+        };
+        let config_six = AssetConfig {
+            decimals: 6,
+            asset_id: AssetId(1),
+        };
+        let config_eight = AssetConfig {
+            decimals: 8,
+            asset_id: AssetId(1),
+        };
+
+        assert_eq!(
+            config_two.to_decimal(1234567890).unwrap(),
+            dec! {12345678.9}
+        );
+
+        assert_eq!(
+            config_six.to_decimal(1234567890).unwrap(),
+            dec! {1234.56789}
+        );
+
+        assert_eq!(
+            config_eight.to_decimal(1234567890).unwrap(),
+            dec! {12.3456789}
+        );
+    }
+
+    #[test]
+    fn to_u128() {
+        let config_two = AssetConfig {
+            decimals: 2,
+            asset_id: AssetId(1),
+        };
+        let config_six = AssetConfig {
+            decimals: 6,
+            asset_id: AssetId(1),
+        };
+        let config_eight = AssetConfig {
+            decimals: 8,
+            asset_id: AssetId(1),
+        };
+
+        assert_eq!(
+            config_two.to_u128(dec!(12.34)).unwrap(),
+            (dec!(12.34), 1234)
+        );
+        assert_eq!(
+            config_two.to_u128(dec!(12.3456)).unwrap(),
+            (dec!(12.34), 1234)
+        );
+
+        assert_eq!(
+            config_six.to_u128(dec!(12.3456)).unwrap(),
+            (dec!(12.3456), 12345600)
+        );
+        assert_eq!(
+            config_six.to_u128(dec!(12.3456789)).unwrap(),
+            (dec!(12.345678), 12345678)
+        );
+
+        assert_eq!(
+            config_eight.to_u128(dec!(12.3456789)).unwrap(),
+            (dec!(12.3456789), 1234567890)
+        );
+    }
 }

@@ -12,6 +12,7 @@ pub use common::*;
 pub use core::*;
 pub use listener::Listener;
 pub use processor::Processor;
+pub use rust_decimal::Decimal;
 pub use shared::{cosmos::SignatureWithRecovery, cryptography::*, types::*};
 pub use submitter::Submitter;
 
