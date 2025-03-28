@@ -523,7 +523,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 dest,
                 amount,
             } => {
-                self.transfer_asset(self.sender, *dest, *asset, *amount)?;
+                self.transfer_asset(*asset, self.sender, *dest, *amount)?;
             }
         }
         Ok(())
