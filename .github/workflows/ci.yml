@@ -63,6 +63,11 @@ jobs:
           version: v0.8.2
       - name: Setup just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+      - name: Install sqlx-cli
+        uses: taiki-e/cache-cargo-install-action@4d586f211d9b0bca9e7b59e57e2a0febf36c0929 # v2
+        with:
+          tool: sqlx-cli@0.8.2
+          locked: false
       - name: Run tests
         run: just test
 
