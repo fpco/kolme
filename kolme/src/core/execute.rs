@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-use k256::ecdsa::VerifyingKey;
-
 use crate::core::*;
 
 /// Execution context for a single message.
@@ -55,8 +53,8 @@ pub enum DatabaseUpdate {
     },
     ApproveAction {
         pubkey: PublicKey,
-        signature: k256::ecdsa::Signature,
-        recovery: k256::ecdsa::RecoveryId,
+        signature: Signature,
+        recovery: RecoveryId,
         msg_index: usize,
         chain: ExternalChain,
         action_id: BridgeActionId,
@@ -206,11 +204,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 chain,
                 action_id,
                 processor,
-                executors,
+                approvers,
             } => {
-                self.processor_approve(*chain, *action_id, processor, executors, msg_index)
+                self.processor_approve(*chain, *action_id, processor, approvers, msg_index)
                     .await?;
             }
+            Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(_auth_message) => todo!(),
         }
         Ok(())
@@ -225,15 +224,26 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     ) -> Result<()> {
         anyhow::ensure!(self.framework_state.listeners.contains(&self.pubkey));
         anyhow::ensure!(!has_already_listened(&self.pool, chain, event_id, &self.pubkey).await?);
-        // FIXME do we want to ensure that the event hasn't been accepted yet?
-        // FIXME should we include a requirement that events are added in order, and if a previous event hasn't been accepted yet, we disallow it being added here?
+        anyhow::ensure!(!has_already_accepted(&self.pool, chain, event_id).await?);
+
+        // Make sure that all previous events have already been accepted.
+        // This prevents potential censorship-style attacks on the part of
+        // the listeners. We may need to reconsider the approach here in
+        // the future, such as allowing signatures to come in but not accepting
+        // them out of order.
+        if let Some(id) = event_id.prev() {
+            anyhow::ensure!(has_already_accepted(&self.pool, chain, id).await?);
+        }
         let event_content = ensure_event_matches(&self.pool, chain, event_id, event).await?;
 
         // OK, valid event. Let's find out how many existing signatures there are so we can decide if we can execute.
-        let existing_signatures = count_listener_signatures(&self.pool, chain, event_id).await?;
+        let existing_signatures = get_listener_signatures(&self.pool, chain, event_id)
+            .await?
+            .iter()
+            .filter(|key| self.framework_state.listeners.contains(key))
+            .count();
 
         // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
-        // FIXME do we need to check that the listeners in the database match our current set of listeners?
         let was_accepted = existing_signatures + 1 >= self.framework_state.needed_listeners;
         let mut action_id = None;
         if was_accepted {
@@ -274,13 +284,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                             continue;
                         };
 
-                        *self
-                            .framework_state
-                            .balances
-                            .entry(account_id)
-                            .or_default()
-                            .entry(asset_config.asset_id)
-                            .or_default() += amount;
+                        self.framework_state.balances.mint(
+                            account_id,
+                            asset_config.asset_id,
+                            asset_config.to_decimal(*amount)?,
+                        )?;
                     }
                 }
                 BridgeEvent::Signed {
@@ -307,14 +315,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         &mut self,
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: k256::ecdsa::Signature,
-        recovery: k256::ecdsa::RecoveryId,
+        signature: Signature,
+        recovery: RecoveryId,
         msg_index: usize,
     ) -> Result<()> {
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
-        let key = VerifyingKey::recover_from_msg(payload.as_bytes(), &signature, recovery)?;
-        let key = PublicKey(key.into());
-        anyhow::ensure!(self.framework_state.executors.contains(&key));
+        let key = PublicKey::recover_from_msg(payload.as_bytes(), &signature, recovery)?;
+        anyhow::ensure!(self.framework_state.approvers.contains(&key));
         let chain_db = chain.as_ref();
         let action_id_db = i64::try_from(action_id.0)?;
         let count = sqlx::query_scalar!(
@@ -350,25 +357,25 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: &SignatureWithRecovery,
-        executors: &[SignatureWithRecovery],
+        approvers: &[SignatureWithRecovery],
         msg_index: usize,
     ) -> Result<()> {
-        anyhow::ensure!(executors.len() >= self.framework_state.needed_executors);
+        anyhow::ensure!(approvers.len() >= self.framework_state.needed_approvers);
 
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
 
         let processor = processor.validate(payload.as_bytes())?;
         anyhow::ensure!(processor == self.framework_state.processor);
 
-        let executors_checked = executors
+        let approvers_checked = approvers
             .iter()
             .map(|sig| {
                 let pubkey = sig.validate(payload.as_bytes())?;
-                anyhow::ensure!(self.framework_state.executors.contains(&pubkey));
+                anyhow::ensure!(self.framework_state.approvers.contains(&pubkey));
                 Ok(pubkey)
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
-        anyhow::ensure!(executors.len() == executors_checked.len());
+        anyhow::ensure!(approvers.len() == approvers_checked.len());
 
         self.db_updates
             .push(DatabaseUpdate::ProcessorApproveAction {
@@ -410,40 +417,70 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.sender
     }
 
+    /// Withdraw an asset to an external chain.
     pub fn withdraw_asset(
         &mut self,
         asset_id: AssetId,
         chain: ExternalChain,
         source: AccountId,
-        wallet: String,
-        amount: u128,
+        wallet: &Wallet,
+        amount: Decimal,
     ) -> Result<()> {
-        let assets = self
-            .framework_state
+        let config = self.framework_state.get_asset_config(chain, asset_id)?;
+        let (amount_dec, amount_u128) = config.to_u128(amount)?;
+        self.framework_state
             .balances
-            .get_mut(&source)
-            .with_context(|| format!("No balances found for account ID {source}"))?;
-        let balance = assets.get_mut(&asset_id).with_context(|| {
-            format!("Account {source} does not have any balances for asset {asset_id}")
-        })?;
-        anyhow::ensure!(*balance >= amount, "Account {source} has insufficient balance of {asset_id}. Requested: {amount}. Balance: {balance}");
+            .burn(source, asset_id, amount_dec)?;
 
-        if *balance == amount {
-            assets.remove(&asset_id);
-            if assets.is_empty() {
-                self.framework_state.balances.remove(&source);
-            }
-        } else {
-            *balance -= amount;
-        }
         self.output.actions.push(ExecAction::Transfer {
             chain,
-            recipient: wallet,
+            recipient: wallet.clone(),
             funds: vec![AssetAmount {
                 id: asset_id,
-                amount,
+                amount: amount_u128,
             }],
         });
+        Ok(())
+    }
+
+    /// Transfer an asset to another account.
+    pub fn transfer_asset(
+        &mut self,
+        asset_id: AssetId,
+        source: AccountId,
+        dest: AccountId,
+        amount: Decimal,
+    ) -> Result<()> {
+        self.burn_asset(asset_id, source, amount)?;
+        self.mint_asset(asset_id, dest, amount)?;
+        Ok(())
+    }
+
+    /// Mint new tokens and assign ownership to the given account.
+    pub fn mint_asset(
+        &mut self,
+        asset_id: AssetId,
+        recipient: AccountId,
+        amount: Decimal,
+    ) -> Result<()> {
+        self.framework_state
+            .balances
+            .mint(recipient, asset_id, amount)?;
+        Ok(())
+    }
+
+    /// Burn some tokens from the given account.
+    ///
+    /// This can be used if the application itself takes possession of some assets.
+    pub fn burn_asset(
+        &mut self,
+        asset_id: AssetId,
+        owner: AccountId,
+        amount: Decimal,
+    ) -> Result<()> {
+        self.framework_state
+            .balances
+            .burn(owner, asset_id, amount)?;
         Ok(())
     }
 
@@ -471,6 +508,25 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             response: serde_json::to_string(&res)?,
         });
         Ok(res)
+    }
+
+    async fn bank(&mut self, bank: &BankMessage) -> Result<()> {
+        match bank {
+            BankMessage::Withdraw {
+                asset,
+                chain,
+                dest,
+                amount,
+            } => self.withdraw_asset(*asset, *chain, self.sender, dest, *amount)?,
+            BankMessage::Transfer {
+                asset,
+                dest,
+                amount,
+            } => {
+                self.transfer_asset(*asset, self.sender, *dest, *amount)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn log(&mut self, msg: impl Into<String>) {
@@ -506,16 +562,40 @@ async fn has_already_listened(
     Ok(count == 1)
 }
 
-async fn count_listener_signatures(
+async fn has_already_accepted(
     pool: &sqlx::SqlitePool,
     chain: ExternalChain,
     event_id: BridgeEventId,
-) -> Result<usize> {
+) -> Result<bool> {
     let chain = chain.as_ref();
     let event_id = i64::try_from(event_id.0)?;
     let count = sqlx::query_scalar!(
         r#"
             SELECT COUNT(*)
+            FROM bridge_events
+            WHERE chain=$1
+            AND event_id=$2
+            AND accepted IS NOT NULL
+        "#,
+        chain,
+        event_id,
+    )
+    .fetch_one(pool)
+    .await?;
+    assert!(count == 0 || count == 1);
+    Ok(count == 1)
+}
+
+async fn get_listener_signatures(
+    pool: &sqlx::SqlitePool,
+    chain: ExternalChain,
+    event_id: BridgeEventId,
+) -> Result<BTreeSet<PublicKey>> {
+    let chain = chain.as_ref();
+    let event_id = i64::try_from(event_id.0)?;
+    let public_keys = sqlx::query_scalar!(
+        r#"
+            SELECT public_key
             FROM bridge_events
             INNER JOIN bridge_event_attestations
             ON bridge_events.id=bridge_event_attestations.event
@@ -525,9 +605,13 @@ async fn count_listener_signatures(
         chain,
         event_id,
     )
-    .fetch_one(pool)
+    .fetch_all(pool)
     .await?;
-    Ok(count.try_into()?)
+    public_keys
+        .iter()
+        .map(PublicKey::from_bytes)
+        .collect::<Result<_, _>>()
+        .map_err(anyhow::Error::from)
 }
 
 /// Returns the rendered version of the event

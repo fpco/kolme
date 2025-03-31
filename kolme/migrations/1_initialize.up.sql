@@ -74,7 +74,6 @@ CREATE TABLE actions(
 );
 
 -- The events themselves, as reported by the first listener to observe.
--- FIXME: If a later listener disagrees, we have a corrupted state and need to do a recovery.
 CREATE TABLE bridge_events(
     -- Database-internal primary key
     id INTEGER PRIMARY KEY NOT NULL,
@@ -96,7 +95,7 @@ CREATE TABLE bridge_event_attestations(
     UNIQUE(event, public_key)
 );
 
--- Approvals from executors for actions.
+-- Approvals from approvers for actions.
 CREATE TABLE action_approvals(
     action INTEGER NOT NULL REFERENCES actions(id),
     public_key BLOB NOT NULL,

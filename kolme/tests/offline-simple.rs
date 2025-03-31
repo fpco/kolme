@@ -3,8 +3,6 @@ use std::{
     sync::OnceLock,
 };
 
-use k256::SecretKey;
-
 use kolme::*;
 
 /// In the future, move to an example and convert the binary to a library.
@@ -35,7 +33,7 @@ impl KolmeApp for SampleKolmeApp {
     type Message = SampleMessage;
 
     fn genesis_info() -> GenesisInfo {
-        let my_public_key = PublicKey(get_sample_secret_key().public_key());
+        let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
         let mut bridges = BTreeMap::new();
@@ -62,8 +60,8 @@ impl KolmeApp for SampleKolmeApp {
             processor: my_public_key,
             listeners: set.clone(),
             needed_listeners: 1,
-            executors: set,
-            needed_executors: 1,
+            approvers: set,
+            needed_approvers: 1,
             chains: bridges,
         }
     }
@@ -82,8 +80,8 @@ impl KolmeApp for SampleKolmeApp {
 
     async fn execute(
         &self,
-        ctx: &mut ExecutionContext<'_, Self>,
-        msg: &Self::Message,
+        _ctx: &mut ExecutionContext<'_, Self>,
+        _msg: &Self::Message,
     ) -> anyhow::Result<()> {
         Err(anyhow::anyhow!("execute not implemented"))
     }

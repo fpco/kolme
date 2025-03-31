@@ -264,8 +264,8 @@ impl<App: KolmeApp> KolmeInner<App> {
                         processor: self.framework_state.processor,
                         listeners: self.framework_state.listeners.clone(),
                         needed_listeners: self.framework_state.needed_listeners,
-                        executors: self.framework_state.executors.clone(),
-                        needed_executors: self.framework_state.needed_executors,
+                        approvers: self.framework_state.approvers.clone(),
+                        needed_approvers: self.framework_state.needed_approvers,
                     })
                 }
                 BridgeContract::Deployed(_) => (),
@@ -325,28 +325,28 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.framework_state.processor
     }
 
-    pub fn get_executor_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.framework_state.executors
+    pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
+        &self.framework_state.approvers
     }
 
-    pub fn get_needed_executors(&self) -> usize {
-        self.framework_state.needed_executors
+    pub fn get_needed_approvers(&self) -> usize {
+        self.framework_state.needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
         &self.framework_state.chains
     }
 
-    pub fn get_balances(&self) -> &BTreeMap<AccountId, BTreeMap<AssetId, u128>> {
+    pub fn get_balances(&self) -> &Balances {
         &self.framework_state.balances
     }
 
     pub async fn create_signed_transaction(
         &self,
-        secret: &k256::SecretKey,
+        secret: &SecretKey,
         messages: Vec<Message<App::Message>>,
     ) -> Result<SignedTransaction<App::Message>> {
-        let pubkey = secret.public_key().into();
+        let pubkey = secret.public_key();
         let nonce = self.get_account_and_next_nonce(pubkey).await?.next_nonce;
         let tx = Transaction::<App::Message> {
             pubkey,
@@ -526,7 +526,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         }
     }
 
-    /// Get the public keys of all executor approvals on an action.
+    /// Get the public keys of all approver approvals on an action.
     pub async fn get_action_approval_signatures(
         &self,
         chain: ExternalChain,
@@ -565,8 +565,8 @@ impl<App: KolmeApp> KolmeInner<App> {
                     Ok((
                         PublicKey::try_from_bytes(&public_key)?,
                         SignatureWithRecovery {
-                            sig: k256::ecdsa::Signature::from_slice(&signature)?,
-                            recid: k256::ecdsa::RecoveryId::from_byte(recovery.try_into()?)
+                            sig: Signature::from_slice(&signature)?,
+                            recid: RecoveryId::from_byte(recovery.try_into()?)
                                 .context("Invalid recovery found")?,
                         },
                     ))

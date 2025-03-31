@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT messages.height, messages.message, actions.payload, actions.action_id\n                FROM actions\n                INNER JOIN messages\n                ON actions.approved=messages.id\n                WHERE chain=$1\n                AND confirmed IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "height",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "message",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "payload",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "action_id",
+        "ordinal": 3,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "650937761d855fea6d4dc4e8bf9567278fba6f224e9b2da2caaf12c7106f5935"
+}

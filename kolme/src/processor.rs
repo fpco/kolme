@@ -1,16 +1,14 @@
 use std::ops::Deref;
 
-use k256::ecdsa::SigningKey;
-
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
-    secret: k256::SecretKey,
+    secret: SecretKey,
 }
 
 impl<App: KolmeApp> Processor<App> {
-    pub fn new(kolme: Kolme<App>, secret: k256::SecretKey) -> Self {
+    pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
         Processor { kolme, secret }
     }
 
@@ -101,7 +99,7 @@ impl<App: KolmeApp> Processor<App> {
         let approved_block = Block {
             tx,
             timestamp: now,
-            processor: PublicKey(self.secret.public_key()),
+            processor: self.secret.public_key(),
             height: kolme.get_next_height(),
             parent: kolme.get_current_block_hash(),
             framework_state,
@@ -137,21 +135,21 @@ impl<App: KolmeApp> Processor<App> {
         let sigs = kolme
             .get_action_approval_signatures(chain, action_id)
             .await?;
-        let mut executors = vec![];
+        let mut approvers = vec![];
         for (key, sig) in &sigs {
             let key2 = sig.validate(payload.as_bytes())?;
             anyhow::ensure!(key == &key2);
-            if kolme.get_executor_pubkeys().contains(key) {
-                executors.push(*sig);
+            if kolme.get_approver_pubkeys().contains(key) {
+                approvers.push(*sig);
             }
         }
 
-        if executors.len() < kolme.get_needed_executors() {
+        if approvers.len() < kolme.get_needed_approvers() {
             // Not enough approvals. Don't bother with later actions, we want to approve in order.
             return Ok(());
         }
 
-        let (sig, recid) = SigningKey::from(&self.secret).sign_recoverable(payload.as_bytes())?;
+        let (sig, recid) = self.secret.sign_recoverable(payload.as_bytes())?;
         let processor = SignatureWithRecovery { sig, recid };
 
         let tx = kolme
@@ -161,7 +159,7 @@ impl<App: KolmeApp> Processor<App> {
                     chain,
                     action_id,
                     processor,
-                    executors,
+                    approvers,
                 }],
             )
             .await?;

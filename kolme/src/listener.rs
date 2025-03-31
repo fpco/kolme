@@ -1,16 +1,17 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
 use cosmos::Contract;
+use cosmwasm_std::Coin;
+use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
 use tokio::task::JoinSet;
 
 use crate::*;
 
 pub struct Listener<App: KolmeApp> {
     kolme: Kolme<App>,
-    secret: k256::SecretKey,
+    secret: SecretKey,
 }
 
 impl<App: KolmeApp> Listener<App> {
-    pub fn new(kolme: Kolme<App>, secret: k256::SecretKey) -> Self {
+    pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
         Listener { kolme, secret }
     }
 
@@ -51,12 +52,16 @@ impl<App: KolmeApp> Listener<App> {
                 if !kolme
                     .received_listener_attestation(
                         chain,
-                        PublicKey(self.secret.public_key()),
+                        self.secret.public_key(),
                         BridgeEventId::start(),
                     )
                     .await?
                 {
-                    // FIXME sanity check the supplied contract and confirm it meets the genesis requirements
+                    if let Err(e) = self.sanity_check_contract(chain, &contract).await {
+                        tracing::error!(
+                            "Invalid genesis contract {contract} on {chain:?} found: {e}"
+                        );
+                    }
                     let signed = kolme
                         .create_signed_transaction(
                             &self.secret,
@@ -85,11 +90,51 @@ impl<App: KolmeApp> Listener<App> {
         }
         Some(res)
     }
+
+    async fn sanity_check_contract(&self, chain: ExternalChain, contract: &str) -> Result<()> {
+        let kolme = self.kolme.read().await;
+        let config = kolme
+            .get_bridge_contracts()
+            .get(&chain)
+            .with_context(|| format!("No chain config found for {chain:?}"))?;
+        let expected_code_id = match config.bridge {
+            BridgeContract::NeededCosmosBridge { code_id } => code_id,
+            BridgeContract::Deployed(_) => {
+                anyhow::bail!("Already have a deployed contract on {chain:?}")
+            }
+        };
+        let contract = kolme
+            .get_cosmos(chain)
+            .await?
+            .make_contract(contract.parse()?);
+        let actual_code_id = contract.info().await?.code_id;
+        anyhow::ensure!(
+            actual_code_id == expected_code_id,
+            "Code ID mismatch, expected {expected_code_id}, but {contract} has {actual_code_id}"
+        );
+
+        let shared::cosmos::State {
+            processor,
+            approvers,
+            needed_approvers,
+            next_event_id: _,
+            next_action_id: _,
+        } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
+
+        let info = App::genesis_info();
+
+        anyhow::ensure!(info.processor == processor);
+
+        anyhow::ensure!(approvers == info.approvers);
+        anyhow::ensure!(usize::from(needed_approvers) == info.needed_approvers);
+
+        Ok(())
+    }
 }
 
 async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
-    secret: k256::SecretKey,
+    secret: SecretKey,
     chain: ExternalChain,
     contract: String,
 ) -> Result<()> {
@@ -98,7 +143,7 @@ async fn listen<App: KolmeApp>(
     let mut next_bridge_event_id = kolme
         .read()
         .await
-        .get_next_bridge_event_id(chain, PublicKey(secret.public_key()))
+        .get_next_bridge_event_id(chain, secret.public_key())
         .await?;
     tracing::info!(
         "Beginning listener loop on contract {contract}, next event ID: {next_bridge_event_id}"
@@ -113,48 +158,36 @@ async fn listen<App: KolmeApp>(
 
 async fn listen_once<App: KolmeApp>(
     kolme: &Kolme<App>,
-    secret: &k256::SecretKey,
+    secret: &SecretKey,
     chain: ExternalChain,
     contract: &Contract,
     next_bridge_event_id: &mut BridgeEventId,
 ) -> Result<()> {
-    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-    #[serde(rename_all = "snake_case")]
-    enum QueryMsg {
-        GetEvent { id: BridgeEventId },
-    }
-    #[derive(serde::Serialize, serde::Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum GetToKolmeMessageResp {
-        Found { message: String },
-        NotFound {},
-    }
     match contract
         .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
         })
         .await?
     {
-        GetToKolmeMessageResp::Found { message } => {
-            let message = BASE64_STANDARD.decode(&message)?;
-            let message = serde_json::from_slice::<BridgeEventContents>(&message)?;
+        GetEventResp::Found { message } => {
+            let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
             broadcast_listener_event(kolme, secret, chain, *next_bridge_event_id, &message).await?;
             *next_bridge_event_id = next_bridge_event_id.next();
             Ok(())
         }
-        GetToKolmeMessageResp::NotFound {} => Ok(()),
+        GetEventResp::NotFound {} => Ok(()),
     }
 }
 
 async fn broadcast_listener_event<App: KolmeApp>(
     kolme: &Kolme<App>,
-    secret: &k256::SecretKey,
+    secret: &SecretKey,
     chain: ExternalChain,
     bridge_event_id: BridgeEventId,
-    message: &BridgeEventContents,
+    message: &BridgeEventMessage,
 ) -> Result<()> {
     let message = match message {
-        BridgeEventContents::Regular {
+        BridgeEventMessage::Regular {
             wallet,
             funds,
             keys,
@@ -163,14 +196,14 @@ async fn broadcast_listener_event<App: KolmeApp>(
             let mut new_keys = vec![];
 
             for Coin { denom, amount } in funds {
-                let amount = amount.parse()?;
+                let amount = amount.u128();
                 new_funds.push(BridgedAssetAmount {
                     denom: denom.clone(),
                     amount,
                 });
             }
             for key in keys {
-                new_keys.push(key.parse()?);
+                new_keys.push(*key);
             }
 
             Message::Listener {
@@ -183,7 +216,7 @@ async fn broadcast_listener_event<App: KolmeApp>(
                 },
             }
         }
-        BridgeEventContents::Signed { wallet, action_id } => Message::Listener {
+        BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
             chain,
             event_id: bridge_event_id,
             event: BridgeEvent::Signed {
@@ -199,24 +232,4 @@ async fn broadcast_listener_event<App: KolmeApp>(
         .await?;
     kolme.propose_transaction(signed)?;
     Ok(())
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-enum BridgeEventContents {
-    Regular {
-        wallet: String,
-        funds: Vec<Coin>,
-        keys: Vec<String>,
-    },
-    Signed {
-        wallet: String,
-        action_id: BridgeActionId,
-    },
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct Coin {
-    denom: String,
-    amount: String,
 }

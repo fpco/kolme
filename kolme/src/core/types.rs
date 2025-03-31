@@ -1,9 +1,13 @@
+mod balances;
+
 use std::{fmt::Display, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
-use k256::ecdsa::VerifyingKey;
+use shared::cosmos::SignatureWithRecovery;
 
 use crate::*;
+
+pub use balances::{Balances, BalancesError};
 
 #[derive(
     serde::Serialize,
@@ -45,6 +49,70 @@ pub struct AssetConfig {
     pub asset_id: AssetId,
 }
 
+#[derive(snafu::Snafu, Debug)]
+pub enum AssetError {
+    #[snafu(display(
+        "Could not convert {amount} to decimal using {decimals} decimal points: {source}"
+    ))]
+    CouldNotConvertToDecimal {
+        source: rust_decimal::Error,
+        amount: u128,
+        decimals: u8,
+    },
+    #[snafu(display("Amount {amount} too large to convert to decimal: {source}"))]
+    U128TooLarge {
+        source: std::num::TryFromIntError,
+        amount: u128,
+    },
+    #[snafu(display("Cannot convert {amount} to integer because it's negative: {source}"))]
+    ToU128WithNegative {
+        source: std::num::TryFromIntError,
+        amount: Decimal,
+    },
+}
+
+impl AssetConfig {
+    pub(crate) fn to_decimal(&self, amount: u128) -> Result<Decimal, AssetError> {
+        Decimal::try_from_i128_with_scale(
+            amount
+                .try_into()
+                .map_err(|source| AssetError::U128TooLarge { source, amount })?,
+            self.decimals.into(),
+        )
+        .map_err(|source| AssetError::CouldNotConvertToDecimal {
+            source,
+            amount,
+            decimals: self.decimals,
+        })
+    }
+
+    /// Convert a decimal amount to u128
+    ///
+    /// Note that this returns a potentially modified Decimal, to
+    /// account for potential rounding due to on-chain representation.
+    /// The idea is to allow dust to remain in the user account.
+    pub(crate) fn to_u128(&self, amount: Decimal) -> Result<(Decimal, u128), AssetError> {
+        let mut int = u128::try_from(amount.mantissa())
+            .map_err(|source| AssetError::ToU128WithNegative { source, amount })?;
+        let decimals = u32::from(self.decimals);
+        let scale = amount.scale();
+        match decimals.cmp(&scale) {
+            std::cmp::Ordering::Less => {
+                for _ in decimals..scale {
+                    int /= 10;
+                }
+            }
+            std::cmp::Ordering::Equal => (),
+            std::cmp::Ordering::Greater => {
+                for _ in scale..decimals {
+                    int *= 10;
+                }
+            }
+        }
+        Ok((self.to_decimal(int)?, int))
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub enum BridgeContract {
     NeededCosmosBridge { code_id: u64 },
@@ -59,8 +127,8 @@ pub enum GenesisAction {
         processor: PublicKey,
         listeners: BTreeSet<PublicKey>,
         needed_listeners: usize,
-        executors: BTreeSet<PublicKey>,
-        needed_executors: usize,
+        approvers: BTreeSet<PublicKey>,
+        needed_approvers: usize,
     },
 }
 
@@ -181,52 +249,6 @@ impl TryFrom<i64> for BlockHeight {
 )]
 pub struct Wallet(pub String);
 
-/// Monotonically increasing identifier for events coming from a bridge contract.
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct BridgeEventId(pub u64);
-impl BridgeEventId {
-    pub fn start() -> BridgeEventId {
-        BridgeEventId(0)
-    }
-
-    pub(crate) fn try_from_i64(id: i64) -> Result<Self> {
-        Ok(BridgeEventId(id.try_into()?))
-    }
-
-    pub(crate) fn next(self) -> BridgeEventId {
-        BridgeEventId(self.0 + 1)
-    }
-}
-
-impl Display for BridgeEventId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// Monotonically increasing identifier for actions sent to a bridge contract.
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
-)]
-pub struct BridgeActionId(pub u64);
-impl BridgeActionId {
-    pub fn start() -> Self {
-        BridgeActionId(0)
-    }
-
-    pub fn next(self) -> BridgeActionId {
-        BridgeActionId(self.0 + 1)
-    }
-}
-
-impl Display for BridgeActionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 /// A block that is signed by the processor.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(bound(
@@ -308,7 +330,7 @@ pub struct Transaction<AppMessage> {
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
-    pub fn sign(self, key: &k256::SecretKey) -> Result<SignedTransaction<AppMessage>> {
+    pub fn sign(self, key: &SecretKey) -> Result<SignedTransaction<AppMessage>> {
         Ok(SignedTransaction(TaggedJson::new(self)?.sign(key)?))
     }
 }
@@ -323,30 +345,23 @@ pub enum Message<AppMessage> {
         event_id: BridgeEventId,
         event: BridgeEvent,
     },
+    /// Approval from a single approver for a bridge action
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: k256::ecdsa::Signature,
-        #[serde(with = "crate::common::recovery")]
-        recovery: k256::ecdsa::RecoveryId,
+        signature: Signature,
+        recovery: RecoveryId,
     },
+    /// Final approval from the processor to confirm approvals from approvers.
     ProcessorApprove {
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: SignatureWithRecovery,
-        executors: Vec<SignatureWithRecovery>,
+        approvers: Vec<SignatureWithRecovery>,
     },
     Auth(AuthMessage),
-    // TODO Bank, with things like
-    // Transfer {
-    //     asset: AssetId,
-    //     amount: Decimal,
-    //     dest: AccountId,
-    // }
-
-    // TODO: outgoing actions
-
-    // TODO: admin actions: update code version, change processor/listeners/executors (need to update contracts too), modification to chain values (like asset definitions)
+    Bank(BankMessage),
+    // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
@@ -374,11 +389,28 @@ pub struct BridgedAssetAmount {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
 pub enum AuthMessage {
     AddPublicKey { key: PublicKey },
     RemovePublicKey { key: PublicKey },
     AddWallet { wallet: String },
     RemoveWallet { wallet: String },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum BankMessage {
+    Transfer {
+        asset: AssetId,
+        dest: AccountId,
+        amount: Decimal,
+    },
+    Withdraw {
+        asset: AssetId,
+        chain: ExternalChain,
+        dest: Wallet,
+        amount: Decimal,
+    },
 }
 
 /// Information defining the initial state of an app.
@@ -392,10 +424,10 @@ pub struct GenesisInfo {
     pub listeners: BTreeSet<PublicKey>,
     /// How many of the listeners are needed to approve a reported bridge event?
     pub needed_listeners: usize,
-    /// Public keys of the executors for this app
-    pub executors: BTreeSet<PublicKey>,
-    /// How many of the executors are needed to approve a bridge action?
-    pub needed_executors: usize,
+    /// Public keys of the approvers for this app
+    pub approvers: BTreeSet<PublicKey>,
+    /// How many of the approvers are needed to approve a bridge action?
+    pub needed_approvers: usize,
     /// Initial configuration of different chains
     pub chains: BTreeMap<ExternalChain, ChainConfig>,
 }
@@ -404,8 +436,8 @@ impl GenesisInfo {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
         anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.executors.len() >= self.needed_executors);
-        anyhow::ensure!(self.needed_executors > 0);
+        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
+        anyhow::ensure!(self.needed_approvers > 0);
         Ok(())
     }
 }
@@ -431,7 +463,7 @@ pub struct BlockDataLoad {
 pub enum ExecAction {
     Transfer {
         chain: ExternalChain,
-        recipient: String,
+        recipient: Wallet,
         funds: Vec<AssetAmount>,
     },
 }
@@ -473,7 +505,7 @@ impl ExecAction {
                             });
                         }
                         cosmwasm_std::CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
-                            to_address: recipient.clone(),
+                            to_address: recipient.0.clone(),
                             amount: coins,
                         })
                     }
@@ -503,8 +535,6 @@ pub struct AssetAmount {
 pub enum Notification<AppMessage> {
     NewBlock(Arc<SignedBlock<AppMessage>>),
     /// A claim by a submitter that it has instantiated a bridge contract.
-    ///
-    /// TODO for now we simply accept this as truth, in the future this will be used by listeners to review and confirm that the contract was created correctly.
     GenesisInstantiation {
         chain: ExternalChain,
         contract: String,
@@ -515,18 +545,78 @@ pub enum Notification<AppMessage> {
     },
 }
 
-/// A signature paired with its recovery ID
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
-pub struct SignatureWithRecovery {
-    pub sig: k256::ecdsa::Signature,
-    #[serde(with = "crate::common::recovery")]
-    pub recid: k256::ecdsa::RecoveryId,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::dec;
 
-impl SignatureWithRecovery {
-    pub fn validate(&self, msg: &[u8]) -> Result<PublicKey> {
-        Ok(PublicKey(
-            VerifyingKey::recover_from_msg(msg, &self.sig, self.recid)?.into(),
-        ))
+    #[test]
+    fn to_decimal() {
+        let config_two = AssetConfig {
+            decimals: 2,
+            asset_id: AssetId(1),
+        };
+        let config_six = AssetConfig {
+            decimals: 6,
+            asset_id: AssetId(1),
+        };
+        let config_eight = AssetConfig {
+            decimals: 8,
+            asset_id: AssetId(1),
+        };
+
+        assert_eq!(
+            config_two.to_decimal(1234567890).unwrap(),
+            dec! {12345678.9}
+        );
+
+        assert_eq!(
+            config_six.to_decimal(1234567890).unwrap(),
+            dec! {1234.56789}
+        );
+
+        assert_eq!(
+            config_eight.to_decimal(1234567890).unwrap(),
+            dec! {12.3456789}
+        );
+    }
+
+    #[test]
+    fn to_u128() {
+        let config_two = AssetConfig {
+            decimals: 2,
+            asset_id: AssetId(1),
+        };
+        let config_six = AssetConfig {
+            decimals: 6,
+            asset_id: AssetId(1),
+        };
+        let config_eight = AssetConfig {
+            decimals: 8,
+            asset_id: AssetId(1),
+        };
+
+        assert_eq!(
+            config_two.to_u128(dec!(12.34)).unwrap(),
+            (dec!(12.34), 1234)
+        );
+        assert_eq!(
+            config_two.to_u128(dec!(12.3456)).unwrap(),
+            (dec!(12.34), 1234)
+        );
+
+        assert_eq!(
+            config_six.to_u128(dec!(12.3456)).unwrap(),
+            (dec!(12.3456), 12345600)
+        );
+        assert_eq!(
+            config_six.to_u128(dec!(12.3456789)).unwrap(),
+            (dec!(12.345678), 12345678)
+        );
+
+        assert_eq!(
+            config_eight.to_u128(dec!(12.3456789)).unwrap(),
+            (dec!(12.3456789), 1234567890)
+        );
     }
 }

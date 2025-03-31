@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT public_key\n            FROM bridge_events\n            INNER JOIN bridge_event_attestations\n            ON bridge_events.id=bridge_event_attestations.event\n            WHERE chain=$1\n            AND event_id=$2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "public_key",
+        "ordinal": 0,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0861d6e7034e9f17460d67b91c8c1f9955914e173332be7d5dcfc5ba4751a1e0"
+}
