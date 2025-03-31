@@ -1,0 +1,6 @@
+[book]
+authors = ["FP Block"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Kolme Framework Developer Docs"
