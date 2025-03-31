@@ -1,6 +1,9 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs::File,
+    io::Write,
     net::SocketAddr,
+    path::PathBuf,
     str::FromStr,
 };
 
@@ -15,34 +18,11 @@ use tokio::task::JoinSet;
 mod six_sigma;
 
 use six_sigma::state::*;
+use six_sigma::types::*;
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
 pub struct SixSigmaApp;
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum AppMessage {
-    SetConfig {
-        sr_account: AccountId,
-        market_funds_account: AccountId,
-    },
-    AddMarket {
-        id: u64,
-        asset_id: AssetId,
-        name: String,
-    },
-    PlaceBet {
-        wallet: String,
-        amount: Decimal,
-        market_id: u64,
-        outcome: u8,
-    },
-    SettleMarket {
-        market_id: u64,
-        outcome: u8,
-    },
-}
 
 // Another keypair for client testing:
 // Public key: 02c2b386e42945d4c11712a5bc1d20d085a7da63e57c214e2742a684a97d436599
@@ -61,12 +41,12 @@ fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-pub(crate) struct Transfer {
-    asset_id: AssetId,
-    amount: Decimal,
-    from: AccountId,
-    to: AccountId,
-    withdraw_wallet: Option<Wallet>,
+pub struct Transfer {
+    pub asset_id: AssetId,
+    pub amount: Decimal,
+    pub from: AccountId,
+    pub to: AccountId,
+    pub withdraw_wallet: Option<Wallet>,
 }
 
 impl KolmeApp for SixSigmaApp {
@@ -191,9 +171,9 @@ impl KolmeApp for SixSigmaApp {
     }
 }
 
-const OUTCOME_COUNT: u8 = 3;
+pub const OUTCOME_COUNT: u8 = 3;
 
-type Odds = [Decimal; OUTCOME_COUNT as usize];
+pub type Odds = [Decimal; OUTCOME_COUNT as usize];
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize)]
 struct OddsSource;
@@ -222,6 +202,8 @@ enum Cmd {
     Serve {
         #[clap(long, default_value = "[::]:3000")]
         bind: SocketAddr,
+        #[clap(long)]
+        tx_log_path: Option<PathBuf>,
     },
     GenPair {},
     Broadcast {
@@ -241,7 +223,7 @@ async fn main() -> Result<()> {
 
 async fn main_inner() -> Result<()> {
     match Opt::parse().cmd {
-        Cmd::Serve { bind } => serve(bind).await,
+        Cmd::Serve { bind, tx_log_path } => serve(bind, tx_log_path).await,
         Cmd::GenPair {} => {
             let mut rng = rand::thread_rng();
             let secret = SecretKey::random(&mut rng);
@@ -258,24 +240,36 @@ async fn main_inner() -> Result<()> {
     }
 }
 
-async fn serve(bind: SocketAddr) -> Result<()> {
+async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
     const DB_PATH: &str = "six-sigma-app.sqlite3";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(SixSigmaApp, DUMMY_CODE_VERSION, DB_PATH).await?;
+    tracing::info!("got kolme");
 
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
+    tracing::info!("spawned proc");
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run());
+    tracing::info!("spawned lstnr");
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
+    tracing::info!("spawned aprov");
     let submitter = Submitter::new(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
     );
     set.spawn(submitter.run());
+    tracing::info!("spawned sbmt");
+    if let Some(tx_log_path) = tx_log_path {
+        tracing::info!("setting tx logger for {tx_log_path:?}");
+        let logger = TxLogger::new(kolme.clone(), tx_log_path);
+        set.spawn(logger.run());
+    } else {
+        tracing::info!("no tx logger");
+    }
     let api_server = ApiServer::new(kolme);
     set.spawn(api_server.run(bind));
 
@@ -294,6 +288,40 @@ async fn serve(bind: SocketAddr) -> Result<()> {
     }
 
     Ok(())
+}
+
+struct TxLogger {
+    kolme: Kolme<SixSigmaApp>,
+    path: PathBuf,
+}
+
+impl TxLogger {
+    fn new(kolme: Kolme<SixSigmaApp>, path: PathBuf) -> Self {
+        Self { kolme, path }
+    }
+
+    async fn run(self) -> Result<()> {
+        let mut file = File::create(self.path)?;
+        let mut receiver = self.kolme.subscribe();
+        loop {
+            let output = match receiver.recv().await? {
+                Notification::Broadcast { .. } => {
+                    // we skip initial tx broadcast, only tx as a part of a block
+                    continue;
+                }
+                Notification::NewBlock(msg) => {
+                    let height = msg.0.message.as_inner().height;
+                    //                    let msg = msg.0.message.as_inner().tx.0.message.as_inner().nonce
+                    LogOutput::NewBlock { height }
+                }
+                Notification::GenesisInstantiation { .. } => LogOutput::GenesisInstantiation,
+            };
+            serde_json::to_writer(&file, &output)?;
+            writeln!(file)?;
+            file.flush()?;
+            tracing::info!("Log output: {output:?}");
+        }
+    }
 }
 
 async fn broadcast(message: String, secret: String, host: String) -> Result<()> {

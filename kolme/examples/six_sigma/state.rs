@@ -4,24 +4,12 @@ use anyhow::{anyhow, Result};
 use kolme::{AccountId, AssetId, Wallet};
 use rust_decimal::{dec, Decimal};
 
-use crate::{Odds, Transfer, OUTCOME_COUNT};
+use crate::{Config, Odds, Transfer, OUTCOME_COUNT};
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 pub struct State {
     markets: HashMap<u64, Market>,
     config: Config,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
-pub enum Config {
-    #[default]
-    Empty,
-    Configured {
-        // Strategic reserve from which markets get their funds
-        sr_account: AccountId,
-        // Account holding funds allocated for markets both from bets and house provisions
-        market_funds_account: AccountId,
-    },
 }
 
 // funds provided to fund every market

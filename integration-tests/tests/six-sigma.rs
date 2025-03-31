@@ -1,23 +1,31 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    io::{self, BufRead},
+    path::PathBuf,
     str::FromStr,
 };
 
 use anyhow::{anyhow, ensure, Result};
 use backon::{ExponentialBuilder, Retryable};
 use cosmos::{AddressHrp, Coin, Contract, Cosmos, HasAddress, SeedPhrase};
+use pretty_assertions::assert_eq;
 use rust_decimal::{dec, Decimal};
 use shared::cosmos::ExecuteMsg;
+use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
+mod six_sigma;
+
 use kolme::*;
+use six_sigma::types::*;
 
 #[test_log::test(tokio::test)]
 #[ignore = "depends on localosmosis thus hidden from default tests"]
 async fn basic_scenario() {
     tracing::debug!("starting");
     prebuild().await.unwrap();
-    let mut app = start_the_app().await.unwrap();
+    let log_file = NamedTempFile::new().unwrap();
+    let mut app = start_the_app(log_file.path().to_path_buf()).await.unwrap();
     let client = reqwest::Client::new();
     let contract_addr = wait_contract_deployed(&client).await.unwrap();
     tracing::debug!("contract: {contract_addr}");
@@ -66,6 +74,37 @@ async fn basic_scenario() {
     )
     .await
     .unwrap();
+
+    let log_lines = io::BufReader::new(log_file.as_file())
+        .lines()
+        .map(|line| -> Result<_> {
+            let line = line?;
+            serde_json::from_str::<LogOutput>(&line).map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    fn block_at(height: u64) -> LogOutput {
+        LogOutput::NewBlock {
+            height: BlockHeight(height),
+        }
+    }
+
+    // we should see the following notifications:
+    // genesis msg, genesis notification, contract instantiation,
+    // regular for SR, regular for bettor, set_config, add_market
+    assert_eq!(
+        log_lines,
+        vec![
+            block_at(0),
+            LogOutput::GenesisInstantiation,
+            block_at(1),
+            block_at(2),
+            block_at(3),
+            block_at(4),
+            block_at(5)
+        ]
+    );
 
     let (bettor_wallet, _bettor_account) =
         create_and_regsiter_bettor_account(&cosmos, &client, &contract)
@@ -330,7 +369,7 @@ fn six_sigma_cmd() -> Command {
     cmd
 }
 
-async fn start_the_app() -> Result<Child> {
+async fn start_the_app(log_path: PathBuf) -> Result<Child> {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(env!("CARGO_MANIFEST_DIR")).args([
         "run",
@@ -339,6 +378,8 @@ async fn start_the_app() -> Result<Child> {
         "--example",
         "six-sigma",
         "serve",
+        "--tx-log-path",
+        log_path.to_str().unwrap(),
     ]);
     if let Ok(rust_log) = std::env::var("RUST_LOG") {
         tracing::debug!("Setting RUST_LOG to {rust_log}");
@@ -405,37 +446,3 @@ enum MarketState {
 
 #[derive(serde::Deserialize, Debug)]
 struct Bet {}
-
-#[derive(PartialEq, serde::Deserialize, Debug)]
-enum Config {
-    Empty,
-    Configured {
-        sr_account: AccountId,
-        market_funds_account: AccountId,
-    },
-}
-
-// copied over from six-sigma.rs as we can't import from an example
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum AppMessage {
-    SetConfig {
-        sr_account: AccountId,
-        market_funds_account: AccountId,
-    },
-    AddMarket {
-        id: u64,
-        asset_id: AssetId,
-        name: String,
-    },
-    PlaceBet {
-        wallet: String,
-        amount: Decimal,
-        market_id: u64,
-        outcome: u8,
-    },
-    SettleMarket {
-        market_id: u64,
-        outcome: u8,
-    },
-}
