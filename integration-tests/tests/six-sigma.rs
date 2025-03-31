@@ -299,10 +299,10 @@ async fn send_funds_with_key_and_find_account(
 ) -> Result<AccountId> {
     let resp = contract
         .execute(
-            &wallet,
+            wallet,
             vec![coin(to_send)],
             ExecuteMsg::Regular {
-                keys: vec![public_key.clone()],
+                keys: vec![*public_key],
             },
         )
         .await?;
@@ -318,7 +318,7 @@ async fn send_funds_with_key_and_find_account(
                 assets
                     .get(&AssetId(1))
                     .is_some_and(|balance| *balance == to_send)
-                    .then_some(acc_id.clone())
+                    .then_some(*acc_id)
             })
             .ok_or(anyhow!(
                 "account with the corresponding balance {to_send} should exist, last seen server state: {state:?}"
