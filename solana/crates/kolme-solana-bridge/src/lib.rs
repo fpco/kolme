@@ -162,6 +162,7 @@ enum Secp256k1RecoverError {
     InvalidHash = 1000,
     InvalidRecoveryId  = 1001,
     InvalidSignature = 1002,
+    SignatureNotNormalized = 1003,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -413,7 +414,7 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     }
 
     let hash = sha256(&data.payload);
-    let recovered_key = secp256k1_recover(&hash, data.processor.recovery_id, &data.processor.signature.0)?;
+    let recovered_key = secp256k1_recover(&hash, data.processor.recovery_id, &data.processor.signature)?;
 
     if recovered_key != state_pda.data.processor {
         return Err(SignedIxError::ProcessorKeyMismatch.into());
@@ -422,7 +423,7 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     let mut keys = Vec::with_capacity(data.executors.len());
 
     for e in data.executors {
-        let key = secp256k1_recover(&hash, e.recovery_id, &e.signature.0)?;
+        let key = secp256k1_recover(&hash, e.recovery_id, &e.signature)?;
 
         if !state_pda.data.executors.contains(&key) {
             return Err(SignedIxError::NonExecutorKey.into());
@@ -481,15 +482,19 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
 fn secp256k1_recover(
     hash: &Sha256,
     recovery_id: u8,
-    signature: &[u8],
+    signature: &Secp256k1Signature,
 ) -> Result<Secp256k1Pubkey, Secp256k1RecoverError> {
+    if !signature.is_normalized() {
+        return Err(Secp256k1RecoverError::SignatureNotNormalized);
+    }
+
     let mut buf = std::mem::MaybeUninit::<[u8; SECP256K1_PUBLIC_KEY_LENGTH]>::uninit();
 
     unsafe {
         let errno = syscalls::sol_secp256k1_recover(
             hash.0.as_ptr(),
             recovery_id as u64,
-            signature.as_ptr(),
+            signature.0.as_ptr(),
             buf.as_mut_ptr() as *mut u8,
         );
 
@@ -516,6 +521,59 @@ fn sha256(bytes: &[u8]) -> Sha256 {
         );
 
         Sha256(result.assume_init())
+    }
+}
+
+impl Secp256k1Signature {
+    // Ported from: https://github.com/cryspen/hacl-packages/blob/05c3d8fb321ed65e3db3a6a8b853019e86fb40a2/src/msvc/Hacl_K256_ECDSA.c#L1772
+    /// Returns `true` if S is low-S normalized and `false` otherwise.
+    pub fn is_normalized(&self) -> bool {
+        // Signature consists of R and S components respectively, each 32 bytes big.
+        const OFFSET: usize = 32;
+
+        let mut a: [u64; 4] = [0; 4];
+
+        for i in 0..4 {
+            let offset = OFFSET + (4 - i - 1) * 8;
+            let bytes: [u8; 8] = self.0.as_slice()[offset..offset + 8].try_into().unwrap();
+            a[i] = u64::from_be_bytes(bytes);
+        }
+
+        let [a0, a1, a2, a3] = a;
+
+        if a0 == 0 && a1 == 0 && a2 == 0 && a3 == 0 {
+            return false;
+        }
+
+        let is_lt_q_b = if a3 < 0xffffffffffffffff {
+            true
+        } else if a2 < 0xfffffffffffffffe {
+            true
+        } else if a2 > 0xfffffffffffffffe {
+            false
+        } else if a1 < 0xbaaedce6af48a03b {
+            true
+        } else if a1 > 0xbaaedce6af48a03b {
+            false
+        } else {
+            a0 < 0xbfd25e8cd0364141
+        };
+
+        let is_s_lt_q_halved = if a3 < 0x7fffffffffffffff {
+            true
+        } else if a3 > 0x7fffffffffffffff {
+            false
+        } else if a2 < 0xffffffffffffffff {
+            true
+        } else if a1 < 0x5d576e7357a4501d {
+            true
+        } else if a1 > 0x5d576e7357a4501d {
+            false
+        } else {
+            a0 <= 0xdfe92f46681b20a0
+        };
+
+        is_lt_q_b && is_s_lt_q_halved
     }
 }
 

@@ -189,6 +189,8 @@ impl Program {
         let hash = sha256.digest(&bytes);
 
         let (sig, rec) = self.keys[PROCESSOR_KEY].sign_prehash_recoverable(&hash).unwrap();
+        assert!(sig.normalize_s().is_none());
+
         let processor = Signature {
             signature: Secp256k1Signature(sig.to_bytes().into()),
             recovery_id: rec.to_byte()
@@ -201,6 +203,8 @@ impl Program {
             assert_ne!(i, PROCESSOR_KEY);
 
             let (sig, rec) = self.keys[i].sign_prehash_recoverable(&hash).unwrap();
+            assert!(sig.normalize_s().is_none());
+
             let signature = Signature {
                 signature: Secp256k1Signature(sig.to_bytes().into()),
                 recovery_id: rec.to_byte()
@@ -485,4 +489,26 @@ fn false_executor_signature_is_rejected() {
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::NonExecutorKey as u32)));
+}
+
+#[test]
+fn secp256k1_is_normalized() {
+    let sig = Secp256k1Signature([227, 15, 46, 106, 15, 112, 95, 79, 181, 248, 80, 27, 167, 156, 124, 13, 63, 172, 132, 127, 26, 215, 11, 135, 62, 151, 151, 177, 123, 137, 179, 144, 129, 241, 164, 69, 117, 137, 243, 13, 118, 171, 159, 137, 231, 72, 166, 140, 138, 148, 195, 15, 224, 186, 200, 251, 92, 11, 84, 234, 112, 191, 109, 47]);
+    assert!(!sig.is_normalized());
+
+    // let mut rng = OsRng;
+
+    // for _ in 0..64 {
+    //     use k256::elliptic_curve::rand_core::RngCore;
+
+    //     let key = ecdsa::SigningKey::random(&mut rng);
+
+    //     let mut payload = [0u8; 16];
+    //     OsRng.fill_bytes(&mut payload);
+
+    //     let (sig, _) = key.sign_recoverable(&payload).unwrap();
+    //     assert!(sig.normalize_s().is_none());
+
+    //     assert!(Secp256k1Signature(sig.to_bytes().into()).is_normalized());
+    // }
 }
