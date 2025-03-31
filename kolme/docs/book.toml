@@ -4,3 +4,14 @@ language = "en"
 multilingual = false
 src = "src"
 title = "Kolme Framework Developer Docs"
+
+[output.html]
+throw-on-error = true
+additional-js = ["assets/external-links.js", "assets/mermaid.min.js", "assets/mermaid-init.js"]
+
+[preprocessor.toc]
+command = "mdbook-toc"
+renderer = ["html"]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
