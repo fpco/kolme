@@ -121,25 +121,35 @@ async fn handle_websocket<App: KolmeApp>(
 ) {
     tracing::debug!("WebSocket subscribed to Kolme notifications");
 
-    while let Ok(note) = rx.recv().await {
-        let msg = match note.clone() {
-            Notification::NewBlock(block) => {
-                format!("NewBlock: {:?}", block.0)
-            }
-            Notification::GenesisInstantiation { chain, contract } => {
-                format!(
-                    "GenesisInstantiation: chain={}, contract={}",
-                    chain.as_ref(),
-                    contract
-                )
-            }
-            Notification::Broadcast { tx } => {
-                format!("Broadcast: tx_hash={}", tx.0.message_hash())
+    while let Ok(notification) = rx.recv().await {
+        let msg = match serde_json::to_string(&notification) {
+            Ok(json) => json,
+            Err(e) => {
+                tracing::error!("Failed to serialize notification to JSON: {}", e);
+                continue;
             }
         };
-        if socket.send(WsMessage::Text(msg.into())).await.is_err() {
-            tracing::debug!("Client disconnected");
+
+        match notification {
+            Notification::NewBlock(block) => {
+                tracing::info!("Sending NewBlock: {:?}", block.0);
+            }
+            Notification::GenesisInstantiation { chain, contract } => {
+                tracing::info!(
+                    "Sending GenesisInstantiation: chain={}, contract={}",
+                    chain.as_ref(),
+                    contract
+                );
+            }
+            Notification::Broadcast { tx } => {
+                tracing::info!("Sending Broadcast: tx_hash={}", tx.0.message_hash());
+            }
+        };
+
+        if let Err(error) = socket.send(WsMessage::Text(msg.into())).await {
+            tracing::debug!("Client disconnected with error: {}", error);
             break;
         }
+        tracing::debug!("Notification sent to WebSocket client.");
     }
 }
