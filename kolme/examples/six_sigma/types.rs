@@ -80,6 +80,6 @@ impl From<kolme::BridgeEvent> for LogBridgeEvent {
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Default, Clone, Debug)]
 pub enum AppState {
     #[default]
-    Unitialized,
+    Uninitialized,
     Operational,
 }

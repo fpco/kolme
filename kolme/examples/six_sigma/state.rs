@@ -52,10 +52,9 @@ impl State {
             anyhow::bail!("Market with id {id} already exist");
         }
         let provision_amount = HOUSE_FUNDS;
-        let mut sr_funds = self
-            .strategic_reserve
-            .get_mut(&asset_id)
-            .with_context(|| "Application doesn't have asset {asset_id} to fund the market")?;
+        let mut sr_funds = self.strategic_reserve.get_mut(&asset_id).with_context(|| {
+            format!("Application doesn't have asset {asset_id} to fund the market")
+        })?;
         if *sr_funds < HOUSE_FUNDS {
             anyhow::bail!("Application doesn't have enough funds to add the market")
         }
