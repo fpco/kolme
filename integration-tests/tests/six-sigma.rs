@@ -1,0 +1,448 @@
+use std::{
+    collections::{BTreeMap, HashMap},
+    io::{self, BufRead},
+    path::PathBuf,
+    str::FromStr,
+};
+
+use anyhow::{anyhow, ensure, Result};
+use backon::{ExponentialBuilder, Retryable};
+use cosmos::{AddressHrp, Coin, Contract, Cosmos, HasAddress, SeedPhrase};
+use pretty_assertions::assert_eq;
+use rust_decimal::{dec, Decimal};
+use shared::cosmos::ExecuteMsg;
+use tempfile::NamedTempFile;
+use tokio::process::{Child, Command};
+
+mod six_sigma;
+
+use kolme::*;
+use six_sigma::types::*;
+
+#[test_log::test(tokio::test)]
+#[ignore = "depends on localosmosis thus hidden from default tests"]
+async fn basic_scenario() {
+    tracing::debug!("starting");
+    prebuild().await.unwrap();
+    let log_file = NamedTempFile::new().unwrap();
+    let mut app = start_the_app(log_file.path().to_path_buf()).await.unwrap();
+    let client = reqwest::Client::new();
+    let contract_addr = wait_contract_deployed(&client).await.unwrap();
+    tracing::debug!("contract: {contract_addr}");
+
+    let cosmos = cosmos::CosmosNetwork::OsmosisLocal
+        .builder_local()
+        .build()
+        .unwrap();
+    let contract = cosmos.make_contract(contract_addr.parse().unwrap());
+
+    let sr_account = register_sr_account(&client, &contract).await.unwrap();
+    let (_funds_wallet, market_funds_account) =
+        create_and_regsiter_funds_account(&cosmos, &client, &contract)
+            .await
+            .unwrap();
+
+    tracing::debug!("SR: {sr_account}, funds: {market_funds_account}, setting them");
+    broadcast(
+        SR_SECRET_KEY,
+        AppMessage::SetConfig {
+            sr_account,
+            market_funds_account,
+        },
+        &client,
+        |state| {
+            ensure!(matches!(state.app_state.config, Config::Configured { .. }));
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+
+    tracing::debug!("Creating a market");
+    broadcast(
+        SR_SECRET_KEY,
+        AppMessage::AddMarket {
+            id: 1,
+            asset_id: AssetId(1),
+            name: "sample market".to_string(),
+        },
+        &client,
+        |state| {
+            ensure!(state.app_state.markets.len() == 1);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+
+    let log_lines = io::BufReader::new(log_file.as_file())
+        .lines()
+        .map(|line| -> Result<_> {
+            let line = line?;
+            serde_json::from_str::<LogOutput>(&line).map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    fn block_at(height: u64) -> LogOutput {
+        LogOutput::NewBlock {
+            height: BlockHeight(height),
+        }
+    }
+
+    // we should see the following notifications:
+    // genesis msg, genesis notification, contract instantiation,
+    // regular for SR, regular for bettor, set_config, add_market
+    assert_eq!(
+        log_lines,
+        vec![
+            block_at(0),
+            LogOutput::GenesisInstantiation,
+            block_at(1),
+            block_at(2),
+            block_at(3),
+            block_at(4),
+            block_at(5)
+        ]
+    );
+
+    let (bettor_wallet, _bettor_account) =
+        create_and_regsiter_bettor_account(&cosmos, &client, &contract)
+            .await
+            .unwrap();
+    tracing::debug!("Placing a bet");
+    broadcast(
+        BETTOR_SECRET_KEY,
+        AppMessage::PlaceBet {
+            wallet: bettor_wallet.get_address_string(),
+            amount: dec!(0.1),
+            market_id: 1,
+            outcome: 0,
+        },
+        &client,
+        |state| {
+            ensure!(state
+                .app_state
+                .markets
+                .iter()
+                .next()
+                .is_some_and(|(_, market)| !market.bets.is_empty()));
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+    let balance_after_bet = u128::from_str(
+        &cosmos
+            .all_balances(bettor_wallet.get_address())
+            .await
+            .unwrap()[0]
+            .amount,
+    )
+    .unwrap();
+
+    tracing::debug!("Settling the market");
+    broadcast(
+        BETTOR_SECRET_KEY,
+        AppMessage::SettleMarket {
+            market_id: 1,
+            outcome: 0,
+        },
+        &client,
+        |state| {
+            ensure!(state
+                .app_state
+                .markets
+                .iter()
+                .next()
+                .is_some_and(|(_, market)| market.state == MarketState::Settled));
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+
+    tracing::debug!("Checking if award was received");
+    (|| async {
+        let balances = cosmos
+            .all_balances(bettor_wallet.get_address())
+            .await
+            .unwrap();
+        ensure!(
+            balances
+                == vec![Coin {
+                    denom: "uosmo".to_string(),
+                    // with odds 1.8 the bettor is supposed to get 0.18 as award
+                    amount: (balance_after_bet + 180000).to_string()
+                }]
+        );
+        Ok(())
+    })
+    .retry(
+        ExponentialBuilder::default()
+            .with_min_delay(std::time::Duration::from_millis(50))
+            .with_max_times(10),
+    )
+    .await
+    .unwrap();
+
+    // extra check that the server is still alive
+    assert_eq!(app.try_wait().unwrap(), None);
+}
+
+async fn broadcast(
+    secret: &str,
+    msg: AppMessage,
+    client: &reqwest::Client,
+    check: impl Fn(ServerState) -> Result<()>,
+) -> Result<()> {
+    let status = six_sigma_cmd()
+        .args([
+            "broadcast",
+            "--secret",
+            secret,
+            "--message",
+            &serde_json::to_string(&msg)?,
+        ])
+        .status()
+        .await?;
+    ensure!(status.success());
+    (|| async {
+        let state = server_state(client).await?;
+        check(state)
+    })
+    .retry(
+        ExponentialBuilder::default()
+            .with_min_delay(std::time::Duration::from_millis(50))
+            .with_max_times(10),
+    )
+    .await
+}
+
+async fn register_sr_account(client: &reqwest::Client, contract: &Contract) -> Result<AccountId> {
+    const SR_BALANCE: Decimal = dec!(123_456);
+    let wallet = sr_wallet()?;
+    let public_key = PublicKey::from_str(SR_PUBLIC_KEY)?;
+    send_funds_with_key_and_find_account(client, contract, &wallet, &public_key, SR_BALANCE).await
+}
+
+const SR_PUBLIC_KEY: &str = "021a2d860dc86f14d21c933512486207d2e5900b2bbf51f6933c516b8b86a8bd00";
+const SR_SECRET_KEY: &str = "5a0089718b4104377979603960e5fd0f5e79666bf95176f1dd6106944dd207ec";
+
+const FUNDS_PUBLIC_KEY: &str = "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";
+
+const BETTOR_PUBLIC_KEY: &str =
+    "03e92af83772943d5a83c40dd35dcf813644655deb6fddb300b1cd6f146a53a4d3";
+const BETTOR_SECRET_KEY: &str = "6075334f2d4f254147fe37cb87c962112f9dad565720dd128b37b4ed07431690";
+
+async fn create_and_regsiter_funds_account(
+    cosmos: &Cosmos,
+    client: &reqwest::Client,
+    contract: &Contract,
+) -> Result<(cosmos::Wallet, AccountId)> {
+    create_wallet_and_regsiter_account(cosmos, client, contract, FUNDS_PUBLIC_KEY, dec!(0.987_456))
+        .await
+}
+
+async fn create_and_regsiter_bettor_account(
+    cosmos: &Cosmos,
+    client: &reqwest::Client,
+    contract: &Contract,
+) -> Result<(cosmos::Wallet, AccountId)> {
+    create_wallet_and_regsiter_account(cosmos, client, contract, BETTOR_PUBLIC_KEY, dec!(345_678))
+        .await
+}
+
+async fn create_wallet_and_regsiter_account(
+    cosmos: &Cosmos,
+    client: &reqwest::Client,
+    contract: &Contract,
+    public_key: &str,
+    marker_amount: Decimal,
+) -> Result<(cosmos::Wallet, AccountId)> {
+    let cosmos_balance = marker_amount + dec!(1.0); // extra coins for feees
+    let new_wallet = wallet_from_seed(SeedPhrase::random())?;
+    let wallet = sr_wallet()?;
+    wallet
+        .send_coins(cosmos, new_wallet.get_address(), vec![coin(cosmos_balance)])
+        .await?;
+    let public_key = PublicKey::from_str(public_key)?;
+    let account_id = send_funds_with_key_and_find_account(
+        client,
+        contract,
+        &new_wallet,
+        &public_key,
+        marker_amount,
+    )
+    .await?;
+    Ok((new_wallet, account_id))
+}
+
+fn coin(amount: Decimal) -> Coin {
+    Coin {
+        amount: u128::try_from(amount * dec!(1_000_000))
+            .unwrap()
+            .to_string(),
+        denom: "uosmo".to_string(),
+    }
+}
+
+// currently we use a very hacky way to find added accounts using funds transferred,
+// TODO we should have a way to get notified when bridge message lands on Kolme
+// TODO we should have a way to match Kolme accounts to their public keys
+async fn send_funds_with_key_and_find_account(
+    client: &reqwest::Client,
+    contract: &Contract,
+    wallet: &cosmos::Wallet,
+    public_key: &PublicKey,
+    to_send: Decimal,
+) -> Result<AccountId> {
+    let resp = contract
+        .execute(
+            wallet,
+            vec![coin(to_send)],
+            ExecuteMsg::Regular {
+                keys: vec![*public_key],
+            },
+        )
+        .await?;
+    assert!(resp.code == 0);
+    (|| async {
+        tracing::debug!("checking if account was created");
+        let state = server_state(client).await?;
+        let acc = state
+            .balances
+            .iter()
+            .find_map(|(acc_id, assets)| {
+                // we don't create any other assets for this app
+                assets
+                    .get(&AssetId(1))
+                    .is_some_and(|balance| *balance == to_send)
+                    .then_some(*acc_id)
+            })
+            .ok_or(anyhow!(
+                "account with the corresponding balance {to_send} should exist, last seen server state: {state:?}"
+            ))?;
+        Ok(acc)
+    })
+    .retry(
+        ExponentialBuilder::default()
+            .with_min_delay(std::time::Duration::from_millis(50))
+            .with_max_times(8),
+    )
+    .await
+}
+
+fn sr_wallet() -> Result<cosmos::Wallet> {
+    wallet_from_seed(SeedPhrase::from_str(SR_SEED_PHRASE)?)
+}
+
+fn wallet_from_seed(seed_phrase: SeedPhrase) -> Result<cosmos::Wallet> {
+    seed_phrase
+        .with_hrp(AddressHrp::from_str("osmo")?)
+        .map_err(Into::into)
+}
+
+// we use lo-test1 for this as we have a lot of funds in that wallet
+const SR_SEED_PHRASE: &str = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
+
+async fn prebuild() -> Result<()> {
+    // prebuild first
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["build", "-p", "kolme", "--example", "six-sigma"])
+        .spawn()?
+        .wait()
+        .await?;
+    Ok(())
+}
+
+fn six_sigma_cmd() -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR")).args([
+        "run",
+        "-p",
+        "kolme",
+        "--example",
+        "six-sigma",
+    ]);
+    cmd
+}
+
+async fn start_the_app(log_path: PathBuf) -> Result<Child> {
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR")).args([
+        "run",
+        "-p",
+        "kolme",
+        "--example",
+        "six-sigma",
+        "serve",
+        "--tx-log-path",
+        log_path.to_str().unwrap(),
+    ]);
+    if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        tracing::debug!("Setting RUST_LOG to {rust_log}");
+        cmd.env("RUST_LOG", rust_log);
+    }
+
+    cmd.kill_on_drop(true).spawn().map_err(Into::into)
+}
+
+async fn wait_contract_deployed(client: &reqwest::Client) -> Result<String> {
+    (|| async {
+        let state = server_state(client).await?;
+        let BridgeContract::Deployed(ref contract_addr) = state
+            .bridges
+            .get(&ExternalChain::OsmosisLocal)
+            .expect("localosmosis config should exist")
+            .bridge
+        else {
+            // TODO: shouldn't we wait for initial deployment?
+            return Err(anyhow!("bridge contract should be already deployed"));
+        };
+
+        Ok(contract_addr.clone())
+    })
+    .retry(
+        ExponentialBuilder::default()
+            .with_min_delay(std::time::Duration::from_millis(50))
+            .with_max_times(8),
+    )
+    .await
+}
+
+async fn server_state(client: &reqwest::Client) -> Result<ServerState> {
+    let resp = client.get("http://localhost:3000").send().await?;
+    ensure!(resp.status().is_success());
+    resp.json::<ServerState>().await.map_err(Into::into)
+}
+
+// copied over as we don't have notifications yet
+#[derive(serde::Deserialize, Debug)]
+struct ServerState {
+    bridges: BTreeMap<ExternalChain, ChainConfig>,
+    balances: BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>,
+    app_state: AppState,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct AppState {
+    config: Config,
+    markets: HashMap<u64, Market>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct Market {
+    state: MarketState,
+    bets: Vec<Bet>,
+}
+
+#[derive(PartialEq, serde::Deserialize, Debug)]
+enum MarketState {
+    Operational,
+    Settled,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct Bet {}

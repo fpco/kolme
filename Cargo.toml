@@ -4,4 +4,5 @@ members = [
   "shared",
   "contracts/cosmos",
   "kolme",
+  "integration-tests"
 ]
