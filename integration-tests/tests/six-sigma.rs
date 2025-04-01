@@ -36,31 +36,38 @@ async fn basic_scenario() {
         .unwrap();
     let contract = cosmos.make_contract(contract_addr.parse().unwrap());
 
-    let sr_account = register_sr_account(&client, &contract).await.unwrap();
-    let (_funds_wallet, market_funds_account) =
-        create_and_regsiter_funds_account(&cosmos, &client, &contract)
-            .await
-            .unwrap();
-
-    tracing::debug!("SR: {sr_account}, funds: {market_funds_account}, setting them");
+    register_funder_account(&client, &contract).await.unwrap();
+    tracing::debug!("Sending initial funds for the application");
     broadcast(
-        SR_SECRET_KEY,
-        AppMessage::SetConfig {
-            sr_account,
-            market_funds_account,
+        FUNDER_SECRET_KEY,
+        AppMessage::SendFunds {
+            asset_id: AssetId(1),
+            amount: dec!(100_000),
         },
         &client,
         |state| {
-            ensure!(matches!(state.app_state.config, Config::Configured { .. }));
+            ensure!(state
+                .app_state
+                .strategic_reserve
+                .get(&AssetId(1))
+                .is_some_and(|balance| balance == &dec!(100_000)));
             Ok(())
         },
     )
     .await
     .unwrap();
 
+    tracing::debug!("Initializing the contract");
+    broadcast(APP_SECRET_KEY, AppMessage::Init, &client, |state| {
+        ensure!(matches!(state.app_state.state, AppState::Operational));
+        Ok(())
+    })
+    .await
+    .unwrap();
+
     tracing::debug!("Creating a market");
     broadcast(
-        SR_SECRET_KEY,
+        APP_SECRET_KEY,
         AppMessage::AddMarket {
             id: 1,
             asset_id: AssetId(1),
@@ -84,9 +91,10 @@ async fn basic_scenario() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    fn block_at(height: u64) -> LogOutput {
+    fn block_at(height: u64, msg: LogMessage) -> LogOutput {
         LogOutput::NewBlock {
             height: BlockHeight(height),
+            messages: vec![msg],
         }
     }
 
@@ -96,13 +104,27 @@ async fn basic_scenario() {
     assert_eq!(
         log_lines,
         vec![
-            block_at(0),
+            block_at(0, LogMessage::Genesis),
             LogOutput::GenesisInstantiation,
-            block_at(1),
-            block_at(2),
-            block_at(3),
-            block_at(4),
-            block_at(5)
+            block_at(1, LogMessage::Listener(LogBridgeEvent::Instantiated)),
+            // registering account and transferring funds into it for funder
+            block_at(2, LogMessage::Listener(LogBridgeEvent::Regular)),
+            block_at(
+                3,
+                LogMessage::App(AppMessage::SendFunds {
+                    asset_id: AssetId(1),
+                    amount: dec!(100_000)
+                })
+            ),
+            block_at(4, LogMessage::App(AppMessage::Init)),
+            block_at(
+                5,
+                LogMessage::App(AppMessage::AddMarket {
+                    id: 1,
+                    asset_id: AssetId(1),
+                    name: "sample market".to_string()
+                })
+            )
         ]
     );
 
@@ -219,30 +241,26 @@ async fn broadcast(
     .await
 }
 
-async fn register_sr_account(client: &reqwest::Client, contract: &Contract) -> Result<AccountId> {
+async fn register_funder_account(client: &reqwest::Client, contract: &Contract) -> Result<()> {
     const SR_BALANCE: Decimal = dec!(123_456);
     let wallet = sr_wallet()?;
-    let public_key = PublicKey::from_str(SR_PUBLIC_KEY)?;
-    send_funds_with_key_and_find_account(client, contract, &wallet, &public_key, SR_BALANCE).await
+    let public_key = PublicKey::from_str(FUNDER_PUBLIC_KEY)?;
+    send_funds_with_key_and_find_account(client, contract, &wallet, &public_key, SR_BALANCE)
+        .await?;
+    Ok(())
 }
 
-const SR_PUBLIC_KEY: &str = "021a2d860dc86f14d21c933512486207d2e5900b2bbf51f6933c516b8b86a8bd00";
-const SR_SECRET_KEY: &str = "5a0089718b4104377979603960e5fd0f5e79666bf95176f1dd6106944dd207ec";
+// Effectively this is processor public key
+// const APP_PUBLIC_KEY: &str = "021a2d860dc86f14d21c933512486207d2e5900b2bbf51f6933c516b8b86a8bd00";
+const APP_SECRET_KEY: &str = "5a0089718b4104377979603960e5fd0f5e79666bf95176f1dd6106944dd207ec";
 
-const FUNDS_PUBLIC_KEY: &str = "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";
+const FUNDER_PUBLIC_KEY: &str =
+    "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";
+const FUNDER_SECRET_KEY: &str = "2bb0119bcf9ac0d9a8883b2832f3309217d350033ba944193352f034f197b96a";
 
 const BETTOR_PUBLIC_KEY: &str =
     "03e92af83772943d5a83c40dd35dcf813644655deb6fddb300b1cd6f146a53a4d3";
 const BETTOR_SECRET_KEY: &str = "6075334f2d4f254147fe37cb87c962112f9dad565720dd128b37b4ed07431690";
-
-async fn create_and_regsiter_funds_account(
-    cosmos: &Cosmos,
-    client: &reqwest::Client,
-    contract: &Contract,
-) -> Result<(cosmos::Wallet, AccountId)> {
-    create_wallet_and_regsiter_account(cosmos, client, contract, FUNDS_PUBLIC_KEY, dec!(0.987_456))
-        .await
-}
 
 async fn create_and_regsiter_bettor_account(
     cosmos: &Cosmos,
@@ -423,12 +441,13 @@ async fn server_state(client: &reqwest::Client) -> Result<ServerState> {
 struct ServerState {
     bridges: BTreeMap<ExternalChain, ChainConfig>,
     balances: BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>,
-    app_state: AppState,
+    app_state: SixSigmaState,
 }
 
 #[derive(serde::Deserialize, Debug)]
-struct AppState {
-    config: Config,
+struct SixSigmaState {
+    state: AppState,
+    strategic_reserve: HashMap<AssetId, Decimal>,
     markets: HashMap<u64, Market>,
 }
 

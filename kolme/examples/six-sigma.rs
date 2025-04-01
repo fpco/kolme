@@ -41,12 +41,18 @@ fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-pub struct Transfer {
-    pub asset_id: AssetId,
-    pub amount: Decimal,
-    pub from: AccountId,
-    pub to: AccountId,
-    pub withdraw_wallet: Option<Wallet>,
+pub enum BalanceChange {
+    Mint {
+        asset_id: AssetId,
+        amount: Decimal,
+        account: AccountId,
+        withdraw_wallet: Wallet,
+    },
+    Burn {
+        asset_id: AssetId,
+        amount: Decimal,
+        account: AccountId,
+    },
 }
 
 impl KolmeApp for SixSigmaApp {
@@ -104,21 +110,12 @@ impl KolmeApp for SixSigmaApp {
         msg: &Self::Message,
     ) -> Result<()> {
         match msg {
-            AppMessage::SetConfig {
-                sr_account,
-                market_funds_account,
-            } => ctx
-                .state_mut()
-                .set_config(*sr_account, *market_funds_account),
+            AppMessage::SendFunds { asset_id, amount } => {
+                ctx.state_mut().send_funds(*asset_id, *amount)
+            }
+            AppMessage::Init => ctx.state_mut().initialize(),
             AppMessage::AddMarket { id, asset_id, name } => {
-                let transfer = ctx.state_mut().add_market(*id, *asset_id, name)?;
-                ctx.transfer_asset(
-                    transfer.asset_id,
-                    transfer.from,
-                    transfer.to,
-                    transfer.amount,
-                )?;
-                Ok(())
+                ctx.state_mut().add_market(*id, *asset_id, name)
             }
             AppMessage::PlaceBet {
                 wallet,
@@ -129,7 +126,7 @@ impl KolmeApp for SixSigmaApp {
                 let sender = ctx.get_sender_id();
                 // TODO: check if sender balance has enough funds
                 let odds = ctx.load_data(OddsSource).await?;
-                let transfer = ctx.state_mut().place_bet(
+                let change = ctx.state_mut().place_bet(
                     sender,
                     *market_id,
                     Wallet(wallet.clone()),
@@ -137,37 +134,44 @@ impl KolmeApp for SixSigmaApp {
                     *outcome,
                     odds,
                 )?;
-                ctx.transfer_asset(
-                    transfer.asset_id,
-                    transfer.from,
-                    transfer.to,
-                    transfer.amount,
-                )?;
-                Ok(())
+                change_balance(ctx, &change)
             }
             AppMessage::SettleMarket { market_id, outcome } => {
-                let transfers = ctx.state_mut().settle_market(*market_id, *outcome)?;
-                for transfer in transfers {
-                    ctx.transfer_asset(
-                        transfer.asset_id,
-                        transfer.from,
-                        transfer.to,
-                        transfer.amount,
-                    )?;
-                    if let Some(wallet) = transfer.withdraw_wallet {
-                        ctx.withdraw_asset(
-                            transfer.asset_id,
-                            ExternalChain::OsmosisLocal,
-                            transfer.to,
-                            &wallet,
-                            transfer.amount,
-                        )?;
-                    }
+                let balance_changes = ctx.state_mut().settle_market(*market_id, *outcome)?;
+                for change in balance_changes {
+                    change_balance(ctx, &change)?
                 }
-                // TODO do the transfer from above using banking subsystem
                 Ok(())
             }
         }
+    }
+}
+
+fn change_balance(
+    ctx: &mut ExecutionContext<'_, SixSigmaApp>,
+    change: &BalanceChange,
+) -> Result<()> {
+    match change {
+        BalanceChange::Mint {
+            asset_id,
+            amount,
+            account,
+            withdraw_wallet,
+        } => {
+            ctx.mint_asset(*asset_id, *account, *amount)?;
+            ctx.withdraw_asset(
+                *asset_id,
+                ExternalChain::OsmosisLocal,
+                *account,
+                &withdraw_wallet,
+                *amount,
+            )
+        }
+        BalanceChange::Burn {
+            asset_id,
+            amount,
+            account,
+        } => ctx.burn_asset(*asset_id, *account, *amount),
     }
 }
 
@@ -244,31 +248,23 @@ async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
     const DB_PATH: &str = "six-sigma-app.sqlite3";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(SixSigmaApp, DUMMY_CODE_VERSION, DB_PATH).await?;
-    tracing::info!("got kolme");
 
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
-    tracing::info!("spawned proc");
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run());
-    tracing::info!("spawned lstnr");
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
-    tracing::info!("spawned aprov");
     let submitter = Submitter::new(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
     );
     set.spawn(submitter.run());
-    tracing::info!("spawned sbmt");
     if let Some(tx_log_path) = tx_log_path {
-        tracing::info!("setting tx logger for {tx_log_path:?}");
         let logger = TxLogger::new(kolme.clone(), tx_log_path);
         set.spawn(logger.run());
-    } else {
-        tracing::info!("no tx logger");
     }
     let api_server = ApiServer::new(kolme);
     set.spawn(api_server.run(bind));
@@ -310,9 +306,19 @@ impl TxLogger {
                     continue;
                 }
                 Notification::NewBlock(msg) => {
-                    let height = msg.0.message.as_inner().height;
-                    //                    let msg = msg.0.message.as_inner().tx.0.message.as_inner().nonce
-                    LogOutput::NewBlock { height }
+                    let block = msg.0.message.as_inner();
+                    let height = block.height;
+                    let messages = block
+                        .tx
+                        .0
+                        .message
+                        .as_inner()
+                        .messages
+                        .iter()
+                        .cloned()
+                        .map(LogMessage::from)
+                        .collect();
+                    LogOutput::NewBlock { height, messages }
                 }
                 Notification::GenesisInstantiation { .. } => LogOutput::GenesisInstantiation,
             };

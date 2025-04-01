@@ -1,12 +1,13 @@
-use kolme::{AccountId, AssetId, BlockHeight, Decimal};
+use kolme::{AssetId, BlockHeight, Decimal};
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(PartialEq, serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum AppMessage {
-    SetConfig {
-        sr_account: AccountId,
-        market_funds_account: AccountId,
+    SendFunds {
+        asset_id: AssetId,
+        amount: Decimal,
     },
+    Init,
     AddMarket {
         id: u64,
         asset_id: AssetId,
@@ -26,18 +27,59 @@ pub enum AppMessage {
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
 pub enum LogOutput {
-    NewBlock { height: BlockHeight },
+    NewBlock {
+        height: BlockHeight,
+        messages: Vec<LogMessage>,
+    },
     GenesisInstantiation,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug)]
-pub enum Config {
+// kolme::Message with details only necessary for tests
+#[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
+pub enum LogMessage {
+    Genesis,
+    App(AppMessage),
+    Listener(LogBridgeEvent),
+    Approve,
+    ProcessorApprove,
+    Auth,
+    Bank,
+}
+
+impl From<kolme::Message<AppMessage>> for LogMessage {
+    fn from(msg: kolme::Message<AppMessage>) -> Self {
+        match msg {
+            kolme::Message::Genesis(_) => LogMessage::Genesis,
+            kolme::Message::App(app_message) => LogMessage::App(app_message),
+            kolme::Message::Listener { event, .. } => LogMessage::Listener(event.into()),
+            kolme::Message::Approve { .. } => LogMessage::Approve,
+            kolme::Message::ProcessorApprove { .. } => LogMessage::ProcessorApprove,
+            kolme::Message::Auth(_) => LogMessage::Auth,
+            kolme::Message::Bank(_) => LogMessage::Bank,
+        }
+    }
+}
+
+#[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
+pub enum LogBridgeEvent {
+    Instantiated,
+    Regular,
+    Signed,
+}
+
+impl From<kolme::BridgeEvent> for LogBridgeEvent {
+    fn from(event: kolme::BridgeEvent) -> Self {
+        match event {
+            kolme::BridgeEvent::Instantiated { .. } => LogBridgeEvent::Instantiated,
+            kolme::BridgeEvent::Regular { .. } => LogBridgeEvent::Regular,
+            kolme::BridgeEvent::Signed { .. } => LogBridgeEvent::Signed,
+        }
+    }
+}
+
+#[derive(PartialEq, serde::Serialize, serde::Deserialize, Default, Clone, Debug)]
+pub enum AppState {
     #[default]
-    Empty,
-    Configured {
-        // Strategic reserve from which markets get their funds
-        sr_account: AccountId,
-        // Account holding funds allocated for markets both from bets and house provisions
-        market_funds_account: AccountId,
-    },
+    Unitialized,
+    Operational,
 }
