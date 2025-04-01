@@ -125,24 +125,7 @@ async fn handle_websocket<App: KolmeApp>(
         let msg = match serde_json::to_string(&notification) {
             Ok(json) => json,
             Err(e) => {
-                tracing::error!("Failed to serialize notification to JSON: {}", e);
-                continue;
-            }
-        };
-
-        match notification {
-            Notification::NewBlock(block) => {
-                tracing::info!("Sending NewBlock: {:?}", block.0);
-            }
-            Notification::GenesisInstantiation { chain, contract } => {
-                tracing::info!(
-                    "Sending GenesisInstantiation: chain={}, contract={}",
-                    chain.as_ref(),
-                    contract
-                );
-            }
-            Notification::Broadcast { tx } => {
-                tracing::info!("Sending Broadcast: tx_hash={}", tx.0.message_hash());
+                format!("Failed to serialize notification to JSON: {}", e)
             }
         };
 
