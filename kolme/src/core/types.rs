@@ -539,7 +539,11 @@ pub struct AssetAmount {
 /// Notifications that can come from the Kolme framework to components.
 ///
 /// TODO this will ultimately be incorporated into a p2p network of events.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound(
+    serialize = "",
+    deserialize = "AppMessage: serde::de::DeserializeOwned"
+))]
 pub enum Notification<AppMessage> {
     NewBlock(Arc<SignedBlock<AppMessage>>),
     /// A claim by a submitter that it has instantiated a bridge contract.
