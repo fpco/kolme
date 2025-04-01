@@ -33,7 +33,7 @@ impl<App: KolmeApp> ApiServer<App> {
             .route("/", get(basics))
             .route("/broadcast", put(broadcast))
             .route("/get-next-nonce", get(get_next_nonce))
-            .route("/ws", get(ws_handler::<App>))
+            .route("/notifications", get(ws_handler::<App>))
             .layer(cors)
             .with_state(self.kolme);
 
