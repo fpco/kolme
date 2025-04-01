@@ -445,7 +445,7 @@ impl GenesisInfo {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct MessageOutput {
     pub logs: Vec<String>,
     pub loads: Vec<BlockDataLoad>,

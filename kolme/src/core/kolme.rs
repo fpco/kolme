@@ -850,18 +850,54 @@ async fn store_block<App: KolmeApp>(
                 .execute(&mut **trans)
                 .await?;
             }
-            DatabaseUpdate::AddPubkeyToAccount { id, pubkey } => {
+            DatabaseUpdate::RemoveWalletFromAccount { id, wallet } => {
                 let id = i64::try_from(id.0)?;
-                sqlx::query!(
-                    "INSERT OR IGNORE INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+                let rows = sqlx::query!(
+                    "DELETE FROM account_wallets WHERE account_id=$1 AND wallet=$2",
                     id,
-                    pubkey
+                    wallet,
                 )
+                .execute(&mut **trans)
+                .await?
+                .rows_affected();
+                anyhow::ensure!(rows == 1);
+            }
+            DatabaseUpdate::AddPubkeyToAccount {
+                id,
+                pubkey,
+                ignore_errors,
+            } => {
+                let id = i64::try_from(id.0)?;
+                if *ignore_errors {
+                    sqlx::query!(
+                        "INSERT OR IGNORE INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+                        id,
+                        pubkey
+                    )
+                } else {
+                    sqlx::query!(
+                        "INSERT INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+                        id,
+                        pubkey
+                    )
+                }
                 .execute(&mut **trans)
                 .await
                 .with_context(|| {
                     format!("Error while adding pubkey from DatabaseUpdate: {id}/{pubkey}")
                 })?;
+            }
+            DatabaseUpdate::RemovePubkeyFromAccount { id, key } => {
+                let id = i64::try_from(id.0)?;
+                let rows = sqlx::query!(
+                    "DELETE FROM account_pubkeys WHERE account_id=$1 AND pubkey=$2",
+                    id,
+                    key,
+                )
+                .execute(&mut **trans)
+                .await?
+                .rows_affected();
+                anyhow::ensure!(rows == 1);
             }
             DatabaseUpdate::ApproveAction {
                 pubkey,

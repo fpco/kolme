@@ -18,8 +18,15 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     next_account_id: AccountId,
     /// ID of the account that signed the transaction
     sender: AccountId,
+    /// Public key used to sign the current transaction.
+    ///
+    /// We need to ensure an account always has an active signing ability.
+    /// Therefore, we disallow removing a public key from an account
+    /// when it is the signer. See references to this field to see how this is used.
+    signing_key: PublicKey,
 }
 
+#[derive(Debug)]
 pub struct ExecutionResults<App: KolmeApp> {
     pub framework_state: FrameworkState,
     pub app_state: App::State,
@@ -27,6 +34,7 @@ pub struct ExecutionResults<App: KolmeApp> {
     pub db_updates: Vec<DatabaseUpdate>,
 }
 
+#[derive(Debug)]
 pub enum DatabaseUpdate {
     ListenerAttestation {
         chain: ExternalChain,
@@ -46,10 +54,20 @@ pub enum DatabaseUpdate {
         id: AccountId,
         wallet: String,
     },
+    RemoveWalletFromAccount {
+        id: AccountId,
+        wallet: String,
+    },
 
     AddPubkeyToAccount {
         id: AccountId,
         pubkey: PublicKey,
+        /// Ignore errors? Useful for bridge messages.
+        ignore_errors: bool,
+    },
+    RemovePubkeyFromAccount {
+        id: AccountId,
+        key: PublicKey,
     },
     ApproveAction {
         pubkey: PublicKey,
@@ -132,6 +150,7 @@ impl<App: KolmeApp> KolmeInner<App> {
             next_account_id,
             sender: sender_account_id,
             app: &self.app,
+            signing_key: signed_tx.0.message.as_inner().pubkey,
         };
         for (msg_index, message) in tx.messages.iter().enumerate() {
             execution_context
@@ -152,6 +171,7 @@ impl<App: KolmeApp> KolmeInner<App> {
             next_account_id: _,
             sender: _,
             app: _,
+            signing_key: _,
         } = execution_context;
 
         if let Some(loads) = validation_data_loads {
@@ -210,7 +230,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .await?;
             }
             Message::Bank(bank) => self.bank(bank).await?,
-            Message::Auth(_auth_message) => todo!(),
+            Message::Auth(auth) => self.auth(auth).await?,
         }
         Ok(())
     }
@@ -265,11 +285,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     funds,
                     keys,
                 } => {
-                    let account_id = self.get_account_id_for_wallet(wallet).await?;
+                    let account_id = self.get_or_add_account_id_for_wallet(wallet).await?;
                     for key in keys {
                         self.db_updates.push(DatabaseUpdate::AddPubkeyToAccount {
                             id: account_id,
                             pubkey: *key,
+                            ignore_errors: true,
                         });
                     }
                     for BridgedAssetAmount { denom, amount } in funds {
@@ -387,7 +408,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn get_account_id_for_wallet(&mut self, wallet: &str) -> Result<AccountId> {
+    async fn get_or_add_account_id_for_wallet(&mut self, wallet: &str) -> Result<AccountId> {
         let account_id = sqlx::query_scalar!(
             "SELECT account_id FROM account_wallets WHERE wallet=$1",
             wallet
@@ -529,9 +550,163 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
+    /// Get the account ID associate with the given identifier.
+    ///
+    /// Note that this has special logic to look at all pending database actions.
+    async fn get_account_id_for_ident(&self, ident: KeyOrWallet<'_>) -> Result<Option<AccountId>> {
+        let account_id = match ident {
+            KeyOrWallet::Key(key) => {
+                sqlx::query_scalar!(
+                    r#"
+                        SELECT account_id
+                        FROM account_pubkeys
+                        WHERE pubkey=$1
+                        LIMIT 1
+                    "#,
+                    key
+                )
+                .fetch_optional(&self.pool)
+                .await?
+            }
+            KeyOrWallet::Wallet(wallet) => {
+                sqlx::query_scalar!(
+                    r#"
+                        SELECT account_id
+                        FROM account_wallets
+                        WHERE wallet=$1
+                        LIMIT 1
+                    "#,
+                    wallet
+                )
+                .fetch_optional(&self.pool)
+                .await?
+            }
+        };
+
+        let mut account_id = match account_id {
+            Some(id) => Some(AccountId(id.try_into()?)),
+            None => None,
+        };
+
+        for update in &self.db_updates {
+            match update {
+                DatabaseUpdate::ListenerAttestation { .. } => (),
+                DatabaseUpdate::AddAccount { .. } => (),
+                DatabaseUpdate::AddWalletToAccount { id, wallet } => {
+                    if KeyOrWallet::Wallet(wallet) == ident {
+                        account_id = Some(*id);
+                    }
+                }
+                DatabaseUpdate::RemoveWalletFromAccount { id: _, wallet } => {
+                    if KeyOrWallet::Wallet(wallet) == ident {
+                        account_id = None;
+                    }
+                }
+                DatabaseUpdate::AddPubkeyToAccount {
+                    id,
+                    pubkey,
+                    ignore_errors: _,
+                } => {
+                    if KeyOrWallet::Key(*pubkey) == ident {
+                        account_id = Some(*id);
+                    }
+                }
+                DatabaseUpdate::RemovePubkeyFromAccount { id: _, key } => {
+                    if KeyOrWallet::Key(*key) == ident {
+                        account_id = None;
+                    }
+                }
+                DatabaseUpdate::ApproveAction { .. } => (),
+                DatabaseUpdate::ProcessorApproveAction { .. } => (),
+            }
+        }
+        Ok(account_id)
+    }
+
+    async fn auth(&mut self, auth: &AuthMessage) -> Result<()> {
+        match auth {
+            AuthMessage::AddPublicKey { key } => match self
+                .get_account_id_for_ident(KeyOrWallet::Key(*key))
+                .await?
+            {
+                Some(id) => anyhow::bail!(
+                    "Cannot add key {key} to account {}, it's already added to account {id}",
+                    self.get_sender_id()
+                ),
+                None => self.db_updates.push(DatabaseUpdate::AddPubkeyToAccount {
+                    id: self.get_sender_id(),
+                    pubkey: *key,
+                    ignore_errors: false,
+                }),
+            },
+            AuthMessage::RemovePublicKey { key } => {
+                anyhow::ensure!(key != &self.signing_key, "Cannot remove public key {key} from account {} with a transaction signed by the same key", self.get_sender_id());
+                match self
+                    .get_account_id_for_ident(KeyOrWallet::Key(*key))
+                    .await?
+                {
+                    Some(id) => {
+                        if id == self.get_sender_id() {
+                            self.db_updates
+                                .push(DatabaseUpdate::RemovePubkeyFromAccount { id, key: *key });
+                        } else {
+                            anyhow::bail!(
+                                "Cannot remove key {key} from account {}, that key is used by {id}",
+                                self.get_sender_id()
+                            )
+                        }
+                    }
+                    None => {
+                        anyhow::bail!("Cannot remove key {key} from account {}, that key is currently unrecognized", self.get_sender_id())
+                    }
+                }
+            }
+            AuthMessage::AddWallet { wallet } => {
+                match self.get_account_id_for_ident(KeyOrWallet::Wallet(wallet)).await? {
+                    Some(id) => anyhow::bail!(
+                        "Cannot add wallet {wallet} to account {}, it's already added to account {id}",
+                        self.get_sender_id()
+                    ),
+                    None => self.db_updates.push(DatabaseUpdate::AddWalletToAccount {
+                        id: self.get_sender_id(),
+                        wallet: wallet.to_owned(),
+                    }),
+                }
+            }
+            AuthMessage::RemoveWallet { wallet } => {
+                match self
+                    .get_account_id_for_ident(KeyOrWallet::Wallet(wallet))
+                    .await?
+                {
+                    Some(id) => {
+                        if id == self.get_sender_id() {
+                            self.db_updates
+                                .push(DatabaseUpdate::RemoveWalletFromAccount {
+                                    id,
+                                    wallet: wallet.to_owned(),
+                                });
+                        } else {
+                            anyhow::bail!("Cannot remove wallet {wallet} from account {}, that wallet is used by {id}", self.get_sender_id())
+                        }
+                    }
+                    None => {
+                        anyhow::bail!("Cannot remove wallet {wallet} from account {}, that wallet is currently unrecognized", self.get_sender_id())
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn log(&mut self, msg: impl Into<String>) {
         self.output.logs.push(msg.into());
     }
+}
+
+#[derive(PartialEq, Eq)]
+enum KeyOrWallet<'a> {
+    Key(PublicKey),
+    Wallet(&'a str),
 }
 
 async fn has_already_listened(

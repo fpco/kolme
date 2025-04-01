@@ -12,7 +12,7 @@ pub enum CoreStateError {
 }
 
 /// Raw framework state that can be serialized to the database.
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct FrameworkState {
     pub(super) processor: PublicKey,
     pub(super) listeners: BTreeSet<PublicKey>,
