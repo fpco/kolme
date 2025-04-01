@@ -1,15 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use kolme::{AccountId, AssetId, Wallet};
 use rust_decimal::{dec, Decimal};
 
-use crate::{Config, Odds, Transfer, OUTCOME_COUNT};
+use crate::{AppState, BalanceChange, Odds, OUTCOME_COUNT};
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 pub struct State {
     markets: HashMap<u64, Market>,
-    config: Config,
+    state: AppState,
+    strategic_reserve: BTreeMap<AssetId, Decimal>,
 }
 
 // funds provided to fund every market
@@ -44,46 +45,40 @@ struct Bet {
 }
 
 impl State {
-    pub(crate) fn add_market(
-        &mut self,
-        id: u64,
-        asset_id: AssetId,
-        name: &str,
-    ) -> Result<Transfer> {
-        let Config::Configured {
-            sr_account,
-            market_funds_account,
-        } = self.config
-        else {
-            return Err(anyhow!("Application accounts are not configured yet"));
-        };
+    pub(crate) fn add_market(&mut self, id: u64, asset_id: AssetId, name: &str) -> Result<()> {
+        self.assert_operational()?;
+
         if self.markets.contains_key(&id) {
-            return Err(anyhow!("Market with id {id} already exist"));
+            anyhow::bail!("Market with id {id} already exist");
         }
         let provision_amount = HOUSE_FUNDS;
+        let mut sr_funds = self
+            .strategic_reserve
+            .get_mut(&asset_id)
+            .with_context(|| "Application doesn't have asset {asset_id} to fund the market")?;
+        if *sr_funds < HOUSE_FUNDS {
+            anyhow::bail!("Application doesn't have enough funds to add the market")
+        }
+        sr_funds -= HOUSE_FUNDS;
         let market = Market::new(id, asset_id, name, provision_amount);
 
         self.markets.insert(id, market);
-        Ok(Transfer {
-            asset_id,
-            amount: provision_amount,
-            from: sr_account,
-            to: market_funds_account,
-            withdraw_wallet: None,
-        })
+        Ok(())
     }
 
-    pub(crate) fn settle_market(&mut self, market_id: u64, outcome: u8) -> Result<Vec<Transfer>> {
+    pub(crate) fn settle_market(
+        &mut self,
+        market_id: u64,
+        outcome: u8,
+    ) -> Result<Vec<BalanceChange>> {
         assert_outcome(outcome)?;
-        let Config::Configured {
-            sr_account,
-            market_funds_account,
-        } = self.config
-        else {
-            return Err(anyhow!("application accounts are not configured"));
-        };
+        self.assert_operational()?;
         let market = self.get_operational_market_mut(market_id)?;
-        market.settle(market_funds_account, sr_account, outcome)
+        let (changes, house_payout) = market.settle(outcome)?;
+        let asset_id = market.asset_id;
+        let asset_balance = self.strategic_reserve.entry(asset_id).or_default();
+        *asset_balance += house_payout;
+        Ok(changes)
     }
 
     pub(crate) fn place_bet(
@@ -94,38 +89,33 @@ impl State {
         amount: Decimal,
         outcome: u8,
         odds: Odds,
-    ) -> std::result::Result<Transfer, anyhow::Error> {
+    ) -> std::result::Result<BalanceChange, anyhow::Error> {
         assert_outcome(outcome)?;
-        let market_funds_account = self.configured_market_funds_account()?;
+        self.assert_operational()?;
         let Some(market) = self.markets.get_mut(&market_id) else {
             return Err(anyhow!("Market with id {market_id} doesn't exist"));
         };
         market.place_bet(bettor, wallet, amount, outcome, odds)?;
-        Ok(Transfer {
+        Ok(BalanceChange::Burn {
             asset_id: market.asset_id,
             amount,
-            from: bettor,
-            to: market_funds_account,
-            withdraw_wallet: None,
+            account: bettor,
         })
     }
 
-    pub(crate) fn set_config(
-        &mut self,
-        sr_account: AccountId,
-        market_funds_account: AccountId,
-    ) -> std::result::Result<(), anyhow::Error> {
-        match self.config {
-            Config::Configured { market_funds_account: current,.. } if current != market_funds_account => {
-                return Err(anyhow!("Can't switch market_funds_account, it was already set to {current} but {market_funds_account} was supplied"))
-            }
-            _ =>{}
-        }
-        self.config = Config::Configured {
-            sr_account,
-            market_funds_account,
-        };
+    pub fn send_funds(&mut self, asset_id: AssetId, amount: Decimal) -> Result<()> {
+        let entry = self.strategic_reserve.entry(asset_id).or_default();
+        *entry += amount;
         Ok(())
+    }
+
+    pub(crate) fn initialize(&mut self) -> std::result::Result<(), anyhow::Error> {
+        if self.state == AppState::Operational {
+            Err(anyhow!("Can't initialize application in operational state"))
+        } else {
+            self.state = AppState::Operational;
+            Ok(())
+        }
     }
 
     fn get_operational_market_mut(&mut self, market_id: u64) -> Result<&'_ mut Market> {
@@ -138,19 +128,17 @@ impl State {
         Ok(market)
     }
 
-    fn configured_market_funds_account(&self) -> Result<AccountId> {
-        match self.config {
-            Config::Configured {
-                market_funds_account,
-                ..
-            } => Ok(market_funds_account),
-            _ => Err(anyhow!("market funds account is not configured")),
+    fn assert_operational(&self) -> Result<()> {
+        if self.state != AppState::Operational {
+            Err(anyhow!("Application is not operational yet"))
+        } else {
+            Ok(())
         }
     }
 }
 
 fn assert_outcome(outcome: u8) -> Result<()> {
-    if outcome >= 3 {
+    if outcome >= OUTCOME_COUNT {
         Err(anyhow!(
             "Market supports only 0, 1 or 2 as outcomes but {outcome} was supplied"
         ))
@@ -202,40 +190,25 @@ impl Market {
         Ok(())
     }
 
-    fn settle(
-        &mut self,
-        market_funds_account: AccountId,
-        sr_account: AccountId,
-        outcome: u8,
-    ) -> Result<Vec<Transfer>> {
+    fn settle(&mut self, outcome: u8) -> Result<(Vec<BalanceChange>, Decimal)> {
         let mut transfers = vec![];
         let mut payouts = Decimal::ZERO;
 
         for bet in &self.bets {
             if bet.outcome == outcome {
                 payouts += bet.returns;
-                transfers.push(Transfer {
+                transfers.push(BalanceChange::Mint {
                     asset_id: self.asset_id,
                     amount: bet.returns,
-                    from: market_funds_account,
-                    to: bet.bettor,
-                    withdraw_wallet: Some(bet.wallet.clone()),
+                    account: bet.bettor,
+                    withdraw_wallet: bet.wallet.clone(),
                 });
             }
         }
         assert!(payouts == self.liabilities[usize::from(outcome)]);
 
-        if self.total_funds > payouts {
-            transfers.push(Transfer {
-                asset_id: self.asset_id,
-                amount: (self.total_funds - payouts),
-                from: market_funds_account,
-                to: sr_account,
-                withdraw_wallet: None, // house withdrawals are expected to be done separately
-            })
-        }
-
+        let house_payout = self.total_funds - payouts;
         self.state = MarketState::Settled;
-        Ok(transfers)
+        Ok((transfers, house_payout))
     }
 }
