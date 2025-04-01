@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+]
+
+[profile.release.package.kolme-solana-bridge]
+overflow-checks = true
+codegen-units = 1
+opt-level = 3
+incremental = false
