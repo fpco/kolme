@@ -52,9 +52,9 @@ jobs:
       - name: Build
         run: cargo build --workspace
       - name: Cargo fmt
-        run: cargo fmt --all --check
+        run: just fmt
       - name: Clippy check
-        run: cargo clippy --no-deps --workspace --tests -- -Dwarnings
+        run: just clippy
 
   contracts:
     name: Build Contracts

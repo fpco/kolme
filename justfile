@@ -1,3 +1,14 @@
+check:
+    cargo check --workspace --tests
+
+clippy:
+    cargo clippy --no-deps --workspace --tests -- -Dwarnings
+
+fmt:
+    cargo fmt --all --check
+
+lint: fmt check clippy
+
 test:
     cargo sqlx database reset -y --source kolme/migrations
     cargo sqlx migrate run --source kolme/migrations
