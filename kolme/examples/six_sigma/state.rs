@@ -185,7 +185,9 @@ impl Market {
         let odds = odds[outcome_pos];
         let returns = amount * odds;
         if self.liabilities[outcome_pos] + returns > self.max_allowed_liability {
-            return Err(anyhow!("House has not enough funds to cover this bet"));
+            return Err(anyhow!(
+                "House does not have enough funds to cover this bet"
+            ));
         }
         self.liabilities[outcome_pos] += returns;
         self.total_funds += amount;
