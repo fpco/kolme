@@ -294,7 +294,10 @@ pub struct Block<AppMessage> {
 
 /// A proposed event from a client, not yet added to the stream
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-#[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
+#[serde(bound(
+    serialize = "",
+    deserialize = "AppMessage: serde::de::DeserializeOwned"
+))]
 pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMessage>>);
 
 impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
@@ -531,7 +534,7 @@ pub struct AssetAmount {
 /// Notifications that can come from the Kolme framework to components.
 ///
 /// TODO this will ultimately be incorporated into a p2p network of events.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub enum Notification<AppMessage> {
     NewBlock(Arc<SignedBlock<AppMessage>>),
     /// A claim by a submitter that it has instantiated a bridge contract.
