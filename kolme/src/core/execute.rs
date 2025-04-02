@@ -438,6 +438,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.sender
     }
 
+    pub fn get_signing_key(&self) -> PublicKey {
+        self.signing_key
+    }
+
     /// Withdraw an asset to an external chain.
     pub fn withdraw_asset(
         &mut self,

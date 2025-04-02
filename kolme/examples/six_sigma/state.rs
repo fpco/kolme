@@ -1,16 +1,28 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{anyhow, Context, Result};
-use kolme::{AccountId, AssetId, Wallet};
+use kolme::{AccountId, AssetId, PublicKey, Wallet};
 use rust_decimal::{dec, Decimal};
 
 use crate::{AppState, BalanceChange, Odds, OUTCOME_COUNT};
 
-#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct State {
+    admin_keys: HashSet<PublicKey>,
     markets: HashMap<u64, Market>,
     state: AppState,
     strategic_reserve: BTreeMap<AssetId, Decimal>,
+}
+
+impl State {
+    pub fn new(admin_keys: impl IntoIterator<Item = PublicKey>) -> Self {
+        Self {
+            admin_keys: HashSet::from_iter(admin_keys),
+            markets: HashMap::new(),
+            state: AppState::Uninitialized,
+            strategic_reserve: BTreeMap::new(),
+        }
+    }
 }
 
 // funds provided to fund every market
@@ -45,7 +57,14 @@ struct Bet {
 }
 
 impl State {
-    pub(crate) fn add_market(&mut self, id: u64, asset_id: AssetId, name: &str) -> Result<()> {
+    pub(crate) fn add_market(
+        &mut self,
+        signing_key: PublicKey,
+        id: u64,
+        asset_id: AssetId,
+        name: &str,
+    ) -> Result<()> {
+        self.assert_admin(signing_key)?;
         self.assert_operational()?;
 
         if self.markets.contains_key(&id) {
@@ -67,9 +86,11 @@ impl State {
 
     pub(crate) fn settle_market(
         &mut self,
+        signing_key: PublicKey,
         market_id: u64,
         outcome: u8,
     ) -> Result<Vec<BalanceChange>> {
+        self.assert_admin(signing_key)?;
         assert_outcome(outcome)?;
         self.assert_operational()?;
         let market = self.get_operational_market_mut(market_id)?;
@@ -108,7 +129,11 @@ impl State {
         Ok(())
     }
 
-    pub(crate) fn initialize(&mut self) -> std::result::Result<(), anyhow::Error> {
+    pub(crate) fn initialize(
+        &mut self,
+        signing_key: PublicKey,
+    ) -> std::result::Result<(), anyhow::Error> {
+        self.assert_admin(signing_key)?;
         if self.state == AppState::Operational {
             Err(anyhow!("Can't initialize application in operational state"))
         } else {
@@ -130,6 +155,14 @@ impl State {
     fn assert_operational(&self) -> Result<()> {
         if self.state != AppState::Operational {
             Err(anyhow!("Application is not operational yet"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn assert_admin(&self, signing_key: PublicKey) -> Result<()> {
+        if !self.admin_keys.contains(&signing_key) {
+            Err(anyhow!("Admin permissions are required for this action"))
         } else {
             Ok(())
         }
