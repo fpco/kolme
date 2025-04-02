@@ -28,6 +28,13 @@ pub enum BalancesError {
 pub struct Balances(BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>);
 
 impl Balances {
+    pub(in crate::core) fn get(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<&BTreeMap<AssetId, Decimal>> {
+        self.0.get(account_id)
+    }
+
     pub(in crate::core) fn mint(
         &mut self,
         account_id: AccountId,

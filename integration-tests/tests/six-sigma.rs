@@ -58,7 +58,7 @@ async fn basic_scenario() {
     .unwrap();
 
     tracing::debug!("Initializing the contract");
-    broadcast(APP_SECRET_KEY, AppMessage::Init, &client, |state| {
+    broadcast(ADMIN_SECRET_KEY, AppMessage::Init, &client, |state| {
         ensure!(matches!(state.app_state.state, AppState::Operational));
         Ok(())
     })
@@ -67,7 +67,7 @@ async fn basic_scenario() {
 
     tracing::debug!("Creating a market");
     broadcast(
-        APP_SECRET_KEY,
+        ADMIN_SECRET_KEY,
         AppMessage::AddMarket {
             id: 1,
             asset_id: AssetId(1),
@@ -165,7 +165,7 @@ async fn basic_scenario() {
 
     tracing::debug!("Settling the market");
     broadcast(
-        BETTOR_SECRET_KEY,
+        ADMIN_SECRET_KEY,
         AppMessage::SettleMarket {
             market_id: 1,
             outcome: 0,
@@ -250,9 +250,7 @@ async fn register_funder_account(client: &reqwest::Client, contract: &Contract) 
     Ok(())
 }
 
-// Effectively this is processor public key
-// const APP_PUBLIC_KEY: &str = "021a2d860dc86f14d21c933512486207d2e5900b2bbf51f6933c516b8b86a8bd00";
-const APP_SECRET_KEY: &str = "5a0089718b4104377979603960e5fd0f5e79666bf95176f1dd6106944dd207ec";
+const ADMIN_SECRET_KEY: &str = "127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02";
 
 const FUNDER_PUBLIC_KEY: &str =
     "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";

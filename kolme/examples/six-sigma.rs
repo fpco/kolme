@@ -24,14 +24,12 @@ use six_sigma::types::*;
 #[derive(Clone, Debug)]
 pub struct SixSigmaApp;
 
-// Another keypair for client testing:
-// Public key: 02c2b386e42945d4c11712a5bc1d20d085a7da63e57c214e2742a684a97d436599
-// Secret key: 127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02
-
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
-//const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 // lo-test1
 const SUBMITTER_SEED_PHRASE: &str = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
+
+const ADMIN_SECRET_KEY_HEX: &str =
+    "127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02";
 
 const LOCALOSMOSIS_CODE_ID: u64 = 1;
 
@@ -39,6 +37,10 @@ const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
+}
+
+fn admin_secret_key() -> SecretKey {
+    SecretKey::from_hex(ADMIN_SECRET_KEY_HEX).unwrap()
 }
 
 pub enum BalanceChange {
@@ -93,7 +95,7 @@ impl KolmeApp for SixSigmaApp {
     }
 
     fn new_state() -> Result<Self::State> {
-        Ok(State::default())
+        Ok(State::new([admin_secret_key().public_key()]))
     }
 
     fn save_state(state: &Self::State) -> Result<String> {
@@ -113,9 +115,14 @@ impl KolmeApp for SixSigmaApp {
             AppMessage::SendFunds { asset_id, amount } => {
                 ctx.state_mut().send_funds(*asset_id, *amount)
             }
-            AppMessage::Init => ctx.state_mut().initialize(),
+            AppMessage::Init => {
+                let signing_key = ctx.get_signing_key();
+                ctx.state_mut().initialize(signing_key)
+            }
             AppMessage::AddMarket { id, asset_id, name } => {
-                ctx.state_mut().add_market(*id, *asset_id, name)
+                let signing_key = ctx.get_signing_key();
+                ctx.state_mut()
+                    .add_market(signing_key, *id, *asset_id, name)
             }
             AppMessage::PlaceBet {
                 wallet,
@@ -124,10 +131,13 @@ impl KolmeApp for SixSigmaApp {
                 outcome,
             } => {
                 let sender = ctx.get_sender_id();
-                // TODO: check if sender balance has enough funds
+                let balances = ctx
+                    .get_account_balances(&sender)
+                    .map_or(Default::default(), Clone::clone);
                 let odds = ctx.load_data(OddsSource).await?;
                 let change = ctx.state_mut().place_bet(
                     sender,
+                    balances,
                     *market_id,
                     Wallet(wallet.clone()),
                     *amount,
@@ -137,7 +147,10 @@ impl KolmeApp for SixSigmaApp {
                 change_balance(ctx, &change)
             }
             AppMessage::SettleMarket { market_id, outcome } => {
-                let balance_changes = ctx.state_mut().settle_market(*market_id, *outcome)?;
+                let signing_key = ctx.get_signing_key();
+                let balance_changes =
+                    ctx.state_mut()
+                        .settle_market(signing_key, *market_id, *outcome)?;
                 for change in balance_changes {
                     change_balance(ctx, &change)?
                 }

@@ -438,6 +438,17 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.sender
     }
 
+    pub fn get_signing_key(&self) -> PublicKey {
+        self.signing_key
+    }
+
+    pub fn get_account_balances(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<&BTreeMap<AssetId, Decimal>> {
+        self.framework_state.balances.get(account_id)
+    }
+
     /// Withdraw an asset to an external chain.
     pub fn withdraw_asset(
         &mut self,
