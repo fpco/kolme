@@ -131,10 +131,13 @@ impl KolmeApp for SixSigmaApp {
                 outcome,
             } => {
                 let sender = ctx.get_sender_id();
-                // TODO: check if sender balance has enough funds
+                let balances = ctx
+                    .get_account_balances(&sender)
+                    .map_or(Default::default(), Clone::clone);
                 let odds = ctx.load_data(OddsSource).await?;
                 let change = ctx.state_mut().place_bet(
                     sender,
+                    balances,
                     *market_id,
                     Wallet(wallet.clone()),
                     *amount,

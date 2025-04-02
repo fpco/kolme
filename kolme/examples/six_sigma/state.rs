@@ -104,6 +104,7 @@ impl State {
     pub(crate) fn place_bet(
         &mut self,
         bettor: AccountId,
+        balances: BTreeMap<AssetId, Decimal>,
         market_id: u64,
         wallet: Wallet,
         amount: Decimal,
@@ -113,8 +114,14 @@ impl State {
         assert_outcome(outcome)?;
         self.assert_operational()?;
         let Some(market) = self.markets.get_mut(&market_id) else {
-            return Err(anyhow!("Market with id {market_id} doesn't exist"));
+            anyhow::bail!("Market with id {market_id} doesn't exist");
         };
+        if !balances
+            .get(&market.asset_id)
+            .is_some_and(|balance| balance >= &amount)
+        {
+            anyhow::bail!("Account doesn't have enough funds to place this bet")
+        }
         market.place_bet(bettor, wallet, amount, outcome, odds)?;
         Ok(BalanceChange::Burn {
             asset_id: market.asset_id,
