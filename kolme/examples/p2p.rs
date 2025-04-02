@@ -1,12 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
-    str::FromStr,
 };
 
 use anyhow::Result;
 use clap::Parser;
-use cosmos::{HasAddressHrp, SeedPhrase};
 
 use kolme::*;
 use tokio::task::JoinSet;
