@@ -25,7 +25,7 @@ impl<App: KolmeApp> ApiServer<App> {
 
     pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<()> {
         let cors = CorsLayer::new()
-            .allow_methods([Method::GET, Method::POST])
+            .allow_methods([Method::GET, Method::POST, Method::PUT])
             .allow_origin(Any)
             .allow_headers([CONTENT_TYPE]);
 
