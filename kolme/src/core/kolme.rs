@@ -1,6 +1,7 @@
 use std::{backtrace::Backtrace, collections::HashMap, ops::Deref, path::Path};
 
 use sqlx::sqlite::SqliteConnectOptions;
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::core::*;
 
@@ -52,6 +53,11 @@ impl<App: KolmeApp> Kolme<App> {
             guard: self.inner.clone().read_owned().await,
             id,
         }
+    }
+
+    /// Send a general purpose notification.
+    pub fn notify(&self, note: Notification<App::Message>) {
+        self.notify.send(note).ok();
     }
 
     /// Notify the system of a genesis contract instantiation.
@@ -196,6 +202,36 @@ impl<App: KolmeApp> Kolme<App> {
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App::Message>> {
         self.notify.subscribe()
     }
+
+    /// Wait until the given block is published
+    pub async fn wait_for_block(&self, height: BlockHeight) {
+        // Start an outer loop so that we can keep processing if we end up Lagged
+        loop {
+            // First subscribe to avoid a race condition...
+            let mut recv = self.subscribe();
+            // And then check if we're at the requested height.
+            if self.read().await.get_next_height() >= height.next() {
+                return;
+            }
+            loop {
+                match recv.recv().await {
+                    Ok(note) => match note {
+                        Notification::NewBlock(block) => {
+                            if block.0.message.as_inner().height == height {
+                                return;
+                            }
+                        }
+                        Notification::GenesisInstantiation { .. } => (),
+                        Notification::Broadcast { .. } => (),
+                    },
+                    Err(e) => match e {
+                        RecvError::Closed => panic!("wait_for_block: unexpected Closed"),
+                        RecvError::Lagged(_) => break,
+                    },
+                }
+            }
+        }
+    }
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
@@ -216,6 +252,29 @@ impl<App: KolmeApp> KolmeInner<App> {
 
     pub fn get_next_height(&self) -> BlockHeight {
         self.next_height
+    }
+
+    /// Returns the given block, if available.
+    pub async fn get_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Option<SignedBlock<App::Message>>> {
+        let height = i64::try_from(height.0)?;
+        let rendered = sqlx::query_scalar!(
+            r#"
+                SELECT rendered
+                FROM blocks
+                WHERE height=$1
+                LIMIT 1
+            "#,
+            height
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(match rendered {
+            Some(rendered) => serde_json::from_str(&rendered)?,
+            None => None,
+        })
     }
 
     /// Returns the hash of the most recent block.

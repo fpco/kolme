@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        SELECT account_id\n                        FROM account_wallets\n                        WHERE wallet=$1\n                        LIMIT 1\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "name": "account_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5f189c1eb9b2c4b34856475acad9d4b6c47b62e4e2eea48bcc42193a758d3332"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "21502a00f28edf0a72284005b2d4ead68fba7fbf7dfcb71f8a3fa64339a7fca6"
+}
