@@ -512,3 +512,141 @@ fn secp256k1_is_normalized() {
     //     assert!(Secp256k1Signature(sig.to_bytes().into()).is_normalized());
     // }
 }
+
+#[test]
+fn invalid_payload_rejected() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let mut payload = Payload {
+        id: 0,
+        program_id: TOKEN.to_bytes(),
+        accounts: vec![],
+        instruction_data: vec![255, 255],
+    };
+    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let metas = [AccountMeta::new(sender.pubkey(), true)]; // Mismatched metas
+
+    let result = p.signed(&sender, &data, &metas).unwrap_err();
+    assert_eq!(
+        result.err,
+        TransactionError::InstructionError(0, InstructionError::InvalidInstructionData)
+    );
+}
+
+#[test]
+fn zero_amount_transfer() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let sender_ata = p.make_ata(&sender);
+    p.mint(&sender_ata, 10_00000000);
+
+    let data = RegularMsgIxData {
+        keys: vec![],
+        transfer_amounts: vec![0],
+    };
+    let result = p.regular(&sender, &data, &[p.token]);
+
+    assert!(result.is_ok());
+
+#[test]
+fn max_executors_works() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
+    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR2_KEY, EXECUTOR3_KEY, EXECUTOR4_KEY]); // All executors
+
+    let result = p.signed(&sender, &data, &metas);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn duplicate_executor_signatures_rejected() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
+    let mut data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR1_KEY]);
+
+    let result = p.signed(&sender, &data, &metas).unwrap_err();
+    assert_eq!(
+        result.err,
+        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::DuplicateSignature as u32))
+    );
+}
+
+#[test]
+fn lamport_transfer_works() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    let receiver = Keypair::new();
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let amount = 500000000;
+    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), amount);
+    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+
+    let pre_sender_balance = p.svm.get_balance(&sender.pubkey()).unwrap();
+    let pre_receiver_balance = p.svm.get_balance(&receiver.pubkey()).unwrap();
+
+    p.signed(&sender, &data, &metas).unwrap();
+
+    let post_sender_balance = p.svm.get_balance(&sender.pubkey()).unwrap();
+    let post_receiver_balance = p.svm.get_balance(&receiver.pubkey()).unwrap();
+
+    assert_eq!(pre_sender_balance - amount, post_sender_balance);
+    assert_eq!(pre_receiver_balance + amount, post_receiver_balance);
+}
+
+#[test]
+fn replay_signed_tx_rejected() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
+    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+
+    p.signed(&sender, &data, &metas).unwrap();
+    let result = p.signed(&sender, &data, &metas).unwrap_err();
+
+    assert_eq!(
+        result.err,
+        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::AlreadyProcessed as u32))
+    );
+}
+
+#[test]
+fn large_token_amount_transfer() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let sender_ata = p.make_ata(&sender);
+    let max_amount = u64::MAX / 2;
+    p.mint(&sender_ata, max_amount);
+
+    let data = RegularMsgIxData {
+        keys: vec![],
+        transfer_amounts: vec![max_amount],
+    };
+    p.regular(&sender, &data, &[p.token]).unwrap();
+
+    let holder_acc = token_holder_acc(&p.token, &sender.pubkey());
+    let holder_ata = spl_client::address::get_associated_token_address(&holder_acc, &p.token);
+    let holder_ata_data: SplAccount = get_spl_account(&p.svm, &holder_ata).unwrap();
+    assert_eq!(holder_ata_data.amount, max_amount);
+}
