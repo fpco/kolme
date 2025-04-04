@@ -2801,6 +2801,7 @@ dependencies = [
  "cosmwasm-std",
  "jiff",
  "libp2p",
+ "merkle-map",
  "rand 0.8.5",
  "reqwest",
  "rust_decimal",
@@ -3391,6 +3392,13 @@ name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
+
+[[package]]
+name = "merkle-map"
+version = "0.1.0"
+dependencies = [
+ "shared",
+]
 
 [[package]]
 name = "mime"
