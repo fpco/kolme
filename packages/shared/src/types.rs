@@ -3,8 +3,6 @@ mod sqlx_impls;
 
 use std::{fmt::Display, num::TryFromIntError};
 
-use k256::sha2::Digest;
-
 /// Monotonically increasing identifier for actions sent to a bridge contract.
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
@@ -101,8 +99,9 @@ pub enum Sha256HashError {
 }
 
 impl Sha256Hash {
+    #[cfg(feature = "realcryptography")]
     pub fn hash(input: impl AsRef<[u8]>) -> Self {
-        Sha256Hash(k256::sha2::Sha256::digest(input.as_ref()).into())
+        Sha256Hash(<k256::sha2::Sha256 as k256::sha2::Digest>::digest(input.as_ref()).into())
     }
 
     pub fn from_hash(state: &[u8]) -> Result<Self, Sha256HashError> {
@@ -123,12 +122,14 @@ impl Sha256Hash {
     }
 }
 
+#[cfg(feature = "realcryptography")]
 impl Display for Sha256Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", hex::encode(self.0.as_slice()))
     }
 }
 
+#[cfg(feature = "realcryptography")]
 impl serde::Serialize for Sha256Hash {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
