@@ -1,8 +1,8 @@
 use crate::*;
 
-impl<K, V> MerkleTree<K, V> {
+impl<K, V> MerkleMap<K, V> {
     pub fn new() -> Self {
-        MerkleTree(Node::Empty)
+        MerkleMap(Node::Empty)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -20,7 +20,7 @@ impl<K, V> MerkleTree<K, V> {
     }
 }
 
-impl<K, V> MerkleTree<K, V>
+impl<K, V> MerkleMap<K, V>
 where
     K: MerkleKey + Clone,
     V: Clone,
@@ -70,7 +70,7 @@ where
     }
 }
 
-impl<K, V> Default for MerkleTree<K, V> {
+impl<K, V> Default for MerkleMap<K, V> {
     fn default() -> Self {
         Self::new()
     }

@@ -6,7 +6,14 @@ use std::sync::Arc;
 
 use shared::types::Sha256Hash;
 
-pub struct MerkleTree<K, V>(pub(crate) Node<K, V>);
+/// A base16 tree supporting sharing of subtrees and cheap hashing.
+///
+/// Consider this as a replacement for a `BTreeMap`. Importantly,
+/// this type internally will hash each subtree individually and store
+/// its serialized format in separate database entries. The goal is to
+/// allow for aggressive sharing in both the on-disk and in-memory
+/// representation of the data.
+pub struct MerkleMap<K, V>(pub(crate) Node<K, V>);
 
 #[derive(Clone)]
 pub(crate) struct LeafEntry<K, V> {

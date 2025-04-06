@@ -62,7 +62,7 @@ impl<K, V> TreeContents<K, V> {
         self.branches.iter().for_each(Node::sanity_checks);
     }
 }
-impl<K, V> Debug for MerkleTree<K, V> {
+impl<K, V> Debug for MerkleMap<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.0)
     }
@@ -107,7 +107,7 @@ impl<K, V> Debug for TreeContents<K, V> {
 
 #[test]
 fn insert_get() {
-    let mut tree = MerkleTree::<String, String>::new();
+    let mut tree = MerkleMap::<String, String>::new();
     assert_eq!(tree.get("key1"), None);
     tree.insert("key1".to_owned(), "value1".to_owned());
     assert_eq!(tree.get("key1").map(|x| x.as_str()), Some("value1"));
@@ -115,7 +115,7 @@ fn insert_get() {
 
 #[test]
 fn many_inserts() {
-    let mut tree = MerkleTree::<u8, u8>::new();
+    let mut tree = MerkleMap::<u8, u8>::new();
     for i in 0..100 {
         tree.insert(i, i * 2);
     }
@@ -127,7 +127,7 @@ fn many_inserts() {
 
 #[test]
 fn remove() {
-    let mut tree = MerkleTree::<u32, u32>::new();
+    let mut tree = MerkleMap::<u32, u32>::new();
     tree.insert(5, 12);
     assert_eq!(tree.get(&5).copied(), Some(12));
     assert_eq!(tree.remove(&5), Some((5, 12)));
@@ -136,7 +136,7 @@ fn remove() {
 
 #[test]
 fn many_removes() {
-    let mut tree = MerkleTree::<u32, u32>::new();
+    let mut tree = MerkleMap::<u32, u32>::new();
     for i in 0..100 {
         tree.insert(i, i * 2);
     }
@@ -151,7 +151,7 @@ fn many_removes() {
 #[test]
 fn iterate_small() {
     const MAX: u32 = 17;
-    let mut tree = MerkleTree::<u32, u32>::new();
+    let mut tree = MerkleMap::<u32, u32>::new();
     for i in 0..MAX {
         tree.insert(i, i * 2);
     }
@@ -165,7 +165,7 @@ fn iterate_small() {
 
 #[test]
 fn iterate() {
-    let mut tree = MerkleTree::<u32, u32>::new();
+    let mut tree = MerkleMap::<u32, u32>::new();
     for i in 0..100 {
         tree.insert(i, i * 2);
     }
@@ -179,7 +179,7 @@ fn iterate() {
 
 #[test]
 fn duplicates() {
-    let mut tree = MerkleTree::<u32, u32>::new();
+    let mut tree = MerkleMap::<u32, u32>::new();
     for i in 0..100u32 {
         assert_eq!(tree.len(), i as usize);
         assert_eq!(tree.insert(i, i), None);
@@ -191,12 +191,12 @@ fn duplicates() {
 
 #[test]
 fn overlapping_keys() {
-    let mut tree = MerkleTree::<String, u32>::new();
+    let mut tree = MerkleMap::<String, u32>::new();
     tree.insert("abc".to_owned(), 1);
     tree.insert("ab".to_owned(), 2);
     tree.insert("abcd".to_owned(), 3);
 
-    fn test_tree(tree: &MerkleTree<String, u32>) {
+    fn test_tree(tree: &MerkleMap<String, u32>) {
         assert_eq!(tree.get("ab"), Some(&2));
         assert_eq!(tree.get("abcd"), Some(&3));
         assert_eq!(tree.get("abc"), Some(&1));
@@ -224,7 +224,7 @@ fn overlapping_keys() {
 
 #[test]
 fn just_a() {
-    let mut tree = MerkleTree::new();
+    let mut tree = MerkleMap::new();
 
     fn make_str(count: usize) -> String {
         let mut s = String::with_capacity(count);

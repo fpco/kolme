@@ -1,6 +1,6 @@
 use crate::*;
 
-impl<'a, K, V> IntoIterator for &'a MerkleTree<K, V> {
+impl<'a, K, V> IntoIterator for &'a MerkleMap<K, V> {
     type Item = (&'a K, &'a V);
 
     type IntoIter = Iter<'a, K, V>;
@@ -74,7 +74,7 @@ fn to_iter_layer<K, V>(node: &Node<K, V>) -> Option<IterLayer<K, V>> {
 
 pub struct IntoIter<K, V>(UnlockedNode<K, V>);
 
-impl<K: MerkleKey + Clone, V: Clone> IntoIterator for MerkleTree<K, V> {
+impl<K: MerkleKey + Clone, V: Clone> IntoIterator for MerkleMap<K, V> {
     type Item = (K, V);
 
     type IntoIter = IntoIter<K, V>;
