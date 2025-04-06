@@ -46,7 +46,7 @@ impl<K, V> LeafContents<K, V> {
         }
     }
 
-    pub(crate) fn get<Q>(&self, key_bytes: MerkleKeyBytes, key: &Q) -> Option<&V>
+    pub(crate) fn get<Q>(&self, key_bytes: MerkleKeyBytes) -> Option<&V>
     where
         K: std::borrow::Borrow<Q>,
         Q: MerkleKey + ?Sized,
@@ -61,7 +61,7 @@ impl<K, V> LeafContents<K, V> {
         })
     }
 
-    pub(crate) fn remove<Q>(&mut self, key_bytes: MerkleKeyBytes, key: &Q) -> Option<(K, V)>
+    pub(crate) fn remove<Q>(&mut self, key_bytes: MerkleKeyBytes) -> Option<(K, V)>
     where
         K: Borrow<Q>,
         Q: MerkleKey + ?Sized,

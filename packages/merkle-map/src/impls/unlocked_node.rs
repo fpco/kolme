@@ -38,22 +38,17 @@ impl<K: MerkleKey + Clone, V: Clone> UnlockedNode<K, V> {
         }
     }
 
-    pub(crate) fn remove<Q>(
+    pub(crate) fn remove(
         self,
         depth: u16,
         key_bytes: MerkleKeyBytes,
-        key: &Q,
-    ) -> (UnlockedNode<K, V>, Option<(K, V)>)
-    where
-        K: Borrow<Q>,
-        Q: MerkleKey + ?Sized,
-    {
+    ) -> (UnlockedNode<K, V>, Option<(K, V)>) {
         match self {
             UnlockedNode::Leaf(mut leaf) => {
-                let v = leaf.remove(key_bytes, key);
+                let v = leaf.remove(key_bytes);
                 (UnlockedNode::Leaf(leaf), v)
             }
-            UnlockedNode::Tree(tree) => tree.remove(depth, key_bytes, key),
+            UnlockedNode::Tree(tree) => tree.remove(depth, key_bytes),
         }
     }
 }

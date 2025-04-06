@@ -40,37 +40,28 @@ impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
         v
     }
 
-    pub(crate) fn get<Q>(&self, depth: u16, key_bytes: MerkleKeyBytes, key: &Q) -> Option<&V>
-    where
-        K: Borrow<Q>,
-        Q: MerkleKey + ?Sized,
-    {
+    pub(crate) fn get(&self, depth: u16, key_bytes: MerkleKeyBytes) -> Option<&V> {
         let Some(index) = key_bytes.get_index_for_depth(depth) else {
             debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
             return self.leaf.as_ref().map(|entry| &entry.value);
         };
         debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
-        self.branches[index].get(depth + 1, key_bytes, key)
+        self.branches[index].get(depth + 1, key_bytes)
     }
 
-    pub(crate) fn remove<Q>(
+    pub(crate) fn remove(
         mut self,
         depth: u16,
         key_bytes: MerkleKeyBytes,
-        key: &Q,
-    ) -> (UnlockedNode<K, V>, Option<(K, V)>)
-    where
-        K: Borrow<Q>,
-        Q: MerkleKey + ?Sized,
-    {
+    ) -> (UnlockedNode<K, V>, Option<(K, V)>) {
         let index = key_bytes
             .get_index_for_depth(depth)
             .expect("Impossible: TreeContents::remove without sufficient bytes");
         let index = usize::from(index);
         // FIXME check if we need to go back to a leaf because we have few enough nodes
         let branch = std::mem::take(&mut self.branches[index]).unlock();
-        let (branch, v) = branch.remove(depth + 1, key_bytes, key);
+        let (branch, v) = branch.remove(depth + 1, key_bytes);
         self.branches[index] = branch.into();
         if v.is_some() {
             self.len -= 1;

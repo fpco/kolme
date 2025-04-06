@@ -33,17 +33,13 @@ impl<K: MerkleKey + Clone, V: Clone> Node<K, V> {
         }
     }
 
-    pub(crate) fn get<Q>(&self, depth: u16, key_bytes: MerkleKeyBytes, key: &Q) -> Option<&V>
-    where
-        K: Borrow<Q>,
-        Q: MerkleKey + ?Sized,
-    {
+    pub(crate) fn get(&self, depth: u16, key_bytes: MerkleKeyBytes) -> Option<&V> {
         match self {
             Node::Empty => None,
-            Node::LockedLeaf(leaf) => leaf.0.inner.get(key_bytes, key),
-            Node::UnlockedLeaf(leaf) => leaf.get(key_bytes, key),
-            Node::LockedTree(tree) => tree.0.inner.get(depth, key_bytes, key),
-            Node::UnlockedTree(tree) => tree.get(depth, key_bytes, key),
+            Node::LockedLeaf(leaf) => leaf.0.inner.get(key_bytes),
+            Node::UnlockedLeaf(leaf) => leaf.get(key_bytes),
+            Node::LockedTree(tree) => tree.0.inner.get(depth, key_bytes),
+            Node::UnlockedTree(tree) => tree.get(depth, key_bytes),
         }
     }
 }

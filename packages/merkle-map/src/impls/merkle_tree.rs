@@ -48,7 +48,7 @@ where
         Q: MerkleKey + ?Sized,
     {
         self.sanity_checks();
-        self.0.get(0, key.to_bytes(), key)
+        self.0.get(0, key.to_bytes())
     }
 
     pub fn remove<Q>(&mut self, key: &Q) -> Option<(K, V)>
@@ -58,7 +58,7 @@ where
     {
         self.sanity_checks();
         let node = std::mem::take(&mut self.0).unlock();
-        let (node, v) = node.remove(0, key.to_bytes(), key);
+        let (node, v) = node.remove(0, key.to_bytes());
         self.0 = node.into();
         self.sanity_checks();
         v
