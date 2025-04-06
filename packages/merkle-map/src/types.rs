@@ -1,11 +1,12 @@
+mod key_bytes;
+
+pub use key_bytes::MerkleKeyBytes;
+
 use std::sync::Arc;
 
 use shared::types::Sha256Hash;
 
 pub struct MerkleTree<K, V>(pub(crate) Node<K, V>);
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct MerkleKeyBytes(pub(crate) Vec<u8>);
 
 #[derive(Clone)]
 pub(crate) struct LeafEntry<K, V> {
@@ -49,6 +50,7 @@ pub(crate) struct LeafContents<K, V> {
 #[derive(Clone)]
 pub(crate) struct TreeContents<K, V> {
     pub(crate) len: usize,
+    pub(crate) leaf: Option<LeafEntry<K, V>>,
     pub(crate) branches: [Node<K, V>; 16],
 }
 

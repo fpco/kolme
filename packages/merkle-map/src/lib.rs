@@ -7,15 +7,6 @@ pub use types::*;
 
 use std::{borrow::Borrow, sync::Arc};
 
-impl MerkleKeyBytes {
-    fn get_index_for_depth(&self, depth: u16) -> Option<u8> {
-        // First get the byte in question...
-        let byte = *self.0.get(usize::from(depth / 2))?;
-        // Then get either the high or low bits, depending on whether our depth is even or odd
-        Some(if depth % 2 == 0 { byte & 0x0F } else { todo!() })
-    }
-}
-
 pub trait MerkleKey {
     fn to_bytes(&self) -> MerkleKeyBytes;
 }
@@ -258,6 +249,7 @@ impl<K, V> TreeContents<K, V> {
     fn new() -> Self {
         Self {
             len: 0,
+            leaf: None,
             branches: std::array::from_fn(|_| Node::Empty),
         }
     }
@@ -273,10 +265,14 @@ impl<K, V> TreeContents<K, V> {
 
 impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
     fn insert(&mut self, depth: u16, entry: LeafEntry<K, V>) -> Option<(K, V)> {
-        let index = entry
-            .key_bytes
-            .get_index_for_depth(depth)
-            .expect("Impossible: TreeContents::insert without sufficient bytes");
+        let Some(index) = entry.key_bytes.get_index_for_depth(depth) else {
+            debug_assert!(depth == 0 || entry.key_bytes.get_index_for_depth(depth - 1).is_some());
+            let v = std::mem::replace(&mut self.leaf, Some(entry));
+            if v.is_none() {
+                self.len += 1;
+            }
+            return v.map(|entry| (entry.key, entry.value));
+        };
         let index = usize::from(index);
         let (branch, v) = std::mem::take(&mut self.branches[index])
             .unlock()
@@ -294,9 +290,11 @@ impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
         K: Borrow<Q>,
         Q: MerkleKey + ?Sized,
     {
-        let index = key_bytes
-            .get_index_for_depth(depth)
-            .expect("Impossible: TreeContents::get without sufficient bytes");
+        let Some(index) = key_bytes.get_index_for_depth(depth) else {
+            debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
+            return self.leaf.as_ref().map(|entry| &entry.value);
+        };
+        debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
         self.branches[index].get(depth + 1, key_bytes, key)
     }
@@ -325,7 +323,10 @@ impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
         (UnlockedNode::Tree(self), v)
     }
 
-    fn drain_entries_to(mut self, entries: &mut Vec<LeafEntry<K, V>>) {
+    fn drain_entries_to(self, entries: &mut Vec<LeafEntry<K, V>>) {
+        if let Some(entry) = self.leaf {
+            entries.push(entry);
+        }
         for branch in self.branches {
             match branch {
                 Node::Empty => (),
@@ -441,24 +442,24 @@ impl<K, V> Default for MerkleTree<K, V> {
 
 impl MerkleKey for String {
     fn to_bytes(&self) -> MerkleKeyBytes {
-        MerkleKeyBytes(self.clone().into_bytes())
+        MerkleKeyBytes::from_slice(self.as_bytes())
     }
 }
 
 impl MerkleKey for str {
     fn to_bytes(&self) -> MerkleKeyBytes {
-        MerkleKeyBytes(self.as_bytes().to_vec())
+        MerkleKeyBytes::from_slice(self.as_bytes())
     }
 }
 
 impl MerkleKey for u8 {
     fn to_bytes(&self) -> MerkleKeyBytes {
-        MerkleKeyBytes(vec![*self])
+        MerkleKeyBytes::from_slice(&[*self])
     }
 }
 impl MerkleKey for u32 {
     fn to_bytes(&self) -> MerkleKeyBytes {
-        MerkleKeyBytes(self.to_le_bytes().to_vec())
+        MerkleKeyBytes::from_slice(&self.to_le_bytes())
     }
 }
 

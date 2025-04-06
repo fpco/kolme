@@ -7,3 +7,7 @@ edition = "2021"
 hex = { workspace = true }
 k256 = { workspace = true }
 shared = { workspace = true, features = ["realcryptography"] }
+tinyvec = { version = "1.9.0", features = ["alloc"] }
+
+[dev-dependencies]
+quickcheck = "1.0.3"

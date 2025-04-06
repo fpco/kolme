@@ -32,7 +32,11 @@ impl<K, V> LeafContents<K, V> {
         let mut prev = None;
         for entry in &self.values {
             if let Some(prev) = prev {
-                assert!(prev < &entry.key_bytes);
+                assert!(
+                    prev < &entry.key_bytes,
+                    "prev ({prev:?}) >= entry.key_bytes ({:?})",
+                    entry.key_bytes
+                );
             }
             prev = Some(&entry.key_bytes);
         }
@@ -52,7 +56,8 @@ impl<K, V> std::fmt::Debug for LeafContents<K, V> {
 impl<K, V> TreeContents<K, V> {
     fn sanity_checks(&self) {
         assert!(self.branches.iter().any(|branch| !branch.is_empty()));
-        let expected = self.branches.iter().map(|node| node.len()).sum::<usize>();
+        let expected = self.branches.iter().map(|node| node.len()).sum::<usize>()
+            + if self.leaf.is_some() { 1 } else { 0 };
         assert_eq!(self.len(), expected);
         self.branches.iter().for_each(Node::sanity_checks);
     }
@@ -176,5 +181,66 @@ fn duplicates() {
         assert_eq!(tree.len(), (i + 1) as usize);
         assert_eq!(tree.insert(i, i), Some((i, i)));
         assert_eq!(tree.len(), (i + 1) as usize);
+    }
+}
+
+#[test]
+fn overlapping_keys() {
+    let mut tree = MerkleTree::<String, u32>::new();
+    tree.insert("abc".to_owned(), 1);
+    tree.insert("ab".to_owned(), 2);
+    tree.insert("abcd".to_owned(), 3);
+
+    fn test_tree(tree: &MerkleTree<String, u32>) {
+        assert_eq!(tree.get("ab"), Some(&2));
+        assert_eq!(tree.get("abcd"), Some(&3));
+        assert_eq!(tree.get("abc"), Some(&1));
+        assert_eq!(tree.get("abcde"), None);
+        assert_eq!(tree.get(""), None);
+    }
+
+    test_tree(&tree);
+
+    // Fun way to run this test: keep expanding the size of the tree and confirm
+    // that we never lose any entries
+    for i in 0..100 {
+        assert_eq!(tree.len(), i as usize + 3);
+        tree.insert(i.to_string(), i);
+        test_tree(&tree);
+    }
+
+    // And now go the other way too
+    for i in 0..100 {
+        assert_eq!(tree.len(), 100 - i as usize + 3);
+        assert_eq!(tree.remove(&i.to_string()), Some((i.to_string(), i)));
+        test_tree(&tree);
+    }
+}
+
+#[test]
+fn just_a() {
+    let mut tree = MerkleTree::new();
+
+    fn make_str(count: usize) -> String {
+        let mut s = String::with_capacity(count);
+        for _ in 0..count {
+            s.push('a');
+        }
+        s
+    }
+
+    for i in 0..100 {
+        assert_eq!(tree.len(), i);
+        tree.insert(make_str(i), i);
+        assert_eq!(tree.len(), i + 1);
+        assert_eq!(tree.insert(make_str(i), i), Some((make_str(i), i)));
+    }
+
+    for i in (0..100).rev() {
+        assert_eq!(tree.len(), i + 1);
+        assert_eq!(tree.remove(&make_str(i)), Some((make_str(i), i)));
+        assert_eq!(tree.len(), i);
+        assert_eq!(tree.remove(&make_str(i)), None);
+        assert_eq!(tree.len(), i);
     }
 }
