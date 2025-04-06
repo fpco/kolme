@@ -16,7 +16,7 @@ pub use listener::Listener;
 pub use merkle_map::*;
 pub use processor::Processor;
 pub use rust_decimal::Decimal;
-pub use shared::{cosmos::SignatureWithRecovery, cryptography::*, types::*};
+pub use shared::{cryptography::*, types::*};
 pub use submitter::Submitter;
 
 pub(crate) use anyhow::{Context, Result};

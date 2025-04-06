@@ -1,11 +1,12 @@
+#[cfg(test)]
+mod tests;
+
+mod types;
+
+pub use types::*;
+
 use std::{borrow::Borrow, sync::Arc};
 
-use shared::types::Sha256Hash;
-
-pub struct MerkleTree<K, V>(Node<K, V>);
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct MerkleKeyBytes(Vec<u8>);
 impl MerkleKeyBytes {
     fn get_index_for_depth(&self, depth: u16) -> Option<u8> {
         // First get the byte in question...
@@ -17,20 +18,6 @@ impl MerkleKeyBytes {
 
 pub trait MerkleKey {
     fn to_bytes(&self) -> MerkleKeyBytes;
-}
-
-#[derive(Clone)]
-struct LeafEntry<K, V> {
-    key_bytes: MerkleKeyBytes,
-    key: K,
-    value: V,
-}
-
-struct Locked<T>(Arc<LockedInner<T>>);
-
-struct LockedInner<T> {
-    hash: Sha256Hash,
-    inner: T,
 }
 
 impl<T> Clone for Locked<T> {
@@ -46,19 +33,6 @@ impl<T: Clone> Locked<T> {
             Err(x) => T::clone(&x.inner),
         }
     }
-}
-
-#[derive(Clone)]
-enum Node<K, V> {
-    Empty,
-    LockedLeaf(Locked<LeafContents<K, V>>),
-    UnlockedLeaf(LeafContents<K, V>),
-    LockedTree(Locked<TreeContents<K, V>>),
-    UnlockedTree(Box<TreeContents<K, V>>),
-    // FIXME
-    // Lazy {
-    //     hash: Sha256Hash,
-    // },
 }
 
 impl<K, V> Node<K, V> {
@@ -79,27 +53,6 @@ impl<K, V> Node<K, V> {
             Node::UnlockedLeaf(leaf) => leaf.len(),
             Node::LockedTree(tree) => tree.0.inner.len(),
             Node::UnlockedTree(tree) => tree.len(),
-        }
-    }
-
-    #[cfg(test)]
-    fn sanity_checks(&self) {
-        match self {
-            Node::Empty => (),
-            Node::LockedLeaf(leaf) => {
-                // FIXME validate hashes
-                leaf.0.inner.sanity_checks();
-            }
-            Node::UnlockedLeaf(leaf) => {
-                leaf.sanity_checks();
-            }
-            Node::LockedTree(tree) => {
-                // FIXME validate hashes
-                tree.0.inner.sanity_checks();
-            }
-            Node::UnlockedTree(tree) => {
-                tree.sanity_checks();
-            }
         }
     }
 
@@ -139,11 +92,6 @@ impl<K: MerkleKey + Clone, V: Clone> Node<K, V> {
         }
     }
 }
-impl<K, V> Default for Node<K, V> {
-    fn default() -> Self {
-        Node::Empty
-    }
-}
 
 impl<K: MerkleKey + Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
     fn from(tree: TreeContents<K, V>) -> Self {
@@ -154,10 +102,6 @@ impl<K: MerkleKey + Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K
     }
 }
 
-enum UnlockedNode<K, V> {
-    Leaf(LeafContents<K, V>),
-    Tree(TreeContents<K, V>),
-}
 impl<K: MerkleKey + Clone, V: Clone> From<UnlockedNode<K, V>> for Node<K, V> {
     fn from(node: UnlockedNode<K, V>) -> Self {
         match node {
@@ -209,23 +153,6 @@ impl<K: MerkleKey + Clone, V: Clone> UnlockedNode<K, V> {
             }
             UnlockedNode::Tree(tree) => tree.remove(depth, key_bytes, key),
         }
-    }
-}
-
-#[derive(Clone)]
-struct LeafContents<K, V> {
-    /// Invariant: must be sored by key_bytes
-    values: Vec<LeafEntry<K, V>>, // FIXME switch to an array
-}
-
-#[cfg(test)]
-impl<K, V> std::fmt::Debug for LeafContents<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[")?;
-        for value in &self.values {
-            write!(f, "{:?},", value.key_bytes)?;
-        }
-        Ok(())
     }
 }
 
@@ -308,19 +235,6 @@ impl<K, V> LeafContents<K, V> {
         self.values.first().map(|x| &x.key)
     }
 
-    #[cfg(test)]
-    fn sanity_checks(&self) {
-        assert!(!self.values.is_empty());
-        assert!(self.values.len() <= 16);
-        let mut prev = None;
-        for entry in &self.values {
-            if let Some(prev) = prev {
-                assert!(prev < &entry.key_bytes);
-            }
-            prev = Some(&entry.key_bytes);
-        }
-    }
-
     fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
@@ -340,11 +254,6 @@ impl<K, V> Default for LeafContents<K, V> {
     }
 }
 
-#[derive(Clone)]
-struct TreeContents<K, V> {
-    len: usize,
-    branches: [Node<K, V>; 16],
-}
 impl<K, V> TreeContents<K, V> {
     fn new() -> Self {
         Self {
@@ -355,14 +264,6 @@ impl<K, V> TreeContents<K, V> {
 
     fn find_first(&self) -> Option<&K> {
         todo!()
-    }
-
-    #[cfg(test)]
-    fn sanity_checks(&self) {
-        assert!(self.branches.iter().any(|branch| !branch.is_empty()));
-        let expected = self.branches.iter().map(|node| node.len()).sum::<usize>();
-        assert_eq!(self.len(), expected);
-        self.branches.iter().for_each(Node::sanity_checks);
     }
 
     fn len(&self) -> usize {
@@ -561,14 +462,6 @@ impl MerkleKey for u32 {
     }
 }
 
-pub struct Iter<'a, K, V> {
-    tree: &'a MerkleTree<K, V>,
-    cursor: Cursor,
-}
-
-#[derive(Default)]
-struct Cursor(Vec<u8>);
-
 impl<'a, K, V> IntoIterator for &'a MerkleTree<K, V> {
     type Item = (&'a K, &'a V);
 
@@ -590,8 +483,6 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
     }
 }
 
-pub struct IntoIter<K, V>(MerkleTree<K, V>);
-
 impl<K: MerkleKey + Clone, V: Clone> IntoIterator for MerkleTree<K, V> {
     type Item = (K, V);
 
@@ -607,122 +498,5 @@ impl<K: MerkleKey + Clone, V: Clone> Iterator for IntoIter<K, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.pop_first()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fmt::Debug;
-
-    use super::*;
-
-    impl<K, V> Debug for MerkleTree<K, V> {
-        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            write!(f, "{:?}", self.0)
-        }
-    }
-
-    impl<K, V> Debug for Node<K, V> {
-        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            match self {
-                Node::Empty => write!(f, "Empty"),
-                Node::LockedLeaf(leaf) => {
-                    write!(f, "LockedLeaf({}, {:?})", leaf.0.hash, leaf.0.inner)
-                }
-                Node::UnlockedLeaf(leaf) => write!(f, "UnlockedLeaf({leaf:?})"),
-                Node::LockedTree(tree) => {
-                    write!(f, "LockedTree({}, {:?})", tree.0.hash, tree.0.inner)
-                }
-                Node::UnlockedTree(tree) => write!(f, "UnlockedTree({tree:?})"),
-            }
-        }
-    }
-    impl<K, V> Debug for UnlockedNode<K, V> {
-        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            match self {
-                UnlockedNode::Leaf(leaf) => {
-                    write!(f, "Leaf({:?})", leaf)
-                }
-                UnlockedNode::Tree(tree) => {
-                    write!(f, "Tree({:?})", tree)
-                }
-            }
-        }
-    }
-    impl<K, V> Debug for TreeContents<K, V> {
-        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            write!(f, "[")?;
-            for branch in &self.branches {
-                write!(f, "{branch:?}")?;
-            }
-            write!(f, "]")
-        }
-    }
-
-    #[test]
-    fn insert_get() {
-        let mut tree = MerkleTree::<String, String>::new();
-        assert_eq!(tree.get("key1"), None);
-        tree.insert("key1".to_owned(), "value1".to_owned());
-        assert_eq!(tree.get("key1").map(|x| x.as_str()), Some("value1"));
-    }
-
-    #[test]
-    fn many_inserts() {
-        let mut tree = MerkleTree::<u8, u8>::new();
-        for i in 0..100 {
-            tree.insert(i, i * 2);
-        }
-
-        for i in 0..100 {
-            assert_eq!(tree.get(&i).copied(), Some(i * 2));
-        }
-    }
-
-    #[test]
-    fn remove() {
-        let mut tree = MerkleTree::<u32, u32>::new();
-        tree.insert(5, 12);
-        assert_eq!(tree.get(&5).copied(), Some(12));
-        assert_eq!(tree.remove(&5), Some((5, 12)));
-        assert_eq!(tree.get(&5).copied(), None);
-    }
-
-    #[test]
-    fn many_removes() {
-        let mut tree = MerkleTree::<u32, u32>::new();
-        for i in 0..100 {
-            tree.insert(i, i * 2);
-        }
-
-        for i in 0..100 {
-            assert_eq!(tree.remove(&i), Some((i, i * 2)));
-        }
-
-        assert!(tree.is_empty());
-    }
-
-    #[test]
-    fn pop_first() {
-        let mut tree = MerkleTree::<String, u32>::new();
-        tree.insert("def".to_owned(), 42);
-        tree.insert("abc".to_owned(), 43);
-        assert_eq!(tree.pop_first(), Some(("abc".to_owned(), 43)));
-        assert_eq!(tree.pop_first(), Some(("def".to_owned(), 42)));
-        assert_eq!(tree.pop_first(), None);
-    }
-
-    #[test]
-    fn iterate() {
-        let mut tree = MerkleTree::<u32, u32>::new();
-        for i in 0..100 {
-            tree.insert(i, i * 2);
-        }
-
-        let expected = (0..100).map(|x| (x, x * 2)).collect::<Vec<_>>();
-        let actual = tree.iter().map(|(x, y)| (*x, *y)).collect::<Vec<_>>();
-        assert_eq!(expected, actual);
-        let actual = tree.into_iter().collect::<Vec<_>>();
-        assert_eq!(expected, actual);
     }
 }

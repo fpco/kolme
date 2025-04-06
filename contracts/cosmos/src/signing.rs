@@ -1,7 +1,7 @@
 use cosmwasm_std::{Api, RecoverPubkeyError};
-use shared::cosmos::*;
 use shared::cryptography::{
     compress_public_key, CompressPublicKeyError, PublicKey, RecoveryId, Signature,
+    SignatureWithRecovery,
 };
 
 #[derive(thiserror::Error, Debug)]

@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 hex = { workspace = true }
 k256 = { workspace = true }
-shared = { workspace = true }
+shared = { workspace = true, features = ["realcryptography"] }

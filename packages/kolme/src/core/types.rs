@@ -3,7 +3,6 @@ mod balances;
 use std::{fmt::Display, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
-use shared::cosmos::SignatureWithRecovery;
 
 use crate::*;
 
