@@ -65,16 +65,16 @@ enum IterLayer<'a, K, V> {
 fn to_iter_layer<K, V>(node: &Node<K, V>) -> Option<IterLayer<K, V>> {
     match node {
         Node::Empty => None,
-        Node::LockedLeaf(leaf) => Some(IterLayer::Leaf(&leaf.0.inner, 0)),
+        Node::LockedLeaf(leaf) => Some(IterLayer::Leaf(&leaf.inner, 0)),
         Node::UnlockedLeaf(leaf) => Some(IterLayer::Leaf(leaf, 0)),
-        Node::LockedTree(tree) => Some(IterLayer::Tree(&tree.0.inner, 0)),
+        Node::LockedTree(tree) => Some(IterLayer::Tree(&tree.inner, 0)),
         Node::UnlockedTree(tree) => Some(IterLayer::Tree(tree, 0)),
     }
 }
 
 pub struct IntoIter<K, V>(UnlockedNode<K, V>);
 
-impl<K: MerkleKey + Clone, V: Clone> IntoIterator for MerkleMap<K, V> {
+impl<K: ToMerkleBytes + Clone, V: Clone> IntoIterator for MerkleMap<K, V> {
     type Item = (K, V);
 
     type IntoIter = IntoIter<K, V>;
@@ -84,7 +84,7 @@ impl<K: MerkleKey + Clone, V: Clone> IntoIterator for MerkleMap<K, V> {
     }
 }
 
-impl<K: MerkleKey + Clone, V: Clone> Iterator for IntoIter<K, V> {
+impl<K: ToMerkleBytes + Clone, V: Clone> Iterator for IntoIter<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -94,7 +94,7 @@ impl<K: MerkleKey + Clone, V: Clone> Iterator for IntoIter<K, V> {
 
 impl<K, V> UnlockedNode<K, V>
 where
-    K: Clone + MerkleKey,
+    K: Clone + ToMerkleBytes,
     V: Clone,
 {
     fn pop_first(&mut self) -> Option<(K, V)> {

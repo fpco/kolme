@@ -9,14 +9,14 @@ impl<K, V> Node<K, V> {
             Node::Empty => (),
             Node::LockedLeaf(leaf) => {
                 // FIXME validate hashes
-                leaf.0.inner.sanity_checks();
+                leaf.inner.sanity_checks();
             }
             Node::UnlockedLeaf(leaf) => {
                 leaf.sanity_checks();
             }
             Node::LockedTree(tree) => {
                 // FIXME validate hashes
-                tree.0.inner.sanity_checks();
+                tree.inner.sanity_checks();
             }
             Node::UnlockedTree(tree) => {
                 tree.sanity_checks();
@@ -73,11 +73,11 @@ impl<K, V> Debug for Node<K, V> {
         match self {
             Node::Empty => write!(f, "Empty"),
             Node::LockedLeaf(leaf) => {
-                write!(f, "LockedLeaf({}, {:?})", leaf.0.hash, leaf.0.inner)
+                write!(f, "LockedLeaf({}, {:?})", leaf.hash, leaf.inner)
             }
             Node::UnlockedLeaf(leaf) => write!(f, "UnlockedLeaf({leaf:?})"),
             Node::LockedTree(tree) => {
-                write!(f, "LockedTree({}, {:?})", tree.0.hash, tree.0.inner)
+                write!(f, "LockedTree({}, {:?})", tree.hash, tree.inner)
             }
             Node::UnlockedTree(tree) => write!(f, "UnlockedTree({tree:?})"),
         }
@@ -248,4 +248,42 @@ fn just_a() {
         assert_eq!(tree.remove(&make_str(i)), None);
         assert_eq!(tree.len(), i);
     }
+}
+
+fn memory_manager_helper(size: u32) {
+    let manager = MerkleManager::new(MerkleMemoryStore::default());
+    let mut m = MerkleMap::new();
+    for i in 0..size {
+        m.insert(i, i * 2);
+    }
+    let hash = manager.save(&mut m).unwrap();
+
+    let m2 = manager.load(hash).unwrap().unwrap();
+
+    assert_eq!(m, m2);
+}
+
+#[test]
+fn memory_manager_0() {
+    memory_manager_helper(0)
+}
+
+#[test]
+fn memory_manager_1() {
+    memory_manager_helper(1)
+}
+
+#[test]
+fn memory_manager_2() {
+    memory_manager_helper(2)
+}
+
+#[test]
+fn memory_manager_10() {
+    memory_manager_helper(10)
+}
+
+#[test]
+fn memory_manager_1000() {
+    memory_manager_helper(1000)
 }

@@ -14,7 +14,7 @@ impl<K, V> TreeContents<K, V> {
     }
 }
 
-impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
+impl<K: ToMerkleBytes + Clone, V: Clone> TreeContents<K, V> {
     pub(crate) fn insert(&mut self, depth: u16, entry: LeafEntry<K, V>) -> Option<(K, V)> {
         let Some(index) = entry.key_bytes.get_index_for_depth(depth) else {
             debug_assert!(depth == 0 || entry.key_bytes.get_index_for_depth(depth - 1).is_some());
@@ -36,7 +36,7 @@ impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
         v
     }
 
-    pub(crate) fn get(&self, depth: u16, key_bytes: MerkleKeyBytes) -> Option<&V> {
+    pub(crate) fn get(&self, depth: u16, key_bytes: MerkleBytes) -> Option<&V> {
         let Some(index) = key_bytes.get_index_for_depth(depth) else {
             debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
             return self.leaf.as_ref().map(|entry| &entry.value);
@@ -49,7 +49,7 @@ impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
     pub(crate) fn remove(
         mut self,
         depth: u16,
-        key_bytes: MerkleKeyBytes,
+        key_bytes: MerkleBytes,
     ) -> (UnlockedNode<K, V>, Option<(K, V)>) {
         let index = key_bytes
             .get_index_for_depth(depth)
@@ -78,5 +78,55 @@ impl<K: MerkleKey + Clone, V: Clone> TreeContents<K, V> {
                 Node::UnlockedTree(tree) => tree.drain_entries_to(entries),
             }
         }
+    }
+}
+
+impl<K, V: ToMerkleBytes> TreeContents<K, V> {
+    pub(crate) fn lock(mut self) -> Locked<TreeContents<K, V>> {
+        let mut buff = WriteBuffer::from(vec![43]);
+        buff.store_usize(self.len);
+        match &self.leaf {
+            Some(leaf) => {
+                buff.push(1);
+                leaf.store(&mut buff);
+            }
+            None => buff.push(0),
+        }
+        for branch in &mut self.branches {
+            let (hash, _) = branch.lock();
+            buff.extend_from_slice(hash.as_array());
+        }
+        Locked::new(buff.finish(), self)
+    }
+}
+
+impl<K: FromMerkleBytes, V: FromMerkleBytes> TreeContents<K, V> {
+    pub(crate) fn load<Store: MerkleRead>(
+        payload: Arc<[u8]>,
+        manager: &MerkleManager<Store>,
+    ) -> Result<Locked<TreeContents<K, V>>, LoadMerkleMapError<Store::Error>> {
+        let mut buff = ReadBuffer::new(&payload);
+        assert_eq!(buff.pop_byte()?, 43);
+        let len = buff.load_usize()?;
+        let leaf = match buff.pop_byte()? {
+            0 => None,
+            1 => Some(LeafEntry::load::<Store>(&mut buff)?),
+            byte => return Err(LoadMerkleMapError::InvalidTreeStart { byte }),
+        };
+        let mut branches = std::array::from_fn(|_| Node::Empty);
+        for branch in &mut branches {
+            let hash = buff.load_hash()?;
+            *branch = manager
+                .load(hash)?
+                .ok_or(LoadMerkleMapError::HashNotFound { hash })?
+                .0;
+        }
+        buff.finish()?;
+        let tree = TreeContents {
+            len,
+            leaf,
+            branches,
+        };
+        Ok(Locked::new(payload, tree))
     }
 }

@@ -1,6 +1,6 @@
 use crate::*;
 
-impl<K: MerkleKey + Clone, V: Clone> From<UnlockedNode<K, V>> for Node<K, V> {
+impl<K: ToMerkleBytes + Clone, V: Clone> From<UnlockedNode<K, V>> for Node<K, V> {
     fn from(node: UnlockedNode<K, V>) -> Self {
         match node {
             UnlockedNode::Leaf(leaf) => {
@@ -23,7 +23,7 @@ impl<K: MerkleKey + Clone, V: Clone> From<UnlockedNode<K, V>> for Node<K, V> {
         }
     }
 }
-impl<K: MerkleKey + Clone, V: Clone> UnlockedNode<K, V> {
+impl<K: ToMerkleBytes + Clone, V: Clone> UnlockedNode<K, V> {
     pub(crate) fn insert(
         self,
         depth: u16,
@@ -41,7 +41,7 @@ impl<K: MerkleKey + Clone, V: Clone> UnlockedNode<K, V> {
     pub(crate) fn remove(
         self,
         depth: u16,
-        key_bytes: MerkleKeyBytes,
+        key_bytes: MerkleBytes,
     ) -> (UnlockedNode<K, V>, Option<(K, V)>) {
         match self {
             UnlockedNode::Leaf(mut leaf) => {

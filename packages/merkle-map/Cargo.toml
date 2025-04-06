@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dashmap = "6.1.0"
 hex = { workspace = true }
 k256 = { workspace = true }
 shared = { workspace = true, features = ["realcryptography"] }
+thiserror = "2.0.12"
 tinyvec = { version = "1.9.0", features = ["alloc"] }
 
 [dev-dependencies]

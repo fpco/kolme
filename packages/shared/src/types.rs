@@ -89,7 +89,7 @@ mod cw_impls {
 }
 
 /// A binary value representing a SHA256 hash.
-#[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Sha256Hash([u8; 32]);
 
 #[derive(snafu::Snafu, Debug)]
@@ -126,6 +126,13 @@ impl Sha256Hash {
 impl Display for Sha256Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", hex::encode(self.0.as_slice()))
+    }
+}
+
+#[cfg(feature = "realcryptography")]
+impl std::fmt::Debug for Sha256Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 }
 

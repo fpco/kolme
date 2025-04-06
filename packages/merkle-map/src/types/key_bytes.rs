@@ -1,9 +1,13 @@
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct MerkleKeyBytes(tinyvec::TinyVec<[u8; 32]>);
+pub struct MerkleBytes(tinyvec::TinyVec<[u8; 32]>);
 
-impl MerkleKeyBytes {
+impl MerkleBytes {
     pub fn from_slice(slice: &[u8]) -> Self {
-        MerkleKeyBytes(slice.into())
+        MerkleBytes(slice.into())
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
     }
 
     pub(crate) fn get_index_for_depth(&self, depth: u16) -> Option<u8> {
@@ -32,8 +36,8 @@ mod tests {
     }
 
     fn ordering_test(xorig: Vec<u8>, yorig: Vec<u8>) -> bool {
-        let x = MerkleKeyBytes::from_slice(&xorig);
-        let y = MerkleKeyBytes::from_slice(&yorig);
+        let x = MerkleBytes::from_slice(&xorig);
+        let y = MerkleBytes::from_slice(&yorig);
         assert_eq!(xorig.cmp(&yorig), x.cmp(&y));
 
         let expected = x.cmp(&y);
