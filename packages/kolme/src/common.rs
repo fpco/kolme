@@ -1,16 +1,8 @@
 /// Common helper functions and utilities.
-use std::{borrow::Cow, fmt::Display};
+use std::fmt::Display;
 
 use crate::*;
 
-use k256::{
-    elliptic_curve::generic_array::GenericArray,
-    sha2::{digest::OutputSizeUser, Digest, Sha256},
-};
-use sqlx::{
-    sqlite::{SqliteArgumentValue, SqliteValueRef},
-    Decode, Encode, Sqlite,
-};
 use tracing::Level;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -205,7 +197,7 @@ mod tests {
         let serialized = serde_json::to_string(&hash1).unwrap();
         let hash2 = serde_json::from_str(&serialized).unwrap();
         assert_eq!(hash1, hash2);
-        assert_eq!(Sha256Hash::from_hash(&hash1.0).unwrap(), hash1);
+        assert_eq!(Sha256Hash::from_array(*hash1.as_array()), hash1);
         Sha256Hash::from_hash(b"invalid input").unwrap_err();
     }
 
