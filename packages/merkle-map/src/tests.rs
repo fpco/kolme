@@ -149,13 +149,18 @@ fn many_removes() {
 }
 
 #[test]
-fn pop_first() {
-    let mut tree = MerkleTree::<String, u32>::new();
-    tree.insert("def".to_owned(), 42);
-    tree.insert("abc".to_owned(), 43);
-    assert_eq!(tree.pop_first(), Some(("abc".to_owned(), 43)));
-    assert_eq!(tree.pop_first(), Some(("def".to_owned(), 42)));
-    assert_eq!(tree.pop_first(), None);
+fn iterate_small() {
+    const MAX: u32 = 17;
+    let mut tree = MerkleTree::<u32, u32>::new();
+    for i in 0..MAX {
+        tree.insert(i, i * 2);
+    }
+
+    let expected = (0..MAX).map(|x| (x, x * 2)).collect::<Vec<_>>();
+    let actual = tree.iter().map(|(x, y)| (*x, *y)).collect::<Vec<_>>();
+    assert_eq!(expected, actual);
+    let actual = tree.into_iter().collect::<Vec<_>>();
+    assert_eq!(expected, actual);
 }
 
 #[test]

@@ -64,28 +64,7 @@ where
         v
     }
 
-    pub fn pop_first(&mut self) -> Option<(K, V)> {
-        self.sanity_checks();
-        let res = self
-            .find_first()
-            .cloned() // FIXME optimize this away
-            .and_then(|first| self.remove(&first));
-        self.sanity_checks();
-        res
-    }
-
-    pub fn find_first(&self) -> Option<&K> {
-        self.sanity_checks();
-        match &self.0 {
-            Node::Empty => None,
-            Node::LockedLeaf(leaf) => leaf.0.inner.find_first(),
-            Node::UnlockedLeaf(leaf) => leaf.find_first(),
-            Node::LockedTree(tree) => tree.0.inner.find_first(),
-            Node::UnlockedTree(tree) => tree.find_first(),
-        }
-    }
-
-    pub fn iter(&self) -> Iter<K, V> {
+    pub fn iter(&self) -> crate::impls::iter::Iter<K, V> {
         self.sanity_checks();
         self.into_iter()
     }

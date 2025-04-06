@@ -9,10 +9,6 @@ impl<K, V> TreeContents<K, V> {
         }
     }
 
-    pub(crate) fn find_first(&self) -> Option<&K> {
-        todo!()
-    }
-
     pub(crate) fn len(&self) -> usize {
         self.len
     }

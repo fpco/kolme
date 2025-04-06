@@ -53,13 +53,3 @@ pub(crate) struct TreeContents<K, V> {
     pub(crate) leaf: Option<LeafEntry<K, V>>,
     pub(crate) branches: [Node<K, V>; 16],
 }
-
-pub struct Iter<'a, K, V> {
-    pub(crate) tree: &'a MerkleTree<K, V>,
-    pub(crate) cursor: Cursor,
-}
-
-#[derive(Default)]
-pub(crate) struct Cursor(pub(crate) Vec<u8>);
-
-pub struct IntoIter<K, V>(pub(crate) MerkleTree<K, V>);

@@ -85,10 +85,6 @@ impl<K, V> LeafContents<K, V> {
         }
     }
 
-    pub(crate) fn find_first(&self) -> Option<&K> {
-        self.values.first().map(|x| &x.key)
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
