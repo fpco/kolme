@@ -101,6 +101,7 @@ impl State {
         Ok(changes)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn place_bet(
         &mut self,
         bettor: AccountId,

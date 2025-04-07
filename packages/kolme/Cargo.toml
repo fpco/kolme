@@ -12,16 +12,14 @@ axum = { version = "0.8.3", features = ["ws"] }
 clap = { version = "4.5.20", features = ["derive", "env", "unicode"] }
 cosmos = { git = "https://github.com/fpco/cosmos-rs", rev = "6f6fea0f7c04e4b64f5c091b006e4736dba1b10e", features = ["config"] }
 cosmwasm-std = "2.2.2"
-hex = "0.4.3"
 jiff = { version = "0.2.3", features = ["serde"] }
-k256 = { version = "0.13.4", features = ["serde", "ecdsa", "sha256"] }
 libp2p = { version = "0.53", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
 rand = "0.8"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }
 rust_decimal = { version = "1.37.1", features = ["macros"] }
 serde = { version = "1.0.218", features = ["derive", "rc"] }
 serde_json = "1.0.140"
-shared = { path = "../shared", features = ["cosmwasm", "realcryptography", "sqlx"] }
+shared = { workspace = true, features = ["cosmwasm", "realcryptography", "sqlx"] }
 snafu = "0.8.5"
 sqlx = { version = "0.8.3", features = ["migrate", "runtime-tokio", "sqlite"] }
 strum = { version = "0.27.1", features = ["derive"] }
