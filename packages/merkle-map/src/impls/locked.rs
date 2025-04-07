@@ -22,9 +22,7 @@ impl<T: Clone> Locked<T> {
 }
 
 impl<T> Locked<T> {
-    pub(crate) fn new(buff: impl Into<Arc<[u8]>>, inner: T) -> Self {
-        let payload = buff.into();
-        let hash = Sha256Hash::hash(&payload);
+    pub(crate) fn new(hash: Sha256Hash, payload: Arc<[u8]>, inner: T) -> Self {
         Locked {
             hash,
             payload,

@@ -1,6 +1,6 @@
 mod key_bytes;
 
-pub use key_bytes::MerkleBytes;
+pub use key_bytes::MerkleKey;
 
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ pub struct MerkleMap<K, V>(pub(crate) Node<K, V>);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct LeafEntry<K, V> {
-    pub(crate) key_bytes: MerkleBytes,
+    pub(crate) key_bytes: MerkleKey,
     pub(crate) key: K,
     pub(crate) value: V,
 }

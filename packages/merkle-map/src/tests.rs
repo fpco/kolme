@@ -258,7 +258,10 @@ fn memory_manager_helper(size: u32) {
     }
     let hash = manager.save(&mut m).unwrap();
 
-    let m2 = manager.load(hash).unwrap().unwrap();
+    let m2 = manager
+        .load(hash)
+        .expect("Manager load failed")
+        .expect("Manager load returned None");
 
     assert_eq!(m, m2);
 }

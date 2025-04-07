@@ -24,7 +24,7 @@ impl<K, V> Node<K, V> {
     }
 }
 
-impl<K: ToMerkleBytes + Clone, V: Clone> Node<K, V> {
+impl<K: Clone, V: Clone> Node<K, V> {
     pub(crate) fn unlock(self) -> UnlockedNode<K, V> {
         match self {
             Node::Empty => UnlockedNode::Leaf(LeafContents::default()),
@@ -35,7 +35,7 @@ impl<K: ToMerkleBytes + Clone, V: Clone> Node<K, V> {
         }
     }
 
-    pub(crate) fn get(&self, depth: u16, key_bytes: MerkleBytes) -> Option<&V> {
+    pub(crate) fn get(&self, depth: u16, key_bytes: MerkleKey) -> Option<&V> {
         match self {
             Node::Empty => None,
             Node::LockedLeaf(leaf) => leaf.inner.get(key_bytes),
@@ -46,55 +46,65 @@ impl<K: ToMerkleBytes + Clone, V: Clone> Node<K, V> {
     }
 }
 
-impl<K, V: ToMerkleBytes> Node<K, V> {
-    pub(crate) fn lock(&mut self) -> (Sha256Hash, Arc<[u8]>) {
+impl<K, V: MerkleSerialize> MerkleSerializeComplete for Node<K, V> {
+    fn serialize_complete<Store: MerkleStore>(
+        &mut self,
+        manager: &MerkleManager<Store>,
+    ) -> Result<Sha256Hash, MerkleSerialError> {
         match std::mem::take(self) {
-            Node::Empty => empty(),
+            Node::Empty => {
+                let (hash, payload) = empty();
+                manager.save_merkle_by_hash(hash, payload)?;
+                Ok(hash)
+            }
             Node::LockedLeaf(leaf) => {
-                let ret = (leaf.hash, leaf.payload.clone());
+                manager.save_merkle_by_hash(leaf.hash, leaf.payload.clone())?;
+                let hash = leaf.hash;
                 *self = Node::LockedLeaf(leaf);
-                ret
+                Ok(hash)
             }
             Node::UnlockedLeaf(leaf) => {
-                let leaf = leaf.lock();
-                let ret = (leaf.hash, leaf.payload.clone());
+                let leaf = leaf.lock(manager)?;
+                let hash = leaf.hash;
                 *self = Node::LockedLeaf(leaf);
-                ret
+                Ok(hash)
             }
             Node::LockedTree(tree) => {
-                let ret = (tree.hash, tree.payload.clone());
+                manager.save_merkle_by_hash(tree.hash, tree.payload.clone())?;
+                let hash = tree.hash;
                 *self = Node::LockedTree(tree);
-                ret
+                Ok(hash)
             }
             Node::UnlockedTree(tree) => {
-                let tree = tree.lock();
-                let ret = (tree.hash, tree.payload.clone());
+                let tree = tree.lock(manager)?;
+                let hash = tree.hash;
                 *self = Node::LockedTree(tree);
-                ret
+                Ok(hash)
             }
         }
     }
 }
 
-impl<K: FromMerkleBytes, V: FromMerkleBytes> Node<K, V> {
-    pub(crate) fn load<Store: MerkleRead>(
+impl<K: FromMerkleKey, V: MerkleDeserialize> Node<K, V> {
+    pub(crate) fn load<Store: MerkleStore>(
+        hash: Sha256Hash,
         payload: Arc<[u8]>,
         manager: &MerkleManager<Store>,
-    ) -> Result<Node<K, V>, LoadMerkleMapError<Store::Error>> {
+    ) -> Result<Node<K, V>, MerkleSerialError> {
         if payload.len() == 0 {
-            return Err(LoadMerkleMapError::InsufficientInput);
+            return Err(MerkleSerialError::InsufficientInput);
         }
-        match payload[0] {
+        let mut deserializer = manager.new_deserializer(&payload);
+
+        match deserializer.pop_byte()? {
             41 => {
-                if payload.len() != 1 {
-                    Err(LoadMerkleMapError::TooMuchInput)
-                } else {
-                    Ok(Node::Empty)
-                }
+                deserializer.finish()?;
+                Ok(Node::Empty)
             }
-            42 => LeafContents::load::<Store>(payload).map(Node::LockedLeaf),
-            43 => TreeContents::load(payload, manager).map(Node::LockedTree),
-            byte => Err(LoadMerkleMapError::UnexpectedMagicByte { byte }),
+            42 => LeafContents::load(deserializer, hash, payload.clone()).map(Node::LockedLeaf),
+            43 => TreeContents::load(deserializer, hash, payload.clone(), manager)
+                .map(Node::LockedTree),
+            byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }
 }

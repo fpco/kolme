@@ -1,6 +1,8 @@
+use shared::types::Sha256Hash;
+
 use crate::*;
 
-impl<K: ToMerkleBytes + Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
+impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
     fn from(tree: TreeContents<K, V>) -> Self {
         assert!(tree.len() <= 16);
         let mut leaf = LeafContents { values: vec![] };
@@ -20,7 +22,7 @@ impl<K, V> LeafContents<K, V> {
         mut entry: LeafEntry<K, V>,
     ) -> (UnlockedNode<K, V>, Option<(K, V)>)
     where
-        K: ToMerkleBytes + Clone,
+        K: Clone,
         V: Clone,
     {
         // Try to do a replace
@@ -46,14 +48,9 @@ impl<K, V> LeafContents<K, V> {
         }
     }
 
-    pub(crate) fn get<Q>(&self, key_bytes: MerkleBytes) -> Option<&V>
-    where
-        K: std::borrow::Borrow<Q>,
-        Q: ToMerkleBytes + ?Sized,
-    {
+    pub(crate) fn get(&self, key_bytes: MerkleKey) -> Option<&V> {
         self.values.iter().find_map(|entry| {
             if entry.key_bytes == key_bytes {
-                // FIXME check equality of key too? Or not necessary?
                 Some(&entry.value)
             } else {
                 None
@@ -61,11 +58,7 @@ impl<K, V> LeafContents<K, V> {
         })
     }
 
-    pub(crate) fn remove<Q>(&mut self, key_bytes: MerkleBytes) -> Option<(K, V)>
-    where
-        K: Borrow<Q>,
-        Q: ToMerkleBytes + ?Sized,
-    {
+    pub(crate) fn remove(&mut self, key_bytes: MerkleKey) -> Option<(K, V)> {
         match self.values.iter().enumerate().find_map(|(idx, entry)| {
             if entry.key_bytes == key_bytes {
                 Some(idx)
@@ -104,30 +97,37 @@ impl<K, V> Default for LeafContents<K, V> {
     }
 }
 
-impl<K, V: ToMerkleBytes> LeafContents<K, V> {
-    pub(crate) fn lock(self) -> Locked<LeafContents<K, V>> {
-        let mut buff = WriteBuffer::from(vec![42]);
-        buff.store_usize(self.values.len());
-        for entry in &self.values {
-            entry.store(&mut buff);
+impl<K, V: MerkleSerialize> LeafContents<K, V> {
+    pub(crate) fn lock<Store: MerkleStore>(
+        mut self,
+        manager: &MerkleManager<Store>,
+    ) -> Result<Locked<LeafContents<K, V>>, MerkleSerialError> {
+        let mut serializer = manager.new_serializer();
+        serializer.store_byte(42);
+        serializer.store_usize(self.values.len());
+        for entry in &mut self.values {
+            entry.serialize(&mut serializer)?;
         }
-        Locked::new(buff.finish(), self)
+        let (hash, payload) = serializer.finish()?;
+
+        Ok(Locked::new(hash, payload, self))
     }
 }
 
-impl<K: FromMerkleBytes, V: FromMerkleBytes> LeafContents<K, V> {
-    pub(crate) fn load<Store: MerkleRead>(
+impl<K: FromMerkleKey, V: MerkleDeserialize> LeafContents<K, V> {
+    pub(crate) fn load<D: MerkleDeserializer>(
+        mut deserializer: D,
+        hash: Sha256Hash,
         payload: Arc<[u8]>,
-    ) -> Result<Locked<LeafContents<K, V>>, LoadMerkleMapError<Store::Error>> {
-        let mut buff = ReadBuffer::new(&payload);
-        assert_eq!(buff.pop_byte()?, 42);
-        let len = buff.load_usize()?;
+    ) -> Result<Locked<LeafContents<K, V>>, MerkleSerialError> {
+        // The 42 magic byte is handled in the calling function.
+        let len = deserializer.load_usize()?;
         let mut values = Vec::with_capacity(len);
         for _ in 0..len {
-            values.push(LeafEntry::load::<Store>(&mut buff)?);
+            values.push(LeafEntry::deserialize(&mut deserializer)?);
         }
-        buff.finish()?;
+        deserializer.finish()?;
 
-        Ok(Locked::new(payload, LeafContents { values }))
+        Ok(Locked::new(hash, payload, LeafContents { values }))
     }
 }

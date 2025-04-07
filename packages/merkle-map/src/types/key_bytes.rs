@@ -1,9 +1,10 @@
+/// A key used in a [MerkleMap].
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct MerkleBytes(tinyvec::TinyVec<[u8; 32]>);
+pub struct MerkleKey(tinyvec::TinyVec<[u8; 32]>);
 
-impl MerkleBytes {
+impl MerkleKey {
     pub fn from_slice(slice: &[u8]) -> Self {
-        MerkleBytes(slice.into())
+        MerkleKey(slice.into())
     }
 
     pub fn as_slice(&self) -> &[u8] {
@@ -36,8 +37,8 @@ mod tests {
     }
 
     fn ordering_test(xorig: Vec<u8>, yorig: Vec<u8>) -> bool {
-        let x = MerkleBytes::from_slice(&xorig);
-        let y = MerkleBytes::from_slice(&yorig);
+        let x = MerkleKey::from_slice(&xorig);
+        let y = MerkleKey::from_slice(&yorig);
         assert_eq!(xorig.cmp(&yorig), x.cmp(&y));
 
         let expected = x.cmp(&y);

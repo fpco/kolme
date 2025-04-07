@@ -6,16 +6,59 @@ use shared::types::Sha256Hash;
 use crate::*;
 
 pub struct MerkleManager<Store> {
-    store: Store,
-    cache: DashMap<Sha256Hash, Arc<[u8]>>,
+    pub(crate) store: Arc<Store>,
+    pub(crate) cache: Arc<DashMap<Sha256Hash, Arc<[u8]>>>,
+}
+
+impl<Store> Clone for MerkleManager<Store> {
+    fn clone(&self) -> Self {
+        MerkleManager {
+            store: self.store.clone(),
+            cache: self.cache.clone(),
+        }
+    }
 }
 
 impl<Store> MerkleManager<Store> {
+    /// Create a new manager based on the given storage engine.
     pub fn new(store: Store) -> Self {
         MerkleManager {
-            store,
-            cache: DashMap::new(),
+            store: Arc::new(store),
+            cache: Arc::new(DashMap::new()),
         }
+    }
+
+    /// Create a new serializer that delegates storing blobs to this manager.
+    pub fn new_serializer(&self) -> MerkleSerializerImpl<Store> {
+        MerkleSerializerImpl {
+            buff: Vec::new(),
+            manager: self.clone(),
+        }
+    }
+
+    /// Create a new deserializer that loads data from this manager.
+    pub fn new_deserializer<'a>(&self, buff: &'a [u8]) -> MerkleDeserializerImpl<'a, Store> {
+        MerkleDeserializerImpl {
+            buff,
+            pos: 0,
+            manager: self.clone(),
+        }
+    }
+}
+
+impl<Store: MerkleStore> MerkleManager<Store> {
+    pub(crate) fn save_merkle_by_hash(
+        &self,
+        hash: Sha256Hash,
+        payload: Arc<[u8]>,
+    ) -> Result<(), MerkleSerialError> {
+        if !self.store.contains_hash(hash)? {
+            self.store.save_merkle_by_hash(hash, &payload)?;
+        }
+        if !self.cache.contains_key(&hash) {
+            self.cache.insert(hash, payload);
+        }
+        Ok(())
     }
 }
 
@@ -28,81 +71,20 @@ pub(crate) fn empty() -> (Sha256Hash, Arc<[u8]>) {
     EMPTY.clone()
 }
 
-impl<Store: MerkleWrite> MerkleManager<Store> {
-    pub fn save<K, V: ToMerkleBytes>(
+impl<Store: MerkleStore> MerkleManager<Store> {
+    pub fn save<T: MerkleSerializeComplete>(
         &self,
-        map: &mut MerkleMap<K, V>,
-    ) -> Result<Sha256Hash, Store::Error> {
-        let (hash, payload) = map.lock();
-        self.store_recursive(&map.0)?;
-        self.store.save_merkle_by_hash(hash, &payload)?;
-        self.cache.insert(hash, payload);
-        Ok(hash)
-    }
-
-    fn store_recursive<K, V: ToMerkleBytes>(&self, node: &Node<K, V>) -> Result<(), Store::Error> {
-        match node {
-            Node::Empty => {
-                let (hash, payload) = empty();
-                self.store_if_missing(hash, &payload)?;
-            }
-            Node::LockedLeaf(leaf) => {
-                self.store_if_missing(leaf.hash, &leaf.payload)?;
-            }
-            Node::UnlockedLeaf(_) => unreachable!(),
-            Node::LockedTree(tree) => {
-                if self.store_if_missing(tree.hash, &tree.payload)? {
-                    for branch in &tree.inner.branches {
-                        self.store_recursive(branch)?;
-                    }
-                }
-            }
-            Node::UnlockedTree(_) => unreachable!(),
-        }
-        Ok(())
-    }
-
-    /// Returns true if it was missing, false if it was already there.
-    fn store_if_missing(&self, hash: Sha256Hash, payload: &[u8]) -> Result<bool, Store::Error> {
-        if self.store.contains_hash(hash)? {
-            Ok(false)
-        } else {
-            self.store.save_merkle_by_hash(hash, payload)?;
-            Ok(true)
-        }
+        x: &mut T,
+    ) -> Result<Sha256Hash, MerkleSerialError> {
+        x.serialize_complete(self)
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum LoadMerkleMapError<StoreError> {
-    #[error(transparent)]
-    StoreError {
-        #[from]
-        source: StoreError,
-    },
-    #[error("Insufficient input when parsing buffer")]
-    InsufficientInput,
-    #[error("A usize value would be larger than the machine representation")]
-    UsizeOverflow,
-    #[error(
-        "Unexpected magic byte to distinguish Tree from Leaf, expected 0 or 1, but got {byte}"
-    )]
-    UnexpectedMagicByte { byte: u8 },
-    #[error("Invalid byte at start of tree, expected 0 or 1, but got {byte}")]
-    InvalidTreeStart { byte: u8 },
-    #[error("Leftover input was unconsumed")]
-    TooMuchInput,
-    #[error("Serialized content was invalid")]
-    InvalidSerializedContent,
-    #[error("Hash not found in store: {hash}")]
-    HashNotFound { hash: shared::types::Sha256Hash },
-}
-
-impl<Store: MerkleRead> MerkleManager<Store> {
-    pub fn load<K: FromMerkleBytes, V: FromMerkleBytes>(
+impl<Store: MerkleStore> MerkleManager<Store> {
+    pub fn load<K: FromMerkleKey, V: MerkleDeserialize>(
         &self,
         hash: Sha256Hash,
-    ) -> Result<Option<MerkleMap<K, V>>, LoadMerkleMapError<Store::Error>> {
+    ) -> Result<Option<MerkleMap<K, V>>, MerkleSerialError> {
         let payload = match self.cache.get(&hash) {
             Some(payload) => Some(payload.value().clone()),
             None => {
@@ -116,7 +98,7 @@ impl<Store: MerkleRead> MerkleManager<Store> {
         match payload {
             None => Ok(None),
             Some(payload) => {
-                let node = Node::load(payload, self)?;
+                let node = Node::load(hash, payload, self)?;
                 Ok(Some(MerkleMap(node)))
             }
         }
