@@ -7,14 +7,14 @@ use crate::*;
 pub struct MerkleMemoryStore(Arc<DashMap<Sha256Hash, Arc<[u8]>>>);
 
 impl MerkleStore for MerkleMemoryStore {
-    fn load_merkle_by_hash(
+    async fn load_merkle_by_hash(
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<Arc<[u8]>>, MerkleSerialError> {
         Ok(self.0.get(&hash).map(|x| x.value().clone()))
     }
 
-    fn save_merkle_by_hash(
+    async fn save_merkle_by_hash(
         &self,
         hash: Sha256Hash,
         payload: &[u8],
@@ -27,7 +27,7 @@ impl MerkleStore for MerkleMemoryStore {
         Ok(())
     }
 
-    fn contains_hash(&self, hash: Sha256Hash) -> Result<bool, MerkleSerialError> {
+    async fn contains_hash(&self, hash: Sha256Hash) -> Result<bool, MerkleSerialError> {
         Ok(self.0.contains_key(&hash))
     }
 }

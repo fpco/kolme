@@ -50,10 +50,10 @@ impl<Store: MerkleStore> MerkleSerializer for MerkleSerializerImpl<Store> {
         self.buff.extend_from_slice(bytes);
     }
 
-    fn finish(self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError> {
+    async fn finish(self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError> {
         let buff = Arc::<[u8]>::from(self.buff);
         let hash = Sha256Hash::hash(&buff);
-        self.manager.save_merkle_by_hash(hash, buff.clone())?;
+        self.manager.save_merkle_by_hash(hash, buff.clone()).await?;
         Ok((hash, buff))
     }
 
@@ -128,12 +128,13 @@ mod tests {
         }
     }
 
-    fn test_store_usize_inner(x: usize) -> bool {
+    #[tokio::main]
+    async fn test_store_usize_inner(x: usize) -> bool {
         let store = MerkleMemoryStore::default();
         let manager = MerkleManager::new(store);
         let mut serializer = manager.new_serializer();
         serializer.store_usize(x);
-        let (_hash, buff) = serializer.finish().unwrap();
+        let (_hash, buff) = serializer.finish().await.unwrap();
         let mut deserializer = manager.new_deserializer(&buff);
         let y = deserializer.load_usize().unwrap();
         assert_eq!(x, y);

@@ -174,6 +174,18 @@ impl Display for AccountId {
     }
 }
 
+impl ToMerkleKey for AccountId {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.0.to_merkle_key()
+    }
+}
+
+impl FromMerkleKey for AccountId {
+    fn from_merkle_key(bytes: &[u8]) -> std::result::Result<Self, MerkleSerialError> {
+        u64::from_merkle_key(bytes).map(AccountId)
+    }
+}
+
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
 )]

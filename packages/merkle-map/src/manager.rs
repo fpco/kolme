@@ -47,13 +47,13 @@ impl<Store> MerkleManager<Store> {
 }
 
 impl<Store: MerkleStore> MerkleManager<Store> {
-    pub(crate) fn save_merkle_by_hash(
+    pub(crate) async fn save_merkle_by_hash(
         &self,
         hash: Sha256Hash,
         payload: Arc<[u8]>,
     ) -> Result<(), MerkleSerialError> {
-        if !self.store.contains_hash(hash)? {
-            self.store.save_merkle_by_hash(hash, &payload)?;
+        if !self.store.contains_hash(hash).await? {
+            self.store.save_merkle_by_hash(hash, &payload).await?;
         }
         if !self.cache.contains_key(&hash) {
             self.cache.insert(hash, payload);
@@ -72,23 +72,23 @@ pub(crate) fn empty() -> (Sha256Hash, Arc<[u8]>) {
 }
 
 impl<Store: MerkleStore> MerkleManager<Store> {
-    pub fn save<T: MerkleSerializeComplete>(
+    pub async fn save<T: MerkleSerializeComplete>(
         &self,
         x: &mut T,
     ) -> Result<Sha256Hash, MerkleSerialError> {
-        x.serialize_complete(self)
+        x.serialize_complete(self).await
     }
 }
 
 impl<Store: MerkleStore> MerkleManager<Store> {
-    pub fn load<K: FromMerkleKey, V: MerkleDeserialize>(
+    pub async fn load<K: FromMerkleKey, V: MerkleDeserialize>(
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<MerkleMap<K, V>>, MerkleSerialError> {
         let payload = match self.cache.get(&hash) {
             Some(payload) => Some(payload.value().clone()),
             None => {
-                let payload = self.store.load_merkle_by_hash(hash)?;
+                let payload = self.store.load_merkle_by_hash(hash).await?;
                 if let Some(payload) = payload.clone() {
                     self.cache.insert(hash, payload);
                 }
@@ -98,7 +98,7 @@ impl<Store: MerkleStore> MerkleManager<Store> {
         match payload {
             None => Ok(None),
             Some(payload) => {
-                let node = Node::load(hash, payload, self)?;
+                let node = Node::load(hash, payload, self).await?;
                 Ok(Some(MerkleMap(node)))
             }
         }

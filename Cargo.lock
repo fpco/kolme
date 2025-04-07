@@ -3425,9 +3425,12 @@ dependencies = [
  "hex",
  "k256",
  "quickcheck",
+ "serde",
+ "serde_json",
  "shared",
  "thiserror 2.0.12",
  "tinyvec",
+ "tokio",
 ]
 
 [[package]]

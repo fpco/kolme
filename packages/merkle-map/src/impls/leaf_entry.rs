@@ -1,12 +1,12 @@
 use crate::*;
 
 impl<K, V: MerkleSerialize> MerkleSerialize for LeafEntry<K, V> {
-    fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError> {
         serializer.store_slice(self.key_bytes.as_slice());
-        self.value.serialize(serializer)?;
+        self.value.serialize(serializer).await?;
         Ok(())
     }
 }

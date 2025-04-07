@@ -38,7 +38,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         v
     }
 
-    pub(crate) fn get(&self, depth: u16, key_bytes: MerkleKey) -> Option<&V> {
+    pub(crate) fn get(&self, depth: u16, key_bytes: &MerkleKey) -> Option<&V> {
         let Some(index) = key_bytes.get_index_for_depth(depth) else {
             debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
             return self.leaf.as_ref().map(|entry| &entry.value);
@@ -46,6 +46,16 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
         self.branches[index].get(depth + 1, key_bytes)
+    }
+
+    pub(crate) fn get_mut(&mut self, depth: u16, key_bytes: &MerkleKey) -> Option<&mut V> {
+        let Some(index) = key_bytes.get_index_for_depth(depth) else {
+            debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
+            return self.leaf.as_mut().map(|entry| &mut entry.value);
+        };
+        debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
+        let index = usize::from(index);
+        self.branches[index].get_mut(depth + 1, key_bytes)
     }
 
     pub(crate) fn remove(
@@ -84,7 +94,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
 }
 
 impl<K, V: MerkleSerialize> TreeContents<K, V> {
-    pub(crate) fn lock<Store: MerkleStore>(
+    pub(crate) async fn lock<Store: MerkleStore>(
         mut self,
         manager: &MerkleManager<Store>,
     ) -> Result<Locked<TreeContents<K, V>>, MerkleSerialError> {
@@ -94,22 +104,22 @@ impl<K, V: MerkleSerialize> TreeContents<K, V> {
         match &mut self.leaf {
             Some(leaf) => {
                 serializer.store_byte(1);
-                leaf.serialize(&mut serializer)?;
+                leaf.serialize(&mut serializer).await?;
             }
             None => serializer.store_byte(0),
         }
         for branch in &mut self.branches {
             serializer.new_serializer();
-            let mut hash = branch.serialize_complete(manager)?;
-            hash.serialize(&mut serializer)?;
+            let mut hash = branch.serialize_complete(manager).await?;
+            hash.serialize(&mut serializer).await?;
         }
-        let (hash, payload) = serializer.finish()?;
+        let (hash, payload) = serializer.finish().await?;
         Ok(Locked::new(hash, payload, self))
     }
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
-    pub(crate) fn load<Store: MerkleStore, D: MerkleDeserializer>(
+    pub(crate) async fn load<Store: MerkleStore, D: MerkleDeserializer>(
         mut deserializer: D,
         hash: Sha256Hash,
         payload: Arc<[u8]>,
@@ -126,7 +136,8 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
         for branch in &mut branches {
             let hash = Sha256Hash::deserialize(&mut deserializer)?;
             *branch = manager
-                .load(hash)?
+                .load(hash)
+                .await?
                 .ok_or(MerkleSerialError::HashNotFound { hash })?
                 .0;
         }

@@ -12,7 +12,7 @@ pub enum CoreStateError {
 }
 
 /// Raw framework state that can be serialized to the database.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct FrameworkState {
     pub(super) processor: PublicKey,
     pub(super) listeners: BTreeSet<PublicKey>,
@@ -20,8 +20,31 @@ pub struct FrameworkState {
     pub(super) approvers: BTreeSet<PublicKey>,
     pub(super) needed_approvers: usize,
     pub(super) chains: BTreeMap<ExternalChain, ChainConfig>,
-    #[serde(default)]
     pub(super) balances: Balances,
+}
+
+impl MerkleSerialize for FrameworkState {
+    fn serialize<S: MerkleSerializer>(
+        &mut self,
+        serializer: &mut S,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        let FrameworkState {
+            processor,
+            listeners,
+            needed_listeners,
+            approvers,
+            needed_approvers,
+            chains,
+            balances,
+        } = self;
+        serializer.store_json(processor)?;
+        serializer.store_json(listeners)?;
+        serializer.store_json(needed_listeners)?;
+        serializer.store_json(approvers)?;
+        serializer.store_json(needed_approvers)?;
+        serializer.store_json(chains)?;
+        todo!()
+    }
 }
 
 impl FrameworkState {

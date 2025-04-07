@@ -20,6 +20,12 @@ CREATE TABLE hashes(
     content TEXT NOT NULL
 );
 
+-- Merkle hash storage
+CREATE TABLE merkle_hashes(
+    hash BLOB PRIMARY KEY NOT NULL,
+    payload BLOB NOT NULL
+);
+
 CREATE TABLE blocks(
     height INTEGER PRIMARY KEY NOT NULL,
     blockhash BLOB NOT NULL UNIQUE,

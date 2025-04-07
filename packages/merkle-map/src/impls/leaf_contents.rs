@@ -48,10 +48,20 @@ impl<K, V> LeafContents<K, V> {
         }
     }
 
-    pub(crate) fn get(&self, key_bytes: MerkleKey) -> Option<&V> {
+    pub(crate) fn get(&self, key_bytes: &MerkleKey) -> Option<&V> {
         self.values.iter().find_map(|entry| {
-            if entry.key_bytes == key_bytes {
+            if &entry.key_bytes == key_bytes {
                 Some(&entry.value)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub(crate) fn get_mut(&mut self, key_bytes: &MerkleKey) -> Option<&mut V> {
+        self.values.iter_mut().find_map(|entry| {
+            if &entry.key_bytes == key_bytes {
+                Some(&mut entry.value)
             } else {
                 None
             }
@@ -98,7 +108,7 @@ impl<K, V> Default for LeafContents<K, V> {
 }
 
 impl<K, V: MerkleSerialize> LeafContents<K, V> {
-    pub(crate) fn lock<Store: MerkleStore>(
+    pub(crate) async fn lock<Store: MerkleStore>(
         mut self,
         manager: &MerkleManager<Store>,
     ) -> Result<Locked<LeafContents<K, V>>, MerkleSerialError> {
@@ -106,9 +116,9 @@ impl<K, V: MerkleSerialize> LeafContents<K, V> {
         serializer.store_byte(42);
         serializer.store_usize(self.values.len());
         for entry in &mut self.values {
-            entry.serialize(&mut serializer)?;
+            entry.serialize(&mut serializer).await?;
         }
-        let (hash, payload) = serializer.finish()?;
+        let (hash, payload) = serializer.finish().await?;
 
         Ok(Locked::new(hash, payload, self))
     }

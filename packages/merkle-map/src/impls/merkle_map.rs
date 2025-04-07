@@ -1,4 +1,12 @@
+use std::fmt::Debug;
+
 use crate::*;
+
+impl<K: Clone, V: Clone> Clone for MerkleMap<K, V> {
+    fn clone(&self) -> Self {
+        MerkleMap(self.0.clone())
+    }
+}
 
 impl<K, V> MerkleMap<K, V> {
     pub fn new() -> Self {
@@ -54,7 +62,33 @@ where
         Q: ToMerkleKey + ?Sized,
     {
         self.sanity_checks();
-        self.0.get(0, key.to_merkle_key())
+        self.0.get(0, &key.to_merkle_key())
+    }
+
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+        Q: ToMerkleKey + ?Sized,
+    {
+        self.sanity_checks();
+        self.0.get_mut(0, &key.to_merkle_key())
+    }
+}
+
+impl<K, V> MerkleMap<K, V>
+where
+    K: ToMerkleKey + Clone,
+    V: Clone,
+{
+    pub fn get_or_insert(&mut self, key: K, def: impl FnOnce() -> V) -> &mut V {
+        self.sanity_checks();
+        // TODO could optimize this
+        let key_bytes = key.to_merkle_key();
+        if self.0.get(0, &key_bytes).is_some() {
+            return self.0.get_mut(0, &key_bytes).unwrap();
+        }
+        self.insert(key, def());
+        self.0.get_mut(0, &key_bytes).unwrap()
     }
 }
 
@@ -75,7 +109,9 @@ where
         self.sanity_checks();
         v
     }
+}
 
+impl<K, V> MerkleMap<K, V> {
     pub fn iter(&self) -> crate::impls::iter::Iter<K, V> {
         self.sanity_checks();
         self.into_iter()
@@ -89,10 +125,24 @@ impl<K, V> Default for MerkleMap<K, V> {
 }
 
 impl<K, V: MerkleSerialize> MerkleSerializeComplete for MerkleMap<K, V> {
-    fn serialize_complete<Store: MerkleStore>(
+    async fn serialize_complete<Store: MerkleStore>(
         &mut self,
         manager: &MerkleManager<Store>,
     ) -> Result<shared::types::Sha256Hash, MerkleSerialError> {
-        self.0.serialize_complete(manager)
+        self.0.serialize_complete(manager).await
+    }
+}
+
+impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{{")?;
+        for (idx, (k, v)) in self.iter().enumerate() {
+            if idx != 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{k:?}: {v:?}")?;
+        }
+        write!(f, "}}")?;
+        Ok(())
     }
 }

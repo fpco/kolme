@@ -24,8 +24,8 @@ pub enum BalancesError {
 }
 
 /// Track balances of all accounts for all assets.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Default, PartialEq, Eq, Debug)]
-pub struct Balances(BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>);
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+pub struct Balances(MerkleMap<AccountId, BTreeMap<AssetId, Decimal>>);
 
 impl Balances {
     pub(in crate::core) fn get(
@@ -50,8 +50,7 @@ impl Balances {
         }
         *self
             .0
-            .entry(account_id)
-            .or_default()
+            .get_or_insert(account_id, BTreeMap::new)
             .entry(asset_id)
             .or_default() += to_mint;
         Ok(())
@@ -94,6 +93,10 @@ impl Balances {
             requested: to_burn,
             available,
         })
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&AccountId, &BTreeMap<AssetId, Decimal>)> {
+        self.0.iter()
     }
 }
 

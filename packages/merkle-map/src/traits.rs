@@ -25,28 +25,30 @@ pub trait FromMerkleKey: Sized {
 /// A value that can be serialized within a [MerkleMap].
 pub trait MerkleSerialize {
     /// Serialize this data for storage.
-    fn serialize<S: MerkleSerializer>(
+    #[allow(async_fn_in_trait)]
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError>;
 }
 
 pub trait MerkleSerializeComplete {
-    fn serialize_complete<Store: MerkleStore>(
+    #[allow(async_fn_in_trait)]
+    async fn serialize_complete<Store: MerkleStore>(
         &mut self,
         manager: &MerkleManager<Store>,
     ) -> Result<Sha256Hash, MerkleSerialError>;
 }
 
 impl<T: MerkleSerialize> MerkleSerializeComplete for T {
-    fn serialize_complete<Store: MerkleStore>(
+    async fn serialize_complete<Store: MerkleStore>(
         &mut self,
         manager: &MerkleManager<Store>,
     ) -> Result<Sha256Hash, MerkleSerialError> {
         let mut serializer = manager.new_serializer();
-        self.serialize(&mut serializer)?;
-        let (hash, bytes) = serializer.finish()?;
-        manager.save_merkle_by_hash(hash, bytes)?;
+        self.serialize(&mut serializer).await?;
+        let (hash, bytes) = serializer.finish().await?;
+        manager.save_merkle_by_hash(hash, bytes).await?;
         Ok(hash)
     }
 }
@@ -96,11 +98,19 @@ pub trait MerkleSerializer {
         }
     }
 
+    /// Store a JSON-encoded version of this content.
+    fn store_json<T: serde::Serialize>(&mut self, t: &T) -> Result<(), MerkleSerialError> {
+        let bytes = serde_json::to_vec(t).map_err(MerkleSerialError::custom)?;
+        self.store_slice(&bytes);
+        Ok(())
+    }
+
     /// Create a fresh serializer for serializing a subcomponent.
     fn new_serializer(&self) -> Self;
 
     /// Finish generating the output and return the completed buffer.
-    fn finish(self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError>;
+    #[allow(async_fn_in_trait)]
+    async fn finish(self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError>;
 }
 
 /// A value that can be deserialized back into a [MerkleMap] value.
@@ -153,18 +163,23 @@ pub trait MerkleDeserializer {
 /// A backing store for raw blobs used by a [MerkleMap].
 pub trait MerkleStore {
     /// Load up the blob by hash, if available.
-    fn load_merkle_by_hash(&self, hash: Sha256Hash)
-        -> Result<Option<Arc<[u8]>>, MerkleSerialError>;
+    #[allow(async_fn_in_trait)]
+    async fn load_merkle_by_hash(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<Option<Arc<[u8]>>, MerkleSerialError>;
 
     /// Save the payload within the Merkle store.
     ///
     /// Invariant: the hash must be the correct hash of the given payload.
-    fn save_merkle_by_hash(
+    #[allow(async_fn_in_trait)]
+    async fn save_merkle_by_hash(
         &self,
         hash: Sha256Hash,
         payload: &[u8],
     ) -> Result<(), MerkleSerialError>;
 
     /// Checks if the store already has a blob matching the given hash.
-    fn contains_hash(&self, hash: Sha256Hash) -> Result<bool, MerkleSerialError>;
+    #[allow(async_fn_in_trait)]
+    async fn contains_hash(&self, hash: Sha256Hash) -> Result<bool, MerkleSerialError>;
 }

@@ -3,7 +3,7 @@ use shared::types::Sha256Hash;
 use crate::*;
 
 impl MerkleSerialize for u8 {
-    fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError> {
@@ -13,7 +13,7 @@ impl MerkleSerialize for u8 {
 }
 
 impl MerkleSerialize for u32 {
-    fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError> {
@@ -23,7 +23,7 @@ impl MerkleSerialize for u32 {
 }
 
 impl MerkleSerialize for String {
-    fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError> {
@@ -33,7 +33,7 @@ impl MerkleSerialize for String {
 }
 
 impl MerkleSerialize for Vec<u8> {
-    fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError> {
@@ -43,7 +43,7 @@ impl MerkleSerialize for Vec<u8> {
 }
 
 impl MerkleSerialize for Sha256Hash {
-    fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError> {

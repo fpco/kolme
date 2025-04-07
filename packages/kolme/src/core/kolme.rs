@@ -705,8 +705,8 @@ async fn store_block<App: KolmeApp>(
     let rendered = serde_json::to_string(&signed_block)?;
     let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
 
-    let framework_state_rendered = serde_json::to_string(&framework_state)?;
-    let framework_state_hash = insert_state_payload(trans, &framework_state_rendered).await?;
+    let framework_state_hash =
+        merkle_map::MerkleManager::new(MerkleDbStore(trans)).save(&framework_state)?;
     let app_state_rendered = App::save_state(app_state)?;
     let app_state_hash = insert_state_payload(trans, &app_state_rendered).await?;
 

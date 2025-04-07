@@ -1,7 +1,5 @@
 use crate::*;
 
-use std::fmt::Debug;
-
 impl<K, V> Node<K, V> {
     #[cfg(test)]
     pub(crate) fn sanity_checks(&self) {
@@ -43,16 +41,6 @@ impl<K, V> LeafContents<K, V> {
     }
 }
 
-impl<K, V> std::fmt::Debug for LeafContents<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[")?;
-        for value in &self.values {
-            write!(f, "{:?},", value.key_bytes)?;
-        }
-        Ok(())
-    }
-}
-
 impl<K, V> TreeContents<K, V> {
     fn sanity_checks(&self) {
         assert!(self.branches.iter().any(|branch| !branch.is_empty()));
@@ -60,48 +48,6 @@ impl<K, V> TreeContents<K, V> {
             + if self.leaf.is_some() { 1 } else { 0 };
         assert_eq!(self.len(), expected);
         self.branches.iter().for_each(Node::sanity_checks);
-    }
-}
-impl<K, V> Debug for MerkleMap<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
-    }
-}
-
-impl<K, V> Debug for Node<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Node::Empty => write!(f, "Empty"),
-            Node::LockedLeaf(leaf) => {
-                write!(f, "LockedLeaf({}, {:?})", leaf.hash, leaf.inner)
-            }
-            Node::UnlockedLeaf(leaf) => write!(f, "UnlockedLeaf({leaf:?})"),
-            Node::LockedTree(tree) => {
-                write!(f, "LockedTree({}, {:?})", tree.hash, tree.inner)
-            }
-            Node::UnlockedTree(tree) => write!(f, "UnlockedTree({tree:?})"),
-        }
-    }
-}
-impl<K, V> Debug for UnlockedNode<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            UnlockedNode::Leaf(leaf) => {
-                write!(f, "Leaf({:?})", leaf)
-            }
-            UnlockedNode::Tree(tree) => {
-                write!(f, "Tree({:?})", tree)
-            }
-        }
-    }
-}
-impl<K, V> Debug for TreeContents<K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[")?;
-        for branch in &self.branches {
-            write!(f, "{branch:?}")?;
-        }
-        write!(f, "]")
     }
 }
 
@@ -250,43 +196,44 @@ fn just_a() {
     }
 }
 
-fn memory_manager_helper(size: u32) {
+async fn memory_manager_helper(size: u32) {
     let manager = MerkleManager::new(MerkleMemoryStore::default());
     let mut m = MerkleMap::new();
     for i in 0..size {
         m.insert(i, i * 2);
     }
-    let hash = manager.save(&mut m).unwrap();
+    let hash = manager.save(&mut m).await.unwrap();
 
     let m2 = manager
         .load(hash)
+        .await
         .expect("Manager load failed")
         .expect("Manager load returned None");
 
     assert_eq!(m, m2);
 }
 
-#[test]
-fn memory_manager_0() {
-    memory_manager_helper(0)
+#[tokio::test]
+async fn memory_manager_0() {
+    memory_manager_helper(0).await
 }
 
-#[test]
-fn memory_manager_1() {
-    memory_manager_helper(1)
+#[tokio::test]
+async fn memory_manager_1() {
+    memory_manager_helper(1).await
 }
 
-#[test]
-fn memory_manager_2() {
-    memory_manager_helper(2)
+#[tokio::test]
+async fn memory_manager_2() {
+    memory_manager_helper(2).await
 }
 
-#[test]
-fn memory_manager_10() {
-    memory_manager_helper(10)
+#[tokio::test]
+async fn memory_manager_10() {
+    memory_manager_helper(10).await
 }
 
-#[test]
-fn memory_manager_1000() {
-    memory_manager_helper(1000)
+#[tokio::test]
+async fn memory_manager_1000() {
+    memory_manager_helper(1000).await
 }
