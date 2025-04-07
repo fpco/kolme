@@ -105,7 +105,13 @@ impl<Store: MerkleRead> MerkleManager<Store> {
     ) -> Result<Option<MerkleMap<K, V>>, LoadMerkleMapError<Store::Error>> {
         let payload = match self.cache.get(&hash) {
             Some(payload) => Some(payload.value().clone()),
-            None => self.store.load_merkle_by_hash(hash)?,
+            None => {
+                let payload = self.store.load_merkle_by_hash(hash)?;
+                if let Some(payload) = payload.clone() {
+                    self.cache.insert(hash, payload);
+                }
+                payload
+            }
         };
         match payload {
             None => Ok(None),
