@@ -20,3 +20,4 @@ target/
 /artifacts/
 /mdbook/
 /docs/bin/
+/.tests-db/
