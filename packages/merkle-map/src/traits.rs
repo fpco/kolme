@@ -54,7 +54,11 @@ impl<T: MerkleSerialize> MerkleSerializeComplete for T {
 }
 
 /// Provides context within a [MerkleSerialize] impl for serializing data.
-pub trait MerkleSerializer {
+pub trait MerkleSerializer: Sized {
+    type Store: MerkleStore;
+
+    fn get_manager(&self) -> &MerkleManager<Self::Store>;
+
     /// Store a single byte.
     fn store_byte(&mut self, byte: u8);
 
@@ -102,6 +106,17 @@ pub trait MerkleSerializer {
     fn store_json<T: serde::Serialize>(&mut self, t: &T) -> Result<(), MerkleSerialError> {
         let bytes = serde_json::to_vec(t).map_err(MerkleSerialError::custom)?;
         self.store_slice(&bytes);
+        Ok(())
+    }
+
+    /// Serialize the given value, store it in the Merkle store, and write the hash to the current serialization.
+    #[allow(async_fn_in_trait)]
+    async fn store_by_merkle_hash<T: MerkleSerializeComplete + ?Sized>(
+        &mut self,
+        t: &mut T,
+    ) -> Result<(), MerkleSerialError> {
+        let mut hash = t.serialize_complete(self.get_manager()).await?;
+        hash.serialize(self).await?;
         Ok(())
     }
 

@@ -26,11 +26,11 @@ pub enum MerkleSerialError {
     #[error("Hash not found in store: {hash}")]
     HashNotFound { hash: shared::types::Sha256Hash },
     #[error(transparent)]
-    Custom(Box<dyn std::error::Error>),
+    Custom(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl MerkleSerialError {
-    pub fn custom<E: std::error::Error + 'static>(e: E) -> Self {
+    pub fn custom<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
         Self::Custom(Box::new(e))
     }
 }
@@ -42,6 +42,12 @@ pub struct MerkleSerializerImpl<Store> {
 }
 
 impl<Store: MerkleStore> MerkleSerializer for MerkleSerializerImpl<Store> {
+    type Store = Store;
+
+    fn get_manager(&self) -> &MerkleManager<Store> {
+        &self.manager
+    }
+
     fn store_byte(&mut self, byte: u8) {
         self.buff.push(byte);
     }

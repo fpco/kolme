@@ -43,7 +43,7 @@ impl MerkleSerialize for Vec<u8> {
 }
 
 impl MerkleSerialize for Sha256Hash {
-    async fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer + ?Sized>(
         &mut self,
         serializer: &mut S,
     ) -> Result<(), MerkleSerialError> {

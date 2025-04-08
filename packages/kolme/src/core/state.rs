@@ -24,7 +24,7 @@ pub struct FrameworkState {
 }
 
 impl MerkleSerialize for FrameworkState {
-    fn serialize<S: MerkleSerializer>(
+    async fn serialize<S: MerkleSerializer>(
         &mut self,
         serializer: &mut S,
     ) -> std::result::Result<(), MerkleSerialError> {
@@ -43,6 +43,7 @@ impl MerkleSerialize for FrameworkState {
         serializer.store_json(approvers)?;
         serializer.store_json(needed_approvers)?;
         serializer.store_json(chains)?;
+        serializer.store_by_merkle_hash(balances).await?;
         todo!()
     }
 }

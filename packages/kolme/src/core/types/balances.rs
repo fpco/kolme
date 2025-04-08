@@ -100,6 +100,15 @@ impl Balances {
     }
 }
 
+impl MerkleSerializeComplete for Balances {
+    async fn serialize_complete<Store: MerkleStore>(
+        &mut self,
+        manager: &MerkleManager<Store>,
+    ) -> std::result::Result<Sha256Hash, MerkleSerialError> {
+        self.0.serialize_complete(manager).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rust_decimal::dec;
