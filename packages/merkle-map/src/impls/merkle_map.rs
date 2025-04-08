@@ -36,7 +36,7 @@ where
     pub fn insert(&mut self, key: K, value: V) -> Option<(K, V)> {
         self.sanity_checks();
         let key_bytes = key.to_merkle_key();
-        let node = std::mem::take(&mut self.0).unlock();
+        let node = std::mem::take(&mut self.0);
         let (node, v) = node.insert(
             0,
             LeafEntry {
@@ -103,7 +103,7 @@ where
         Q: ToMerkleKey + ?Sized,
     {
         self.sanity_checks();
-        let node = std::mem::take(&mut self.0).unlock();
+        let node = std::mem::take(&mut self.0);
         let (node, v) = node.remove(0, key.to_merkle_key());
         self.0 = node.into();
         self.sanity_checks();
@@ -129,7 +129,8 @@ impl<K, V: MerkleSerialize> MerkleSerializeComplete for MerkleMap<K, V> {
         &mut self,
         manager: &MerkleManager<Store>,
     ) -> Result<shared::types::Sha256Hash, MerkleSerialError> {
-        self.0.serialize_complete(manager).await
+        todo!()
+        // self.0.serialize_complete(manager).await
     }
 }
 

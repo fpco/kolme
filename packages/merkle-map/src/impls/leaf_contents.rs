@@ -20,7 +20,7 @@ impl<K, V> LeafContents<K, V> {
         mut self,
         depth: u16,
         mut entry: LeafEntry<K, V>,
-    ) -> (UnlockedNode<K, V>, Option<(K, V)>)
+    ) -> (Node<K, V>, Option<(K, V)>)
     where
         K: Clone,
         V: Clone,
@@ -29,14 +29,17 @@ impl<K, V> LeafContents<K, V> {
         for old_entry in &mut self.values {
             if old_entry.key_bytes == entry.key_bytes {
                 std::mem::swap(old_entry, &mut entry);
-                return (UnlockedNode::Leaf(self), Some((entry.key, entry.value)));
+                return (
+                    Node::Leaf(Lockable::new_unlocked(self)),
+                    Some((entry.key, entry.value)),
+                );
             }
         }
 
         if self.values.len() < 16 {
             self.values.push(entry);
             self.sort();
-            (UnlockedNode::Leaf(self), None)
+            (Node::Leaf(Lockable::new_unlocked(self)), None)
         } else {
             let mut tree = TreeContents::new();
             tree.insert(depth, entry);
@@ -44,7 +47,7 @@ impl<K, V> LeafContents<K, V> {
                 let old = tree.insert(depth, entry);
                 assert!(old.is_none());
             });
-            (UnlockedNode::Tree(tree), None)
+            (Node::Tree(Lockable::new_unlocked(tree)), None)
         }
     }
 
@@ -68,7 +71,7 @@ impl<K, V> LeafContents<K, V> {
         })
     }
 
-    pub(crate) fn remove(&mut self, key_bytes: MerkleKey) -> Option<(K, V)> {
+    pub(crate) fn remove(mut self, key_bytes: MerkleKey) -> (Node<K, V>, Option<(K, V)>) {
         match self.values.iter().enumerate().find_map(|(idx, entry)| {
             if entry.key_bytes == key_bytes {
                 Some(idx)
@@ -82,9 +85,14 @@ impl<K, V> LeafContents<K, V> {
                     key,
                     value,
                 } = self.values.remove(idx);
-                Some((key, value))
+                let node = if self.values.is_empty() {
+                    Node::Empty
+                } else {
+                    Node::Leaf(Lockable::new_unlocked(self))
+                };
+                (node, Some((key, value)))
             }
-            None => None,
+            None => (Node::Leaf(Lockable::new_unlocked(self)), None),
         }
     }
 
@@ -111,7 +119,7 @@ impl<K, V: MerkleSerialize> LeafContents<K, V> {
     pub(crate) async fn lock<Store: MerkleStore>(
         mut self,
         manager: &MerkleManager<Store>,
-    ) -> Result<Locked<LeafContents<K, V>>, MerkleSerialError> {
+    ) -> Result<Lockable<LeafContents<K, V>>, MerkleSerialError> {
         let mut serializer = manager.new_serializer();
         serializer.store_byte(42);
         serializer.store_usize(self.values.len());
@@ -120,7 +128,7 @@ impl<K, V: MerkleSerialize> LeafContents<K, V> {
         }
         let (hash, payload) = serializer.finish().await?;
 
-        Ok(Locked::new(hash, payload, self))
+        Ok(Lockable::new_locked(hash, payload, self))
     }
 }
 
@@ -129,7 +137,7 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> LeafContents<K, V> {
         mut deserializer: D,
         hash: Sha256Hash,
         payload: Arc<[u8]>,
-    ) -> Result<Locked<LeafContents<K, V>>, MerkleSerialError> {
+    ) -> Result<Lockable<LeafContents<K, V>>, MerkleSerialError> {
         // The 42 magic byte is handled in the calling function.
         let len = deserializer.load_usize()?;
         let mut values = Vec::with_capacity(len);
@@ -138,6 +146,6 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> LeafContents<K, V> {
         }
         deserializer.finish()?;
 
-        Ok(Locked::new(hash, payload, LeafContents { values }))
+        Ok(Lockable::new_locked(hash, payload, LeafContents { values }))
     }
 }

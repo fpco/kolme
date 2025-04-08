@@ -65,14 +65,12 @@ enum IterLayer<'a, K, V> {
 fn to_iter_layer<K, V>(node: &Node<K, V>) -> Option<IterLayer<K, V>> {
     match node {
         Node::Empty => None,
-        Node::LockedLeaf(leaf) => Some(IterLayer::Leaf(&leaf.inner, 0)),
-        Node::UnlockedLeaf(leaf) => Some(IterLayer::Leaf(leaf, 0)),
-        Node::LockedTree(tree) => Some(IterLayer::Tree(&tree.inner, 0)),
-        Node::UnlockedTree(tree) => Some(IterLayer::Tree(tree, 0)),
+        Node::Leaf(leaf) => Some(IterLayer::Leaf(&leaf.as_ref(), 0)),
+        Node::Tree(tree) => Some(IterLayer::Tree(&tree.as_ref(), 0)),
     }
 }
 
-pub struct IntoIter<K, V>(UnlockedNode<K, V>);
+pub struct IntoIter<K, V>(Node<K, V>);
 
 impl<K: Clone, V: Clone> IntoIterator for MerkleMap<K, V> {
     type Item = (K, V);
@@ -80,7 +78,7 @@ impl<K: Clone, V: Clone> IntoIterator for MerkleMap<K, V> {
     type IntoIter = IntoIter<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter(self.0.unlock())
+        IntoIter(self.0)
     }
 }
 
@@ -92,14 +90,16 @@ impl<K: Clone, V: Clone> Iterator for IntoIter<K, V> {
     }
 }
 
-impl<K, V> UnlockedNode<K, V>
+impl<K, V> Node<K, V>
 where
     K: Clone,
     V: Clone,
 {
     fn pop_first(&mut self) -> Option<(K, V)> {
         match self {
-            UnlockedNode::Leaf(leaf) => {
+            Node::Empty => None,
+            Node::Leaf(leaf) => {
+                let leaf = leaf.as_mut();
                 if leaf.values.is_empty() {
                     None
                 } else {
@@ -107,15 +107,14 @@ where
                     Some((entry.key, entry.value))
                 }
             }
-            UnlockedNode::Tree(tree) => {
+            Node::Tree(tree) => {
+                let tree = tree.as_mut();
                 if let Some(entry) = tree.leaf.take() {
                     return Some((entry.key, entry.value));
                 }
 
-                for idx in 0..16 {
-                    let mut branch = std::mem::take(&mut tree.branches[idx]).unlock();
+                for branch in &mut tree.branches {
                     if let Some(pair) = branch.pop_first() {
-                        tree.branches[idx] = branch.into();
                         return Some(pair);
                     }
                 }

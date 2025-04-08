@@ -2,7 +2,9 @@ mod key_bytes;
 
 pub use key_bytes::MerkleKey;
 
-use std::sync::Arc;
+pub(crate) use crate::impls::Lockable;
+
+use std::sync::{Arc, OnceLock};
 
 use shared::types::Sha256Hash;
 
@@ -23,49 +25,16 @@ pub(crate) struct LeafEntry<K, V> {
     pub(crate) value: V,
 }
 
-pub(crate) struct Locked<T> {
-    pub(crate) hash: Sha256Hash,
-    pub(crate) payload: Arc<[u8]>,
-    pub(crate) inner: Arc<T>,
-}
-
-impl<T: PartialOrd> PartialOrd for Locked<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.inner.partial_cmp(&other.inner)
-    }
-}
-
-impl<T: Ord> Ord for Locked<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.inner.cmp(&other.inner)
-    }
-}
-
-impl<T: PartialEq> PartialEq for Locked<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner.eq(&other.inner)
-    }
-}
-
-impl<T: Eq> Eq for Locked<T> {}
-
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Node<K, V> {
     #[default]
     Empty,
-    LockedLeaf(Locked<LeafContents<K, V>>),
-    UnlockedLeaf(LeafContents<K, V>),
-    LockedTree(Locked<TreeContents<K, V>>),
-    UnlockedTree(Box<TreeContents<K, V>>),
+    Leaf(Lockable<LeafContents<K, V>>),
+    Tree(Lockable<TreeContents<K, V>>),
     // FIXME
     // Lazy {
     //     hash: Sha256Hash,
     // },
-}
-
-pub(crate) enum UnlockedNode<K, V> {
-    Leaf(LeafContents<K, V>),
-    Tree(TreeContents<K, V>),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]

@@ -27,9 +27,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
             return v.map(|entry| (entry.key, entry.value));
         };
         let index = usize::from(index);
-        let (branch, v) = std::mem::take(&mut self.branches[index])
-            .unlock()
-            .insert(depth + 1, entry);
+        let (branch, v) = std::mem::take(&mut self.branches[index]).insert(depth + 1, entry);
         let branch = branch.into();
         self.branches[index] = branch;
         if v.is_none() {
@@ -62,19 +60,19 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         mut self,
         depth: u16,
         key_bytes: MerkleKey,
-    ) -> (UnlockedNode<K, V>, Option<(K, V)>) {
+    ) -> (Node<K, V>, Option<(K, V)>) {
         let index = key_bytes
             .get_index_for_depth(depth)
             .expect("Impossible: TreeContents::remove without sufficient bytes");
         let index = usize::from(index);
         // FIXME check if we need to go back to a leaf because we have few enough nodes
-        let branch = std::mem::take(&mut self.branches[index]).unlock();
+        let branch = std::mem::take(&mut self.branches[index]);
         let (branch, v) = branch.remove(depth + 1, key_bytes);
         self.branches[index] = branch.into();
         if v.is_some() {
             self.len -= 1;
         }
-        (UnlockedNode::Tree(self), v)
+        (Node::Tree(Lockable::new_unlocked(self)), v)
     }
 
     pub(crate) fn drain_entries_to(self, entries: &mut Vec<LeafEntry<K, V>>) {
@@ -84,10 +82,8 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         for branch in self.branches {
             match branch {
                 Node::Empty => (),
-                Node::LockedLeaf(leaf) => leaf.into_inner().drain_entries_to(entries),
-                Node::UnlockedLeaf(leaf) => leaf.drain_entries_to(entries),
-                Node::LockedTree(tree) => tree.into_inner().drain_entries_to(entries),
-                Node::UnlockedTree(tree) => tree.drain_entries_to(entries),
+                Node::Leaf(leaf) => leaf.into_inner().drain_entries_to(entries),
+                Node::Tree(tree) => tree.into_inner().drain_entries_to(entries),
             }
         }
     }
@@ -97,7 +93,7 @@ impl<K, V: MerkleSerialize> TreeContents<K, V> {
     pub(crate) async fn lock<Store: MerkleStore>(
         mut self,
         manager: &MerkleManager<Store>,
-    ) -> Result<Locked<TreeContents<K, V>>, MerkleSerialError> {
+    ) -> Result<Lockable<TreeContents<K, V>>, MerkleSerialError> {
         let mut serializer = manager.new_serializer();
         serializer.store_byte(43);
         serializer.store_usize(self.len);
@@ -108,13 +104,14 @@ impl<K, V: MerkleSerialize> TreeContents<K, V> {
             }
             None => serializer.store_byte(0),
         }
-        for branch in &mut self.branches {
+        for _branch in &mut self.branches {
             serializer.new_serializer();
-            let mut hash = branch.serialize_complete(manager).await?;
-            hash.serialize(&mut serializer).await?;
+            todo!()
+            // let mut hash = branch.serialize_complete(manager).await?;
+            // hash.serialize(&mut serializer).await?;
         }
         let (hash, payload) = serializer.finish().await?;
-        Ok(Locked::new(hash, payload, self))
+        Ok(Lockable::new_locked(hash, payload, self))
     }
 }
 
@@ -124,7 +121,7 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
         hash: Sha256Hash,
         payload: Arc<[u8]>,
         manager: &MerkleManager<Store>,
-    ) -> Result<Locked<TreeContents<K, V>>, MerkleSerialError> {
+    ) -> Result<Lockable<TreeContents<K, V>>, MerkleSerialError> {
         // Byte 43 already checked in caller
         let len = deserializer.load_usize()?;
         let leaf = match deserializer.pop_byte()? {
@@ -147,6 +144,6 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
             leaf,
             branches,
         };
-        Ok(Locked::new(hash, payload, tree))
+        Ok(Lockable::new_locked(hash, payload, tree))
     }
 }

@@ -85,22 +85,23 @@ impl<Store: MerkleStore> MerkleManager<Store> {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<MerkleMap<K, V>>, MerkleSerialError> {
-        let payload = match self.cache.get(&hash) {
-            Some(payload) => Some(payload.value().clone()),
-            None => {
-                let payload = self.store.load_merkle_by_hash(hash).await?;
-                if let Some(payload) = payload.clone() {
-                    self.cache.insert(hash, payload);
-                }
-                payload
-            }
-        };
-        match payload {
-            None => Ok(None),
-            Some(payload) => {
-                let node = Node::load(hash, payload, self).await?;
-                Ok(Some(MerkleMap(node)))
-            }
-        }
+        todo!();
+        // let payload = match self.cache.get(&hash) {
+        //     Some(payload) => Some(payload.value().clone()),
+        //     None => {
+        //         let payload = self.store.load_merkle_by_hash(hash).await?;
+        //         if let Some(payload) = payload.clone() {
+        //             self.cache.insert(hash, payload);
+        //         }
+        //         payload
+        //     }
+        // };
+        // match payload {
+        //     None => Ok(None),
+        //     Some(payload) => {
+        //         let node = Node::load(hash, payload, self).await?;
+        //         Ok(Some(MerkleMap(node)))
+        //     }
+        // }
     }
 }

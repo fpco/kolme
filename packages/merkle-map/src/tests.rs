@@ -5,19 +5,13 @@ impl<K, V> Node<K, V> {
     pub(crate) fn sanity_checks(&self) {
         match self {
             Node::Empty => (),
-            Node::LockedLeaf(leaf) => {
+            Node::Leaf(leaf) => {
                 // FIXME validate hashes
-                leaf.inner.sanity_checks();
+                leaf.as_ref().sanity_checks();
             }
-            Node::UnlockedLeaf(leaf) => {
-                leaf.sanity_checks();
-            }
-            Node::LockedTree(tree) => {
+            Node::Tree(tree) => {
                 // FIXME validate hashes
-                tree.inner.sanity_checks();
-            }
-            Node::UnlockedTree(tree) => {
-                tree.sanity_checks();
+                tree.as_ref().sanity_checks();
             }
         }
     }
