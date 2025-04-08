@@ -12,6 +12,7 @@ test-log = { version = "0.2", features = ["trace"] }
 anyhow = "1"
 reqwest = { version = "0.12.15", features = ["json"] }
 tokio = { version = "1.43.0", features = ["full"] }
+tokio-util = { version = "0.7", features = ["full"] }
 tracing = "0.1.41"
 backon = "1.4.1"
 kolme = { path = "../kolme" }
@@ -27,3 +28,4 @@ axum = { version = "0.8.3", features = ["ws"] }
 futures-util = "0.3.31"
 tokio-tungstenite = "0.26.2"
 jiff = "0.2.5"
+rand = "0.8"

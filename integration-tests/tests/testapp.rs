@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures_util::future::join_all;
 use futures_util::StreamExt;
 use kolme::{
     AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext, ExternalChain,
@@ -9,14 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use shared::cryptography::SecretKey;
 use std::collections::BTreeSet;
-use std::fs::{self, create_dir_all};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
-use tokio;
+use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{connect_async, tungstenite};
+use tokio_util::task::AbortOnDropHandle;
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
@@ -89,31 +90,16 @@ async fn find_free_port() -> Result<u16> {
 }
 
 async fn setup(
-    test_name: &str,
+    db_path: &Path,
 ) -> Result<(
     Kolme<TestApp>,
     tokio::task::JoinHandle<Result<()>>,
     SocketAddr,
 )> {
-    create_dir_all("../.tests-db")?;
-    let db_file_name = format!("../.tests-db/local-test_{}.sqlite3", test_name);
-    let db_path = Path::new(&db_file_name);
-    if db_path.exists() {
-        fs::remove_file(db_path)?;
-        tracing::info!("Removed existing database for {}: {:?}", test_name, db_path);
-    }
-
-    tracing::info!("Using database for {}: {:?}", test_name, db_path);
-
     let app = TestApp;
     let kolme = Kolme::new(app, "test_version", db_path).await?;
     let read = kolme.read().await;
-    assert_eq!(
-        read.get_next_height(),
-        BlockHeight(0),
-        "Initial height should be 0 for {}",
-        test_name
-    );
+    assert_eq!(read.get_next_height(), BlockHeight(0),);
 
     let addr = SocketAddr::new("127.0.0.1".parse()?, find_free_port().await?);
     let server_handle = tokio::spawn({
@@ -128,9 +114,23 @@ async fn setup(
     Ok((kolme, server_handle, addr))
 }
 
+async fn next_message<S>(
+    ws_stream: &mut S,
+) -> Result<tungstenite::Message, Box<dyn std::error::Error>>
+where
+    S: StreamExt<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
+{
+    let message = timeout(Duration::from_secs(5), ws_stream.next())
+        .await?
+        .ok_or("WebSocket stream terminated")??;
+
+    Ok(message)
+}
+
 #[test_log::test(tokio::test)]
 async fn test_websocket_notifications() {
-    let (kolme, server_handle, addr) = setup("test_websocket_notifications").await.unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
 
@@ -139,17 +139,18 @@ async fn test_websocket_notifications() {
     tracing::info!("Connected to WebSocket");
 
     processor.create_genesis_event().await.unwrap();
-    let processor_handle = tokio::spawn({
+
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
         let processor = Processor::new(kolme.clone(), secret.clone());
         async move { processor.run().await }
-    });
+    }));
 
-    let message = timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
+
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
+
     tracing::info!("Received genesis notification: {}", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -164,15 +165,11 @@ async fn test_websocket_notifications() {
         .await
         .unwrap();
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
     kolme.propose_transaction(tx.clone()).unwrap();
 
-    let message = timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received notification: {}", notification);
     assert!(
         notification["Broadcast"].is_object(),
@@ -180,12 +177,9 @@ async fn test_websocket_notifications() {
         notification
     );
 
-    let message = timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received notification: {}", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -195,14 +189,12 @@ async fn test_websocket_notifications() {
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-
-    processor_handle.abort();
-    server_handle.abort();
 }
 
 #[test_log::test(tokio::test)]
 async fn test_validate_tx_valid_signature() {
-    let (kolme, server_handle, addr) = setup("test_validate_tx_valid_signature").await.unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
 
@@ -212,13 +204,16 @@ async fn test_validate_tx_valid_signature() {
     tracing::info!("Connected to WebSocket");
 
     processor.create_genesis_event().await.unwrap();
-    let processor_handle = tokio::spawn({
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
         let processor = Processor::new(kolme.clone(), secret.clone());
         async move { processor.run().await }
-    });
+    }));
 
-    let message = ws.next().await.unwrap().unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
+
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("\nReceived notification: {}\n", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -235,8 +230,9 @@ async fn test_validate_tx_valid_signature() {
 
     kolme.propose_transaction(tx.clone()).unwrap();
 
-    let message = ws.next().await.unwrap().unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("\nReceived notification: {}\n", notification);
     assert!(
         notification["Broadcast"].is_object(),
@@ -244,8 +240,9 @@ async fn test_validate_tx_valid_signature() {
         notification
     );
 
-    let message = ws.next().await.unwrap().unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("\nReceived notification: {}\n", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -255,14 +252,13 @@ async fn test_validate_tx_valid_signature() {
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-
-    processor_handle.abort();
-    server_handle.abort();
 }
 
 #[test_log::test(tokio::test)]
 async fn test_execute_transaction_genesis() {
-    let (kolme, server_handle, addr) = setup("test_execute_transaction_genesis").await.unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, addr) = setup(db_path.path()).await.unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
 
@@ -272,8 +268,9 @@ async fn test_execute_transaction_genesis() {
 
     processor.create_genesis_event().await.unwrap();
 
-    let message = ws.next().await.unwrap().unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received notification: {}", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -283,13 +280,12 @@ async fn test_execute_transaction_genesis() {
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-
-    server_handle.abort();
 }
 
 #[test_log::test(tokio::test)]
 async fn test_validate_tx_invalid_nonce() {
-    let (kolme, server_handle, addr) = setup("test_validate_tx_invalid_nonce").await.unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
 
@@ -299,13 +295,16 @@ async fn test_validate_tx_invalid_nonce() {
 
     processor.create_genesis_event().await.unwrap();
 
-    let processor_handle = tokio::spawn({
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
         let processor = Processor::new(kolme.clone(), secret.clone());
         async move { processor.run().await }
-    });
+    }));
 
-    let message = ws.next().await.unwrap().unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
+
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received notification: {}", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -323,8 +322,9 @@ async fn test_validate_tx_invalid_nonce() {
 
     kolme.propose_transaction(signed_tx.clone()).unwrap();
 
-    let message = ws.next().await.unwrap().unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received notification: {}", notification);
     assert!(
         notification["Broadcast"].is_object(),
@@ -332,29 +332,23 @@ async fn test_validate_tx_invalid_nonce() {
         notification
     );
 
-    let result = timeout(Duration::from_millis(500), ws.next()).await;
-
-    match result {
-        Ok(Some(Ok(message))) => {
-            let notification: Value =
-                serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
-            tracing::error!("Unexpected notification received: {}", notification);
-        }
-        Ok(Some(Err(e))) => tracing::error!("WebSocket error: {}", e),
-        Ok(None) => tracing::info!("WebSocket closed unexpectedly"),
-        Err(_) => tracing::info!("No additional notifications received, as expected"),
-    };
+    let read = kolme.read().await;
+    let state = read.get_app_state();
+    assert_eq!(
+        state.counter, 0,
+        "Counter should remain 0 with invalid nonce, got: {}",
+        state.counter
+    );
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-
-    processor_handle.abort();
-    server_handle.abort();
 }
 
 #[test_log::test(tokio::test)]
 async fn test_no_subscribers() {
-    let (kolme, server_handle, _) = setup("test_no_subscribers").await.unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, _) = setup(db_path.path()).await.unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     let tx = kolme
@@ -375,15 +369,12 @@ async fn test_no_subscribers() {
         result.unwrap_err().to_string(),
         "Tried to propose an event, but no one is listening to our notifications"
     );
-
-    server_handle.abort();
 }
 
 #[test_log::test(tokio::test)]
 async fn test_rejected_transaction_insufficient_balance() {
-    let (kolme, server_handle, addr) = setup("test_rejected_transaction_insufficient_balance")
-        .await
-        .unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
 
@@ -392,17 +383,15 @@ async fn test_rejected_transaction_insufficient_balance() {
     tracing::info!("Connected to WebSocket");
 
     processor.create_genesis_event().await.unwrap();
-    let processor_handle = tokio::spawn({
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
         let processor = Processor::new(kolme.clone(), secret.clone());
         async move { processor.run().await }
-    });
+    }));
 
-    let message = timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received notification: {}", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -427,12 +416,9 @@ async fn test_rejected_transaction_insufficient_balance() {
 
     kolme.propose_transaction(tx_withdraw.clone()).unwrap();
 
-    let message = timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received notification: {}", notification);
     assert!(
         notification["Broadcast"].is_object(),
@@ -440,29 +426,22 @@ async fn test_rejected_transaction_insufficient_balance() {
         notification
     );
 
-    let message = timeout(Duration::from_secs(5), ws.next()).await;
-    match message {
-        Ok(Some(Ok(message))) => {
-            let notification: Value =
-                serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
-            tracing::info!("Unexpected notification: {}", notification);
-            panic!("Should not receive a NewBlock for insufficient balance");
-        }
-        Ok(Some(Err(e))) => panic!("WebSocket error: {}", e),
-        Ok(None) => panic!("WebSocket closed unexpectedly"),
-        Err(_) => tracing::info!("No NewBlock received, as expected for insufficient balance"),
-    }
+    let read = kolme.read().await;
+    let state = read.get_app_state();
+    assert_eq!(
+        state.counter, 0,
+        "Counter should remain 0 with insufficient balance, got: {}",
+        state.counter
+    );
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-
-    processor_handle.abort();
-    server_handle.abort();
 }
 
 #[test_log::test(tokio::test)]
 async fn test_many_transactions() {
-    let (kolme, server_handle, addr) = setup("test_many_transactions").await.unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
 
@@ -471,17 +450,16 @@ async fn test_many_transactions() {
     tracing::info!("Connected to WebSocket");
 
     processor.create_genesis_event().await.unwrap();
-    let processor_handle = tokio::spawn({
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
         let processor = Processor::new(kolme.clone(), secret.clone());
         async move { processor.run().await }
-    });
+    }));
 
-    let message = timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
+
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received genesis notification: {}", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -497,16 +475,11 @@ async fn test_many_transactions() {
             .await
             .unwrap();
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
         kolme.propose_transaction(tx.clone()).unwrap();
 
-        let message = timeout(Duration::from_secs(5), ws.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let notification: Value =
-            serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+        let message = next_message(&mut ws).await.unwrap();
+
+        let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
         tracing::info!("Received notification for tx {}: {}", i, notification);
         assert!(
             notification["Broadcast"].is_object(),
@@ -515,13 +488,9 @@ async fn test_many_transactions() {
             notification
         );
 
-        let message = timeout(Duration::from_secs(5), ws.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let notification: Value =
-            serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+        let message = next_message(&mut ws).await.unwrap();
+
+        let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
         tracing::info!("Received notification for tx {}: {}", i, notification);
         assert!(
             notification["NewBlock"].is_object(),
@@ -541,14 +510,12 @@ async fn test_many_transactions() {
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-
-    processor_handle.abort();
-    server_handle.abort();
 }
 
 #[test_log::test(tokio::test)]
 async fn test_concurrent_transactions() {
-    let (kolme, server_handle, addr) = setup("test_concurrent_transactions").await.unwrap();
+    let db_path = NamedTempFile::new().unwrap();
+    let (kolme, server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
 
@@ -557,17 +524,16 @@ async fn test_concurrent_transactions() {
     tracing::info!("Connected to WebSocket");
 
     processor.create_genesis_event().await.unwrap();
-    let processor_handle = tokio::spawn({
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
         let processor = Processor::new(kolme.clone(), secret.clone());
         async move { processor.run().await }
-    });
+    }));
 
-    let message = timeout(Duration::from_secs(5), ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: Value = serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+    let _server_handle = AbortOnDropHandle::new(server_handle);
+
+    let message = next_message(&mut ws).await.unwrap();
+
+    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received genesis notification: {}", notification);
     assert!(
         notification["NewBlock"].is_object(),
@@ -575,40 +541,46 @@ async fn test_concurrent_transactions() {
         notification
     );
 
-    let mut tasks = Vec::new();
-    let mut nonce = AccountNonce(1);
-    for i in 0..100 {
+    // Generate 100 secret keys and each one will receive a nonce from Kolme.
+    let mut rng = rand::rngs::ThreadRng::default();
+    let mut secrets = Vec::with_capacity(100);
+    for _ in 0..100 {
+        let secret = SecretKey::random(&mut rng);
+        secrets.push(secret);
+    }
+
+    let mut tasks = Vec::with_capacity(100);
+    for secret in secrets {
         let kolme_clone = kolme.clone();
-        let secret_clone = secret.clone();
-        let tx = Transaction {
-            pubkey: secret_clone.public_key(),
-            nonce,
-            created: jiff::Timestamp::now(),
-            messages: vec![Message::App(TestMessage::Increment)],
-        };
-        let signed_tx = tx.sign(&secret_clone).unwrap();
-        nonce = nonce.next();
 
         let task = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let read = kolme_clone.read().await;
+
+            let next_nonce = read
+                .get_account_and_next_nonce(secret.public_key())
+                .await
+                .unwrap()
+                .next_nonce;
+
+            let tx = Transaction {
+                pubkey: secret.public_key(),
+                nonce: next_nonce,
+                created: jiff::Timestamp::now(),
+                messages: vec![Message::App(TestMessage::Increment)],
+            };
+
+            let signed_tx = tx.sign(&secret).unwrap();
+
             kolme_clone.propose_transaction(signed_tx).unwrap();
-            tracing::info!("Proposed transaction {}", i);
         });
         tasks.push(task);
     }
 
-    for task in tasks {
-        task.await.unwrap();
-    }
+    join_all(tasks).await;
 
     for i in 0..200 {
-        let message = timeout(Duration::from_secs(5), ws.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let notification: Value =
-            serde_json::from_str(message.into_text().unwrap().as_str()).unwrap();
+        let message = next_message(&mut ws).await.unwrap();
+        let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
         tracing::info!("Received notification {}: {}", i, notification);
         assert!(
             notification["Broadcast"].is_object() || notification["NewBlock"].is_object(),
@@ -628,7 +600,4 @@ async fn test_concurrent_transactions() {
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-
-    processor_handle.abort();
-    server_handle.abort();
 }
