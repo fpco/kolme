@@ -10,7 +10,7 @@ impl<K: Clone, V: Clone> Clone for MerkleMap<K, V> {
 
 impl<K, V> MerkleMap<K, V> {
     pub fn new() -> Self {
-        MerkleMap(Node::Empty)
+        MerkleMap(Node::default())
     }
 
     pub fn is_empty(&self) -> bool {

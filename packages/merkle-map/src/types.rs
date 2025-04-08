@@ -4,10 +4,6 @@ pub use key_bytes::MerkleKey;
 
 pub(crate) use crate::impls::Lockable;
 
-use std::sync::{Arc, OnceLock};
-
-use shared::types::Sha256Hash;
-
 /// A base16 tree supporting sharing of subtrees and cheap hashing.
 ///
 /// Consider this as a replacement for a `BTreeMap`. Importantly,
@@ -25,16 +21,10 @@ pub(crate) struct LeafEntry<K, V> {
     pub(crate) value: V,
 }
 
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Node<K, V> {
-    #[default]
-    Empty,
     Leaf(Lockable<LeafContents<K, V>>),
     Tree(Lockable<TreeContents<K, V>>),
-    // FIXME
-    // Lazy {
-    //     hash: Sha256Hash,
-    // },
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]

@@ -7,7 +7,7 @@ impl<K, V> TreeContents<K, V> {
         Self {
             len: 0,
             leaf: None,
-            branches: std::array::from_fn(|_| Node::Empty),
+            branches: std::array::from_fn(|_| Node::default()),
         }
     }
 
@@ -28,7 +28,6 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         };
         let index = usize::from(index);
         let (branch, v) = std::mem::take(&mut self.branches[index]).insert(depth + 1, entry);
-        let branch = branch.into();
         self.branches[index] = branch;
         if v.is_none() {
             self.len += 1;
@@ -68,11 +67,18 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         // FIXME check if we need to go back to a leaf because we have few enough nodes
         let branch = std::mem::take(&mut self.branches[index]);
         let (branch, v) = branch.remove(depth + 1, key_bytes);
-        self.branches[index] = branch.into();
+        self.branches[index] = branch;
         if v.is_some() {
             self.len -= 1;
         }
-        (Node::Tree(Lockable::new_unlocked(self)), v)
+        let node = if self.len <= 16 {
+            let mut values = vec![];
+            self.drain_entries_to(&mut values);
+            Node::Leaf(Lockable::new_unlocked(LeafContents { values }))
+        } else {
+            Node::Tree(Lockable::new_unlocked(self))
+        };
+        (node, v)
     }
 
     pub(crate) fn drain_entries_to(self, entries: &mut Vec<LeafEntry<K, V>>) {
@@ -81,7 +87,6 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         }
         for branch in self.branches {
             match branch {
-                Node::Empty => (),
                 Node::Leaf(leaf) => leaf.into_inner().drain_entries_to(entries),
                 Node::Tree(tree) => tree.into_inner().drain_entries_to(entries),
             }
@@ -129,7 +134,7 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
             1 => Some(LeafEntry::deserialize(&mut deserializer)?),
             byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
         };
-        let mut branches = std::array::from_fn(|_| Node::Empty);
+        let mut branches = std::array::from_fn(|_| Node::default());
         for branch in &mut branches {
             let hash = Sha256Hash::deserialize(&mut deserializer)?;
             *branch = manager

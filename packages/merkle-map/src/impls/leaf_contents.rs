@@ -85,11 +85,7 @@ impl<K, V> LeafContents<K, V> {
                     key,
                     value,
                 } = self.values.remove(idx);
-                let node = if self.values.is_empty() {
-                    Node::Empty
-                } else {
-                    Node::Leaf(Lockable::new_unlocked(self))
-                };
+                let node = Node::Leaf(Lockable::new_unlocked(self));
                 (node, Some((key, value)))
             }
             None => (Node::Leaf(Lockable::new_unlocked(self)), None),

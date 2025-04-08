@@ -64,7 +64,6 @@ enum IterLayer<'a, K, V> {
 
 fn to_iter_layer<K, V>(node: &Node<K, V>) -> Option<IterLayer<K, V>> {
     match node {
-        Node::Empty => None,
         Node::Leaf(leaf) => Some(IterLayer::Leaf(&leaf.as_ref(), 0)),
         Node::Tree(tree) => Some(IterLayer::Tree(&tree.as_ref(), 0)),
     }
@@ -97,7 +96,6 @@ where
 {
     fn pop_first(&mut self) -> Option<(K, V)> {
         match self {
-            Node::Empty => None,
             Node::Leaf(leaf) => {
                 let leaf = leaf.as_mut();
                 if leaf.values.is_empty() {

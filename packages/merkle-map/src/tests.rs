@@ -4,7 +4,6 @@ impl<K, V> Node<K, V> {
     #[cfg(test)]
     pub(crate) fn sanity_checks(&self) {
         match self {
-            Node::Empty => (),
             Node::Leaf(leaf) => {
                 // FIXME validate hashes
                 leaf.as_ref().sanity_checks();
@@ -19,7 +18,6 @@ impl<K, V> Node<K, V> {
 
 impl<K, V> LeafContents<K, V> {
     pub(crate) fn sanity_checks(&self) {
-        assert!(!self.values.is_empty());
         assert!(self.values.len() <= 16);
         let mut prev = None;
         for entry in &self.values {
