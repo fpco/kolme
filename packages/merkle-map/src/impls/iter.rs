@@ -1,5 +1,26 @@
 use crate::*;
 
+impl<'a, K, V> IntoIterator for &'a Node<K, V> {
+    type Item = (&'a K, &'a V);
+
+    type IntoIter = Iter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter {
+            stack: match to_iter_layer(self) {
+                Some(layer) => vec![layer],
+                None => vec![],
+            },
+        }
+    }
+}
+
+impl<K, V> Node<K, V> {
+    pub(crate) fn iter(&self) -> Iter<K, V> {
+        self.into_iter()
+    }
+}
+
 impl<'a, K, V> IntoIterator for &'a MerkleMap<K, V> {
     type Item = (&'a K, &'a V);
 

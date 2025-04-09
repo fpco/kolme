@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::*;
 
 impl<K, V> Clone for Node<K, V> {
@@ -115,5 +117,19 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Node<K, V> {
             43 => Lockable::<TreeContents<K, V>>::deserialize(deserializer).map(Node::Tree),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
+    }
+}
+
+impl<K: Debug, V: Debug> Debug for Node<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{{")?;
+        for (idx, (k, v)) in self.iter().enumerate() {
+            if idx != 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{k:?}: {v:?}")?;
+        }
+        write!(f, "}}")?;
+        Ok(())
     }
 }

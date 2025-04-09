@@ -90,6 +90,8 @@ impl MerkleSerializer {
         child: &T,
     ) -> Result<(), MerkleSerialError> {
         let contents = self.manager.serialize(child)?;
-        contents.hash.serialize(self)
+        let hash = contents.hash;
+        self.children.push(contents);
+        hash.serialize(self)
     }
 }
