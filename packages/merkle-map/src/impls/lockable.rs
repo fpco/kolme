@@ -28,6 +28,17 @@ where
     }
 }
 
+impl<T: CanLock> CanLock for Lockable<T> {
+    fn lock(&self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError> {
+        if let Some(pair) = self.locked.get() {
+            return Ok(pair.clone());
+        }
+        let pair = self.inner.lock()?;
+        self.locked.set(pair.clone()).unwrap();
+        Ok(pair)
+    }
+}
+
 impl<T: PartialOrd> PartialOrd for Lockable<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.inner.partial_cmp(&other.inner)

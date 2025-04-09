@@ -124,16 +124,6 @@ impl<K, V> Default for MerkleMap<K, V> {
     }
 }
 
-impl<K, V: MerkleSerialize> MerkleSerializeComplete for MerkleMap<K, V> {
-    async fn serialize_complete<Store: MerkleStore>(
-        &mut self,
-        manager: &MerkleManager<Store>,
-    ) -> Result<shared::types::Sha256Hash, MerkleSerialError> {
-        todo!()
-        // self.0.serialize_complete(manager).await
-    }
-}
-
 impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{{")?;

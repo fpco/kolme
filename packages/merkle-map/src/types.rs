@@ -21,7 +21,7 @@ pub(crate) struct LeafEntry<K, V> {
     pub(crate) value: V,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Node<K, V> {
     Leaf(Lockable<LeafContents<K, V>>),
     Tree(Lockable<TreeContents<K, V>>),

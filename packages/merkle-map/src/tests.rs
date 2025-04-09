@@ -189,20 +189,23 @@ fn just_a() {
 }
 
 async fn memory_manager_helper(size: u32) {
-    let manager = MerkleManager::new(MerkleMemoryStore::default());
     let mut m = MerkleMap::new();
     for i in 0..size {
         m.insert(i, i * 2);
     }
-    let hash = manager.save(&mut m).await.unwrap();
 
-    let m2 = manager
-        .load(hash)
-        .await
-        .expect("Manager load failed")
-        .expect("Manager load returned None");
+    let mut store = MerkleMemoryStore::default();
+    let contents = merkle_serialize(&m).unwrap();
+    contents.save(&mut store).await.unwrap();
 
-    assert_eq!(m, m2);
+    todo!()
+    // let m2 = manager
+    //     .load(hash)
+    //     .await
+    //     .expect("Manager load failed")
+    //     .expect("Manager load returned None");
+
+    // assert_eq!(m, m2);
 }
 
 #[tokio::test]

@@ -111,26 +111,21 @@ impl<K, V> Default for LeafContents<K, V> {
     }
 }
 
-impl<K, V: MerkleSerialize> LeafContents<K, V> {
-    pub(crate) async fn lock<Store: MerkleStore>(
-        mut self,
-        manager: &MerkleManager<Store>,
-    ) -> Result<Lockable<LeafContents<K, V>>, MerkleSerialError> {
-        let mut serializer = manager.new_serializer();
+impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
+    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_byte(42);
         serializer.store_usize(self.values.len());
-        for entry in &mut self.values {
-            entry.serialize(&mut serializer).await?;
+        for entry in &self.values {
+            entry.serialize(serializer)?;
         }
-        let (hash, payload) = serializer.finish().await?;
 
-        Ok(Lockable::new_locked(hash, payload, self))
+        Ok(())
     }
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> LeafContents<K, V> {
-    pub(crate) fn load<D: MerkleDeserializer>(
-        mut deserializer: D,
+    pub(crate) fn load(
+        mut deserializer: MerkleDeserializer,
         hash: Sha256Hash,
         payload: Arc<[u8]>,
     ) -> Result<Lockable<LeafContents<K, V>>, MerkleSerialError> {
@@ -143,5 +138,17 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> LeafContents<K, V> {
         deserializer.finish()?;
 
         Ok(Lockable::new_locked(hash, payload, LeafContents { values }))
+    }
+}
+
+impl<K: ToMerkleKey, V: MerkleSerialize> CanLock for LeafContents<K, V> {
+    fn lock(&self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError> {
+        let mut serializer = MerkleSerializer::new();
+        serializer.store_byte(42);
+        serializer.store_usize(self.values.len());
+        for value in &self.values {
+            value.serialize(&mut serializer)?;
+        }
+        Ok(serializer.finish())
     }
 }

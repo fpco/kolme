@@ -1,5 +1,3 @@
-use shared::types::Sha256Hash;
-
 use crate::*;
 
 impl<K, V> TreeContents<K, V> {
@@ -94,61 +92,59 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
     }
 }
 
-impl<K, V: MerkleSerialize> TreeContents<K, V> {
-    pub(crate) async fn lock<Store: MerkleStore>(
-        mut self,
-        manager: &MerkleManager<Store>,
-    ) -> Result<Lockable<TreeContents<K, V>>, MerkleSerialError> {
-        let mut serializer = manager.new_serializer();
+impl<K: ToMerkleKey, V: MerkleSerialize> CanLock for TreeContents<K, V> {
+    fn lock(&self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError> {
+        let mut serializer = MerkleSerializer::new();
         serializer.store_byte(43);
         serializer.store_usize(self.len);
-        match &mut self.leaf {
+        match &self.leaf {
             Some(leaf) => {
                 serializer.store_byte(1);
-                leaf.serialize(&mut serializer).await?;
+                leaf.serialize(&mut serializer)?;
             }
             None => serializer.store_byte(0),
         }
-        for _branch in &mut self.branches {
-            serializer.new_serializer();
-            todo!()
-            // let mut hash = branch.serialize_complete(manager).await?;
-            // hash.serialize(&mut serializer).await?;
+        for branch in &self.branches {
+            let (hash, _payload) = match branch {
+                Node::Leaf(leaf) => leaf.lock()?,
+                Node::Tree(tree) => tree.lock()?,
+            };
+            hash.serialize(&mut serializer)?;
         }
-        let (hash, payload) = serializer.finish().await?;
-        Ok(Lockable::new_locked(hash, payload, self))
+        Ok(serializer.finish())
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
-    pub(crate) async fn load<Store: MerkleStore, D: MerkleDeserializer>(
-        mut deserializer: D,
-        hash: Sha256Hash,
-        payload: Arc<[u8]>,
-        manager: &MerkleManager<Store>,
-    ) -> Result<Lockable<TreeContents<K, V>>, MerkleSerialError> {
-        // Byte 43 already checked in caller
-        let len = deserializer.load_usize()?;
-        let leaf = match deserializer.pop_byte()? {
-            0 => None,
-            1 => Some(LeafEntry::deserialize(&mut deserializer)?),
-            byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
-        };
-        let mut branches = std::array::from_fn(|_| Node::default());
-        for branch in &mut branches {
-            let hash = Sha256Hash::deserialize(&mut deserializer)?;
-            *branch = manager
-                .load(hash)
-                .await?
-                .ok_or(MerkleSerialError::HashNotFound { hash })?
-                .0;
-        }
-        deserializer.finish()?;
-        let tree = TreeContents {
-            len,
-            leaf,
-            branches,
-        };
-        Ok(Lockable::new_locked(hash, payload, tree))
-    }
-}
+// FIXME
+// impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
+//     pub(crate) async fn load<Store: MerkleStore, D: MerkleDeserializer>(
+//         mut deserializer: D,
+//         hash: Sha256Hash,
+//         payload: Arc<[u8]>,
+//         manager: &MerkleManager<Store>,
+//     ) -> Result<Lockable<TreeContents<K, V>>, MerkleSerialError> {
+//         // Byte 43 already checked in caller
+//         let len = deserializer.load_usize()?;
+//         let leaf = match deserializer.pop_byte()? {
+//             0 => None,
+//             1 => Some(LeafEntry::deserialize(&mut deserializer)?),
+//             byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
+//         };
+//         let mut branches = std::array::from_fn(|_| Node::default());
+//         for branch in &mut branches {
+//             let hash = Sha256Hash::deserialize(&mut deserializer)?;
+//             *branch = manager
+//                 .load(hash)
+//                 .await?
+//                 .ok_or(MerkleSerialError::HashNotFound { hash })?
+//                 .0;
+//         }
+//         deserializer.finish()?;
+//         let tree = TreeContents {
+//             len,
+//             leaf,
+//             branches,
+//         };
+//         Ok(Lockable::new_locked(hash, payload, tree))
+//     }
+// }
