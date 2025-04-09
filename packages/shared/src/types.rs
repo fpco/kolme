@@ -87,3 +87,54 @@ mod cw_impls {
         }
     }
 }
+
+/// A binary value representing a SHA256 hash.
+#[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
+pub struct Sha256Hash([u8; 32]);
+
+#[derive(snafu::Snafu, Debug)]
+pub enum Sha256HashError {
+    #[snafu(display("Wrong byte count for a SHA256 hash. Expected 32, received {actual}."))]
+    WrongByteCount { actual: usize },
+}
+
+impl Sha256Hash {
+    #[cfg(feature = "realcryptography")]
+    pub fn hash(input: impl AsRef<[u8]>) -> Self {
+        Sha256Hash(<k256::sha2::Sha256 as k256::sha2::Digest>::digest(input.as_ref()).into())
+    }
+
+    pub fn from_hash(state: &[u8]) -> Result<Self, Sha256HashError> {
+        state
+            .try_into()
+            .map(Sha256Hash)
+            .map_err(|_| Sha256HashError::WrongByteCount {
+                actual: state.len(),
+            })
+    }
+
+    pub fn as_array(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn from_array(array: [u8; 32]) -> Self {
+        Sha256Hash(array)
+    }
+}
+
+#[cfg(feature = "realcryptography")]
+impl Display for Sha256Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(self.0.as_slice()))
+    }
+}
+
+#[cfg(feature = "realcryptography")]
+impl serde::Serialize for Sha256Hash {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&hex::encode(self.0.as_slice()))
+    }
+}

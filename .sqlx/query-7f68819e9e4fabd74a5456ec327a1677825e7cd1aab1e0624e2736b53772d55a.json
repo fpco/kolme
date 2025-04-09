@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM account_wallets WHERE account_id=$1 AND wallet=$2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7f68819e9e4fabd74a5456ec327a1677825e7cd1aab1e0624e2736b53772d55a"
+}

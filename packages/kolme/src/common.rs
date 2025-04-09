@@ -1,16 +1,8 @@
 /// Common helper functions and utilities.
-use std::{borrow::Cow, fmt::Display};
+use std::fmt::Display;
 
 use crate::*;
 
-use k256::{
-    elliptic_curve::generic_array::GenericArray,
-    sha2::{digest::OutputSizeUser, Digest, Sha256},
-};
-use sqlx::{
-    sqlite::{SqliteArgumentValue, SqliteValueRef},
-    Decode, Encode, Sqlite,
-};
 use tracing::Level;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -162,83 +154,6 @@ impl<'de, T: serde::de::DeserializeOwned> serde::Deserialize<'de> for TaggedJson
     }
 }
 
-/// A binary value representing a SHA256 hash.
-#[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
-pub struct Sha256Hash(pub GenericArray<u8, <Sha256 as OutputSizeUser>::OutputSize>);
-
-impl Sha256Hash {
-    pub fn hash(input: impl AsRef<[u8]>) -> Self {
-        Sha256Hash(Sha256::digest(input.as_ref()))
-    }
-
-    pub fn from_hash(state: &[u8]) -> Result<Self> {
-        // FIXME instead of hard-coding 32, use OutputSize correctly
-        if state.len() == 32 {
-            Ok(Sha256Hash(*GenericArray::from_slice(state)))
-        } else {
-            Err(anyhow::anyhow!(
-                "Sha256Hash::from_hash: wrong length of {}",
-                state.len()
-            ))
-        }
-    }
-}
-
-impl Display for Sha256Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(self.0.as_slice()))
-    }
-}
-
-impl serde::Serialize for Sha256Hash {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&hex::encode(self.0.as_slice()))
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Sha256Hash {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::Error;
-        let s = String::deserialize(deserializer)?;
-        let bytes = hex::decode(&s).map_err(D::Error::custom)?;
-        Sha256Hash::from_hash(&bytes).map_err(D::Error::custom)
-    }
-}
-
-impl sqlx::Type<sqlx::Sqlite> for Sha256Hash {
-    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
-        <&[u8] as sqlx::Type<Sqlite>>::type_info()
-    }
-
-    fn compatible(ty: &sqlx::sqlite::SqliteTypeInfo) -> bool {
-        <&[u8] as sqlx::Type<Sqlite>>::compatible(ty)
-    }
-}
-
-impl Encode<'_, sqlx::Sqlite> for Sha256Hash {
-    fn encode_by_ref(
-        &self,
-        args: &mut Vec<SqliteArgumentValue>,
-    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        args.push(SqliteArgumentValue::Blob(Cow::Owned(self.0.to_vec())));
-
-        Ok(sqlx::encode::IsNull::No)
-    }
-}
-
-impl Decode<'_, sqlx::Sqlite> for Sha256Hash {
-    fn decode(value: SqliteValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
-        let vec: Vec<u8> = Decode::<sqlx::Sqlite>::decode(value)?;
-        Sha256Hash::from_hash(&vec).map_err(Into::into)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -282,7 +197,7 @@ mod tests {
         let serialized = serde_json::to_string(&hash1).unwrap();
         let hash2 = serde_json::from_str(&serialized).unwrap();
         assert_eq!(hash1, hash2);
-        assert_eq!(Sha256Hash::from_hash(&hash1.0).unwrap(), hash1);
+        assert_eq!(Sha256Hash::from_array(*hash1.as_array()), hash1);
         Sha256Hash::from_hash(b"invalid input").unwrap_err();
     }
 
