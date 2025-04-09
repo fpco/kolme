@@ -3422,7 +3422,6 @@ name = "merkle-map"
 version = "0.1.0"
 dependencies = [
  "dashmap",
- "hex",
  "quickcheck",
  "rust_decimal",
  "serde",
