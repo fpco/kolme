@@ -36,33 +36,15 @@ pub enum ExternalChain {
     SolanaLocal,
 }
 
-#[derive(
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Clone,
-    Copy,
-    Hash,
-    Debug,
-)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub enum SolanaChain {
     Mainnet,
     Testnet,
     Devnet,
-    Local
+    Local,
 }
 
-#[derive(
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Clone,
-    Copy,
-    Hash,
-    Debug,
-)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub enum CosmosChain {
     OsmosisTestnet,
     NeutronTestnet,
@@ -78,7 +60,7 @@ pub enum ChainName {
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum ChainKind {
     Cosmos(CosmosChain),
-    Solana(SolanaChain)
+    Solana(SolanaChain),
 }
 
 impl CosmosChain {
@@ -669,7 +651,7 @@ impl ExecAction {
                 let payload = serde_json::to_string(&payload)?;
                 Ok(payload)
             }
-            ChainName::Solana => todo!()
+            ChainName::Solana => todo!(),
         }
     }
 }

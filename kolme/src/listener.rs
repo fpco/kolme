@@ -1,7 +1,7 @@
-use std::mem;
 use cosmos::Contract;
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
+use std::mem;
 use tokio::task::JoinSet;
 
 use crate::*;
@@ -94,12 +94,23 @@ impl<App: KolmeApp> Listener<App> {
                         ChainKind::Cosmos(chain) => {
                             let cosmos = kolme.get_cosmos(chain).await?;
 
-                            cosmos_listener::sanity_check_contract(&cosmos, &contract, expected_code_id, &App::genesis_info()).await
+                            cosmos_listener::sanity_check_contract(
+                                &cosmos,
+                                &contract,
+                                expected_code_id,
+                                &App::genesis_info(),
+                            )
+                            .await
                         }
                         ChainKind::Solana(chain) => {
                             let client = kolme.get_solana_client(chain).await;
 
-                            solana_listener::sanity_check_contract(&client, &contract, &App::genesis_info()).await
+                            solana_listener::sanity_check_contract(
+                                &client,
+                                &contract,
+                                &App::genesis_info(),
+                            )
+                            .await
                         }
                     };
 
@@ -146,8 +157,8 @@ impl<App: KolmeApp> Listener<App> {
 }
 
 mod cosmos_listener {
-    use cosmos::Cosmos;
     use super::*;
+    use cosmos::Cosmos;
 
     pub async fn listen<App: KolmeApp>(
         kolme: Kolme<App>,
@@ -193,7 +204,8 @@ mod cosmos_listener {
         {
             GetEventResp::Found { message } => {
                 let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
-                let message = to_kolme_message::<App::Message>(message, chain, *next_bridge_event_id);
+                let message =
+                    to_kolme_message::<App::Message>(message, chain, *next_bridge_event_id);
 
                 let signed = kolme
                     .read()
@@ -211,7 +223,12 @@ mod cosmos_listener {
         }
     }
 
-    pub async fn sanity_check_contract(cosmos: &Cosmos, contract: &str, expected_code_id: u64, info: &GenesisInfo) -> Result<()> {
+    pub async fn sanity_check_contract(
+        cosmos: &Cosmos,
+        contract: &str,
+        expected_code_id: u64,
+        info: &GenesisInfo,
+    ) -> Result<()> {
         let contract = cosmos.make_contract(contract.parse()?);
         let actual_code_id = contract.info().await?.code_id;
 
@@ -235,7 +252,11 @@ mod cosmos_listener {
         Ok(())
     }
 
-    fn to_kolme_message<T>(msg: BridgeEventMessage, chain: CosmosChain, event_id: BridgeEventId) -> Message<T> {
+    fn to_kolme_message<T>(
+        msg: BridgeEventMessage,
+        chain: CosmosChain,
+        event_id: BridgeEventId,
+    ) -> Message<T> {
         match msg {
             BridgeEventMessage::Regular {
                 wallet,
@@ -247,10 +268,7 @@ mod cosmos_listener {
 
                 for Coin { denom, amount } in funds {
                     let amount = amount.u128();
-                    new_funds.push(BridgedAssetAmount {
-                        denom,
-                        amount,
-                    });
+                    new_funds.push(BridgedAssetAmount { denom, amount });
                 }
 
                 for key in keys {
@@ -270,26 +288,22 @@ mod cosmos_listener {
             BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
                 chain: chain.into(),
                 event_id,
-                event: BridgeEvent::Signed {
-                    wallet,
-                    action_id,
-                },
+                event: BridgeEvent::Signed { wallet, action_id },
             },
         }
     }
 }
 
 mod solana_listener {
-    use std::{str::FromStr, ops::Deref};
+    use std::{ops::Deref, str::FromStr};
 
-    use solana_client::rpc_config::{RpcTransactionLogsFilter, RpcTransactionLogsConfig};
-    use kolme_solana_bridge_client::{
-        State as BridgeState, BridgeMessage, Message as ContractMessage,
-        solana_pubkey::Pubkey,
-    };
-    use borsh::de::BorshDeserialize;
-    use libp2p::futures::StreamExt;
     use base64::Engine;
+    use borsh::de::BorshDeserialize;
+    use kolme_solana_bridge_client::{
+        solana_pubkey::Pubkey, BridgeMessage, Message as ContractMessage, State as BridgeState,
+    };
+    use libp2p::futures::StreamExt;
+    use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
 
     use super::*;
 
@@ -310,7 +324,7 @@ mod solana_listener {
 
         let filter = RpcTransactionLogsFilter::Mentions(vec![contract.clone()]);
         let config = RpcTransactionLogsConfig {
-            commitment: None // Defaults to finalized
+            commitment: None, // Defaults to finalized
         };
 
         let (mut subscription, unsub) = client.logs_subscribe(filter, config).await?;
@@ -337,11 +351,20 @@ mod solana_listener {
                 let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
                 let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
 
-                let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes)
-                    .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge message from logs: {:?}", x))?;
+                let result =
+                    <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|x| {
+                        anyhow::anyhow!(
+                            "Error deserializing Solana bridge message from logs: {:?}",
+                            x
+                        )
+                    })?;
 
                 if next_bridge_event_id.0 != result.id {
-                    tracing::warn!("Received bridge message with ID {} but expected ID {}. Ignoring...", next_bridge_event_id.0, result.id);
+                    tracing::warn!(
+                        "Received bridge message with ID {} but expected ID {}. Ignoring...",
+                        next_bridge_event_id.0,
+                        result.id
+                    );
 
                     continue 'subscription_loop;
                 }
@@ -373,24 +396,34 @@ mod solana_listener {
         Ok(())
     }
 
-    pub async fn sanity_check_contract(client: &SolanaClient, program: &str, info: &GenesisInfo) -> Result<()> {
+    pub async fn sanity_check_contract(
+        client: &SolanaClient,
+        program: &str,
+        info: &GenesisInfo,
+    ) -> Result<()> {
         let program_id = Pubkey::from_str(program)?;
         let state_acc = kolme_solana_bridge_client::derive_state_pda(&program_id);
 
         let acc = client.get_account(&state_acc).await?;
 
         if acc.owner != program_id || acc.data.is_empty() {
-            return Err(anyhow::anyhow!("Bridge program {program} hasn't been initialized yet."));
+            return Err(anyhow::anyhow!(
+                "Bridge program {program} hasn't been initialized yet."
+            ));
         }
 
         let state = <BridgeState as BorshDeserialize>::try_from_slice(&acc.data)
             .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
 
-        anyhow::ensure!(info.processor.as_bytes().deref() == state.processor.to_sec1_bytes().as_slice());
+        anyhow::ensure!(
+            info.processor.as_bytes().deref() == state.processor.to_sec1_bytes().as_slice()
+        );
         anyhow::ensure!(info.approvers.len() == state.executors.len());
 
         for a in &state.executors {
-            anyhow::ensure!(info.approvers.contains(&PublicKey::try_from_bytes(a.to_sec1_bytes().as_slice())?));
+            anyhow::ensure!(info
+                .approvers
+                .contains(&PublicKey::try_from_bytes(a.to_sec1_bytes().as_slice())?));
         }
 
         anyhow::ensure!(info.needed_approvers == usize::from(state.needed_executors));
@@ -409,7 +442,7 @@ mod solana_listener {
                 for coin in funds {
                     new_funds.push(BridgedAssetAmount {
                         denom: Pubkey::new_from_array(coin.mint).to_string(),
-                        amount: coin.amount.into()
+                        amount: coin.amount.into(),
                     });
                 }
 
@@ -429,13 +462,13 @@ mod solana_listener {
             ContractMessage::Signed { action_id } => BridgeEvent::Signed {
                 wallet,
                 action_id: BridgeActionId(action_id.into()),
-            }
+            },
         };
 
         Message::Listener {
             chain: chain.into(),
             event_id,
-            event
+            event,
         }
     }
 }
