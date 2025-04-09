@@ -45,7 +45,7 @@ where
                 value,
             },
         );
-        self.0 = node.into();
+        self.0 = node;
         self.sanity_checks();
         v
     }
@@ -105,7 +105,7 @@ where
         self.sanity_checks();
         let node = std::mem::take(&mut self.0);
         let (node, v) = node.remove(0, key.to_merkle_key());
-        self.0 = node.into();
+        self.0 = node;
         self.sanity_checks();
         v
     }
@@ -135,5 +135,11 @@ impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
         }
         write!(f, "}}")?;
         Ok(())
+    }
+}
+
+impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for MerkleMap<K, V> {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        Node::deserialize(deserializer).map(MerkleMap)
     }
 }

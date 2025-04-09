@@ -1,6 +1,9 @@
 //! Helper types and functions for buffer reading and writing.
 
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
 use shared::types::Sha256Hash;
 
@@ -23,8 +26,10 @@ pub enum MerkleSerialError {
     TooMuchInput,
     #[error("Serialized content was invalid")]
     InvalidSerializedContent,
-    #[error("Hash not found in store: {hash}")]
-    HashNotFound { hash: shared::types::Sha256Hash },
+    #[error("Hashes not found in store: {hashes:?}")]
+    HashesNotFound {
+        hashes: Vec<shared::types::Sha256Hash>,
+    },
     #[error(transparent)]
     Custom(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -103,12 +108,54 @@ impl MerkleSerializeManager {
 /// Serialize a value to a set of hashes and payloads to include in storage.
 pub fn merkle_serialize<T: MerkleSerializeComplete>(
     value: &T,
-) -> Result<MerkleSerializeManager, MerkleSerialError> {
+) -> Result<(Sha256Hash, MerkleSerializeManager), MerkleSerialError> {
     let mut manager = MerkleSerializeManager {
         contents: VecDeque::new(),
     };
-    value.serialize_complete(&mut manager)?;
-    Ok(manager)
+    let hash = value.serialize_complete(&mut manager)?;
+    Ok((hash, manager))
+}
+
+/// Load data from the store and deserialize it.
+pub async fn merkle_load<Store: MerkleStore, T: MerkleDeserialize>(
+    store: &mut Store,
+    hash: Sha256Hash,
+) -> Result<T, MerkleSerialError> {
+    let mut extra_hashes = HashMap::new();
+    let payload = store
+        .load_merkle_by_hash(hash)
+        .await?
+        .ok_or_else(|| MerkleSerialError::HashesNotFound { hashes: vec![hash] })?;
+    extra_hashes.insert(hash, payload.clone());
+    let mut deserializer = MerkleDeserializer {
+        buff: payload.clone(),
+        pos: 0,
+        extra_hashes,
+        hash,
+    };
+    loop {
+        deserializer.pos = 0;
+        match T::deserialize(&mut deserializer) {
+            Ok(value) => break Ok(value),
+            Err(MerkleSerialError::HashesNotFound { hashes }) => {
+                let mut missing = vec![];
+                for hash in hashes {
+                    match store.load_merkle_by_hash(hash).await? {
+                        Some(payload) => {
+                            let old = deserializer.extra_hashes.insert(hash, payload);
+                            // Should this be an error instead of a panic?
+                            assert!(old.is_none());
+                        }
+                        None => missing.push(hash),
+                    }
+                }
+                if !missing.is_empty() {
+                    return Err(MerkleSerialError::HashesNotFound { hashes: missing });
+                }
+            }
+            Err(e) => break Err(e),
+        }
+    }
 }
 
 impl MerkleSerializer {
@@ -134,11 +181,6 @@ impl MerkleSerializer {
         let hash = Sha256Hash::hash(&buff);
         (hash, buff)
     }
-
-    // FIXME
-    // fn new_serializer(&self) -> Self {
-    //     self.manager.new_serializer()
-    // }
 
     /// Store the size of the buffer followed by the bytes.
     pub fn store_slice(&mut self, bytes: &[u8]) {
@@ -179,33 +221,26 @@ impl MerkleSerializer {
         self.store_slice(&bytes);
         Ok(())
     }
-
-    // Serialize the given value, store it in the Merkle store, and write the hash to the current serialization.
-    // #[allow(async_fn_in_trait)]
-    // async fn store_by_merkle_hash<T: MerkleSerializeComplete + ?Sized>(
-    //     &mut self,
-    //     t: &mut T,
-    // ) -> Result<(), MerkleSerialError> {
-    //     let mut hash = t.serialize_complete(self.get_manager()).await?;
-    //     hash.serialize(self).await?;
-    //     Ok(())
-    // }
-    // FIXME
-
-    // Create a fresh serializer for serializing a subcomponent.
-    // fn new_serializer(&self) -> Self
 }
 
 /// Provides context within a [MerkleDeserialize] impl for deserializing data.
-pub struct MerkleDeserializer<'a> {
-    pub(crate) buff: &'a [u8],
+pub struct MerkleDeserializer {
+    pub(crate) buff: Arc<[u8]>,
+    hash: Sha256Hash,
     pub(crate) pos: usize,
-    // // TODO we'll probably need this so we can add a helper method to MerkleDeserializer
-    // #[allow(dead_code)]
-    // pub(crate) manager: MerkleManager<Store>,
+    // TODO add some point start caching this across a Manager or something like that
+    extra_hashes: HashMap<Sha256Hash, Arc<[u8]>>,
 }
 
-impl<'a> MerkleDeserializer<'a> {
+impl MerkleDeserializer {
+    pub fn get_full_payload(&self) -> Arc<[u8]> {
+        self.buff.clone()
+    }
+
+    pub fn get_hash(&self) -> Sha256Hash {
+        self.hash
+    }
+
     /// Get the next byte in the stream.
     pub fn pop_byte(&mut self) -> Result<u8, MerkleSerialError> {
         let byte = *self
@@ -217,7 +252,7 @@ impl<'a> MerkleDeserializer<'a> {
     }
 
     /// Load up the given number of bytes.
-    pub fn load_raw_bytes(&mut self, len: usize) -> Result<&'a [u8], MerkleSerialError> {
+    pub fn load_raw_bytes(&mut self, len: usize) -> Result<&[u8], MerkleSerialError> {
         let end = self.pos + len;
         if end > self.buff.len() {
             Err(MerkleSerialError::InsufficientInput)
@@ -229,7 +264,7 @@ impl<'a> MerkleDeserializer<'a> {
     }
 
     /// Finish processing, ensuring that all input was consumed.
-    pub fn finish(self) -> Result<(), MerkleSerialError> {
+    pub fn finish(&self) -> Result<(), MerkleSerialError> {
         if self.buff.len() == self.pos {
             Ok(())
         } else {
@@ -266,22 +301,25 @@ impl<'a> MerkleDeserializer<'a> {
             }
         }
     }
+
+    /// Load and deserialize from already loaded extra hashes.
+    pub fn load<T: MerkleDeserialize>(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<Option<T>, MerkleSerialError> {
+        let Some(payload) = self.extra_hashes.get(&hash) else {
+            return Ok(None);
+        };
+        let mut deserializer = MerkleDeserializer {
+            buff: payload.clone(),
+            hash,
+            pos: 0,
+            // FIXME terribly inefficient! Fix with an Arc and maybe a DashMap
+            extra_hashes: self.extra_hashes.clone(),
+        };
+        T::deserialize(&mut deserializer).map(Some)
+    }
 }
-
-// FIXME
-
-//     pub(crate) fn load_hash<StoreError>(
-//         &mut self,
-//     ) -> Result<Sha256Hash, LoadMerkleMapError<StoreError>> {
-//         if self.pos + 32 <= self.buff.len() {
-//             let hash =
-//                 Sha256Hash::from_array(self.buff[self.pos..self.pos + 32].try_into().unwrap());
-//             self.pos += 32;
-//             Ok(hash)
-//         } else {
-//             Err(LoadMerkleMapError::InsufficientInput)
-//         }
-//     }
 
 #[cfg(test)]
 mod tests {
@@ -298,10 +336,13 @@ mod tests {
     async fn test_store_usize_inner(x: usize) -> bool {
         let mut serializer = MerkleSerializer { buff: vec![] };
         serializer.store_usize(x);
-        let (_hash, buff) = serializer.finish();
+        let (hash, buff) = serializer.finish();
+        let extra_hashes = HashMap::new();
         let mut deserializer = MerkleDeserializer {
-            buff: &buff,
+            buff,
+            hash,
             pos: 0,
+            extra_hashes,
         };
         let y = deserializer.load_usize().unwrap();
         assert_eq!(x, y);

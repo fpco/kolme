@@ -4,12 +4,12 @@ impl<T: MerkleSerialize> MerkleSerializeComplete for T {
     fn serialize_complete(
         &self,
         manager: &mut MerkleSerializeManager,
-    ) -> Result<(), MerkleSerialError> {
+    ) -> Result<Sha256Hash, MerkleSerialError> {
         let mut serializer = MerkleSerializer::new();
         self.serialize(&mut serializer)?;
         let (hash, payload) = serializer.finish();
         manager.add_contents(hash, payload, vec![]);
-        Ok(())
+        Ok(hash)
     }
 }
 
@@ -19,7 +19,7 @@ impl<K: ToMerkleKey + 'static, V: MerkleSerialize + 'static> MerkleSerializeComp
     fn serialize_complete(
         &self,
         manager: &mut MerkleSerializeManager,
-    ) -> Result<(), MerkleSerialError> {
+    ) -> Result<Sha256Hash, MerkleSerialError> {
         self.0.serialize_complete(manager)
     }
 }
@@ -30,11 +30,12 @@ impl<K: ToMerkleKey + 'static, V: MerkleSerialize + 'static> MerkleSerializeComp
     fn serialize_complete(
         &self,
         manager: &mut MerkleSerializeManager,
-    ) -> Result<(), MerkleSerialError> {
+    ) -> Result<Sha256Hash, MerkleSerialError> {
         match &self {
             Node::Leaf(leaf) => {
                 let (hash, payload) = leaf.lock()?;
                 manager.add_contents(hash, payload, vec![]);
+                Ok(hash)
             }
             Node::Tree(tree) => {
                 let (hash, payload) = tree.lock()?;
@@ -43,8 +44,8 @@ impl<K: ToMerkleKey + 'static, V: MerkleSerialize + 'static> MerkleSerializeComp
                     children.push(Box::new(branch.clone()));
                 }
                 manager.add_contents(hash, payload, children);
+                Ok(hash)
             }
         }
-        Ok(())
     }
 }

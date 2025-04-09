@@ -123,21 +123,21 @@ impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserialize> LeafContents<K, V> {
-    pub(crate) fn load(
-        mut deserializer: MerkleDeserializer,
-        hash: Sha256Hash,
-        payload: Arc<[u8]>,
-    ) -> Result<Lockable<LeafContents<K, V>>, MerkleSerialError> {
+impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<LeafContents<K, V>> {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
         // The 42 magic byte is handled in the calling function.
         let len = deserializer.load_usize()?;
         let mut values = Vec::with_capacity(len);
         for _ in 0..len {
-            values.push(LeafEntry::deserialize(&mut deserializer)?);
+            values.push(LeafEntry::deserialize(deserializer)?);
         }
         deserializer.finish()?;
 
-        Ok(Lockable::new_locked(hash, payload, LeafContents { values }))
+        Ok(Lockable::new_locked(
+            deserializer.get_hash(),
+            deserializer.get_full_payload(),
+            LeafContents { values },
+        ))
     }
 }
 

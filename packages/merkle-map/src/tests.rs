@@ -195,17 +195,12 @@ async fn memory_manager_helper(size: u32) {
     }
 
     let mut store = MerkleMemoryStore::default();
-    let contents = merkle_serialize(&m).unwrap();
+    let (hash, contents) = merkle_serialize(&m).unwrap();
     contents.save(&mut store).await.unwrap();
 
-    todo!()
-    // let m2 = manager
-    //     .load(hash)
-    //     .await
-    //     .expect("Manager load failed")
-    //     .expect("Manager load returned None");
+    let m2 = merkle_load(&mut store, hash).await.unwrap();
 
-    // assert_eq!(m, m2);
+    assert_eq!(m, m2);
 }
 
 #[tokio::test]

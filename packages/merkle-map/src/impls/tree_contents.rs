@@ -62,7 +62,6 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
             .get_index_for_depth(depth)
             .expect("Impossible: TreeContents::remove without sufficient bytes");
         let index = usize::from(index);
-        // FIXME check if we need to go back to a leaf because we have few enough nodes
         let branch = std::mem::take(&mut self.branches[index]);
         let (branch, v) = branch.remove(depth + 1, key_bytes);
         self.branches[index] = branch;
@@ -115,36 +114,37 @@ impl<K: ToMerkleKey, V: MerkleSerialize> CanLock for TreeContents<K, V> {
     }
 }
 
-// FIXME
-// impl<K: FromMerkleKey, V: MerkleDeserialize> TreeContents<K, V> {
-//     pub(crate) async fn load<Store: MerkleStore, D: MerkleDeserializer>(
-//         mut deserializer: D,
-//         hash: Sha256Hash,
-//         payload: Arc<[u8]>,
-//         manager: &MerkleManager<Store>,
-//     ) -> Result<Lockable<TreeContents<K, V>>, MerkleSerialError> {
-//         // Byte 43 already checked in caller
-//         let len = deserializer.load_usize()?;
-//         let leaf = match deserializer.pop_byte()? {
-//             0 => None,
-//             1 => Some(LeafEntry::deserialize(&mut deserializer)?),
-//             byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
-//         };
-//         let mut branches = std::array::from_fn(|_| Node::default());
-//         for branch in &mut branches {
-//             let hash = Sha256Hash::deserialize(&mut deserializer)?;
-//             *branch = manager
-//                 .load(hash)
-//                 .await?
-//                 .ok_or(MerkleSerialError::HashNotFound { hash })?
-//                 .0;
-//         }
-//         deserializer.finish()?;
-//         let tree = TreeContents {
-//             len,
-//             leaf,
-//             branches,
-//         };
-//         Ok(Lockable::new_locked(hash, payload, tree))
-//     }
-// }
+impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<TreeContents<K, V>> {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        // Byte 43 already checked in caller
+        let len = deserializer.load_usize()?;
+        let leaf = match deserializer.pop_byte()? {
+            0 => None,
+            1 => Some(LeafEntry::deserialize(deserializer)?),
+            byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
+        };
+        let mut branches = std::array::from_fn(|_| Node::default());
+        let mut missing = vec![];
+        for branch in &mut branches {
+            let hash = Sha256Hash::deserialize(deserializer)?;
+            match deserializer.load(hash)? {
+                Some(value) => *branch = value,
+                None => missing.push(hash),
+            }
+        }
+        if !missing.is_empty() {
+            return Err(MerkleSerialError::HashesNotFound { hashes: missing });
+        }
+        deserializer.finish()?;
+        let tree = TreeContents {
+            len,
+            leaf,
+            branches,
+        };
+        Ok(Lockable::new_locked(
+            deserializer.get_hash(),
+            deserializer.get_full_payload(),
+            tree,
+        ))
+    }
+}

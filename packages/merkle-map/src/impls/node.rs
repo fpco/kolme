@@ -1,5 +1,3 @@
-use shared::types::Sha256Hash;
-
 use crate::*;
 
 impl<K, V> Clone for Node<K, V> {
@@ -71,24 +69,12 @@ impl<K: Clone, V: Clone> Node<K, V> {
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserialize> Node<K, V> {
-    pub(crate) async fn load<Store: MerkleStore>(
-        hash: Sha256Hash,
-        payload: Arc<[u8]>,
-        store: &mut Store,
-    ) -> Result<Node<K, V>, MerkleSerialError> {
-        if payload.len() == 0 {
-            return Err(MerkleSerialError::InsufficientInput);
+impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Node<K, V> {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        match deserializer.pop_byte()? {
+            42 => Lockable::<LeafContents<K, V>>::deserialize(deserializer).map(Node::Leaf),
+            43 => Lockable::<TreeContents<K, V>>::deserialize(deserializer).map(Node::Tree),
+            byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
-        todo!()
-        // let mut deserializer = manager.new_deserializer(&payload);
-
-        // match deserializer.pop_byte()? {
-        //     42 => LeafContents::load(deserializer, hash, payload.clone()).map(Node::Leaf),
-        //     43 => TreeContents::load(deserializer, hash, payload.clone(), manager)
-        //         .await
-        //         .map(Node::Tree),
-        //     byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
-        // }
     }
 }

@@ -34,7 +34,7 @@ pub trait MerkleSerializeComplete {
     fn serialize_complete(
         &self,
         manager: &mut MerkleSerializeManager,
-    ) -> Result<(), MerkleSerialError>;
+    ) -> Result<Sha256Hash, MerkleSerialError>;
 }
 
 /// A value that can be deserialized back into a [MerkleMap] value.
