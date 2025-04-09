@@ -10,8 +10,8 @@ fmt:
 lint: fmt check clippy
 
 test:
-    cargo sqlx database reset -y --source kolme/migrations
-    cargo sqlx migrate run --source kolme/migrations
+    cargo sqlx database reset -y --source packages/kolme/migrations
+    cargo sqlx migrate run --source packages/kolme/migrations
     cargo sqlx prepare --workspace
     cargo test
 

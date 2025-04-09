@@ -176,7 +176,7 @@ fn change_balance(
                 *asset_id,
                 ExternalChain::OsmosisLocal,
                 *account,
-                &withdraw_wallet,
+                withdraw_wallet,
                 *amount,
             )
         }
