@@ -153,6 +153,18 @@ impl Display for AssetId {
     }
 }
 
+impl MerkleSerialize for AssetId {
+    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for AssetId {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        MerkleDeserialize::deserialize(deserializer).map(Self)
+    }
+}
+
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug,
 )]

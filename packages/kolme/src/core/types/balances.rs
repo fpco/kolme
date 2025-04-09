@@ -100,12 +100,18 @@ impl Balances {
     }
 }
 
-impl MerkleSerializeComplete for Balances {
-    async fn serialize_complete<Store: MerkleStore>(
-        &mut self,
-        manager: &MerkleManager<Store>,
-    ) -> std::result::Result<Sha256Hash, MerkleSerialError> {
-        self.0.serialize_complete(manager).await
+impl MerkleSerialize for Balances {
+    fn serialize(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for Balances {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        MerkleDeserialize::deserialize(deserializer).map(Self)
     }
 }
 

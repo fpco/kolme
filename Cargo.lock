@@ -3424,6 +3424,7 @@ dependencies = [
  "dashmap",
  "hex",
  "quickcheck",
+ "rust_decimal",
  "serde",
  "serde_json",
  "shared",

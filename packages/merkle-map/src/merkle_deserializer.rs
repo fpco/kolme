@@ -99,10 +99,24 @@ impl MerkleDeserializer {
         }
     }
 
-    pub fn load_by_hash<T: MerkleDeserialize>(
+    pub(crate) fn load_by_hash_optional<T: MerkleDeserialize>(
         &mut self,
         hash: Sha256Hash,
     ) -> Result<Option<T>, MerkleSerialError> {
         self.manager.deserialize_cached(hash)
+    }
+
+    pub fn load_by_hash<T: MerkleDeserialize>(&mut self) -> Result<T, MerkleSerialError> {
+        let hash = Sha256Hash::deserialize(self)?;
+        match self.manager.deserialize_cached(hash) {
+            Err(e) => Err(e),
+            Ok(Some(x)) => Ok(x),
+            Ok(None) => Err(MerkleSerialError::HashesNotFound { hashes: vec![hash] }),
+        }
+    }
+
+    pub fn load_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, MerkleSerialError> {
+        let bytes = self.load_bytes()?;
+        serde_json::from_slice(bytes).map_err(MerkleSerialError::custom)
     }
 }

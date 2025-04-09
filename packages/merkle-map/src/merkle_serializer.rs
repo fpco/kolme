@@ -28,6 +28,11 @@ impl MerkleSerializer {
         self.buff.extend_from_slice(bytes);
     }
 
+    /// Store an array as raw bytes.
+    pub fn store_array<const N: usize>(&mut self, array: [u8; N]) {
+        self.store_raw_bytes(&array);
+    }
+
     /// Finish generating the output and return the completed buffer.
     pub(crate) fn finish(self) -> MerkleContents {
         let MerkleSerializer {
@@ -85,7 +90,7 @@ impl MerkleSerializer {
     }
 
     /// Serialize as a new top level stored value and then store the hash in the current serialization.
-    pub(crate) fn store_by_hash<T: MerkleSerialize>(
+    pub fn store_by_hash<T: MerkleSerialize>(
         &mut self,
         child: &T,
     ) -> Result<(), MerkleSerialError> {

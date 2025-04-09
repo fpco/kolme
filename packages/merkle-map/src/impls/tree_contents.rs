@@ -125,7 +125,7 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Tree
         let mut missing = vec![];
         for branch in &mut branches {
             let hash = Sha256Hash::deserialize(deserializer)?;
-            match deserializer.load_by_hash(hash)? {
+            match deserializer.load_by_hash_optional(hash)? {
                 Some(value) => *branch = value,
                 None => missing.push(hash),
             }

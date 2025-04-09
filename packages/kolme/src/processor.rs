@@ -93,7 +93,7 @@ impl<App: KolmeApp> Processor<App> {
             db_updates: _,
         } = kolme.execute_transaction(&tx, None).await?;
 
-        let framework_state = Sha256Hash::hash(serde_json::to_string(&framework_state)?);
+        let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
         let app_state = Sha256Hash::hash(&App::save_state(&app_state)?);
 
         let approved_block = Block {
