@@ -8,14 +8,14 @@ use crate::*;
 pub struct MerkleMemoryStore(Arc<RwLock<HashMap<Sha256Hash, Arc<[u8]>>>>);
 
 impl MerkleStore for MerkleMemoryStore {
-    async fn load_merkle_by_hash(
+    async fn load_by_hash(
         &mut self,
         hash: Sha256Hash,
     ) -> Result<Option<Arc<[u8]>>, MerkleSerialError> {
         Ok(self.0.read().unwrap().get(&hash).map(|x| x.clone()))
     }
 
-    async fn save_merkle_by_hash(
+    async fn save_by_hash(
         &mut self,
         hash: Sha256Hash,
         payload: &[u8],

@@ -3,7 +3,7 @@ use merkle_map::{MerkleSerialError, MerkleStore};
 pub(crate) struct MerkleDbStore<'a>(pub(crate) &'a sqlx::SqlitePool);
 
 impl<'a> MerkleStore for MerkleDbStore<'a> {
-    async fn load_merkle_by_hash(
+    async fn load_by_hash(
         &self,
         hash: shared::types::Sha256Hash,
     ) -> Result<Option<std::sync::Arc<[u8]>>, merkle_map::MerkleSerialError> {
@@ -14,7 +14,7 @@ impl<'a> MerkleStore for MerkleDbStore<'a> {
             .map_err(MerkleSerialError::custom)
     }
 
-    async fn save_merkle_by_hash(
+    async fn save_by_hash(
         &self,
         hash: shared::types::Sha256Hash,
         payload: &[u8],

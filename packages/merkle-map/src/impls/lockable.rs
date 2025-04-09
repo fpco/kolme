@@ -1,11 +1,9 @@
 use std::sync::OnceLock;
 
-use shared::types::Sha256Hash;
-
 use crate::*;
 
 pub(crate) struct Lockable<T> {
-    locked: Arc<OnceLock<(Sha256Hash, Arc<[u8]>)>>,
+    locked: Arc<OnceLock<Arc<MerkleContents>>>,
     inner: Arc<T>,
 }
 
@@ -28,14 +26,17 @@ where
     }
 }
 
-impl<T: CanLock> CanLock for Lockable<T> {
-    fn lock(&self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError> {
-        if let Some(pair) = self.locked.get() {
-            return Ok(pair.clone());
-        }
-        let pair = self.inner.lock()?;
-        self.locked.set(pair.clone()).unwrap();
-        Ok(pair)
+impl<T: MerkleSerialize> MerkleSerialize for Lockable<T> {
+    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.inner.serialize(serializer)
+    }
+
+    fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
+        self.locked.get().cloned()
+    }
+
+    fn set_merkle_contents(&self, contents: Arc<MerkleContents>) {
+        self.locked.set(contents).ok();
     }
 }
 
@@ -78,15 +79,6 @@ impl<T> Lockable<T> {
     pub(crate) fn new_unlocked(inner: T) -> Self {
         Lockable {
             locked: Arc::new(OnceLock::new()),
-            inner: Arc::new(inner),
-        }
-    }
-
-    pub(crate) fn new_locked(hash: Sha256Hash, payload: Arc<[u8]>, inner: T) -> Self {
-        let locked = OnceLock::new();
-        locked.set((hash, payload)).unwrap();
-        Lockable {
-            locked: Arc::new(locked),
             inner: Arc::new(inner),
         }
     }

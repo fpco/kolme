@@ -14,6 +14,12 @@ impl MerkleDeserialize for u32 {
     }
 }
 
+impl MerkleDeserialize for usize {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        deserializer.load_usize()
+    }
+}
+
 impl MerkleDeserialize for Sha256Hash {
     fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(Sha256Hash::from_array)

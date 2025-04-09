@@ -1,5 +1,3 @@
-use shared::types::Sha256Hash;
-
 use crate::*;
 
 impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
@@ -125,30 +123,24 @@ impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<LeafContents<K, V>> {
     fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
-        // The 42 magic byte is handled in the calling function.
+        let magic_byte = deserializer.pop_byte()?;
+        if magic_byte != 42 {
+            return Err(MerkleSerialError::UnexpectedMagicByte { byte: magic_byte });
+        }
         let len = deserializer.load_usize()?;
         let mut values = Vec::with_capacity(len);
         for _ in 0..len {
             values.push(LeafEntry::deserialize(deserializer)?);
         }
-        deserializer.finish()?;
 
-        Ok(Lockable::new_locked(
-            deserializer.get_hash(),
-            deserializer.get_full_payload(),
-            LeafContents { values },
-        ))
-    }
-}
-
-impl<K: ToMerkleKey, V: MerkleSerialize> CanLock for LeafContents<K, V> {
-    fn lock(&self) -> Result<(Sha256Hash, Arc<[u8]>), MerkleSerialError> {
-        let mut serializer = MerkleSerializer::new();
-        serializer.store_byte(42);
-        serializer.store_usize(self.values.len());
-        for value in &self.values {
-            value.serialize(&mut serializer)?;
-        }
-        Ok(serializer.finish())
+        Ok(Lockable::new_unlocked(LeafContents { values })) // FIXME
+                                                            // Ok(Lockable::new_locked(
+                                                            //     MerkleContents {
+                                                            //         hash: deserializer.get_hash(),
+                                                            //         payload: deserializer.get_full_payload(),
+                                                            //         children: (),
+                                                            //     },
+                                                            //     LeafContents { values },
+                                                            // ))
     }
 }

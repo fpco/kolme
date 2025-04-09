@@ -195,10 +195,10 @@ async fn memory_manager_helper(size: u32) {
     }
 
     let mut store = MerkleMemoryStore::default();
-    let (hash, contents) = merkle_serialize(&m).unwrap();
-    contents.save(&mut store).await.unwrap();
+    let manager = MerkleManager::default();
+    let contents = manager.save(&mut store, &m).await.unwrap();
 
-    let m2 = merkle_load(&mut store, hash).await.unwrap();
+    let m2 = manager.load(&mut store, contents.hash).await.unwrap();
 
     assert_eq!(m, m2);
 }
@@ -224,6 +224,33 @@ async fn memory_manager_10() {
 }
 
 #[tokio::test]
+async fn memory_manager_16() {
+    memory_manager_helper(16).await
+}
+
+#[tokio::test]
+async fn memory_manager_17() {
+    memory_manager_helper(17).await
+}
+
+#[tokio::test]
 async fn memory_manager_1000() {
     memory_manager_helper(1000).await
+}
+
+quickcheck::quickcheck! {
+    fn test_store_usize(x: usize) -> bool {
+        test_store_usize_inner(x)
+    }
+}
+
+#[tokio::main]
+async fn test_store_usize_inner(x: usize) -> bool {
+    let manager = MerkleManager::default();
+    let contents = manager.serialize(&x).unwrap();
+    let y = manager
+        .deserialize::<usize>(contents.hash, contents.payload.clone())
+        .unwrap();
+    assert_eq!(x, y);
+    true
 }

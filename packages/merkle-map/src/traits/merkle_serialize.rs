@@ -16,6 +16,13 @@ impl MerkleSerialize for u32 {
     }
 }
 
+impl MerkleSerialize for usize {
+    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_usize(*self);
+        Ok(())
+    }
+}
+
 impl MerkleSerialize for String {
     fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_slice(self.as_bytes());

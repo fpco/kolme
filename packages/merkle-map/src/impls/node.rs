@@ -69,9 +69,48 @@ impl<K: Clone, V: Clone> Node<K, V> {
     }
 }
 
+impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for Node<K, V> {
+    fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
+        match self {
+            Node::Leaf(leaf) => leaf.get_merkle_contents(),
+            Node::Tree(tree) => tree.get_merkle_contents(),
+        }
+    }
+
+    fn set_merkle_contents(&self, contents: Arc<MerkleContents>) {
+        match self {
+            Node::Leaf(leaf) => leaf.set_merkle_contents(contents),
+            Node::Tree(tree) => tree.set_merkle_contents(contents),
+        }
+    }
+
+    fn serialize(&self, manager: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        match self {
+            Node::Leaf(leaf) => leaf.serialize(manager),
+            Node::Tree(tree) => tree.serialize(manager),
+        }
+        // match &self {
+        //     Node::Leaf(leaf) => {
+        //         let (hash, payload) = leaf.lock()?;
+        //         manager.add_contents(hash, payload, vec![]);
+        //         Ok(hash)
+        //     }
+        //     Node::Tree(tree) => {
+        //         let (hash, payload) = tree.lock()?;
+        //         let mut children: Vec<Box<dyn MerkleSerializeComplete>> = vec![];
+        //         for branch in &tree.as_ref().branches {
+        //             children.push(Box::new(branch.clone()));
+        //         }
+        //         manager.add_contents(hash, payload, children);
+        //         Ok(hash)
+        //     }
+        // }
+    }
+}
+
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Node<K, V> {
     fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
-        match deserializer.pop_byte()? {
+        match deserializer.peek_byte()? {
             42 => Lockable::<LeafContents<K, V>>::deserialize(deserializer).map(Node::Leaf),
             43 => Lockable::<TreeContents<K, V>>::deserialize(deserializer).map(Node::Tree),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
