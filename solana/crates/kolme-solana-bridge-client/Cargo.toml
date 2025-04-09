@@ -1,0 +1,21 @@
+[package]
+name = "kolme-solana-bridge-client"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
+
+[features]
+default = []
+client = [
+    "dep:solana-transaction", "dep:solana-pubkey", "dep:solana-message",
+    "dep:solana-instruction", "dep:solana-hash"
+]
+
+[dependencies]
+borsh = { version = "1.5.5", default-features = false, features = ["derive"] }
+solana-transaction = { version = "2.2", optional = true }
+solana-pubkey = { version = "2.2", default-features = false, features = ["std", "curve25519"], optional = true }
+solana-message = { version = "2.2", optional = true }
+solana-instruction = { version = "2.2", optional = true }
+solana-hash = { version = "2.2", optional = true }

@@ -16,11 +16,13 @@ use borsh::BorshSerialize;
 use k256::{ecdsa, elliptic_curve::rand_core::OsRng};
 use sha_256::Sha256;
 
-use crate::{
+use kolme_solana_bridge_client::{
     InitializeIxData, RegularMsgIxData, SignedMsgIxData, Payload,
     Secp256k1Pubkey, Secp256k1Signature, Signature, InstructionAccount,
-    SignedIxError, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED
+    INITIALIZE_IX, REGULAR_IX, SIGNED_IX
 };
+
+use crate::{SignedIxError, TOKEN_HOLDER_SEED};
 
 const KEYS_LEN: usize = 5;
 const PROCESSOR_KEY: usize = 0;
@@ -68,6 +70,7 @@ impl Program {
 
     fn init_default(&mut self, sender: &Keypair) -> TransactionResult {
         let mut executors = Vec::with_capacity(KEYS_LEN - 1);
+
         for i in 1..KEYS_LEN {
             executors.push(Secp256k1Pubkey(self.keys[i].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()));
         }
@@ -229,7 +232,7 @@ impl Program {
     }
 }
 
-fn transfer_payload(id: u32, from: Pubkey, to: Pubkey, authority: Pubkey, amount: u64) -> (Payload, [AccountMeta; 3]) {
+fn transfer_payload(id: u64, from: Pubkey, to: Pubkey, authority: Pubkey, amount: u64) -> (Payload, [AccountMeta; 3]) {
     let account_metas: [AccountMeta; 3] = [
         AccountMeta::new(from, false),
         AccountMeta::new(to, false),

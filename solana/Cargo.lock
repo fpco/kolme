@@ -1535,6 +1535,7 @@ version = "0.1.0"
 dependencies = [
  "borsh 1.5.6",
  "k256",
+ "kolme-solana-bridge-client",
  "litesvm",
  "litesvm-token",
  "pinocchio-pubkey",
@@ -1550,6 +1551,18 @@ dependencies = [
  "solana-transaction-error",
  "solbox",
  "spl-associated-token-account-client",
+]
+
+[[package]]
+name = "kolme-solana-bridge-client"
+version = "0.1.0"
+dependencies = [
+ "borsh 1.5.6",
+ "solana-hash",
+ "solana-instruction",
+ "solana-message",
+ "solana-pubkey",
+ "solana-transaction",
 ]
 
 [[package]]

@@ -267,7 +267,7 @@ async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(listener.run());
+    set.spawn(listener.run(ChainName::Cosmos));
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
     let submitter = Submitter::new(

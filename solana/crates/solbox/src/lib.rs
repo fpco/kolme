@@ -1,4 +1,3 @@
-pub use borsh;
 pub use pinocchio;
 pub use pinocchio_system as system;
 pub use pinocchio_token as token;

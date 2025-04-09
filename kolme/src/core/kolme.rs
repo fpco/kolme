@@ -150,7 +150,8 @@ pub struct KolmeInner<App: KolmeApp> {
     pub(super) app_state: App::State,
     pub(super) next_height: BlockHeight,
     pub(super) current_block_hash: BlockHash,
-    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<ExternalChain, cosmos::Cosmos>>,
+    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
+    pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
     // TODO Intended only for dev-time, we should either remove in the future
     // or gate with feature flags/optimization flags.
     pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
@@ -191,6 +192,7 @@ impl<App: KolmeApp> Kolme<App> {
             next_height,
             current_block_hash,
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
+            solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             deadlock_detector: Default::default(),
         };
         Ok(Kolme {
@@ -235,17 +237,35 @@ impl<App: KolmeApp> Kolme<App> {
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
-    pub async fn get_cosmos(&self, chain: ExternalChain) -> Result<cosmos::Cosmos> {
+    pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
         }
+
         let mut guard = self.cosmos_conns.write().await;
         match guard.get(&chain) {
             Some(cosmos) => Ok(cosmos.clone()),
             None => {
-                let cosmos = chain.make_cosmos().await?;
+                let cosmos = chain.make_client().await?;
                 guard.insert(chain, cosmos.clone());
                 Ok(cosmos)
+            }
+        }
+    }
+
+    pub async fn get_solana_client(&self, chain: SolanaChain) -> Arc<SolanaClient> {
+        if let Some(client) = self.solana_conns.read().await.get(&chain) {
+            return client.clone();
+        }
+
+        let mut guard = self.solana_conns.write().await;
+        match guard.get(&chain) {
+            Some(client) => Arc::clone(&client),
+            None => {
+                let client = Arc::new(chain.make_client());
+                guard.insert(chain, Arc::clone(&client));
+
+                client
             }
         }
     }

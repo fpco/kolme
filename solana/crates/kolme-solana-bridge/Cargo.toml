@@ -18,8 +18,9 @@ default = []
 
 [dependencies]
 pinocchio-pubkey = "0.2.4"
-borsh = { version = "1.5.5", default-features = false, features = ["derive"] }
+borsh = { version = "1.5.5", default-features = false }
 solbox = { path = "../solbox" }
+kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client" }
 
 [dev-dependencies]
 litesvm = "0.6.0"

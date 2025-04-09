@@ -9,6 +9,9 @@ use crate::*;
 
 pub use balances::{Balances, BalancesError};
 
+pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
+pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;
+
 #[derive(
     serde::Serialize,
     serde::Deserialize,
@@ -27,16 +30,157 @@ pub enum ExternalChain {
     OsmosisTestnet,
     NeutronTestnet,
     OsmosisLocal,
+    SolanaMainnet,
+    SolanaTestnet,
+    SolanaDevnet,
+    SolanaLocal,
+}
+
+#[derive(
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Hash,
+    Debug,
+)]
+pub enum SolanaChain {
+    Mainnet,
+    Testnet,
+    Devnet,
+    Local
+}
+
+#[derive(
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Hash,
+    Debug,
+)]
+pub enum CosmosChain {
+    OsmosisTestnet,
+    NeutronTestnet,
+    OsmosisLocal,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum ChainName {
+    Cosmos,
+    Solana,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum ChainKind {
+    Cosmos(CosmosChain),
+    Solana(SolanaChain)
+}
+
+impl CosmosChain {
+    pub const fn name() -> ChainName {
+        ChainName::Cosmos
+    }
+
+    pub async fn make_client(self) -> Result<cosmos::Cosmos> {
+        let network = match self {
+            Self::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
+            Self::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
+            Self::OsmosisLocal => cosmos::CosmosNetwork::OsmosisLocal,
+        };
+
+        Ok(network.builder_with_config().await?.build()?)
+    }
+}
+
+impl SolanaChain {
+    pub const fn name() -> ChainName {
+        ChainName::Solana
+    }
+
+    pub fn make_client(self) -> SolanaClient {
+        let url = match self {
+            Self::Mainnet => "https://api.mainnet-beta.solana.com",
+            Self::Testnet => "https://api.testnet.solana.com",
+            Self::Devnet => "https://api.devnet.solana.com",
+            Self::Local => "http://localhost:8899",
+        };
+
+        SolanaClient::new(url.into())
+    }
+
+    // TODO: We should have a way to configure those endpoints - the public ones are not suitable for production use.
+    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
+        let url = match self {
+            Self::Mainnet => "wss://api.mainnet-beta.solana.com",
+            Self::Testnet => "wss://api.testnet.solana.com",
+            Self::Devnet => "wss://api.devnet.solana.com/",
+            Self::Local => "ws://localhost:8900",
+        };
+
+        Ok(SolanaPubsubClient::new(url.into()).await?)
+    }
 }
 
 impl ExternalChain {
-    pub async fn make_cosmos(self) -> Result<cosmos::Cosmos> {
-        let network = match self {
-            ExternalChain::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
-            ExternalChain::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
-            ExternalChain::OsmosisLocal => cosmos::CosmosNetwork::OsmosisLocal,
-        };
-        Ok(network.builder_with_config().await?.build()?)
+    pub fn name(self) -> ChainName {
+        match ChainKind::from(self) {
+            ChainKind::Cosmos(_) => CosmosChain::name(),
+            ChainKind::Solana(_) => SolanaChain::name(),
+        }
+    }
+
+    pub fn to_cosmos_chain(self) -> Option<CosmosChain> {
+        match ChainKind::from(self) {
+            ChainKind::Cosmos(chain) => Some(chain),
+            ChainKind::Solana(_) => None,
+        }
+    }
+
+    pub fn to_solana_chain(self) -> Option<SolanaChain> {
+        match ChainKind::from(self) {
+            ChainKind::Cosmos(_) => None,
+            ChainKind::Solana(chain) => Some(chain),
+        }
+    }
+}
+
+impl From<CosmosChain> for ExternalChain {
+    fn from(c: CosmosChain) -> ExternalChain {
+        match c {
+            CosmosChain::OsmosisTestnet => ExternalChain::OsmosisTestnet,
+            CosmosChain::NeutronTestnet => ExternalChain::NeutronTestnet,
+            CosmosChain::OsmosisLocal => ExternalChain::OsmosisLocal,
+        }
+    }
+}
+
+impl From<SolanaChain> for ExternalChain {
+    fn from(c: SolanaChain) -> ExternalChain {
+        match c {
+            SolanaChain::Mainnet => ExternalChain::SolanaMainnet,
+            SolanaChain::Testnet => ExternalChain::SolanaTestnet,
+            SolanaChain::Devnet => ExternalChain::SolanaDevnet,
+            SolanaChain::Local => ExternalChain::SolanaLocal,
+        }
+    }
+}
+
+impl From<ExternalChain> for ChainKind {
+    fn from(c: ExternalChain) -> ChainKind {
+        match c {
+            ExternalChain::OsmosisTestnet => ChainKind::Cosmos(CosmosChain::OsmosisTestnet),
+            ExternalChain::NeutronTestnet => ChainKind::Cosmos(CosmosChain::NeutronTestnet),
+            ExternalChain::OsmosisLocal => ChainKind::Cosmos(CosmosChain::OsmosisLocal),
+            ExternalChain::SolanaMainnet => ChainKind::Solana(SolanaChain::Mainnet),
+            ExternalChain::SolanaTestnet => ChainKind::Solana(SolanaChain::Testnet),
+            ExternalChain::SolanaDevnet => ChainKind::Solana(SolanaChain::Devnet),
+            ExternalChain::SolanaLocal => ChainKind::Solana(SolanaChain::Local),
+        }
     }
 }
 
@@ -45,6 +189,7 @@ pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
 }
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct AssetConfig {
     pub decimals: u8,
@@ -480,10 +625,8 @@ impl ExecAction {
         configs: &BTreeMap<ExternalChain, ChainConfig>,
         id: BridgeActionId,
     ) -> Result<String> {
-        match chain {
-            ExternalChain::OsmosisTestnet
-            | ExternalChain::NeutronTestnet
-            | ExternalChain::OsmosisLocal => {
+        match chain.name() {
+            ChainName::Cosmos => {
                 #[derive(serde::Serialize)]
                 struct Payload {
                     id: BridgeActionId,
@@ -526,6 +669,7 @@ impl ExecAction {
                 let payload = serde_json::to_string(&payload)?;
                 Ok(payload)
             }
+            ChainName::Solana => todo!()
         }
     }
 }
