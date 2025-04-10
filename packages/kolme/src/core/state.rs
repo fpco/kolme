@@ -25,7 +25,6 @@ pub struct FrameworkState {
 
 impl MerkleSerialize for FrameworkState {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        // FIXME change this to use Merkle serialization directly instead of abusing serde
         let FrameworkState {
             processor,
             listeners,
@@ -35,27 +34,29 @@ impl MerkleSerialize for FrameworkState {
             chains,
             balances,
         } = self;
-        serializer.store_json(processor)?;
-        serializer.store_json(listeners)?;
-        serializer.store_json(needed_listeners)?;
-        serializer.store_json(approvers)?;
-        serializer.store_json(needed_approvers)?;
-        serializer.store_json(chains)?;
-        serializer.store_by_hash(balances)?;
+        serializer.store(processor)?;
+        serializer.store(listeners)?;
+        serializer.store(needed_listeners)?;
+        serializer.store(approvers)?;
+        serializer.store(needed_approvers)?;
+        serializer.store(chains)?;
+        serializer.store(balances)?;
         Ok(())
     }
 }
 
 impl MerkleDeserialize for FrameworkState {
-    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
         Ok(FrameworkState {
-            processor: deserializer.load_json()?,
-            listeners: deserializer.load_json()?,
-            needed_listeners: deserializer.load_json()?,
-            approvers: deserializer.load_json()?,
-            needed_approvers: deserializer.load_json()?,
-            chains: deserializer.load_json()?,
-            balances: deserializer.load_by_hash()?,
+            processor: deserializer.load()?,
+            listeners: deserializer.load()?,
+            needed_listeners: deserializer.load()?,
+            approvers: deserializer.load()?,
+            needed_approvers: deserializer.load()?,
+            chains: deserializer.load()?,
+            balances: deserializer.load()?,
         })
     }
 }

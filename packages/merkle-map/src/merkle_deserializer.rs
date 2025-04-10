@@ -82,6 +82,12 @@ impl MerkleDeserializer {
         self.load_raw_bytes(len)
     }
 
+    /// Load bytes and then UTF-8 decode them.
+    pub fn load_str(&mut self) -> Result<&str, MerkleSerialError> {
+        let bytes = self.load_bytes()?;
+        std::str::from_utf8(bytes).map_err(MerkleSerialError::custom)
+    }
+
     pub fn load_usize(&mut self) -> Result<usize, MerkleSerialError> {
         let mut value = 0usize;
 

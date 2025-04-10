@@ -83,7 +83,10 @@ impl MerkleSerializer {
     }
 
     /// Store any value that can be serialized via [MerkleSerialize].
-    pub fn store<T: MerkleSerialize>(&mut self, value: &T) -> Result<(), MerkleSerialError> {
+    pub fn store<T: MerkleSerialize + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), MerkleSerialError> {
         value.merkle_serialize(self)
     }
 

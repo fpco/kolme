@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use shared::types::Sha256Hash;
+use shared::{cryptography::PublicKey, types::Sha256Hash};
 
 use crate::*;
 
@@ -39,6 +39,13 @@ impl MerkleSerialize for String {
     }
 }
 
+impl MerkleSerialize for str {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_slice(self.as_bytes());
+        Ok(())
+    }
+}
+
 impl MerkleSerialize for Vec<u8> {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_slice(self);
@@ -64,9 +71,26 @@ impl<K: MerkleSerialize, V: MerkleSerialize> MerkleSerialize for BTreeMap<K, V> 
     }
 }
 
+impl<T: MerkleSerialize> MerkleSerialize for BTreeSet<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_usize(self.len());
+        for x in self {
+            x.merkle_serialize(serializer)?;
+        }
+        Ok(())
+    }
+}
+
 impl MerkleSerialize for rust_decimal::Decimal {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_array(self.serialize());
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for PublicKey {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_slice(&self.as_bytes());
         Ok(())
     }
 }
