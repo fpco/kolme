@@ -109,7 +109,7 @@ impl MerkleDeserializer {
     }
 
     pub fn load_by_hash<T: MerkleDeserialize>(&mut self) -> Result<T, MerkleSerialError> {
-        let hash = Sha256Hash::deserialize(self)?;
+        let hash = Sha256Hash::merkle_deserialize(self)?;
         match self.manager.deserialize_cached(hash) {
             Err(e) => Err(e),
             Ok(Some(x)) => Ok(x),
@@ -125,7 +125,7 @@ impl MerkleDeserializer {
 
     /// Load any value that can be deserialized via [MerkleDeserialize].
     pub fn load<T: MerkleDeserialize>(&mut self) -> Result<T, MerkleSerialError> {
-        T::deserialize(self)
+        T::merkle_deserialize(self)
     }
 
     pub fn load_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, MerkleSerialError> {

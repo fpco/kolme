@@ -25,7 +25,7 @@ pub trait FromMerkleKey: Sized {
 /// A value that can be serialized within a [MerkleMap].
 pub trait MerkleSerialize {
     /// Serialize this data for storage.
-    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError>;
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError>;
 
     /// Optimization: if we already know our serialized contents, return them.
     fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
@@ -38,7 +38,7 @@ pub trait MerkleSerialize {
 
 /// A value that can be deserialized back into a [MerkleMap] value.
 pub trait MerkleDeserialize: Sized {
-    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError>;
+    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError>;
 
     fn set_merkle_contents(&self, _contents: Arc<MerkleContents>) {}
 }

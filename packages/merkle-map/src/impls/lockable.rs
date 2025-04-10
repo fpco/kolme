@@ -32,8 +32,8 @@ where
 }
 
 impl<T: MerkleSerialize> MerkleSerialize for Lockable<T> {
-    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.inner.serialize(serializer)
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.inner.merkle_serialize(serializer)
     }
 
     fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {

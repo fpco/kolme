@@ -24,7 +24,7 @@ pub struct FrameworkState {
 }
 
 impl MerkleSerialize for FrameworkState {
-    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         // FIXME change this to use Merkle serialization directly instead of abusing serde
         let FrameworkState {
             processor,

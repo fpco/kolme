@@ -86,10 +86,10 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for Node<K, V> {
         }
     }
 
-    fn serialize(&self, manager: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+    fn merkle_serialize(&self, manager: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         match self {
-            Node::Leaf(leaf) => leaf.serialize(manager),
-            Node::Tree(tree) => tree.serialize(manager),
+            Node::Leaf(leaf) => leaf.merkle_serialize(manager),
+            Node::Tree(tree) => tree.merkle_serialize(manager),
         }
         // match &self {
         //     Node::Leaf(leaf) => {
@@ -111,10 +111,10 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for Node<K, V> {
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Node<K, V> {
-    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
         match deserializer.peek_byte()? {
-            42 => Lockable::<LeafContents<K, V>>::deserialize(deserializer).map(Node::Leaf),
-            43 => Lockable::<TreeContents<K, V>>::deserialize(deserializer).map(Node::Tree),
+            42 => Lockable::<LeafContents<K, V>>::merkle_deserialize(deserializer).map(Node::Leaf),
+            43 => Lockable::<TreeContents<K, V>>::merkle_deserialize(deserializer).map(Node::Tree),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }

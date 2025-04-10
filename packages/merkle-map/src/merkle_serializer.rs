@@ -84,7 +84,7 @@ impl MerkleSerializer {
 
     /// Store any value that can be serialized via [MerkleSerialize].
     pub fn store<T: MerkleSerialize>(&mut self, value: &T) -> Result<(), MerkleSerialError> {
-        value.serialize(self)
+        value.merkle_serialize(self)
     }
 
     /// Store a JSON-encoded version of this content.
@@ -102,6 +102,6 @@ impl MerkleSerializer {
         let contents = self.manager.serialize(child)?;
         let hash = contents.hash;
         self.children.push(contents);
-        hash.serialize(self)
+        hash.merkle_serialize(self)
     }
 }

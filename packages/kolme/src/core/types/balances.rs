@@ -101,17 +101,17 @@ impl Balances {
 }
 
 impl MerkleSerialize for Balances {
-    fn serialize(
+    fn merkle_serialize(
         &self,
         serializer: &mut MerkleSerializer,
     ) -> std::result::Result<(), MerkleSerialError> {
-        self.0.serialize(serializer)
+        self.0.merkle_serialize(serializer)
     }
 }
 
 impl MerkleDeserialize for Balances {
-    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
-        MerkleDeserialize::deserialize(deserializer).map(Self)
+    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        MerkleDeserialize::merkle_deserialize(deserializer).map(Self)
     }
 }
 

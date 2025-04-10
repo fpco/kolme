@@ -139,8 +139,8 @@ impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
 }
 
 impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for MerkleMap<K, V> {
-    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.serialize(serializer)
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
     }
 
     fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
@@ -153,7 +153,7 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for MerkleMap<K, V> {
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for MerkleMap<K, V> {
-    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
-        Node::deserialize(deserializer).map(MerkleMap)
+    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        Node::merkle_deserialize(deserializer).map(MerkleMap)
     }
 }

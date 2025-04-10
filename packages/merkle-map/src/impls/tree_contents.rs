@@ -94,13 +94,13 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
 }
 
 impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for TreeContents<K, V> {
-    fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_byte(43);
         serializer.store_usize(self.len);
         match &self.leaf {
             Some(leaf) => {
                 serializer.store_byte(1);
-                leaf.serialize(serializer)?;
+                leaf.merkle_serialize(serializer)?;
             }
             None => serializer.store_byte(0),
         }
@@ -112,7 +112,7 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for TreeContents<K, V> 
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<TreeContents<K, V>> {
-    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
         let magic_byte = deserializer.pop_byte()?;
         if magic_byte != 43 {
             return Err(MerkleSerialError::UnexpectedMagicByte { byte: magic_byte });
@@ -120,13 +120,13 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Tree
         let len = deserializer.load_usize()?;
         let leaf = match deserializer.pop_byte()? {
             0 => None,
-            1 => Some(LeafEntry::deserialize(deserializer)?),
+            1 => Some(LeafEntry::merkle_deserialize(deserializer)?),
             byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
         };
         let mut branches = std::array::from_fn(|_| Node::default());
         let mut missing = HashSet::new();
         for branch in &mut branches {
-            let hash = Sha256Hash::deserialize(deserializer)?;
+            let hash = Sha256Hash::merkle_deserialize(deserializer)?;
             match deserializer.load_by_hash_optional(hash)? {
                 Some(value) => *branch = value,
                 None => {

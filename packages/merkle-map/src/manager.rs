@@ -38,7 +38,7 @@ impl MerkleManager {
         }
 
         let mut serializer = MerkleSerializer::new(self.clone());
-        value.serialize(&mut serializer)?;
+        value.merkle_serialize(&mut serializer)?;
         let contents = Arc::new(serializer.finish());
 
         if !self.cache.read().contains_key(&contents.hash) {
@@ -95,7 +95,7 @@ impl MerkleManager {
         payload: Arc<[u8]>,
     ) -> Result<T, MerkleSerialError> {
         let mut deserializer = MerkleDeserializer::new(hash, payload, self.clone());
-        let value = T::deserialize(&mut deserializer)?;
+        let value = T::merkle_deserialize(&mut deserializer)?;
         let contents = Arc::new(deserializer.finish()?);
         value.set_merkle_contents(contents);
         Ok(value)
