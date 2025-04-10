@@ -719,8 +719,7 @@ async fn store_block<App: KolmeApp>(
         .save(&mut store, framework_state)
         .await?
         .hash;
-    let app_state_rendered = App::save_state(app_state)?;
-    let app_state_hash = insert_state_payload(trans, &app_state_rendered).await?;
+    let app_state_hash = kolme.merkle_manager.save(&mut store, app_state).await?.hash;
 
     sqlx::query!(
             r#"
@@ -1041,31 +1040,6 @@ async fn store_block<App: KolmeApp>(
     }
 
     Ok(())
-}
-
-/// Returns the hash of the content
-async fn insert_state_payload(
-    e: &mut sqlx::SqliteTransaction<'_>,
-    payload: &str,
-) -> Result<Sha256Hash> {
-    let hash = Sha256Hash::hash(payload);
-    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM hashes WHERE hash=$1", hash)
-        .fetch_one(&mut **e)
-        .await?;
-    match count {
-        0 => {
-            sqlx::query!(
-                "INSERT INTO hashes(hash,content) VALUES($1, $2)",
-                hash,
-                payload
-            )
-            .execute(&mut **e)
-            .await?;
-        }
-        1 => (),
-        _ => anyhow::bail!("insert_state_payload: impossible result of {count} entries"),
-    }
-    Ok(hash)
 }
 
 async fn get_or_insert_account_id_and_next_nonce(

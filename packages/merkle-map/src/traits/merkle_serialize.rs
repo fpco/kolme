@@ -46,9 +46,21 @@ impl MerkleSerialize for str {
     }
 }
 
-impl MerkleSerialize for Vec<u8> {
+impl<T: MerkleSerialize> MerkleSerialize for Vec<T> {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        serializer.store_slice(self);
+        serializer.store_usize(self.len());
+        for x in self {
+            serializer.store(x)?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: MerkleSerialize, const N: usize> MerkleSerialize for [T; N] {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        for x in self {
+            serializer.store(x)?;
+        }
         Ok(())
     }
 }

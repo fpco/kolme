@@ -2680,6 +2680,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shared",
+ "strum 0.27.1",
  "tempfile",
  "test-log",
  "tokio",

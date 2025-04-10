@@ -47,6 +47,34 @@ impl MerkleDeserialize for String {
     }
 }
 
+impl<T: MerkleDeserialize> MerkleDeserialize for Vec<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let len = deserializer.load_usize()?;
+        let mut v = Vec::with_capacity(len);
+        for _ in 0..len {
+            v.push(deserializer.load()?);
+        }
+        Ok(v)
+    }
+}
+
+impl<T: MerkleDeserialize, const N: usize> MerkleDeserialize for [T; N] {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let mut v = Vec::with_capacity(N);
+        for _ in 0..N {
+            v.push(deserializer.load()?);
+        }
+        Ok(match v.try_into() {
+            Ok(x) => x,
+            Err(_) => unreachable!(),
+        })
+    }
+}
+
 impl MerkleDeserialize for Sha256Hash {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,

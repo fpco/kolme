@@ -148,8 +148,10 @@ pub(super) async fn load_state<App: KolmeApp>(
             let framework_state = merkle_manager
                 .load(&mut MerkleDbStore::Pool(pool), framework_state_hash)
                 .await?;
-            let app_state = load_by_raw_hash(pool, &app_state_hash).await?;
-            let app_state = App::load_state(&app_state)?;
+            let app_state_hash = Sha256Hash::from_array(app_state_hash.as_slice().try_into()?);
+            let app_state = merkle_manager
+                .load(&mut MerkleDbStore::Pool(pool), app_state_hash)
+                .await?;
             let height = BlockHeight::try_from(height)?;
             let next_height = height.next();
             let current_block_hash = BlockHash(Sha256Hash::from_hash(&blockhash)?);
@@ -169,13 +171,6 @@ pub(super) async fn load_state<App: KolmeApp>(
     };
     res.framework_state.validate()?;
     Ok(res)
-}
-
-async fn load_by_raw_hash(pool: &sqlx::SqlitePool, hash: &[u8]) -> Result<String> {
-    sqlx::query_scalar!("SELECT content FROM hashes WHERE hash=$1", hash)
-        .fetch_one(pool)
-        .await
-        .map_err(Into::into)
 }
 
 /// Ensures that either we have no blocks yet, or the first block has matching genesis info.

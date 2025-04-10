@@ -65,6 +65,14 @@ where
         self.0.get(0, &key.to_merkle_key())
     }
 
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: ToMerkleKey + ?Sized,
+    {
+        self.get(key).is_some()
+    }
+
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
@@ -153,7 +161,9 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for MerkleMap<K, V> {
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for MerkleMap<K, V> {
-    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
         Node::merkle_deserialize(deserializer).map(MerkleMap)
     }
 }

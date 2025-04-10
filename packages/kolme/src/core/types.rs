@@ -287,6 +287,20 @@ impl AccountId {
     }
 }
 
+impl MerkleSerialize for AccountId {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for AccountId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
+
 impl Display for AccountId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
@@ -380,6 +394,20 @@ impl TryFrom<i64> for BlockHeight {
     PartialEq, PartialOrd, Ord, Eq, Clone, Debug, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub struct Wallet(pub String);
+
+impl MerkleSerialize for Wallet {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for Wallet {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Wallet)
+    }
+}
 
 /// A block that is signed by the processor.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

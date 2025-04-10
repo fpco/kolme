@@ -21,6 +21,23 @@ pub struct SampleState {
     hi_count: u32,
 }
 
+impl MerkleSerialize for SampleState {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store(&self.hi_count)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for SampleState {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            hi_count: deserializer.load()?,
+        })
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum SampleMessage {
@@ -111,14 +128,6 @@ impl KolmeApp for SampleKolmeApp {
 
     fn new_state() -> Result<Self::State> {
         Ok(SampleState { hi_count: 0 })
-    }
-
-    fn save_state(state: &Self::State) -> Result<String> {
-        serde_json::to_string(state).map_err(anyhow::Error::from)
-    }
-
-    fn load_state(v: &str) -> Result<Self::State> {
-        serde_json::from_str(v).map_err(anyhow::Error::from)
     }
 
     async fn execute(
