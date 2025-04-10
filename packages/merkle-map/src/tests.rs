@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::*;
 
 impl<K, V> MerkleMap<K, V> {
@@ -279,4 +281,50 @@ async fn memory_manager_17() {
 #[tokio::test]
 async fn memory_manager_1000() {
     memory_manager_helper(1000).await
+}
+
+fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
+    #[derive(Debug, PartialEq, Eq)]
+    struct Person {
+        name: String,
+        age: u32,
+        inventory: BTreeMap<String, u32>,
+    }
+
+    impl MerkleSerialize for Person {
+        fn serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+            serializer.store(&self.name)?;
+            serializer.store(&self.age)?;
+            serializer.store(&self.inventory)?;
+            Ok(())
+        }
+    }
+
+    impl MerkleDeserialize for Person {
+        fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+            Ok(Self {
+                name: deserializer.load()?,
+                age: deserializer.load()?,
+                inventory: deserializer.load()?,
+            })
+        }
+    }
+
+    let person = Person {
+        name,
+        age,
+        inventory,
+    };
+
+    let manager = MerkleManager::default();
+    let contents = manager.serialize(&person).unwrap();
+    let person2 = manager.deserialize_cached(contents.hash).unwrap().unwrap();
+    assert_eq!(person, person2);
+}
+
+quickcheck::quickcheck! {
+    fn store_load(name:String,age:u32, inventory:BTreeMap<String,u32>) -> bool {
+        store_load_helper(name,age,inventory);
+        true
+    }
 }

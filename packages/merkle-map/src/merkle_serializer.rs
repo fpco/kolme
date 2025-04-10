@@ -82,6 +82,11 @@ impl MerkleSerializer {
         }
     }
 
+    /// Store any value that can be serialized via [MerkleSerialize].
+    pub fn store<T: MerkleSerialize>(&mut self, value: &T) -> Result<(), MerkleSerialError> {
+        value.serialize(self)
+    }
+
     /// Store a JSON-encoded version of this content.
     pub fn store_json<T: serde::Serialize>(&mut self, t: &T) -> Result<(), MerkleSerialError> {
         let bytes = serde_json::to_vec(t).map_err(MerkleSerialError::custom)?;

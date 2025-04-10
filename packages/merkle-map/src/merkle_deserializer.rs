@@ -123,6 +123,11 @@ impl MerkleDeserializer {
         }
     }
 
+    /// Load any value that can be deserialized via [MerkleDeserialize].
+    pub fn load<T: MerkleDeserialize>(&mut self) -> Result<T, MerkleSerialError> {
+        T::deserialize(self)
+    }
+
     pub fn load_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, MerkleSerialError> {
         let bytes = self.load_bytes()?;
         serde_json::from_slice(bytes).map_err(MerkleSerialError::custom)

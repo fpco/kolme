@@ -40,6 +40,12 @@ impl MerkleManager {
         let mut serializer = MerkleSerializer::new(self.clone());
         value.serialize(&mut serializer)?;
         let contents = Arc::new(serializer.finish());
+
+        if !self.cache.read().contains_key(&contents.hash) {
+            self.cache
+                .write()
+                .insert(contents.hash, contents.payload.clone());
+        }
         value.set_merkle_contents(contents.clone());
         Ok(contents)
     }

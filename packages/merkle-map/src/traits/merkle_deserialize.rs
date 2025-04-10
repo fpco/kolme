@@ -28,6 +28,15 @@ impl MerkleDeserialize for usize {
     }
 }
 
+impl MerkleDeserialize for String {
+    fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        let bytes = deserializer.load_bytes()?;
+        std::str::from_utf8(bytes)
+            .map(ToOwned::to_owned)
+            .map_err(MerkleSerialError::custom)
+    }
+}
+
 impl MerkleDeserialize for Sha256Hash {
     fn deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(Sha256Hash::from_array)
