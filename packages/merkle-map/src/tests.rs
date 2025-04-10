@@ -237,7 +237,7 @@ async fn memory_manager_helper(size: u32) {
     let manager = MerkleManager::default();
     let contents = manager.save(&mut store, &m).await.unwrap();
 
-    m.assert_locked_status(false);
+    m.assert_locked_status(true);
 
     let m2 = manager.load(&mut store, contents.hash).await.unwrap();
 
