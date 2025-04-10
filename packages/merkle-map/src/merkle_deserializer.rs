@@ -120,11 +120,7 @@ impl MerkleDeserializer {
             Err(e) => Err(e),
             Ok(Some(x)) => Ok(x),
             Ok(None) => Err(MerkleSerialError::HashesNotFound {
-                hashes: {
-                    let mut set = HashSet::new();
-                    set.insert(hash);
-                    set
-                },
+                hashes: HashSet::from_iter([hash]),
             }),
         }
     }
