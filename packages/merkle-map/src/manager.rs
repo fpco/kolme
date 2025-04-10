@@ -137,11 +137,7 @@ impl MerkleManager {
                 .load_by_hash(hash)
                 .await?
                 .ok_or_else(|| MerkleSerialError::HashesNotFound {
-                    hashes: {
-                        let mut set = HashSet::new();
-                        set.insert(hash);
-                        set
-                    },
+                    hashes: HashSet::from_iter([hash]),
                 })?;
         self.cache.write().insert(hash, payload.clone());
 
