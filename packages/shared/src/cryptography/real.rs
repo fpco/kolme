@@ -196,7 +196,7 @@ mod sigerr {
 
 pub use sigerr::SignatureError;
 
-use crate::cosmos::SignatureWithRecovery;
+use super::SignatureWithRecovery;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
 pub struct Signature(k256::ecdsa::Signature);

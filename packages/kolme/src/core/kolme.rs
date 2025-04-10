@@ -154,6 +154,7 @@ pub struct KolmeInner<App: KolmeApp> {
     // TODO Intended only for dev-time, we should either remove in the future
     // or gate with feature flags/optimization flags.
     pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
+    pub(super) merkle_manager: MerkleManager,
 }
 
 #[derive(Default)]
@@ -177,12 +178,13 @@ impl<App: KolmeApp> Kolme<App> {
         sqlx::migrate!().run(&pool).await?;
         let info = App::genesis_info();
         validate_genesis_info(&pool, &info).await?;
+        let merkle_manager = MerkleManager::default();
         let LoadStateResult {
             framework_state,
             app_state,
             next_height,
             current_block_hash,
-        } = state::load_state::<App>(&pool, &info).await?;
+        } = state::load_state::<App>(&pool, &info, &merkle_manager).await?;
         let inner = KolmeInner {
             pool,
             app,
@@ -192,6 +194,7 @@ impl<App: KolmeApp> Kolme<App> {
             current_block_hash,
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
             deadlock_detector: Default::default(),
+            merkle_manager,
         };
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),
@@ -275,6 +278,11 @@ impl<App: KolmeApp> KolmeInner<App> {
             Some(rendered) => serde_json::from_str(&rendered)?,
             None => None,
         })
+    }
+
+    /// Get the [MerkleManager]
+    pub fn get_merkle_manager(&self) -> &MerkleManager {
+        &self.merkle_manager
     }
 
     /// Returns the hash of the most recent block.
@@ -705,10 +713,13 @@ async fn store_block<App: KolmeApp>(
     let rendered = serde_json::to_string(&signed_block)?;
     let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
 
-    let framework_state_rendered = serde_json::to_string(&framework_state)?;
-    let framework_state_hash = insert_state_payload(trans, &framework_state_rendered).await?;
-    let app_state_rendered = App::save_state(app_state)?;
-    let app_state_hash = insert_state_payload(trans, &app_state_rendered).await?;
+    let mut store = MerkleDbStore::Conn(trans);
+    let framework_state_hash = kolme
+        .merkle_manager
+        .save(&mut store, framework_state)
+        .await?
+        .hash;
+    let app_state_hash = kolme.merkle_manager.save(&mut store, app_state).await?.hash;
 
     sqlx::query!(
             r#"
@@ -1029,31 +1040,6 @@ async fn store_block<App: KolmeApp>(
     }
 
     Ok(())
-}
-
-/// Returns the hash of the content
-async fn insert_state_payload(
-    e: &mut sqlx::SqliteTransaction<'_>,
-    payload: &str,
-) -> Result<Sha256Hash> {
-    let hash = Sha256Hash::hash(payload);
-    let count = sqlx::query_scalar!("SELECT COUNT(*) FROM hashes WHERE hash=$1", hash)
-        .fetch_one(&mut **e)
-        .await?;
-    match count {
-        0 => {
-            sqlx::query!(
-                "INSERT INTO hashes(hash,content) VALUES($1, $2)",
-                hash,
-                payload
-            )
-            .execute(&mut **e)
-            .await?;
-        }
-        1 => (),
-        _ => anyhow::bail!("insert_state_payload: impossible result of {count} entries"),
-    }
-    Ok(hash)
 }
 
 async fn get_or_insert_account_id_and_next_nonce(

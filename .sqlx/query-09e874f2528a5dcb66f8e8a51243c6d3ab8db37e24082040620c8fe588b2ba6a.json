@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO merkle_hashes(hash, payload) VALUES($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "09e874f2528a5dcb66f8e8a51243c6d3ab8db37e24082040620c8fe588b2ba6a"
+}

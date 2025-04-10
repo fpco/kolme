@@ -14,10 +14,10 @@ CREATE TABLE account_pubkeys(
     pubkey BLOB NOT NULL UNIQUE
 );
 
--- Unified table for looking up all hashes.
-CREATE TABLE hashes(
+-- Merkle hash storage
+CREATE TABLE merkle_hashes(
     hash BLOB PRIMARY KEY NOT NULL,
-    content TEXT NOT NULL
+    payload BLOB NOT NULL
 );
 
 CREATE TABLE blocks(

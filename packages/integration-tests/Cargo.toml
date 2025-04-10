@@ -11,6 +11,7 @@ authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 test-log = { version = "0.2", features = ["trace"] }
 anyhow = "1"
 reqwest = { version = "0.12.15", features = ["json"] }
+strum = { version = "0.27.1", features = ["derive"] }
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tracing = "0.1.41"
