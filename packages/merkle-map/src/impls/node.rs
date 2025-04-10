@@ -111,7 +111,9 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for Node<K, V> {
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Node<K, V> {
-    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
         match deserializer.peek_byte()? {
             42 => Lockable::<LeafContents<K, V>>::merkle_deserialize(deserializer).map(Node::Leaf),
             43 => Lockable::<TreeContents<K, V>>::merkle_deserialize(deserializer).map(Node::Tree),

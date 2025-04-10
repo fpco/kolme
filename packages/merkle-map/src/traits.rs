@@ -38,7 +38,8 @@ pub trait MerkleSerialize {
 
 /// A value that can be deserialized back into a [MerkleMap] value.
 pub trait MerkleDeserialize: Sized {
-    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError>;
+    fn merkle_deserialize(deserializer: &mut MerkleDeserializer)
+        -> Result<Self, MerkleSerialError>;
 
     fn set_merkle_contents(&self, _contents: Arc<MerkleContents>) {}
 }

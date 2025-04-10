@@ -112,7 +112,9 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for TreeContents<K, V> 
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<TreeContents<K, V>> {
-    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
         let magic_byte = deserializer.pop_byte()?;
         if magic_byte != 43 {
             return Err(MerkleSerialError::UnexpectedMagicByte { byte: magic_byte });

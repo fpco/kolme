@@ -110,7 +110,9 @@ impl MerkleSerialize for Balances {
 }
 
 impl MerkleDeserialize for Balances {
-    fn merkle_deserialize(deserializer: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
         MerkleDeserialize::merkle_deserialize(deserializer).map(Self)
     }
 }
