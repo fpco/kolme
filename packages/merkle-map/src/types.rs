@@ -1,5 +1,7 @@
 mod key_bytes;
 
+use std::collections::HashSet;
+
 use crate::*;
 pub use key_bytes::MerkleKey;
 
@@ -73,7 +75,7 @@ pub enum MerkleSerialError {
     InvalidSerializedContent,
     #[error("Hashes not found in store: {hashes:?}")]
     HashesNotFound {
-        hashes: Vec<shared::types::Sha256Hash>,
+        hashes: HashSet<shared::types::Sha256Hash>,
     },
     #[error(transparent)]
     Custom(Box<dyn std::error::Error + Send + Sync>),

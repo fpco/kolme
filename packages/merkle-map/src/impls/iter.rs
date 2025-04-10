@@ -85,8 +85,8 @@ enum IterLayer<'a, K, V> {
 
 fn to_iter_layer<K, V>(node: &Node<K, V>) -> Option<IterLayer<K, V>> {
     match node {
-        Node::Leaf(leaf) => Some(IterLayer::Leaf(&leaf.as_ref(), 0)),
-        Node::Tree(tree) => Some(IterLayer::Tree(&tree.as_ref(), 0)),
+        Node::Leaf(leaf) => Some(IterLayer::Leaf(leaf.as_ref(), 0)),
+        Node::Tree(tree) => Some(IterLayer::Tree(tree.as_ref(), 0)),
     }
 }
 

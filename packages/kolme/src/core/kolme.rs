@@ -713,7 +713,7 @@ async fn store_block<App: KolmeApp>(
     let rendered = serde_json::to_string(&signed_block)?;
     let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
 
-    let mut store = MerkleDbStore(&kolme.pool);
+    let mut store = MerkleDbStore::Conn(trans);
     let framework_state_hash = kolme
         .merkle_manager
         .save(&mut store, framework_state)

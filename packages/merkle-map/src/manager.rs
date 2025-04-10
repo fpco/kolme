@@ -1,8 +1,10 @@
 //! Helper types and functions for buffer reading and writing.
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
-use dashmap::DashMap;
 use shared::types::Sha256Hash;
 
 use crate::*;
@@ -10,7 +12,7 @@ use crate::*;
 /// Primary interface for loading and saving data with merkle-map.
 #[derive(Clone, Default)]
 pub struct MerkleManager {
-    cache: Arc<DashMap<Sha256Hash, Arc<[u8]>>>,
+    cache: Arc<parking_lot::RwLock<HashMap<Sha256Hash, Arc<[u8]>>>>,
 }
 
 impl MerkleSerialError {
@@ -89,7 +91,6 @@ impl MerkleManager {
         let mut deserializer = MerkleDeserializer::new(hash, payload, self.clone());
         let value = T::deserialize(&mut deserializer)?;
         let contents = Arc::new(deserializer.finish()?);
-        self.cache.insert(contents.hash, contents.payload.clone());
         value.set_merkle_contents(contents);
         Ok(value)
     }
@@ -121,15 +122,22 @@ impl MerkleManager {
         store: &mut Store,
         hash: Sha256Hash,
     ) -> Result<Arc<[u8]>, MerkleSerialError> {
-        if let Some(payload) = self.cache.get(&hash) {
+        if let Some(payload) = self.cache.read().get(&hash) {
             return Ok(payload.clone());
         }
 
-        let payload = store
-            .load_by_hash(hash)
-            .await?
-            .ok_or_else(|| MerkleSerialError::HashesNotFound { hashes: vec![hash] })?;
-        self.cache.insert(hash, payload.clone());
+        let payload =
+            store
+                .load_by_hash(hash)
+                .await?
+                .ok_or_else(|| MerkleSerialError::HashesNotFound {
+                    hashes: {
+                        let mut set = HashSet::new();
+                        set.insert(hash);
+                        set
+                    },
+                })?;
+        self.cache.write().insert(hash, payload.clone());
 
         Ok(payload)
     }
@@ -138,7 +146,7 @@ impl MerkleManager {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<T>, MerkleSerialError> {
-        match self.cache.get(&hash) {
+        match self.cache.read().get(&hash) {
             None => Ok(None),
             Some(payload) => self.deserialize(hash, payload.clone()).map(Some),
         }

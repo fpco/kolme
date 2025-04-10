@@ -145,7 +145,7 @@ pub(super) async fn load_state<App: KolmeApp>(
             let framework_state_hash =
                 Sha256Hash::from_array(framework_state_hash.as_slice().try_into()?);
             let framework_state = merkle_manager
-                .load(&mut MerkleDbStore(pool), framework_state_hash)
+                .load(&mut MerkleDbStore::Pool(pool), framework_state_hash)
                 .await?;
             let app_state = load_by_raw_hash(pool, &app_state_hash).await?;
             let app_state = App::load_state(&app_state)?;

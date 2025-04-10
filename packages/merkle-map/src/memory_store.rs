@@ -12,7 +12,7 @@ impl MerkleStore for MerkleMemoryStore {
         &mut self,
         hash: Sha256Hash,
     ) -> Result<Option<Arc<[u8]>>, MerkleSerialError> {
-        Ok(self.0.read().unwrap().get(&hash).map(|x| x.clone()))
+        Ok(self.0.read().unwrap().get(&hash).cloned())
     }
 
     async fn save_by_hash(

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::*;
 
 /// Provides context within a [MerkleDeserialize] impl for deserializing data.
@@ -111,7 +113,13 @@ impl MerkleDeserializer {
         match self.manager.deserialize_cached(hash) {
             Err(e) => Err(e),
             Ok(Some(x)) => Ok(x),
-            Ok(None) => Err(MerkleSerialError::HashesNotFound { hashes: vec![hash] }),
+            Ok(None) => Err(MerkleSerialError::HashesNotFound {
+                hashes: {
+                    let mut set = HashSet::new();
+                    set.insert(hash);
+                    set
+                },
+            }),
         }
     }
 
