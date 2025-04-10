@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use litesvm::{LiteSVM, types::TransactionResult};
 use litesvm_token::{
     spl_token::state::Account as SplAccount,
@@ -18,8 +20,8 @@ use sha_256::Sha256;
 
 use kolme_solana_bridge_client::{
     InitializeIxData, RegularMsgIxData, SignedMsgIxData, Payload,
-    Secp256k1Pubkey, Secp256k1Signature, Signature, InstructionAccount,
-    INITIALIZE_IX, REGULAR_IX, SIGNED_IX
+    Secp256k1Signature, Secp256k1PubkeyCompressed, Signature,
+    InstructionAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
 };
 
 use crate::{SignedIxError, TOKEN_HOLDER_SEED};
@@ -72,12 +74,12 @@ impl Program {
         let mut executors = Vec::with_capacity(KEYS_LEN - 1);
 
         for i in 1..KEYS_LEN {
-            executors.push(Secp256k1Pubkey(self.keys[i].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()));
+            executors.push(Secp256k1PubkeyCompressed(self.keys[i].verifying_key().to_sec1_bytes().deref().try_into().unwrap()));
         }
 
         let data = InitializeIxData {
             needed_executors: ((KEYS_LEN - 1) / 2) as u8,
-            processor: Secp256k1Pubkey(self.keys[PROCESSOR_KEY].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()),
+            processor: Secp256k1PubkeyCompressed(self.keys[PROCESSOR_KEY].verifying_key().to_sec1_bytes().deref().try_into().unwrap()),
             executors
         };
 

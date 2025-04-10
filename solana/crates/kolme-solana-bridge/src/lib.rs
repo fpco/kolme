@@ -3,7 +3,8 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use kolme_solana_bridge_client::{
     InitializeIxData,  RegularMsgIxData, SignedMsgIxData,
     State, Token, Message, BridgeMessage, Secp256k1Pubkey,
-    Secp256k1Signature, Payload, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
+    Secp256k1Signature, Payload, INITIALIZE_IX, REGULAR_IX,
+    SIGNED_IX
 };
 use solbox::{
     token,
@@ -327,14 +328,14 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     let hash = sha256(&data.payload);
     let recovered_key = secp256k1_recover(&hash, data.processor.recovery_id, &data.processor.signature)?;
 
-    if recovered_key != state_pda.data.processor {
+    if recovered_key.to_sec1_bytes() != state_pda.data.processor {
         return Err(SignedIxError::ProcessorKeyMismatch.into());
     }
 
     let mut keys = Vec::with_capacity(data.executors.len());
 
     for e in data.executors {
-        let key = secp256k1_recover(&hash, e.recovery_id, &e.signature)?;
+        let key = secp256k1_recover(&hash, e.recovery_id, &e.signature)?.to_sec1_bytes();
 
         if !state_pda.data.executors.contains(&key) {
             return Err(SignedIxError::NonExecutorKey.into());

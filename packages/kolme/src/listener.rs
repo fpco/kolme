@@ -416,14 +416,14 @@ mod solana_listener {
             .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
 
         anyhow::ensure!(
-            info.processor.as_bytes().deref() == state.processor.to_sec1_bytes().as_slice()
+            info.processor.as_bytes().deref() == state.processor.0.as_slice()
         );
         anyhow::ensure!(info.approvers.len() == state.executors.len());
 
         for a in &state.executors {
             anyhow::ensure!(info
                 .approvers
-                .contains(&PublicKey::try_from_bytes(a.to_sec1_bytes().as_slice())?));
+                .contains(&PublicKey::try_from_bytes(a.0.as_slice())?));
         }
 
         anyhow::ensure!(info.needed_approvers == usize::from(state.needed_executors));
@@ -447,7 +447,7 @@ mod solana_listener {
                 }
 
                 for key in keys {
-                    if let Ok(key) = PublicKey::try_from_bytes(key.to_sec1_bytes().as_slice()) {
+                    if let Ok(key) = PublicKey::try_from_bytes(key.0.as_slice()) {
                         new_keys.push(key);
                     }
                 }

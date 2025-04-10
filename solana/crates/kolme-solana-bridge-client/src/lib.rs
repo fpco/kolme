@@ -19,18 +19,21 @@ pub const SIGNED_IX: u8 = 2;
 pub struct Secp256k1Pubkey(pub [u8; Self::LEN]);
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
+pub struct Secp256k1PubkeyCompressed(pub [u8; Self::LEN]);
+
+#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
 pub struct Secp256k1Signature(pub [u8; Self::LEN]);
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct InitializeIxData {
     pub needed_executors: u8,
-    pub processor: Secp256k1Pubkey,
-    pub executors: Vec<Secp256k1Pubkey>,
+    pub processor: Secp256k1PubkeyCompressed,
+    pub executors: Vec<Secp256k1PubkeyCompressed>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct RegularMsgIxData {
-    pub keys: Vec<Secp256k1Pubkey>,
+    pub keys: Vec<Secp256k1PubkeyCompressed>,
     pub transfer_amounts: Vec<u64>
 }
 
@@ -78,7 +81,7 @@ pub struct BridgeMessage {
 pub enum Message {
     Regular {
         funds: Vec<Token>,
-        keys: Vec<Secp256k1Pubkey>,
+        keys: Vec<Secp256k1PubkeyCompressed>,
     },
     Signed {
         action_id: u64,
@@ -93,8 +96,8 @@ pub struct Token {
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct State {
-    pub processor: Secp256k1Pubkey,
-    pub executors: Vec<Secp256k1Pubkey>,
+    pub processor: Secp256k1PubkeyCompressed,
+    pub executors: Vec<Secp256k1PubkeyCompressed>,
     pub needed_executors: u8,
     /// IDs for bridge events.
     pub next_event_id: u64,
@@ -104,6 +107,10 @@ pub struct State {
 
 impl Secp256k1Pubkey {
     pub const LEN: usize = 64;
+}
+
+impl Secp256k1PubkeyCompressed {
+    pub const LEN: usize = 33;
 }
 
 impl Secp256k1Signature {
@@ -171,11 +178,11 @@ impl Secp256k1Pubkey {
         }
     }
 
-    pub fn to_sec1_bytes(&self) -> [u8; 33] {
+    pub fn to_sec1_bytes(&self) -> Secp256k1PubkeyCompressed {
         let mut res = [0u8; 33];
         res[0] = self.y_parity();
         res[1..].copy_from_slice(&self.0.as_slice()[..32]);
 
-        res
+        Secp256k1PubkeyCompressed(res)
     }
 }
