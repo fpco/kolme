@@ -130,6 +130,7 @@ impl MerkleSerialize for Market {
         serializer.store(max_allowed_liability)?;
         serializer.store(liabilities)?;
         Ok(())
+    }
 }
 
 impl MerkleDeserialize for Market {
