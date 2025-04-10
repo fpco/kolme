@@ -1,24 +1,59 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{anyhow, Context, Result};
-use kolme::{AccountId, AssetId, PublicKey, Wallet};
+use kolme::{
+    AccountId, AssetId, MerkleDeserialize, MerkleMap, MerkleSerialError, MerkleSerialize,
+    PublicKey, Wallet,
+};
 use rust_decimal::{dec, Decimal};
 
 use crate::{AppState, BalanceChange, Odds, OUTCOME_COUNT};
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Clone)]
 pub struct State {
-    admin_keys: HashSet<PublicKey>,
-    markets: HashMap<u64, Market>,
+    admin_keys: BTreeSet<PublicKey>,
+    markets: MerkleMap<u64, Market>,
     state: AppState,
     strategic_reserve: BTreeMap<AssetId, Decimal>,
+}
+
+impl MerkleSerialize for State {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut kolme::MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        let State {
+            admin_keys,
+            markets,
+            state,
+            strategic_reserve,
+        } = self;
+        serializer.store(admin_keys)?;
+        serializer.store(markets)?;
+        serializer.store(state)?;
+        serializer.store(strategic_reserve)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for State {
+    fn merkle_deserialize(
+        deserializer: &mut kolme::MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            admin_keys: deserializer.load()?,
+            markets: deserializer.load()?,
+            state: deserializer.load()?,
+            strategic_reserve: deserializer.load()?,
+        })
+    }
 }
 
 impl State {
     pub fn new(admin_keys: impl IntoIterator<Item = PublicKey>) -> Self {
         Self {
-            admin_keys: HashSet::from_iter(admin_keys),
-            markets: HashMap::new(),
+            admin_keys: BTreeSet::from_iter(admin_keys),
+            markets: MerkleMap::new(),
             state: AppState::Uninitialized,
             strategic_reserve: BTreeMap::new(),
         }
@@ -28,10 +63,32 @@ impl State {
 // funds provided to fund every market
 const HOUSE_FUNDS: Decimal = dec!(1000); // 1000 coins with 6 decimals
 
-#[derive(PartialEq, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(
+    PartialEq, serde::Serialize, serde::Deserialize, Clone, strum::AsRefStr, strum::EnumString,
+)]
 enum MarketState {
     Operational,
     Settled,
+}
+
+impl MerkleSerialize for MarketState {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut kolme::MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        serializer.store(self.as_ref())
+    }
+}
+
+impl MerkleDeserialize for MarketState {
+    fn merkle_deserialize(
+        deserializer: &mut kolme::MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer
+            .load_str()?
+            .parse()
+            .map_err(MerkleSerialError::custom)
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -47,6 +104,53 @@ pub struct Market {
     liabilities: [Decimal; OUTCOME_COUNT as usize],
 }
 
+impl MerkleSerialize for Market {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut kolme::MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        let Market {
+            state,
+            id,
+            asset_id,
+            name,
+            bets,
+            total_funds,
+            available_liquidity,
+            max_allowed_liability,
+            liabilities,
+        } = self;
+        serializer.store(state)?;
+        serializer.store(id)?;
+        serializer.store(asset_id)?;
+        serializer.store(name)?;
+        serializer.store(bets)?;
+        serializer.store(total_funds)?;
+        serializer.store(available_liquidity)?;
+        serializer.store(max_allowed_liability)?;
+        serializer.store(liabilities)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for Market {
+    fn merkle_deserialize(
+        deserializer: &mut kolme::MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            state: deserializer.load()?,
+            id: deserializer.load()?,
+            asset_id: deserializer.load()?,
+            name: deserializer.load()?,
+            bets: deserializer.load()?,
+            total_funds: deserializer.load()?,
+            available_liquidity: deserializer.load()?,
+            max_allowed_liability: deserializer.load()?,
+            liabilities: deserializer.load()?,
+        })
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct Bet {
     bettor: AccountId,
@@ -54,6 +158,41 @@ struct Bet {
     amount: Decimal,
     outcome: u8,
     returns: Decimal,
+}
+
+impl MerkleSerialize for Bet {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut kolme::MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        let Bet {
+            bettor,
+            wallet,
+            amount,
+            outcome,
+            returns,
+        } = self;
+        serializer.store(bettor)?;
+        serializer.store(wallet)?;
+        serializer.store(amount)?;
+        serializer.store(outcome)?;
+        serializer.store(returns)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for Bet {
+    fn merkle_deserialize(
+        deserializer: &mut kolme::MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            bettor: deserializer.load()?,
+            wallet: deserializer.load()?,
+            amount: deserializer.load()?,
+            outcome: deserializer.load()?,
+            returns: deserializer.load()?,
+        })
+    }
 }
 
 impl State {

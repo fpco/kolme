@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use cosmwasm_std::{Binary, Coin, CosmosMsg};
 
 use crate::{
-    cryptography::{PublicKey, RecoveryId, Signature},
+    cryptography::{PublicKey, SignatureWithRecovery},
     types::{BridgeActionId, BridgeEventId},
 };
 
@@ -76,12 +76,6 @@ pub enum QueryMsg {
 pub enum GetEventResp {
     Found { message: Binary },
     NotFound {},
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
-pub struct SignatureWithRecovery {
-    pub recid: RecoveryId,
-    pub sig: Signature,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

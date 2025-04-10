@@ -10,7 +10,7 @@ use cw_storage_plus::{Item, Map};
 use sha2::{Digest, Sha256};
 use shared::{
     cosmos::*,
-    cryptography::PublicKey,
+    cryptography::{PublicKey, SignatureWithRecovery},
     types::{BridgeActionId, BridgeEventId},
 };
 

@@ -1,0 +1,82 @@
+mod key_bytes;
+
+use std::collections::HashSet;
+
+use crate::*;
+pub use key_bytes::MerkleKey;
+
+pub(crate) use crate::impls::Lockable;
+
+/// A base16 tree supporting sharing of subtrees and cheap hashing.
+///
+/// Consider this as a replacement for a `BTreeMap`. Importantly,
+/// this type internally will hash each subtree individually and store
+/// its serialized format in separate database entries. The goal is to
+/// allow for aggressive sharing in both the on-disk and in-memory
+/// representation of the data.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub struct MerkleMap<K, V>(pub(crate) Node<K, V>);
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct LeafEntry<K, V> {
+    pub(crate) key_bytes: MerkleKey,
+    pub(crate) key: K,
+    pub(crate) value: V,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Node<K, V> {
+    Leaf(Lockable<LeafContents<K, V>>),
+    Tree(Lockable<TreeContents<K, V>>),
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct LeafContents<K, V> {
+    /// Invariant: must be sored by key_bytes
+    pub(crate) values: Vec<LeafEntry<K, V>>, // FIXME switch to an array
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct TreeContents<K, V> {
+    pub(crate) len: usize,
+    pub(crate) leaf: Option<LeafEntry<K, V>>,
+    pub(crate) branches: [Node<K, V>; 16],
+}
+
+/// The serialized contents of a value.
+///
+/// This includes the hash and payload which will be stored in the database.
+/// It also includes all direct children nodes encountered during serialization,
+/// so that they can be checked as present in the database and added if missing.
+#[derive(Clone)]
+pub struct MerkleContents {
+    pub hash: Sha256Hash,
+    pub payload: Arc<[u8]>,
+    /// FIXME figure out a way to not require everything in memory at once
+    pub children: Arc<[Arc<MerkleContents>]>,
+}
+
+/// Errors that can occur during serialization of data.
+#[derive(thiserror::Error, Debug)]
+pub enum MerkleSerialError {
+    #[error("Insufficient input when parsing buffer")]
+    InsufficientInput,
+    #[error("A usize value would be larger than the machine representation")]
+    UsizeOverflow,
+    #[error(
+        "Unexpected magic byte to distinguish Tree from Leaf, expected 0 or 1, but got {byte}"
+    )]
+    UnexpectedMagicByte { byte: u8 },
+    #[error("Invalid byte at start of tree, expected 0 or 1, but got {byte}")]
+    InvalidTreeStart { byte: u8 },
+    #[error("Leftover input was unconsumed")]
+    TooMuchInput,
+    #[error("Serialized content was invalid")]
+    InvalidSerializedContent,
+    #[error("Hashes not found in store: {hashes:?}")]
+    HashesNotFound {
+        hashes: HashSet<shared::types::Sha256Hash>,
+    },
+    #[error(transparent)]
+    Custom(Box<dyn std::error::Error + Send + Sync>),
+}

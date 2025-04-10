@@ -12,6 +12,23 @@ pub struct SampleKolmeApp;
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {}
 
+impl MerkleSerialize for SampleState {
+    fn merkle_serialize(
+        &self,
+        _serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for SampleState {
+    fn merkle_deserialize(
+        _deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(SampleState {})
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum SampleMessage {
     SayHi,
@@ -68,14 +85,6 @@ impl KolmeApp for SampleKolmeApp {
 
     fn new_state() -> anyhow::Result<Self::State> {
         Ok(SampleState {})
-    }
-
-    fn save_state(state: &Self::State) -> anyhow::Result<String> {
-        serde_json::to_string(state).map_err(anyhow::Error::from)
-    }
-
-    fn load_state(v: &str) -> anyhow::Result<Self::State> {
-        serde_json::from_str(v).map_err(anyhow::Error::from)
     }
 
     async fn execute(

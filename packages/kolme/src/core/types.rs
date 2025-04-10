@@ -3,7 +3,6 @@ mod balances;
 use std::{fmt::Display, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
-use shared::cosmos::SignatureWithRecovery;
 
 use crate::*;
 
@@ -21,6 +20,7 @@ pub use balances::{Balances, BalancesError};
     Debug,
     Hash,
     strum::AsRefStr,
+    strum::EnumString,
 )]
 #[strum(serialize_all = "kebab-case")]
 pub enum ExternalChain {
@@ -40,15 +40,76 @@ impl ExternalChain {
     }
 }
 
+impl MerkleSerialize for ExternalChain {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        serializer.store(self.as_ref())
+    }
+}
+
+impl MerkleDeserialize for ExternalChain {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer
+            .load_str()?
+            .parse()
+            .map_err(MerkleSerialError::custom)
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
 }
+
+impl MerkleSerialize for ChainConfig {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let ChainConfig { assets, bridge } = self;
+        serializer.store(assets)?;
+        serializer.store(bridge)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for ChainConfig {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            assets: deserializer.load()?,
+            bridge: deserializer.load()?,
+        })
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct AssetConfig {
     pub decimals: u8,
     pub asset_id: AssetId,
+}
+
+impl MerkleSerialize for AssetConfig {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let AssetConfig { decimals, asset_id } = self;
+        serializer.store(decimals)?;
+        serializer.store(asset_id)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for AssetConfig {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            decimals: deserializer.load()?,
+            asset_id: deserializer.load()?,
+        })
+    }
 }
 
 #[derive(snafu::Snafu, Debug)]
@@ -121,6 +182,36 @@ pub enum BridgeContract {
     Deployed(String),
 }
 
+impl MerkleSerialize for BridgeContract {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        match self {
+            BridgeContract::NeededCosmosBridge { code_id } => {
+                serializer.store_byte(0);
+                serializer.store(code_id)?;
+            }
+            BridgeContract::Deployed(addr) => {
+                serializer.store_byte(1);
+                serializer.store(addr)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for BridgeContract {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        match deserializer.pop_byte()? {
+            0 => Ok(Self::NeededCosmosBridge {
+                code_id: deserializer.load()?,
+            }),
+            1 => Ok(Self::Deployed(deserializer.load()?)),
+            byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 pub enum GenesisAction {
     InstantiateCosmos {
@@ -154,10 +245,37 @@ impl Display for AssetId {
     }
 }
 
+impl MerkleSerialize for AssetId {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for AssetId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        MerkleDeserialize::merkle_deserialize(deserializer).map(Self)
+    }
+}
+
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug,
 )]
 pub struct AssetName(pub String);
+
+impl MerkleSerialize for AssetName {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+impl MerkleDeserialize for AssetName {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
 
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
@@ -169,9 +287,35 @@ impl AccountId {
     }
 }
 
+impl MerkleSerialize for AccountId {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for AccountId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
+
 impl Display for AccountId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl ToMerkleKey for AccountId {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.0.to_merkle_key()
+    }
+}
+
+impl FromMerkleKey for AccountId {
+    fn from_merkle_key(bytes: &[u8]) -> std::result::Result<Self, MerkleSerialError> {
+        u64::from_merkle_key(bytes).map(AccountId)
     }
 }
 
@@ -250,6 +394,20 @@ impl TryFrom<i64> for BlockHeight {
     PartialEq, PartialOrd, Ord, Eq, Clone, Debug, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub struct Wallet(pub String);
+
+impl MerkleSerialize for Wallet {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for Wallet {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Wallet)
+    }
+}
 
 /// A block that is signed by the processor.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

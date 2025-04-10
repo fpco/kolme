@@ -1,4 +1,6 @@
-use kolme::{AssetId, BlockHeight, Decimal};
+use std::str::FromStr;
+
+use kolme::{AssetId, BlockHeight, Decimal, MerkleDeserialize, MerkleSerialError, MerkleSerialize};
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -77,9 +79,36 @@ impl From<kolme::BridgeEvent> for LogBridgeEvent {
     }
 }
 
-#[derive(PartialEq, serde::Serialize, serde::Deserialize, Default, Clone, Debug)]
+#[derive(
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
+    Clone,
+    Debug,
+    strum::AsRefStr,
+    strum::EnumString,
+)]
+#[strum(serialize_all = "snake_case")]
 pub enum AppState {
     #[default]
     Uninitialized,
     Operational,
+}
+
+impl MerkleSerialize for AppState {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut kolme::MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        serializer.store(self.as_ref())
+    }
+}
+
+impl MerkleDeserialize for AppState {
+    fn merkle_deserialize(
+        deserializer: &mut kolme::MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        AppState::from_str(deserializer.load_str()?).map_err(MerkleSerialError::custom)
+    }
 }
