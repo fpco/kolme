@@ -142,12 +142,6 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Tree
             leaf,
             branches,
         };
-        Ok(Lockable::new_unlocked(tree)) // FIXME
-
-        // Ok(Lockable::new_locked(
-        //     deserializer.get_hash(),
-        //     deserializer.get_full_payload(),
-        //     tree,
-        // ))
+        Ok(Lockable::new_unlocked(tree))
     }
 }

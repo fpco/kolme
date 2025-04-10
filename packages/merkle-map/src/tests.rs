@@ -1,5 +1,25 @@
 use crate::*;
 
+impl<K, V> MerkleMap<K, V> {
+    pub fn assert_locked_status(&self, expected: bool) {
+        self.0.assert_locked_status(expected);
+    }
+}
+
+impl<K, V> Node<K, V> {
+    pub fn assert_locked_status(&self, expected: bool) {
+        match self {
+            Node::Leaf(leaf) => leaf.assert_locked_status(expected),
+            Node::Tree(tree) => {
+                tree.assert_locked_status(expected);
+                for branch in &tree.as_ref().branches {
+                    branch.assert_locked_status(expected);
+                }
+            }
+        }
+    }
+}
+
 impl<K, V> Node<K, V> {
     #[cfg(test)]
     pub(crate) fn sanity_checks(&self) {
@@ -203,4 +223,60 @@ async fn test_store_usize_inner(x: usize) -> bool {
         .unwrap();
     assert_eq!(x, y);
     true
+}
+
+async fn memory_manager_helper(size: u32) {
+    let mut m = MerkleMap::new();
+    for i in 0..size {
+        m.insert(i, i * 2);
+    }
+
+    m.assert_locked_status(false);
+
+    let mut store = MerkleMemoryStore::default();
+    let manager = MerkleManager::default();
+    let contents = manager.save(&mut store, &m).await.unwrap();
+
+    m.assert_locked_status(false);
+
+    let m2 = manager.load(&mut store, contents.hash).await.unwrap();
+
+    m.assert_locked_status(true);
+
+    assert_eq!(m, m2);
+}
+
+#[tokio::test]
+async fn memory_manager_0() {
+    memory_manager_helper(0).await
+}
+
+#[tokio::test]
+async fn memory_manager_1() {
+    memory_manager_helper(1).await
+}
+
+#[tokio::test]
+async fn memory_manager_2() {
+    memory_manager_helper(2).await
+}
+
+#[tokio::test]
+async fn memory_manager_10() {
+    memory_manager_helper(10).await
+}
+
+#[tokio::test]
+async fn memory_manager_16() {
+    memory_manager_helper(16).await
+}
+
+#[tokio::test]
+async fn memory_manager_17() {
+    memory_manager_helper(17).await
+}
+
+#[tokio::test]
+async fn memory_manager_1000() {
+    memory_manager_helper(1000).await
 }

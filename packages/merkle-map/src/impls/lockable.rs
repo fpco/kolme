@@ -11,6 +11,11 @@ impl<T> Lockable<T> {
     pub(crate) fn as_ref(&self) -> &Arc<T> {
         &self.inner
     }
+
+    #[cfg(test)]
+    pub fn assert_locked_status(&self, expected: bool) {
+        assert_eq!(self.locked.get().is_some(), expected);
+    }
 }
 
 impl<T> Lockable<T>
