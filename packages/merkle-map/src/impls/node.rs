@@ -91,22 +91,6 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for Node<K, V> {
             Node::Leaf(leaf) => leaf.merkle_serialize(manager),
             Node::Tree(tree) => tree.merkle_serialize(manager),
         }
-        // match &self {
-        //     Node::Leaf(leaf) => {
-        //         let (hash, payload) = leaf.lock()?;
-        //         manager.add_contents(hash, payload, vec![]);
-        //         Ok(hash)
-        //     }
-        //     Node::Tree(tree) => {
-        //         let (hash, payload) = tree.lock()?;
-        //         let mut children: Vec<Box<dyn MerkleSerializeComplete>> = vec![];
-        //         for branch in &tree.as_ref().branches {
-        //             children.push(Box::new(branch.clone()));
-        //         }
-        //         manager.add_contents(hash, payload, children);
-        //         Ok(hash)
-        //     }
-        // }
     }
 }
 
