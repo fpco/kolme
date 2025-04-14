@@ -92,9 +92,9 @@ mod cw_impls {
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Sha256Hash([u8; 32]);
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Sha256HashError {
-    #[snafu(display("Wrong byte count for a SHA256 hash. Expected 32, received {actual}."))]
+    #[error("Wrong byte count for a SHA256 hash. Expected 32, received {actual}.")]
     WrongByteCount { actual: usize },
 }
 
