@@ -1,3 +1,4 @@
+use parameterized::parameterized;
 use std::collections::BTreeMap;
 
 use crate::*;
@@ -108,29 +109,14 @@ fn many_removes() {
     assert!(tree.is_empty());
 }
 
-#[test]
-fn iterate_small() {
-    const MAX: u32 = 17;
+#[parameterized(size = { 17, 100 })]
+fn iterate(size: u32) {
     let mut tree = MerkleMap::<u32, u32>::new();
-    for i in 0..MAX {
+    for i in 0..size {
         tree.insert(i, i * 2);
     }
 
-    let expected = (0..MAX).map(|x| (x, x * 2)).collect::<Vec<_>>();
-    let actual = tree.iter().map(|(x, y)| (*x, *y)).collect::<Vec<_>>();
-    assert_eq!(expected, actual);
-    let actual = tree.into_iter().collect::<Vec<_>>();
-    assert_eq!(expected, actual);
-}
-
-#[test]
-fn iterate() {
-    let mut tree = MerkleMap::<u32, u32>::new();
-    for i in 0..100 {
-        tree.insert(i, i * 2);
-    }
-
-    let expected = (0..100).map(|x| (x, x * 2)).collect::<Vec<_>>();
+    let expected = (0..size).map(|x| (x, x * 2)).collect::<Vec<_>>();
     let actual = tree.iter().map(|(x, y)| (*x, *y)).collect::<Vec<_>>();
     assert_eq!(expected, actual);
     let actual = tree.into_iter().collect::<Vec<_>>();
@@ -248,39 +234,10 @@ async fn memory_manager_helper(size: u32) {
     assert_eq!(m, m2);
 }
 
-#[tokio::test]
-async fn memory_manager_0() {
-    memory_manager_helper(0).await
-}
-
-#[tokio::test]
-async fn memory_manager_1() {
-    memory_manager_helper(1).await
-}
-
-#[tokio::test]
-async fn memory_manager_2() {
-    memory_manager_helper(2).await
-}
-
-#[tokio::test]
-async fn memory_manager_10() {
-    memory_manager_helper(10).await
-}
-
-#[tokio::test]
-async fn memory_manager_16() {
-    memory_manager_helper(16).await
-}
-
-#[tokio::test]
-async fn memory_manager_17() {
-    memory_manager_helper(17).await
-}
-
-#[tokio::test]
-async fn memory_manager_1000() {
-    memory_manager_helper(1000).await
+#[parameterized(size = { 0, 1, 2, 10, 16, 17, 1000 })]
+#[parameterized_macro(tokio::test)]
+async fn memory_manager(size: u32) {
+    memory_manager_helper(size).await
 }
 
 fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
