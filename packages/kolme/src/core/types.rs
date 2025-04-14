@@ -19,6 +19,7 @@ pub use balances::{Balances, BalancesError};
     Copy,
     Debug,
     Hash,
+    strum::Display,
     strum::AsRefStr,
     strum::EnumString,
 )]
@@ -112,22 +113,20 @@ impl MerkleDeserialize for AssetConfig {
     }
 }
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum AssetError {
-    #[snafu(display(
-        "Could not convert {amount} to decimal using {decimals} decimal points: {source}"
-    ))]
+    #[error("Could not convert {amount} to decimal using {decimals} decimal points: {source}")]
     CouldNotConvertToDecimal {
         source: rust_decimal::Error,
         amount: u128,
         decimals: u8,
     },
-    #[snafu(display("Amount {amount} too large to convert to decimal: {source}"))]
+    #[error("Amount {amount} too large to convert to decimal: {source}")]
     U128TooLarge {
         source: std::num::TryFromIntError,
         amount: u128,
     },
-    #[snafu(display("Cannot convert {amount} to integer because it's negative: {source}"))]
+    #[error("Cannot convert {amount} to integer because it's negative: {source}")]
     ToU128WithNegative {
         source: std::num::TryFromIntError,
         amount: Decimal,

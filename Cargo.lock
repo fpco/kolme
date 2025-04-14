@@ -2819,10 +2819,10 @@ dependencies = [
  "serde",
  "serde_json",
  "shared",
- "snafu",
  "sqlx",
  "strum 0.27.1",
  "tempfile",
+ "thiserror 2.0.12",
  "tokio",
  "tower-http",
  "tracing",
@@ -5049,8 +5049,8 @@ dependencies = [
  "k256",
  "rand 0.8.5",
  "serde",
- "snafu",
  "sqlx",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -5100,27 +5100,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fcf8323ef1faaee30a44a340193b1ac6814fd9b7b4e88e9d4519a3e4abe1cfd"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "snafu"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "223891c85e2a29c3fe8fb900c1fae5e69c2e42415e3177752e8718475efa5019"
-dependencies = [
- "snafu-derive",
-]
-
-[[package]]
-name = "snafu-derive"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn 2.0.100",
 ]
 
 [[package]]

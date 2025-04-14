@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use cosmwasm_std::HexBinary;
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum PublicKeyError {}
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord, Copy)]

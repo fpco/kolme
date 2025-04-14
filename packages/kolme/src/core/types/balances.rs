@@ -1,21 +1,22 @@
 use crate::*;
+use thiserror::Error;
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(Error, Debug)]
 pub enum BalancesError {
-    #[snafu(display("Insufficient balance for account {account_id}, asset {asset_id}. Requested: {requested}. Available: {available}."))]
+    #[error("Insufficient balance for account {account_id}, asset {asset_id}. Requested: {requested}. Available: {available}.")]
     InsufficientBalance {
         account_id: AccountId,
         asset_id: AssetId,
         requested: Decimal,
         available: Decimal,
     },
-    #[snafu(display("Must provide positive values for minting. Tried to mint {to_mint} from account {account_id}, asset {asset_id}."))]
+    #[error("Must provide positive values for minting. Tried to mint {to_mint} from account {account_id}, asset {asset_id}.")]
     MustMintPositive {
         account_id: AccountId,
         asset_id: AssetId,
         to_mint: Decimal,
     },
-    #[snafu(display("Must provide positive values for burning. Tried to burn {to_burn} from account {account_id}, asset {asset_id}."))]
+    #[error("Must provide positive values for burning. Tried to burn {to_burn} from account {account_id}, asset {asset_id}.")]
     MustBurnPositive {
         account_id: AccountId,
         asset_id: AssetId,

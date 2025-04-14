@@ -1,10 +1,10 @@
 use crate::*;
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum CoreStateError {
-    ChainNotSupported {
-        chain: ExternalChain,
-    },
+    #[error("The chain '{chain}' is not supported")]
+    ChainNotSupported { chain: ExternalChain },
+    #[error("The asset '{asset_id}' on chain '{chain}' is not supported")]
     AssetNotSupported {
         chain: ExternalChain,
         asset_id: AssetId,
