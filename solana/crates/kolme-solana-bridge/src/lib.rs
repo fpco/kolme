@@ -4,13 +4,13 @@ use kolme_solana_bridge_client::{
     InitializeIxData,  RegularMsgIxData, SignedMsgIxData,
     State, Token, Message, BridgeMessage, Secp256k1Pubkey,
     Secp256k1Signature, Payload, INITIALIZE_IX, REGULAR_IX,
-    SIGNED_IX
+    SIGNED_IX, TOKEN_HOLDER_SEED
 };
 use solbox::{
     token,
     pinocchio::{
         account_info::AccountInfo,
-        instruction::{AccountMeta, Instruction},
+        instruction::{AccountMeta, Instruction, Seed, Signer},
         pubkey::{Pubkey, find_program_address},
         program_error::ProgramError,
         ProgramResult,
@@ -45,7 +45,6 @@ entrypoint!(process_instruction);
 const STATE_DERIVATION: PdaDerivation = PdaDerivation::with_bump(&[b"state"], 254);
 type StatePda = PdaData<State, 0>;
 
-const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
 type TokenHolderPda = PdaData<TokenHolder, 1>;
 
 const SHA256_DIGEST_SIZE: usize = 32;
@@ -298,7 +297,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
 }
 
 fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
-    if ctx.accounts.len() < 2 {
+    if ctx.accounts.len() < 3 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
@@ -350,7 +349,7 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         }
     }
 
-    let ix_accounts = &ctx.accounts[2..];
+    let ix_accounts = &ctx.accounts[3..];
 
     if payload.accounts.len() != ix_accounts.len() {
         return Err(SignedIxError::AccountMetaAndPassedAccountsMismatch.into());
@@ -358,11 +357,11 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
 
     let mut accounts = Vec::with_capacity(payload.accounts.len());
 
-    for a in &payload.accounts {
+    for (i, a) in payload.accounts.iter().enumerate() {
         accounts.push(AccountMeta {
             pubkey: &a.pubkey,
             is_writable: a.is_writable,
-            is_signer: sender_acc.key() == &a.pubkey,
+            is_signer: payload.signer.as_ref().map_or(false, |x| usize::from(x.index) == i)
         });
     }
 
@@ -373,7 +372,15 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     };
 
     let ix_accounts: Vec<&AccountInfo> = ix_accounts.iter().map(|x| x).collect();
-    cpi::slice_invoke(&ix, &ix_accounts)?;
+
+    if let Some(signer) = payload.signer {
+        let seeds: Vec<Seed> = signer.seeds.iter().map(|x| Seed::from(x.as_slice())).collect();
+        let signer = Signer::from(seeds.as_slice());
+
+        cpi::slice_invoke_signed(&ix, &ix_accounts, &[signer])?;
+    } else {
+        cpi::slice_invoke(&ix, &ix_accounts)?;
+    }
 
     let msg = BridgeMessage {
         id: incoming_id,

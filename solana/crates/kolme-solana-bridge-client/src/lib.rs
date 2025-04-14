@@ -5,7 +5,10 @@ mod client;
 pub use client::*;
 
 #[cfg(feature = "client")]
-pub use solana_pubkey;
+pub use solana_pubkey as pubkey;
+
+#[cfg(feature = "client")]
+pub use solana_keypair as keypair;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -14,6 +17,8 @@ pub type Pubkey = [u8; 32];
 pub const INITIALIZE_IX: u8 = 0;
 pub const REGULAR_IX: u8 = 1;
 pub const SIGNED_IX: u8 = 2;
+
+pub const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
 pub struct Secp256k1Pubkey(pub [u8; Self::LEN]);
@@ -61,13 +66,20 @@ pub struct Payload {
     pub id: u64,
     pub program_id: Pubkey,
     pub accounts: Vec<InstructionAccount>,
-    pub instruction_data: Vec<u8>
+    pub instruction_data: Vec<u8>,
+    pub signer: Option<SignerAccount>
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct InstructionAccount {
     pub pubkey: Pubkey,
     pub is_writable: bool,
+}
+
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct SignerAccount {
+    pub index: u8,
+    pub seeds: Vec<Vec<u8>>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]

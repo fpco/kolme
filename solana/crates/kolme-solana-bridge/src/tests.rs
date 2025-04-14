@@ -21,7 +21,7 @@ use sha_256::Sha256;
 use kolme_solana_bridge_client::{
     InitializeIxData, RegularMsgIxData, SignedMsgIxData, Payload,
     Secp256k1Signature, Secp256k1PubkeyCompressed, Signature,
-    InstructionAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
+    transfer_payload, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
 };
 
 use crate::{SignedIxError, TOKEN_HOLDER_SEED};
@@ -186,7 +186,7 @@ impl Program {
         Transaction::new(&[sender], msg, blockhash)
     }
 
-    fn make_signed_msg(&self, payload: &Payload, executor_indices: &[usize]) -> SignedMsgIxData {
+    fn make_signed_msg(&self, payload: &Payload, executor_indices: &[usize]) -> (SignedMsgIxData, Vec<AccountMeta>) {
         let mut bytes = Vec::with_capacity(borsh::object_length(payload).unwrap());
         payload.serialize(&mut bytes).unwrap();
 
@@ -218,11 +218,30 @@ impl Program {
             executors.push(signature);
         }
 
-        SignedMsgIxData {
+        let data = SignedMsgIxData {
             processor,
             executors,
             payload: bytes
-        }
+        };
+
+        let mut metas: Vec<AccountMeta> = Vec::with_capacity(1 + payload.accounts.len());
+        metas.push(
+            AccountMeta {
+                pubkey: Pubkey::new_from_array(payload.program_id),
+                is_writable: true,
+                is_signer: false,
+            }
+        );
+
+        metas.extend(payload.accounts.iter().map(|x|
+            AccountMeta {
+                pubkey: Pubkey::new_from_array(x.pubkey),
+                is_writable: x.is_writable,
+                is_signer: false,
+            }
+        ));
+
+        (data, metas)
     }
 
     fn mint(&mut self, to: &Pubkey, amount: u64) {
@@ -232,33 +251,10 @@ impl Program {
     fn make_ata(&mut self, acc: &Keypair) -> Pubkey {
         CreateAssociatedTokenAccount::new(&mut self.svm, acc, &self.token).send().unwrap()
     }
-}
 
-fn transfer_payload(id: u64, from: Pubkey, to: Pubkey, authority: Pubkey, amount: u64) -> (Payload, [AccountMeta; 3]) {
-    let account_metas: [AccountMeta; 3] = [
-        AccountMeta::new(from, false),
-        AccountMeta::new(to, false),
-        AccountMeta::new_readonly(authority, true),
-    ];
-
-    let accounts: Vec<InstructionAccount> = account_metas.iter()
-        .map(|x| InstructionAccount {
-            pubkey: x.pubkey.to_bytes(),
-            is_writable: x.is_writable
-        })
-        .collect();
-
-    let bytes = amount.to_le_bytes();
-    let instruction_data = vec![3, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]];
-
-    let payload = Payload {
-        id,
-        program_id: TOKEN.to_bytes(),
-        accounts,
-        instruction_data
-    };
-
-    (payload, account_metas)
+    fn transfer_payload(&self, id: u64, to: Pubkey, amount: u64) -> Payload {
+        transfer_payload(id, crate::ID.into(), self.token, to, amount)
+    }
 }
 
 fn token_holder_acc(mint: &Pubkey, sender: &Pubkey) -> Pubkey {
@@ -280,11 +276,12 @@ fn must_init_first() {
         program_id: TOKEN.to_bytes(),
         accounts: vec![],
         instruction_data: vec![],
+        signer: None
     };
 
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
-    let meta = p.signed(&sender, &data, &[]).unwrap_err();
+    let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::UninitializedAccount));
 }
 
@@ -377,34 +374,70 @@ fn signing_multiple_tokens_work() {
 fn signing_works() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    let receiver = Keypair::new();
 
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
-
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let payload = p.transfer_payload(0, sender.pubkey(), 100);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
 
     // This error occurs on the SPL program invocation because we didn't provide
     // the relevant accounts to it which means that signature checks have passed.
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::MissingAccount));
+    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::InvalidAccountData));
+}
+
+#[test]
+fn signed_transfer() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.init_default(&sender).unwrap();
+
+    let sender_ata_acc = p.make_ata(&sender);
+    let holder_acc = token_holder_acc(&p.token, &sender.pubkey());
+    let holder_ata_acc = spl_client::address::get_associated_token_address(&holder_acc, &p.token);
+
+    let mint_amount = 10_00000000; // 10
+    let transfer_amount = mint_amount / 2; // 5
+
+    p.mint(&sender_ata_acc, mint_amount);
+
+    let data = RegularMsgIxData {
+        keys: vec![],
+        transfer_amounts: vec![transfer_amount]
+    };
+
+    p.regular(&sender, &data, &[p.token]).unwrap();
+
+    let holder_ata: SplAccount = get_spl_account(&p.svm, &holder_ata_acc).unwrap();
+    assert_eq!(holder_ata.amount, transfer_amount);
+
+    let payload = p.transfer_payload(0, sender.pubkey(), transfer_amount);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+
+    p.signed(&sender, &data, &metas).unwrap();
+
+    let sender_ata: SplAccount = get_spl_account(&p.svm, &sender_ata_acc).unwrap();
+    assert_eq!(sender_ata.amount, mint_amount);
+
+    let holder_ata: SplAccount = get_spl_account(&p.svm, &holder_ata_acc).unwrap();
+    assert_eq!(holder_ata.amount, 0);
 }
 
 #[test]
 fn insufficient_signatures_are_rejected() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    let receiver = Keypair::new();
 
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
 
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR2_KEY]);
+    let payload = p.transfer_payload(0, sender.pubkey(), 1000);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR2_KEY]);
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::InsufficientSignatures as u32)));
@@ -414,14 +447,13 @@ fn insufficient_signatures_are_rejected() {
 fn false_processor_signature_is_rejected() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    let receiver = Keypair::new();
 
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
 
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let mut data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let payload = p.transfer_payload(0, sender.pubkey(), 1000);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let mut rng = OsRng;
     let fake_key = ecdsa::SigningKey::random(&mut rng);
@@ -441,11 +473,11 @@ fn false_processor_signature_is_rejected() {
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::ProcessorKeyMismatch as u32)));
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let mut data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let payload = p.transfer_payload(0, sender.pubkey(), 1000);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
-    let (other_payload, _) = transfer_payload(1, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let other_data = p.make_signed_msg(&other_payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let other_payload = p.transfer_payload(1, sender.pubkey(), 1000);
+    let (other_data, _) = p.make_signed_msg(&other_payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     data.processor = other_data.processor;
 
@@ -457,14 +489,13 @@ fn false_processor_signature_is_rejected() {
 fn false_executor_signature_is_rejected() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    let receiver = Keypair::new();
 
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
 
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let mut data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
+    let payload = p.transfer_payload(0, sender.pubkey(), 1000);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
 
     let mut rng = OsRng;
     let fake_key = ecdsa::SigningKey::random(&mut rng);
@@ -484,11 +515,11 @@ fn false_executor_signature_is_rejected() {
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::NonExecutorKey as u32)));
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let mut data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
+    let payload = p.transfer_payload(0, sender.pubkey(), 1000);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
 
-    let (other_payload, _) = transfer_payload(1, sender.pubkey(), receiver.pubkey(), sender.pubkey(), 1000);
-    let mut other_data = p.make_signed_msg(&other_payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
+    let other_payload = p.transfer_payload(1, sender.pubkey(), 1000);
+    let (mut other_data, _) = p.make_signed_msg(&other_payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
 
     data.executors[1] = other_data.executors.pop().unwrap();
 

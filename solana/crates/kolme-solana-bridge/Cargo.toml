@@ -25,6 +25,7 @@ kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client" }
 [dev-dependencies]
 litesvm = "0.6.0"
 litesvm-token = "0.6.0"
+kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client", default-features = false, features = ["client"] }
 solana-transaction-error = "2.2.1"
 solana-account = "2.2"
 solana-keypair = "2.2"
