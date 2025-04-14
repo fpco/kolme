@@ -24,6 +24,9 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     /// Therefore, we disallow removing a public key from an account
     /// when it is the signer. See references to this field to see how this is used.
     signing_key: PublicKey,
+    /// Timestamp corresponding to the moment of time when processor starts
+    /// executing the current transaction
+    timestamp: Timestamp,
 }
 
 #[derive(Debug)]
@@ -129,6 +132,7 @@ impl<App: KolmeApp> KolmeInner<App> {
     pub async fn execute_transaction(
         &self,
         signed_tx: &SignedTransaction<App::Message>,
+        timestamp: Timestamp,
         validation_data_loads: Option<Vec<BlockDataLoad>>,
     ) -> Result<ExecutionResults<App>> {
         let ValidateTxResponse {
@@ -151,6 +155,7 @@ impl<App: KolmeApp> KolmeInner<App> {
             sender: sender_account_id,
             app: &self.app,
             signing_key: signed_tx.0.message.as_inner().pubkey,
+            timestamp,
         };
         for (msg_index, message) in tx.messages.iter().enumerate() {
             execution_context
@@ -172,6 +177,7 @@ impl<App: KolmeApp> KolmeInner<App> {
             sender: _,
             app: _,
             signing_key: _,
+            timestamp: _,
         } = execution_context;
 
         if let Some(loads) = validation_data_loads {
@@ -432,6 +438,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
     pub fn state_mut(&mut self) -> &mut App::State {
         &mut self.app_state
+    }
+
+    pub fn block_time(&self) -> Timestamp {
+        self.timestamp
     }
 
     pub fn get_sender_id(&self) -> AccountId {

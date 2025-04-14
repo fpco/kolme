@@ -3,6 +3,7 @@ use std::{
     sync::OnceLock,
 };
 
+use jiff::Timestamp;
 use tokio::task::JoinSet;
 
 use kolme::*;
@@ -104,7 +105,11 @@ async fn test_sample_sanity() {
                 .await
                 .create_signed_transaction(&signer, msgs.into_iter().map(Message::Auth).collect())
                 .await?;
-            kolme.read().await.execute_transaction(&tx, None).await?;
+            kolme
+                .read()
+                .await
+                .execute_transaction(&tx, Timestamp::now(), None)
+                .await?;
             let mut subscribe = kolme.subscribe();
             let next_height = kolme.read().await.get_next_height();
             kolme.propose_transaction(tx)?;
