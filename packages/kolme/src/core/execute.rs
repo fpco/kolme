@@ -448,6 +448,18 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.sender
     }
 
+    pub async fn get_sender_wallets(&self) -> Result<Vec<Wallet>> {
+        let account_id = i64::try_from(self.sender.0)?;
+        let rows = sqlx::query_scalar!(
+            "SELECT wallet FROM account_wallets WHERE account_id=$1",
+            account_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let wallets = rows.into_iter().map(Wallet).collect();
+        Ok(wallets)
+    }
+
     pub fn get_signing_key(&self) -> PublicKey {
         self.signing_key
     }
