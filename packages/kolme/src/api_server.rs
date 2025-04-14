@@ -70,7 +70,12 @@ async fn broadcast<App: KolmeApp>(
     Json(tx): Json<SignedTransaction<App::Message>>,
 ) -> impl IntoResponse {
     let txhash = tx.0.message_hash();
-    if let Err(e) = kolme.read().await.execute_transaction(&tx, None).await {
+    if let Err(e) = kolme
+        .read()
+        .await
+        .execute_transaction(&tx, Timestamp::now(), None)
+        .await
+    {
         let mut res = e.to_string().into_response();
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         return res;

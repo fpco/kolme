@@ -1,5 +1,3 @@
-use snafu::prelude::*;
-
 #[cfg(feature = "realcryptography")]
 mod real;
 
@@ -12,11 +10,11 @@ pub use real::*;
 #[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm"))]
 pub use cosmwasm::*;
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum CompressPublicKeyError {
-    #[snafu(display("Wrong key length, expected {expected}, actual {actual}"))]
+    #[error("Wrong key length, expected {expected}, actual {actual}")]
     WrongUncompressedLen { expected: u32, actual: u32 },
-    #[snafu(display("Wrong starting bytes, expected {expected}, actual {actual}"))]
+    #[error("Wrong starting bytes, expected {expected}, actual {actual}")]
     WrongStartingByte { expected: u8, actual: u8 },
 }
 

@@ -82,11 +82,13 @@ impl<App: KolmeApp> Kolme<App> {
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
         signed_block.validate_signature()?;
+        let block = signed_block.0.message.as_inner();
         let exec_results = self
             .read()
             .await
             .execute_transaction(
-                &signed_block.0.message.as_inner().tx,
+                &block.tx,
+                block.timestamp,
                 Some(signed_block.0.message.as_inner().loads.clone()),
             )
             .await?;

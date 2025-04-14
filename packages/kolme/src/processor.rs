@@ -91,7 +91,7 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             outputs,
             db_updates: _,
-        } = kolme.execute_transaction(&tx, None).await?;
+        } = kolme.execute_transaction(&tx, now, None).await?;
 
         let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
         let app_state = kolme.get_merkle_manager().serialize(&app_state)?.hash;
