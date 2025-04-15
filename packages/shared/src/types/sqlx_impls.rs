@@ -20,7 +20,7 @@ impl sqlx::Encode<'_, sqlx::Sqlite> for PublicKey {
         &self,
         buf: &mut <sqlx::Sqlite as sqlx::Database>::ArgumentBuffer<'_>,
     ) -> std::result::Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        self.as_bytes().encode_by_ref(buf)
+        sqlx::Encode::<sqlx::Sqlite>::encode_by_ref(&self.as_bytes(), buf)
     }
 }
 

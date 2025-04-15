@@ -1,18 +1,114 @@
-use std::ops::Deref;
+use std::{ops::Deref, path::PathBuf};
+
+use sqlx::{migrate::Migrator, postgres::PgListener};
+use tokio::task::JoinSet;
 
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
     secret: SecretKey,
+    block_db: Option<BlockDb>,
+}
+
+/// A database that stores blocks in durable storage.
+///
+/// Motivation is twofold:
+///
+/// * Ensure that any block that we produce ends up stored long-term in storage.
+///
+/// * If there are multiple processors, ensure that they all agree on the chain history.
+///
+/// Under the surface, this simply uses a PostgreSQL database.
+#[derive(Clone)]
+pub struct BlockDb(sqlx::PgPool);
+
+impl BlockDb {
+    /// Use the given connection pool.
+    pub async fn new(pool: sqlx::PgPool) -> Result<Self> {
+        let migrator = Migrator::new(PathBuf::from("blockdb-migrations")).await?;
+        migrator.run(&pool).await?;
+        Ok(BlockDb(pool))
+    }
+
+    async fn get_new_blocks<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<()> {
+        loop {
+            match self.get_new_blocks_inner(&kolme).await {
+                Ok(()) => tracing::warn!("Unexpected exit from get_new_blocks_inner"),
+                Err(e) => tracing::warn!("Error from get_new_blocks_inner: {e}"),
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+    }
+
+    async fn get_new_blocks_inner<App: KolmeApp>(&self, kolme: &Kolme<App>) -> Result<()> {
+        let mut listener = PgListener::connect_with(&self.0).await?;
+        listener.listen("new_block_channel").await?;
+        self.resync(kolme).await?;
+        loop {
+            let _ = listener.recv().await?;
+            self.resync(kolme).await?;
+        }
+    }
+
+    async fn resync<App: KolmeApp>(&self, kolme: &Kolme<App>) -> Result<()> {
+        loop {
+            let height = kolme.read().await.get_next_height();
+            let rendered: Option<String> =
+                sqlx::query_scalar("SELECT rendered FROM blocks WHERE height=$1")
+                    .bind(height.try_into_i64()?)
+                    .fetch_optional(&self.0)
+                    .await?;
+            let Some(rendered) = rendered else {
+                break Ok(());
+            };
+            kolme.add_block(serde_json::from_str(&rendered)?).await?;
+        }
+    }
+
+    pub(crate) async fn add_block<AppMessage>(
+        &self,
+        signed_block: &SignedBlock<AppMessage>,
+    ) -> Result<()> {
+        sqlx::query("INSERT INTO blocks(height,rendered) VALUES($1, $2)")
+            .bind(signed_block.0.message.as_inner().height.try_into_i64()?)
+            .bind(serde_json::to_string(&signed_block)?)
+            .execute(&self.0)
+            .await?;
+        Ok(())
+    }
 }
 
 impl<App: KolmeApp> Processor<App> {
-    pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
-        Processor { kolme, secret }
+    pub fn new(kolme: Kolme<App>, secret: SecretKey, block_db: Option<BlockDb>) -> Self {
+        Processor {
+            kolme,
+            secret,
+            block_db,
+        }
     }
 
     pub async fn run(self) -> Result<()> {
+        match self.block_db.clone() {
+            None => self.run_just_processor().await,
+            Some(block_db) => {
+                self.kolme.set_block_db(block_db.clone()).await;
+                let mut set = JoinSet::new();
+                set.spawn(block_db.get_new_blocks(self.kolme.clone()));
+                set.spawn(self.run_just_processor());
+                while let Some(res) = set.join_next().await {
+                    match res {
+                        Err(e) => return Err(e.into()),
+                        Ok(Err(e)) => return Err(e),
+                        Ok(Ok(())) => (),
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    async fn run_just_processor(self) -> Result<()> {
         let chains = self
             .kolme
             .read()
@@ -21,13 +117,16 @@ impl<App: KolmeApp> Processor<App> {
             .keys()
             .copied()
             .collect::<Vec<_>>();
-        if self.kolme.read().await.get_next_height().is_start() {
-            tracing::info!("Creating genesis event");
-            self.create_genesis_event().await?;
-        }
 
         // Subscribe to any newly arrived events.
+        // Do this before initialization so that any events that get sent
+        // while setting up the genesis event don't get dropped.
         let mut receiver = self.kolme.subscribe();
+
+        while let Err(e) = self.ensure_genesis_event().await {
+            tracing::error!("Unable to ensure genesis event, sleeping and retrying: {e}");
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
 
         self.approve_actions_all(&chains).await?;
 
@@ -46,6 +145,16 @@ impl<App: KolmeApp> Processor<App> {
                     self.add_transaction(tx).await?
                 }
             }
+        }
+    }
+
+    async fn ensure_genesis_event(&self) -> Result<()> {
+        if self.kolme.read().await.get_next_height().is_start() {
+            tracing::info!("Creating genesis event");
+            self.create_genesis_event().await
+        } else {
+            tracing::info!("Genesis event already present");
+            Ok(())
         }
     }
 

@@ -592,7 +592,7 @@ impl<AppMessage> SignedBlock<AppMessage> {
 }
 
 /// The hash of a [Block].
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockHash(pub Sha256Hash);
 impl BlockHash {
     pub(crate) fn genesis_parent() -> BlockHash {
@@ -600,6 +600,10 @@ impl BlockHash {
         *LOCK.get_or_init(|| BlockHash(Sha256Hash::hash("genesis parent")))
     }
 }
+
+/// The hash of a [Transaction].
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TxHash(pub Sha256Hash);
 
 /// A block containing a single transaction.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -631,6 +635,11 @@ impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
         let pubkey = self.0.verify_signature()?;
         anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
         Ok(())
+    }
+
+    /// Get the hash of the transaction
+    pub fn hash(&self) -> TxHash {
+        TxHash(self.0.message_hash())
     }
 }
 

@@ -258,7 +258,7 @@ async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
 
     let mut set = JoinSet::new();
 
-    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
     set.spawn(processor.run());
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run(ChainName::Cosmos));

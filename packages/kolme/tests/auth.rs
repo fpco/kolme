@@ -85,7 +85,7 @@ async fn test_sample_sanity() {
     let mut subscription = kolme.subscribe();
 
     let mut set = JoinSet::new();
-    set.spawn(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
+    set.spawn(Processor::new(kolme.clone(), get_sample_secret_key().clone(), None).run());
     subscription.recv().await.unwrap();
 
     let mut rng = rand::thread_rng();

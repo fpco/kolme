@@ -113,6 +113,12 @@ impl<App: KolmeApp> Kolme<App> {
         let mut kolme = self.inner.write().await;
         let mut trans = kolme.pool.begin().await?;
         store_block(&mut kolme, &mut trans, &signed_block, &exec_results).await?;
+
+        // And try to write to durable storage here, allowing a failure to revert this commit.
+        if let Some(block_db) = &kolme.block_db {
+            block_db.add_block(&signed_block).await?;
+        }
+
         trans.commit().await?;
         kolme.next_height = signed_block.0.message.as_inner().height.next();
         kolme.current_block_hash = BlockHash(signed_block.0.message_hash());
@@ -122,6 +128,10 @@ impl<App: KolmeApp> Kolme<App> {
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
         Ok(())
+    }
+
+    pub(crate) async fn set_block_db(&self, block_db: BlockDb) {
+        self.inner.write().await.block_db = Some(block_db);
     }
 }
 
@@ -164,6 +174,7 @@ pub struct KolmeInner<App: KolmeApp> {
     #[cfg(feature = "deadlock_detector")]
     pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
     pub(super) merkle_manager: MerkleManager,
+    block_db: Option<BlockDb>,
 }
 
 #[cfg(feature = "deadlock_detector")]
@@ -207,6 +218,7 @@ impl<App: KolmeApp> Kolme<App> {
             #[cfg(feature = "deadlock_detector")]
             deadlock_detector: Default::default(),
             merkle_manager,
+            block_db: None,
         };
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),
@@ -241,6 +253,36 @@ impl<App: KolmeApp> Kolme<App> {
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_block: unexpected Closed"),
+                        RecvError::Lagged(_) => break,
+                    },
+                }
+            }
+        }
+    }
+
+    /// Wait until the given transaction is published
+    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<()> {
+        // Start an outer loop so that we can keep processing if we end up Lagged
+        loop {
+            // First subscribe to avoid a race condition...
+            let mut recv = self.subscribe();
+            // And then check if we have that transaction.
+            if self.read().await.get_tx(tx).await?.is_some() {
+                break Ok(());
+            }
+            loop {
+                match recv.recv().await {
+                    Ok(note) => match note {
+                        Notification::NewBlock(block) => {
+                            if block.0.message.as_inner().tx.hash() == tx {
+                                return Ok(());
+                            }
+                        }
+                        Notification::GenesisInstantiation { .. } => (),
+                        Notification::Broadcast { .. } => (),
+                    },
+                    Err(e) => match e {
+                        RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
                         RecvError::Lagged(_) => break,
                     },
                 }
@@ -301,6 +343,26 @@ impl<App: KolmeApp> KolmeInner<App> {
                 LIMIT 1
             "#,
             height
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(match rendered {
+            Some(rendered) => serde_json::from_str(&rendered)?,
+            None => None,
+        })
+    }
+
+    /// Get the block information for the given transaction, if present.
+    pub async fn get_tx(&self, tx: TxHash) -> Result<Option<SignedBlock<App::Message>>> {
+        let tx = tx.0;
+        let rendered = sqlx::query_scalar!(
+            r#"
+                SELECT rendered
+                FROM blocks
+                WHERE txhash=$1
+                LIMIT 1
+            "#,
+            tx
         )
         .fetch_optional(&self.pool)
         .await?;
