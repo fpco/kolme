@@ -1,6 +1,8 @@
-use std::collections::{HashMap, HashSet};
+mod cosmos;
+mod solana;
 
 use crate::*;
+use std::collections::{HashMap, HashSet};
 
 /// Component which submits necessary transactions to the blockchain.
 pub struct Submitter<App: KolmeApp> {
@@ -20,7 +22,7 @@ pub struct Submitter<App: KolmeApp> {
 
 enum ChainArgs {
     Cosmos {
-        seed_phrase: cosmos::SeedPhrase,
+        seed_phrase: ::cosmos::SeedPhrase,
     },
     Solana {
         keypair: kolme_solana_bridge_client::keypair::Keypair,
@@ -38,7 +40,7 @@ impl ChainArgs {
 }
 
 impl<App: KolmeApp> Submitter<App> {
-    pub fn new_cosmos(kolme: Kolme<App>, seed_phrase: cosmos::SeedPhrase) -> Self {
+    pub fn new_cosmos(kolme: Kolme<App>, seed_phrase: ::cosmos::SeedPhrase) -> Self {
         Submitter {
             kolme,
             args: ChainArgs::Cosmos { seed_phrase },
@@ -133,8 +135,7 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
 
-                let addr =
-                    cosmos_submitter::instantiate(&cosmos, seed_phrase, code_id, args).await?;
+                let addr = cosmos::instantiate(&cosmos, seed_phrase, code_id, args).await?;
 
                 (addr, chain.into())
             }
@@ -153,7 +154,7 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let client = self.kolme.read().await.get_solana_client(chain).await;
 
-                solana_submitter::instantiate(&client, &keypair, &program_id, args).await?;
+                solana::instantiate(&client, &keypair, &program_id, args).await?;
 
                 (program_id, chain.into())
             }
@@ -228,7 +229,7 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let cosmos = self.kolme.read().await.get_cosmos(cosmos_chain).await?;
 
-                cosmos_submitter::execute(
+                cosmos::execute(
                     &cosmos,
                     seed_phrase,
                     &contract,
@@ -250,7 +251,7 @@ impl<App: KolmeApp> Submitter<App> {
                     .get_solana_client(solana_chain)
                     .await;
 
-                solana_submitter::execute(
+                solana::execute(
                     &client,
                     keypair,
                     &contract,
@@ -269,176 +270,5 @@ impl<App: KolmeApp> Submitter<App> {
         self.last_submitted.insert(chain, action_id);
 
         Ok(())
-    }
-}
-
-mod cosmos_submitter {
-    use cosmos::{Cosmos, HasAddressHrp, SeedPhrase, TxBuilder};
-    use shared::cosmos::{ExecuteMsg, InstantiateMsg};
-
-    use super::*;
-
-    pub async fn instantiate(
-        cosmos: &Cosmos,
-        seed_phrase: &SeedPhrase,
-        code_id: u64,
-        args: InstantiateArgs,
-    ) -> Result<String> {
-        let needed_approvers = u16::try_from(args.needed_approvers)?;
-        let msg = InstantiateMsg {
-            processor: args.processor,
-            approvers: args.approvers,
-            needed_approvers,
-        };
-
-        let wallet = seed_phrase.with_hrp(cosmos.get_address_hrp())?;
-        let contract = cosmos
-            .make_code_id(code_id)
-            .instantiate(
-                &wallet,
-                "Kolme Framework Bridge Contract".to_owned(),
-                vec![],
-                &msg,
-                cosmos::ContractAdmin::Sender,
-            )
-            .await?;
-
-        tracing::info!("Instantiate new contract: {contract}");
-
-        let res = TxBuilder::default()
-            .add_update_contract_admin(&contract, &wallet, &contract)
-            .sign_and_broadcast(&cosmos, &wallet)
-            .await?;
-
-        tracing::info!(
-            "Updated admin on {contract} to its own address in tx {}",
-            res.txhash
-        );
-
-        Ok(contract.to_string())
-    }
-
-    pub async fn execute(
-        cosmos: &Cosmos,
-        seed_phrase: &SeedPhrase,
-        contract: &str,
-        processor: SignatureWithRecovery,
-        approvers: Vec<SignatureWithRecovery>,
-        payload: String,
-    ) -> Result<String> {
-        let msg = ExecuteMsg::Signed {
-            processor,
-            approvers,
-            payload,
-        };
-
-        let contract = cosmos.make_contract(contract.parse()?);
-        let tx = contract
-            .execute(
-                &seed_phrase.with_hrp(contract.get_address_hrp())?,
-                vec![],
-                msg,
-            )
-            .await?;
-
-        Ok(tx.txhash)
-    }
-}
-
-mod solana_submitter {
-    use std::{ops::Deref, str::FromStr};
-
-    use base64::Engine;
-    use borsh::BorshDeserialize;
-    use kolme_solana_bridge_client::{
-        init_tx, instruction::account_meta::AccountMeta, keypair::Keypair, pubkey::Pubkey,
-        signed_tx, InitializeIxData, Payload, Secp256k1PubkeyCompressed, Secp256k1Signature,
-        Signature, SignedMsgIxData,
-    };
-
-    use super::*;
-
-    pub async fn instantiate(
-        client: &SolanaClient,
-        keypair: &Keypair,
-        program_id: &str,
-        args: InstantiateArgs,
-    ) -> Result<()> {
-        let needed_approvers = u8::try_from(args.needed_approvers)?;
-        let mut executors = Vec::with_capacity(args.approvers.len());
-
-        for a in args.approvers {
-            executors.push(Secp256k1PubkeyCompressed(a.as_bytes().deref().try_into()?));
-        }
-
-        let data = InitializeIxData {
-            needed_executors: needed_approvers,
-            processor: Secp256k1PubkeyCompressed(args.processor.as_bytes().deref().try_into()?),
-            executors,
-        };
-
-        let program_pubkey = Pubkey::from_str(&program_id)?;
-        let blockhash = client.get_latest_blockhash().await?;
-        let tx =
-            init_tx(program_pubkey, blockhash, &keypair, &data).map_err(|x| anyhow::anyhow!(x))?;
-
-        client.send_and_confirm_transaction(&tx).await?;
-
-        Ok(())
-    }
-
-    pub async fn execute(
-        client: &SolanaClient,
-        keypair: &Keypair,
-        program_id: &str,
-        processor: SignatureWithRecovery,
-        approvers: Vec<SignatureWithRecovery>,
-        payload: String,
-    ) -> Result<String> {
-        let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload)?;
-        let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
-            .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
-
-        let program_id = Pubkey::from_str(&program_id)?;
-        let mut metas: Vec<AccountMeta> = Vec::with_capacity(1 + payload.accounts.len());
-        metas.push(AccountMeta {
-            pubkey: Pubkey::new_from_array(payload.program_id),
-            is_writable: true,
-            is_signer: false,
-        });
-
-        metas.extend(payload.accounts.iter().map(|x| AccountMeta {
-            pubkey: Pubkey::new_from_array(x.pubkey),
-            is_writable: x.is_writable,
-            is_signer: false,
-        }));
-
-        let mut executors = Vec::with_capacity(approvers.len());
-
-        for a in approvers {
-            let sig = Signature {
-                signature: Secp256k1Signature(a.sig.to_bytes().deref().try_into()?),
-                recovery_id: processor.recid.to_byte(),
-            };
-
-            executors.push(sig);
-        }
-
-        let data = SignedMsgIxData {
-            processor: Signature {
-                signature: Secp256k1Signature(processor.sig.to_bytes().deref().try_into()?),
-                recovery_id: processor.recid.to_byte(),
-            },
-            executors,
-            payload: payload_bytes,
-        };
-
-        let blockhash = client.get_latest_blockhash().await?;
-        let tx = signed_tx(program_id, blockhash, &keypair, &data, &metas)
-            .map_err(|x| anyhow::anyhow!(x))?;
-
-        let sig = client.send_and_confirm_transaction(&tx).await?;
-
-        Ok(sig.to_string())
     }
 }
