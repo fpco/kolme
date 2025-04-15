@@ -3283,7 +3283,6 @@ dependencies = [
  "clap",
  "cosmos",
  "cosmwasm-std",
- "hex",
  "jiff",
  "kolme-solana-bridge-client",
  "libp2p",

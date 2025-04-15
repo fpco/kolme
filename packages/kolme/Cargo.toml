@@ -14,7 +14,6 @@ cosmos = { git = "https://github.com/fpco/cosmos-rs", rev = "6f6fea0f7c04e4b64f5
 solana-client = "2.2.6"
 borsh = { version = "1.5.5", default-features = false }
 cosmwasm-std = "2.2.2"
-hex = "0.4.3"
 base64 = "0.22.1"
 jiff = { version = "0.2.3", features = ["serde"] }
 libp2p = { version = "0.53", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
