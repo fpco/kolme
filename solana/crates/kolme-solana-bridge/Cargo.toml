@@ -20,12 +20,12 @@ default = []
 pinocchio-pubkey = "0.2.4"
 borsh = { version = "1.5.5", default-features = false }
 solbox = { path = "../solbox" }
-kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client" }
+kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client", default-features = false }
 
 [dev-dependencies]
 litesvm = "0.6.0"
 litesvm-token = "0.6.0"
-kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client", default-features = false, features = ["client"] }
+kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client" }
 solana-transaction-error = "2.2.1"
 solana-account = "2.2"
 solana-keypair = "2.2"

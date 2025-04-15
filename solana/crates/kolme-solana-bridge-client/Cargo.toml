@@ -6,7 +6,7 @@ license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [features]
-default = []
+default = ["client"]
 client = [
     "dep:solana-transaction", "dep:solana-pubkey", "dep:solana-message",
     "dep:solana-instruction", "dep:solana-hash", "dep:solana-signer",
@@ -15,7 +15,7 @@ client = [
 
 [dependencies]
 borsh = { version = "1.5.5", default-features = false, features = ["derive"] }
-solana-transaction = { version = "2.2", optional = true }
+solana-transaction = { version = "2.2", optional = true, features = ["bincode"] }
 solana-pubkey = { version = "2.2", default-features = false, features = ["std", "curve25519"], optional = true }
 solana-keypair = { version = "2.2", optional = true }
 solana-signer = { version = "2.2", optional = true }
