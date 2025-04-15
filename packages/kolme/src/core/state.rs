@@ -1,10 +1,10 @@
 use crate::*;
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum CoreStateError {
-    ChainNotSupported {
-        chain: ExternalChain,
-    },
+    #[error("The chain '{chain}' is not supported")]
+    ChainNotSupported { chain: ExternalChain },
+    #[error("The asset '{asset_id}' on chain '{chain}' is not supported")]
     AssetNotSupported {
         chain: ExternalChain,
         asset_id: AssetId,
@@ -12,7 +12,7 @@ pub enum CoreStateError {
 }
 
 /// Raw framework state that can be serialized to the database.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct FrameworkState {
     pub(super) processor: PublicKey,
     pub(super) listeners: BTreeSet<PublicKey>,
@@ -20,8 +20,45 @@ pub struct FrameworkState {
     pub(super) approvers: BTreeSet<PublicKey>,
     pub(super) needed_approvers: usize,
     pub(super) chains: ConfiguredChains,
-    #[serde(default)]
     pub(super) balances: Balances,
+}
+
+impl MerkleSerialize for FrameworkState {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let FrameworkState {
+            processor,
+            listeners,
+            needed_listeners,
+            approvers,
+            needed_approvers,
+            chains,
+            balances,
+        } = self;
+        serializer.store(processor)?;
+        serializer.store(listeners)?;
+        serializer.store(needed_listeners)?;
+        serializer.store(approvers)?;
+        serializer.store(needed_approvers)?;
+        serializer.store(&chains.0)?;
+        serializer.store(balances)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for FrameworkState {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(FrameworkState {
+            processor: deserializer.load()?,
+            listeners: deserializer.load()?,
+            needed_listeners: deserializer.load()?,
+            approvers: deserializer.load()?,
+            needed_approvers: deserializer.load()?,
+            chains: ConfiguredChains(deserializer.load()?),
+            balances: deserializer.load()?,
+        })
+    }
 }
 
 impl FrameworkState {
@@ -91,6 +128,7 @@ pub(super) struct LoadStateResult<AppState> {
 pub(super) async fn load_state<App: KolmeApp>(
     pool: &sqlx::SqlitePool,
     genesis: &GenesisInfo,
+    merkle_manager: &MerkleManager,
 ) -> Result<LoadStateResult<App::State>> {
     struct Output {
         height: i64,
@@ -116,10 +154,15 @@ pub(super) async fn load_state<App: KolmeApp>(
             height,
             blockhash,
         }) => {
-            let framework_state = load_by_raw_hash(pool, &framework_state_hash).await?;
-            let framework_state = serde_json::from_str(&framework_state)?;
-            let app_state = load_by_raw_hash(pool, &app_state_hash).await?;
-            let app_state = App::load_state(&app_state)?;
+            let framework_state_hash =
+                Sha256Hash::from_array(framework_state_hash.as_slice().try_into()?);
+            let framework_state = merkle_manager
+                .load(&mut MerkleDbStore::Pool(pool), framework_state_hash)
+                .await?;
+            let app_state_hash = Sha256Hash::from_array(app_state_hash.as_slice().try_into()?);
+            let app_state = merkle_manager
+                .load(&mut MerkleDbStore::Pool(pool), app_state_hash)
+                .await?;
             let height = BlockHeight::try_from(height)?;
             let next_height = height.next();
             let current_block_hash = BlockHash(Sha256Hash::from_hash(&blockhash)?);
@@ -139,13 +182,6 @@ pub(super) async fn load_state<App: KolmeApp>(
     };
     res.framework_state.validate()?;
     Ok(res)
-}
-
-async fn load_by_raw_hash(pool: &sqlx::SqlitePool, hash: &[u8]) -> Result<String> {
-    sqlx::query_scalar!("SELECT content FROM hashes WHERE hash=$1", hash)
-        .fetch_one(pool)
-        .await
-        .map_err(Into::into)
 }
 
 /// Ensures that either we have no blocks yet, or the first block has matching genesis info.

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM hashes WHERE hash=$1",
+  "query": "SELECT COUNT(*) FROM merkle_hashes WHERE hash=$1",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "ed422fa56f331ae769131ba60a9bb0e3af19d8e000349d088430507579a99726"
+  "hash": "bdb5c382bbf61851b3837bfed36e2989e8967ab36f0168facd5d45a712ed6109"
 }

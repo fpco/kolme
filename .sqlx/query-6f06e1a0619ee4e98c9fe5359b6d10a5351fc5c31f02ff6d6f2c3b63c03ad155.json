@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT content FROM hashes WHERE hash=$1",
+  "query": "SELECT wallet FROM account_wallets WHERE account_id=$1",
   "describe": {
     "columns": [
       {
-        "name": "content",
+        "name": "wallet",
         "ordinal": 0,
         "type_info": "Text"
       }
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "512bc9c852d45d731f5f334488288c7ecb93dc186a86bce8541300e09cfc9f62"
+  "hash": "6f06e1a0619ee4e98c9fe5359b6d10a5351fc5c31f02ff6d6f2c3b63c03ad155"
 }

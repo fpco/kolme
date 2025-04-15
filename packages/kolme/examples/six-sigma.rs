@@ -100,14 +100,6 @@ impl KolmeApp for SixSigmaApp {
         Ok(State::new([admin_secret_key().public_key()]))
     }
 
-    fn save_state(state: &Self::State) -> Result<String> {
-        serde_json::to_string(state).map_err(anyhow::Error::from)
-    }
-
-    fn load_state(v: &str) -> Result<Self::State> {
-        serde_json::from_str(v).map_err(anyhow::Error::from)
-    }
-
     async fn execute(
         &self,
         ctx: &mut ExecutionContext<'_, Self>,

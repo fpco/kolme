@@ -1,21 +1,22 @@
 use crate::*;
+use thiserror::Error;
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(Error, Debug)]
 pub enum BalancesError {
-    #[snafu(display("Insufficient balance for account {account_id}, asset {asset_id}. Requested: {requested}. Available: {available}."))]
+    #[error("Insufficient balance for account {account_id}, asset {asset_id}. Requested: {requested}. Available: {available}.")]
     InsufficientBalance {
         account_id: AccountId,
         asset_id: AssetId,
         requested: Decimal,
         available: Decimal,
     },
-    #[snafu(display("Must provide positive values for minting. Tried to mint {to_mint} from account {account_id}, asset {asset_id}."))]
+    #[error("Must provide positive values for minting. Tried to mint {to_mint} from account {account_id}, asset {asset_id}.")]
     MustMintPositive {
         account_id: AccountId,
         asset_id: AssetId,
         to_mint: Decimal,
     },
-    #[snafu(display("Must provide positive values for burning. Tried to burn {to_burn} from account {account_id}, asset {asset_id}."))]
+    #[error("Must provide positive values for burning. Tried to burn {to_burn} from account {account_id}, asset {asset_id}.")]
     MustBurnPositive {
         account_id: AccountId,
         asset_id: AssetId,
@@ -24,8 +25,8 @@ pub enum BalancesError {
 }
 
 /// Track balances of all accounts for all assets.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Default, PartialEq, Eq, Debug)]
-pub struct Balances(BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>);
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+pub struct Balances(MerkleMap<AccountId, BTreeMap<AssetId, Decimal>>);
 
 impl Balances {
     pub(in crate::core) fn get(
@@ -50,8 +51,7 @@ impl Balances {
         }
         *self
             .0
-            .entry(account_id)
-            .or_default()
+            .get_or_insert(account_id, BTreeMap::new)
             .entry(asset_id)
             .or_default() += to_mint;
         Ok(())
@@ -94,6 +94,27 @@ impl Balances {
             requested: to_burn,
             available,
         })
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&AccountId, &BTreeMap<AssetId, Decimal>)> {
+        self.0.iter()
+    }
+}
+
+impl MerkleSerialize for Balances {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for Balances {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        MerkleDeserialize::merkle_deserialize(deserializer).map(Self)
     }
 }
 

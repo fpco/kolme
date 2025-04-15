@@ -4,18 +4,18 @@ use std::{fmt::Display, str::FromStr};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PublicKey(k256::PublicKey);
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum PublicKeyError {
-    #[snafu(display("Unable to parse public key from bytes: {source}"))]
+    #[error("Unable to parse public key from bytes: {source}")]
     TryFromBytes { source: k256::elliptic_curve::Error },
-    #[snafu(display("Unable to recover public key from message: {source}"))]
+    #[error("Unable to recover public key from message: {source}")]
     RecoverFromMessage { source: k256::ecdsa::Error },
-    #[snafu(display("Invalid hex encoding for public key in {hex:?}: {source}"))]
+    #[error("Invalid hex encoding for public key in {hex:?}: {source}")]
     InvalidHexEncoding {
         source: hex::FromHexError,
         hex: String,
     },
-    #[snafu(display("Could not parse a public key from {bytes:?}: {source}"))]
+    #[error("Could not parse a public key from {bytes:?}: {source}")]
     FromBytes {
         source: k256::elliptic_curve::Error,
         bytes: Vec<u8>,
@@ -116,13 +116,13 @@ impl std::hash::Hash for PublicKey {
     }
 }
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum SecretKeyError {
-    #[snafu(display("Signing failed: {source}"))]
+    #[error("Signing failed: {source}")]
     SigningFailed { source: k256::ecdsa::Error },
-    #[snafu(display("Invalid hex when parsing secret key (contents redacted for privacy)"))]
+    #[error("Invalid hex when parsing secret key (contents redacted for privacy)")]
     InvalidHex,
-    #[snafu(display("Invalid bytes when parsing a secret key: {source}"))]
+    #[error("Invalid bytes when parsing a secret key: {source}")]
     InvalidBytes { source: k256::elliptic_curve::Error },
 }
 
@@ -179,14 +179,14 @@ impl std::fmt::Debug for SecretKey {
 }
 
 mod sigerr {
-    #[derive(snafu::Snafu, Debug)]
+    #[derive(thiserror::Error, Debug)]
     pub enum SignatureError {
-        #[snafu(display("Invalid hex encoding for signature in {hex:?}: {source}"))]
+        #[error("Invalid hex encoding for signature in {hex:?}: {source}")]
         InvalidHexEncoding {
             source: hex::FromHexError,
             hex: String,
         },
-        #[snafu(display("Invalid signature in {bytes:?}: {source}"))]
+        #[error("Invalid signature in {bytes:?}: {source}")]
         InvalidSignature {
             source: k256::ecdsa::Error,
             bytes: Vec<u8>,
@@ -196,7 +196,7 @@ mod sigerr {
 
 pub use sigerr::SignatureError;
 
-use crate::cosmos::SignatureWithRecovery;
+use super::SignatureWithRecovery;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
 pub struct Signature(k256::ecdsa::Signature);
@@ -235,9 +235,9 @@ impl Display for Signature {
     }
 }
 
-#[derive(snafu::Snafu, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum RecoveryIdError {
-    #[snafu(display("Invalid byte provided for recovery ID: {byte}"))]
+    #[error("Invalid byte provided for recovery ID: {byte}")]
     InvalidByte { byte: u8 },
 }
 

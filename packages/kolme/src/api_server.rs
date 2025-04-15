@@ -51,8 +51,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         next_height: BlockHeight,
         next_genesis_action: Option<GenesisAction>,
         bridges: &'a BTreeMap<ExternalChain, ChainConfig>,
-        balances: &'a Balances,
-        app_state: serde_json::Value,
+        balances: BTreeMap<&'a AccountId, &'a BTreeMap<AssetId, Decimal>>,
     }
 
     let kolme = kolme.read().await;
@@ -60,8 +59,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         next_height: kolme.get_next_height(),
         next_genesis_action: kolme.get_next_genesis_action(),
         bridges: kolme.get_bridge_contracts(),
-        balances: kolme.get_balances(),
-        app_state: serde_json::from_str(&App::save_state(kolme.get_app_state()).unwrap()).unwrap(),
+        balances: kolme.get_balances().iter().collect(),
     };
 
     Json(basics).into_response()
@@ -72,7 +70,12 @@ async fn broadcast<App: KolmeApp>(
     Json(tx): Json<SignedTransaction<App::Message>>,
 ) -> impl IntoResponse {
     let txhash = tx.0.message_hash();
-    if let Err(e) = kolme.read().await.execute_transaction(&tx, None).await {
+    if let Err(e) = kolme
+        .read()
+        .await
+        .execute_transaction(&tx, Timestamp::now(), None)
+        .await
+    {
         let mut res = e.to_string().into_response();
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         return res;
