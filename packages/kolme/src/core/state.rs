@@ -19,7 +19,7 @@ pub struct FrameworkState {
     pub(super) needed_listeners: usize,
     pub(super) approvers: BTreeSet<PublicKey>,
     pub(super) needed_approvers: usize,
-    pub(super) chains: BTreeMap<ExternalChain, ChainConfig>,
+    pub(super) chains: ConfiguredChains,
     #[serde(default)]
     pub(super) balances: Balances,
 }
@@ -61,12 +61,23 @@ impl FrameworkState {
         asset_id: AssetId,
     ) -> Result<&AssetConfig, CoreStateError> {
         self.chains
+            .0
             .get(&chain)
             .ok_or(CoreStateError::ChainNotSupported { chain })?
             .assets
             .values()
             .find(|config| config.asset_id == asset_id)
             .ok_or(CoreStateError::AssetNotSupported { chain, asset_id })
+    }
+
+    pub(super) fn instantiate_args(&self) -> InstantiateArgs {
+        InstantiateArgs {
+            processor: self.processor,
+            listeners: self.listeners.clone(),
+            needed_listeners: self.needed_listeners,
+            approvers: self.approvers.clone(),
+            needed_approvers: self.needed_approvers,
+        }
     }
 }
 

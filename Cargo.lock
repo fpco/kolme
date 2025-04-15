@@ -3314,9 +3314,12 @@ dependencies = [
  "borsh",
  "solana-hash",
  "solana-instruction",
+ "solana-keypair",
  "solana-message",
  "solana-pubkey",
+ "solana-signer",
  "solana-transaction",
+ "spl-associated-token-account-client",
 ]
 
 [[package]]
@@ -7227,6 +7230,16 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "spl-associated-token-account-client"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6f8349dbcbe575f354f9a533a21f272f3eb3808a49e2fdc1c34393b88ba76cb"
+dependencies = [
+ "solana-instruction",
+ "solana-pubkey",
 ]
 
 [[package]]

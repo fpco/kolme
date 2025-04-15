@@ -137,7 +137,7 @@ impl<App: KolmeApp> Processor<App> {
             .await?;
         let mut approvers = vec![];
         for (key, sig) in &sigs {
-            let key2 = sig.validate(payload.as_bytes())?;
+            let key2 = sig.validate(&payload)?;
             anyhow::ensure!(key == &key2);
             if kolme.get_approver_pubkeys().contains(key) {
                 approvers.push(*sig);
@@ -149,7 +149,7 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
 
-        let (sig, recid) = self.secret.sign_recoverable(payload.as_bytes())?;
+        let (sig, recid) = self.secret.sign_recoverable(&payload)?;
         let processor = SignatureWithRecovery { sig, recid };
 
         let tx = kolme

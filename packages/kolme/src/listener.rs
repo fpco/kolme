@@ -85,6 +85,7 @@ impl<App: KolmeApp> Listener<App> {
 
                     let expected_code_id = match config.bridge {
                         BridgeContract::NeededCosmosBridge { code_id } => code_id,
+                        BridgeContract::NeededSolanaBridge { .. } => 0, // Solana has no code id to check
                         BridgeContract::Deployed(_) => {
                             anyhow::bail!("Already have a deployed contract on {chain:?}")
                         }
@@ -145,7 +146,8 @@ impl<App: KolmeApp> Listener<App> {
             }
 
             match &config.bridge {
-                BridgeContract::NeededCosmosBridge { code_id: _ } => return None,
+                BridgeContract::NeededCosmosBridge { .. }
+                | BridgeContract::NeededSolanaBridge { .. } => return None,
                 BridgeContract::Deployed(contract) => {
                     res.insert(*chain, contract.clone());
                 }
@@ -298,9 +300,9 @@ mod solana_listener {
     use std::{ops::Deref, str::FromStr};
 
     use base64::Engine;
-    use borsh::de::BorshDeserialize;
+    use borsh::BorshDeserialize;
     use kolme_solana_bridge_client::{
-        solana_pubkey::Pubkey, BridgeMessage, Message as ContractMessage, State as BridgeState,
+        pubkey::Pubkey, BridgeMessage, Message as ContractMessage, State as BridgeState,
     };
     use libp2p::futures::StreamExt;
     use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
@@ -351,8 +353,8 @@ mod solana_listener {
                 let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
                 let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
 
-                let result =
-                    <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|x| {
+                let result: BridgeMessage =
+                    BorshDeserialize::try_from_slice(&bytes).map_err(|x| {
                         anyhow::anyhow!(
                             "Error deserializing Solana bridge message from logs: {:?}",
                             x
@@ -412,12 +414,10 @@ mod solana_listener {
             ));
         }
 
-        let state = <BridgeState as BorshDeserialize>::try_from_slice(&acc.data)
+        let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data)
             .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
 
-        anyhow::ensure!(
-            info.processor.as_bytes().deref() == state.processor.0.as_slice()
-        );
+        anyhow::ensure!(info.processor.as_bytes().deref() == state.processor.0.as_slice());
         anyhow::ensure!(info.approvers.len() == state.executors.len());
 
         for a in &state.executors {

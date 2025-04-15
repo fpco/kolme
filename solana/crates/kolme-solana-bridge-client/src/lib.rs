@@ -10,6 +10,9 @@ pub use solana_pubkey as pubkey;
 #[cfg(feature = "client")]
 pub use solana_keypair as keypair;
 
+#[cfg(feature = "client")]
+pub use solana_instruction as instruction;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 
 pub type Pubkey = [u8; 32];
@@ -39,7 +42,7 @@ pub struct InitializeIxData {
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct RegularMsgIxData {
     pub keys: Vec<Secp256k1PubkeyCompressed>,
-    pub transfer_amounts: Vec<u64>
+    pub transfer_amounts: Vec<u64>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -67,7 +70,7 @@ pub struct Payload {
     pub program_id: Pubkey,
     pub accounts: Vec<InstructionAccount>,
     pub instruction_data: Vec<u8>,
-    pub signer: Option<SignerAccount>
+    pub signer: Option<SignerAccount>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -86,7 +89,7 @@ pub struct SignerAccount {
 pub struct BridgeMessage {
     pub id: u64,
     pub wallet: Pubkey,
-    pub ty: Message
+    pub ty: Message,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -103,7 +106,7 @@ pub enum Message {
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Token {
     pub mint: Pubkey,
-    pub amount: u64
+    pub amount: u64,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]

@@ -65,7 +65,7 @@ impl KolmeApp for SixSigmaApp {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        let mut bridges = BTreeMap::new();
+        let mut bridges = ConfiguredChain::new();
         let mut assets = BTreeMap::new();
         assets.insert(
             AssetName("uosmo".to_owned()),
@@ -74,15 +74,17 @@ impl KolmeApp for SixSigmaApp {
                 asset_id: AssetId(1),
             },
         );
-        bridges.insert(
-            ExternalChain::OsmosisLocal,
-            ChainConfig {
-                assets,
-                bridge: BridgeContract::NeededCosmosBridge {
-                    code_id: LOCALOSMOSIS_CODE_ID,
+        bridges
+            .insert_cosmos(
+                ExternalChain::OsmosisLocal,
+                ChainConfig {
+                    assets,
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: LOCALOSMOSIS_CODE_ID,
+                    },
                 },
-            },
-        );
+            )
+            .unwrap();
         GenesisInfo {
             kolme_ident: "Six sigma example".to_owned(),
             processor: my_public_key,
