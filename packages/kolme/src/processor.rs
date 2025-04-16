@@ -42,9 +42,9 @@ impl BlockDb {
         })
     }
 
-    async fn listen_new_blocks<App: KolmeApp>(self, kolme: Kolme<App>) {
+    async fn listen_new_blocks(self) {
         loop {
-            match self.listen_new_blocks_inner(&kolme).await {
+            match self.listen_new_blocks_inner().await {
                 Ok(()) => tracing::warn!("Unexpected exit from get_new_blocks_inner"),
                 Err(e) => tracing::warn!("Error from get_new_blocks_inner: {e}"),
             }
@@ -52,10 +52,9 @@ impl BlockDb {
         }
     }
 
-    async fn listen_new_blocks_inner<App: KolmeApp>(&self, kolme: &Kolme<App>) -> Result<()> {
+    async fn listen_new_blocks_inner(&self) -> Result<()> {
         let mut listener = PgListener::connect_with(&self.pool).await?;
         listener.listen("new_block_channel").await?;
-        self.resync(kolme).await?;
         loop {
             let _ = listener.recv().await?;
             self.resync_trigger.send_modify(|x| *x += 1);
@@ -131,7 +130,7 @@ impl BlockDb {
                         return Ok(());
                     }
                 }
-                Err(anyhow::Error::from(BlockDbError::AlreadyInDb))
+                Err(anyhow::Error::from(BlockDbError::BlockAlreadyInDb))
             } else {
                 Err(e.into())
             }
@@ -144,7 +143,9 @@ impl BlockDb {
 #[derive(thiserror::Error, Debug)]
 pub enum BlockDbError {
     #[error("Block is already present in database")]
-    AlreadyInDb,
+    BlockAlreadyInDb,
+    #[error("Transaction is already present in database")]
+    TxAlreadyInDb,
 }
 
 impl<App: KolmeApp> Processor<App> {
@@ -166,7 +167,7 @@ impl<App: KolmeApp> Processor<App> {
             Some(block_db) => {
                 self.kolme.set_block_db(block_db.clone()).await;
                 let mut set = JoinSet::new();
-                set.spawn(block_db.clone().listen_new_blocks(self.kolme.clone()));
+                set.spawn(block_db.clone().listen_new_blocks());
                 set.spawn(block_db.resync_loop(self.kolme.clone()));
                 set.spawn(self.run_just_processor());
                 match set.join_next().await {
@@ -216,8 +217,18 @@ impl<App: KolmeApp> Processor<App> {
 
         loop {
             let tx = self.kolme.wait_on_mempool().await;
-            if let Err(e) = self.add_transaction(Arc::unwrap_or_clone(tx)).await {
-                tracing::warn!("Error while adding transaction: {e}");
+            let txhash = tx.hash();
+            loop {
+                let tx = (*tx).clone();
+
+                if let Err(e) = self.add_transaction(tx).await {
+                    if let Some(KolmeError::InvalidAddBlockHeight { .. }) = e.downcast_ref() {
+                        tracing::warn!("Block height race condition when adding transaction {txhash}, retrying");
+                    } else {
+                        tracing::error!("Unable to add transaction from mempool: {e}");
+                        break;
+                    }
+                }
             }
         }
     }
@@ -252,28 +263,38 @@ impl<App: KolmeApp> Processor<App> {
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
         let txhash = tx.hash();
+        println!("(1)Attempting to add_transaction: {txhash}");
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 5;
         let res = loop {
             if self.kolme.read().await.get_tx(txhash).await?.is_some() {
                 break Ok(());
             }
+            println!("(2)Attempting to add_transaction: {txhash}");
             attempts += 1;
             match self.construct_block(tx.clone()).await {
                 Ok(block) => {
+                    println!("(3)Attempting to add_transaction: {txhash}");
                     self.kolme.add_block(block).await?;
+                    println!("(4)Attempting to add_transaction: {txhash}");
                     break Ok(());
                 }
                 Err(e) => {
+                    println!("(5)Attempting to add_transaction: {txhash}");
                     if attempts >= MAX_ATTEMPTS {
                         break Err(e);
                     }
-                    if let Some(BlockDbError::AlreadyInDb) = e.downcast_ref() {
-                        tracing::warn!(
-                            "Block already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}..."
-                        );
-                        if let Some(block_db) = &self.block_db {
-                            block_db.resync_trigger.send_modify(|x| *x += 1);
+                    if let Some(e) = e.downcast_ref() {
+                        match e {
+                            BlockDbError::BlockAlreadyInDb => {
+                                tracing::warn!("Block already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}...");
+                                if let Some(block_db) = &self.block_db {
+                                    block_db.resync_trigger.send_modify(|x| *x += 1);
+                                }
+                            }
+                            BlockDbError::TxAlreadyInDb => {
+                                return Ok(());
+                            }
                         }
                     } else {
                         break Err(e);
@@ -297,6 +318,11 @@ impl<App: KolmeApp> Processor<App> {
     ) -> Result<SignedBlock<App::Message>> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read().await;
+
+        let txhash = tx.hash();
+        if kolme.get_tx(txhash).await?.is_some() {
+            return Err(anyhow::Error::from(BlockDbError::TxAlreadyInDb));
+        }
 
         let now = Timestamp::now();
 

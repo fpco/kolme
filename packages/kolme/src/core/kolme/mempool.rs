@@ -29,22 +29,17 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     pub(super) async fn peek(&self) -> (TxHash, Arc<SignedTransaction<AppMessage>>) {
-        println!("peek(1), len: {}", self.txs.read().len());
         if let Some(pair) = self.txs.read().front() {
-            println!("peek(2) {}", pair.0);
             return pair.clone();
         }
 
-        println!("peek(3)");
         let mut recv = self.notify.subscribe();
 
         loop {
-            println!("peek(4)");
             if let Some(pair) = self.txs.read().front() {
                 println!("peek(5): {}", pair.0);
                 break pair.clone();
             }
-            println!("peek(6)");
             recv.changed().await.ok();
         }
     }

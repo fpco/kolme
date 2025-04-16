@@ -1,4 +1,7 @@
+mod error;
 mod mempool;
+
+pub use error::KolmeError;
 
 use std::{collections::HashMap, ops::Deref, path::Path};
 
@@ -835,12 +838,13 @@ async fn store_block<App: KolmeApp>(
     let tx = block.tx.0.message.as_inner();
 
     let height = block.height;
-    anyhow::ensure!(
-        kolme.get_next_height() == height,
-        "Proposed block height {} does not match expected next height {}",
-        height,
-        kolme.get_next_height()
-    );
+    let expected = kolme.get_next_height();
+    if height != expected {
+        return Err(anyhow::Error::from(KolmeError::InvalidAddBlockHeight {
+            proposed: height,
+            expected,
+        }));
+    }
     let height_i64 = height.try_into_i64()?;
 
     let (account_id, nonce) =

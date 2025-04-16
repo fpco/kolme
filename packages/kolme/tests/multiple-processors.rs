@@ -184,9 +184,8 @@ async fn client(_: OwnedSemaphorePermit, kolmes: Arc<[Kolme<SampleKolmeApp>]>) -
         // a shorter value of 200 fails. Looks like we have some lag in the system.
         let kolmes = kolmes.clone();
         tokio::time::timeout(tokio::time::Duration::from_millis(5000), async move {
-            for (idx, kolme) in kolmes.iter().enumerate() {
+            for kolme in &*kolmes {
                 kolme.wait_for_tx(txhash).await?;
-                println!("Found {txhash} in database {idx}");
             }
             anyhow::Ok(())
         })
