@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use kolme::*;
-use rand::seq::SliceRandom;
+use rand::Rng;
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore},
     task::JoinSet,
@@ -80,7 +80,7 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 100)]
 async fn multiple_processors() {
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
     let block_db_str = match std::env::var(ENVVAR) {

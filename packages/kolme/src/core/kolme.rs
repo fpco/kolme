@@ -1,5 +1,8 @@
+mod mempool;
+
 use std::{collections::HashMap, ops::Deref, path::Path};
 
+use mempool::Mempool;
 use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -20,6 +23,7 @@ use crate::core::*;
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<tokio::sync::RwLock<KolmeInner<App>>>,
     notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
+    mempool: Mempool<App::Message>,
 }
 
 impl<App: KolmeApp> Clone for Kolme<App> {
@@ -27,6 +31,7 @@ impl<App: KolmeApp> Clone for Kolme<App> {
         Kolme {
             inner: self.inner.clone(),
             notify: self.notify.clone(),
+            mempool: self.mempool.clone(),
         }
     }
 }
@@ -73,8 +78,10 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Propose a new event for the processor to add to the chain.
     pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
+        let tx = Arc::new(tx);
+        self.mempool.add(tx.clone());
         self.notify
-            .send(Notification::Broadcast { tx: Arc::new(tx) })
+            .send(Notification::Broadcast { tx })
             .map_err(|_| {
                 anyhow::anyhow!(
                     "Tried to propose an event, but no one is listening to our notifications"
@@ -121,17 +128,34 @@ impl<App: KolmeApp> Kolme<App> {
 
         trans.commit().await?;
         kolme.next_height = signed_block.0.message.as_inner().height.next();
-        kolme.current_block_hash = BlockHash(signed_block.0.message_hash());
+        kolme.current_block_hash = signed_block.hash();
         kolme.framework_state = exec_results.framework_state;
         kolme.app_state = exec_results.app_state;
         self.notify
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
+        self.mempool.drop_tx(txhash);
         Ok(())
     }
 
     pub(crate) async fn set_block_db(&self, block_db: BlockDb) {
         self.inner.write().await.block_db = Some(block_db);
+    }
+
+    pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
+        loop {
+            let (txhash, tx) = self.mempool.peek().await;
+            match self.read().await.get_tx(txhash).await {
+                Ok(Some(_)) => self.mempool.drop_tx(txhash),
+                Ok(None) => {
+                    break tx;
+                }
+                Err(e) => {
+                    tracing::warn!("Error checking for transaction in database: {e}");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+            }
+        }
     }
 }
 
@@ -223,6 +247,7 @@ impl<App: KolmeApp> Kolme<App> {
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),
             notify: tokio::sync::broadcast::channel(100).0,
+            mempool: Mempool::new(),
         })
     }
 

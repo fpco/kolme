@@ -1,4 +1,4 @@
-use std::{ops::Deref, path::PathBuf};
+use std::path::PathBuf;
 
 use sqlx::{migrate::Migrator, postgres::PgListener};
 use tokio::task::JoinSet;
@@ -171,10 +171,14 @@ impl<App: KolmeApp> Processor<App> {
             .copied()
             .collect::<Vec<_>>();
 
-        // Subscribe to any newly arrived events.
-        // Do this before initialization so that any events that get sent
-        // while setting up the genesis event don't get dropped.
-        let mut receiver = self.kolme.subscribe();
+        // If we're working with a block DB, wait until the first sync finishes
+        // before trying to do anything.
+        if let Some(block_db) = &self.block_db {
+            let mut chan = block_db.resync_completed.subscribe();
+            if chan.borrow_and_update().is_none() {
+                chan.changed().await.ok();
+            }
+        }
 
         while let Err(e) = self.ensure_genesis_event().await {
             tracing::error!("Unable to ensure genesis event, sleeping and retrying: {e}");
@@ -184,25 +188,9 @@ impl<App: KolmeApp> Processor<App> {
         self.approve_actions_all(&chains).await;
 
         loop {
-            let notification = receiver
-                .recv()
-                .await
-                .expect("Impossible closed notification channel");
-            match notification {
-                Notification::NewBlock(_) => {
-                    self.approve_actions_all(&chains).await;
-                }
-                Notification::GenesisInstantiation {
-                    chain: _,
-                    contract: _,
-                } => (),
-                Notification::FailedTransaction { .. } => (),
-                Notification::Broadcast { tx } => {
-                    let tx = Arc::try_unwrap(tx).unwrap_or_else(|tx| tx.deref().clone());
-                    if let Err(e) = self.add_transaction(tx).await {
-                        tracing::warn!("Error while adding transaction: {e}");
-                    }
-                }
+            let tx = self.kolme.wait_on_mempool().await;
+            if let Err(e) = self.add_transaction(Arc::unwrap_or_clone(tx)).await {
+                tracing::warn!("Error while adding transaction: {e}");
             }
         }
     }
