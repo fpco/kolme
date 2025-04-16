@@ -53,10 +53,10 @@ impl KolmeApp for SampleKolmeApp {
         let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        let mut bridges = ConfiguredChains::new();
+        let mut bridges = ConfiguredChains::default();
         bridges
             .insert_cosmos(
-                ExternalChain::OsmosisTestnet,
+                CosmosChain::OsmosisTestnet,
                 ChainConfig {
                     assets: BTreeMap::new(),
                     bridge: BridgeContract::NeededCosmosBridge {
@@ -67,7 +67,7 @@ impl KolmeApp for SampleKolmeApp {
             .unwrap();
         bridges
             .insert_cosmos(
-                ExternalChain::NeutronTestnet,
+                CosmosChain::NeutronTestnet,
                 ChainConfig {
                     assets: BTreeMap::new(),
                     bridge: BridgeContract::NeededCosmosBridge {

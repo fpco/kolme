@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    net::SocketAddr,
-};
+use std::{collections::BTreeSet, net::SocketAddr};
 
 use anyhow::Result;
 use clap::Parser;

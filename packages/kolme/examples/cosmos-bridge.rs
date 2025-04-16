@@ -257,7 +257,7 @@ async fn serve(bind: SocketAddr) -> Result<()> {
     set.spawn(listener.run(ChainName::Cosmos));
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
-    let submitter = Submitter::new(
+    let submitter = Submitter::new_cosmos(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
     );

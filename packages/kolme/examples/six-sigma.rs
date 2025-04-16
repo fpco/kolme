@@ -65,7 +65,7 @@ impl KolmeApp for SixSigmaApp {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        let mut bridges = ConfiguredChain::new();
+        let mut bridges = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
         assets.insert(
             AssetName("uosmo".to_owned()),
@@ -76,7 +76,7 @@ impl KolmeApp for SixSigmaApp {
         );
         bridges
             .insert_cosmos(
-                ExternalChain::OsmosisLocal,
+                CosmosChain::OsmosisLocal,
                 ChainConfig {
                     assets,
                     bridge: BridgeContract::NeededCosmosBridge {
@@ -264,7 +264,7 @@ async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
     set.spawn(listener.run(ChainName::Cosmos));
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
-    let submitter = Submitter::new(
+    let submitter = Submitter::new_cosmos(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
     );
