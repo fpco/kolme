@@ -9,6 +9,7 @@ pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
     secret: SecretKey,
     block_db: Option<BlockDb>,
+    ready: tokio::sync::watch::Sender<bool>,
 }
 
 /// A database that stores blocks in durable storage.
@@ -23,7 +24,8 @@ pub struct Processor<App: KolmeApp> {
 #[derive(Clone)]
 pub struct BlockDb {
     pool: sqlx::PgPool,
-    resync_trigger: tokio::sync::watch::Sender<()>,
+    resync_trigger: tokio::sync::watch::Sender<usize>,
+    resync_completed: tokio::sync::watch::Sender<Option<jiff::Timestamp>>,
 }
 
 impl BlockDb {
@@ -31,10 +33,12 @@ impl BlockDb {
     pub async fn new(pool: sqlx::PgPool) -> Result<Self> {
         let migrator = Migrator::new(PathBuf::from("blockdb-migrations")).await?;
         migrator.run(&pool).await?;
-        let resync_trigger = tokio::sync::watch::channel(()).0;
+        let resync_trigger = tokio::sync::watch::channel(0).0;
+        let resync_completed = tokio::sync::watch::channel(None).0;
         Ok(BlockDb {
             pool,
             resync_trigger,
+            resync_completed,
         })
     }
 
@@ -54,7 +58,7 @@ impl BlockDb {
         self.resync(kolme).await?;
         loop {
             let _ = listener.recv().await?;
-            self.resync(kolme).await?;
+            self.resync_trigger.send_modify(|x| *x += 1);
         }
     }
 
@@ -65,7 +69,7 @@ impl BlockDb {
                 .await
                 .ok();
             if let Err(e) = self.resync(&kolme).await {
-                tracing::error!("Unable to resync with block DB: {e}");
+                tracing::error!("Unable to resync with block DB: {e:?}");
             }
         }
     }
@@ -79,9 +83,17 @@ impl BlockDb {
                     .fetch_optional(&self.pool)
                     .await?;
             let Some(rendered) = rendered else {
+                self.resync_completed
+                    .send(Some(jiff::Timestamp::now()))
+                    .ok();
                 break Ok(());
             };
-            kolme.add_block(serde_json::from_str(&rendered)?).await?;
+            let signed_block: SignedBlock<_> = serde_json::from_str(&rendered)?;
+            let txhash = signed_block.0.message.as_inner().tx.hash();
+            kolme
+                .add_block(signed_block)
+                .await
+                .with_context(|| format!("Failed to resync block with txhash {txhash}"))?;
         }
     }
 
@@ -141,6 +153,7 @@ impl<App: KolmeApp> Processor<App> {
             kolme,
             secret,
             block_db,
+            ready: tokio::sync::watch::channel(false).0,
         }
     }
 
@@ -167,6 +180,10 @@ impl<App: KolmeApp> Processor<App> {
         }
     }
 
+    pub fn ready_watcher(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.ready.subscribe()
+    }
+
     async fn run_just_processor(self) {
         let chains = self
             .kolme
@@ -186,10 +203,14 @@ impl<App: KolmeApp> Processor<App> {
             }
         }
 
+        self.ready.send_replace(true);
+
+        tracing::info!("Ensuring genesis event...");
         while let Err(e) = self.ensure_genesis_event().await {
             tracing::error!("Unable to ensure genesis event, sleeping and retrying: {e}");
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
+        tracing::info!("Finished ensuring genesis event...");
 
         self.approve_actions_all(&chains).await;
 
@@ -252,7 +273,7 @@ impl<App: KolmeApp> Processor<App> {
                             "Block already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}..."
                         );
                         if let Some(block_db) = &self.block_db {
-                            block_db.resync_trigger.send_replace(());
+                            block_db.resync_trigger.send_modify(|x| *x += 1);
                         }
                     } else {
                         break Err(e);
@@ -261,6 +282,7 @@ impl<App: KolmeApp> Processor<App> {
             }
         };
         if let Err(e) = &res {
+            tracing::warn!("Giving up on adding transaction {txhash}: {e}");
             self.kolme.notify(Notification::FailedTransaction {
                 txhash,
                 error: e.to_string(),

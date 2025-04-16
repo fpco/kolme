@@ -91,10 +91,11 @@ async fn multiple_processors() {
         println!("Skipping test due to no local database being available");
     }
 
-    kolme::init_logger(true, None);
+    kolme::init_logger(false, None);
     let mut processor_set = JoinSet::new();
     let mut set = JoinSet::new();
     let mut kolmes = vec![];
+    let mut readies = vec![];
     const PROCESSOR_COUNT: usize = 10;
     const CLIENT_COUNT: usize = 100;
 
@@ -108,15 +109,23 @@ async fn multiple_processors() {
             .unwrap();
         let pool = sqlx::PgPool::connect(&block_db_str).await.unwrap();
         let block_db = BlockDb::new(pool).await.unwrap();
-        processor_set.spawn(
-            Processor::new(
-                kolme.clone(),
-                get_sample_secret_key().clone(),
-                Some(block_db),
-            )
-            .run(),
+        let processor = Processor::new(
+            kolme.clone(),
+            get_sample_secret_key().clone(),
+            Some(block_db),
         );
+        readies.push(processor.ready_watcher());
+        processor_set.spawn(processor.run());
+        processor_set.spawn(check_failed_txs(kolme.clone()));
         kolmes.push(kolme);
+    }
+
+    for mut ready in readies {
+        println!("Waiting for ready...");
+        while !*ready.borrow_and_update() {
+            ready.changed().await.ok();
+        }
+        println!("It's ready");
     }
 
     let kolmes = Arc::<[_]>::from(kolmes);
@@ -139,29 +148,52 @@ async fn multiple_processors() {
     }
 }
 
-async fn client(_: OwnedSemaphorePermit, kolmes: Arc<[Kolme<SampleKolmeApp>]>) -> Result<()> {
-    let (kolme, secret) = {
-        let mut rng = rand::thread_rng();
-        let kolme = (*kolmes).choose(&mut rng).unwrap();
-        let secret = SecretKey::random(&mut rng);
-        (kolme, secret)
-    };
-    let tx = kolme
-        .read()
-        .await
-        .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])
-        .await?;
-    let txhash = tx.hash();
-    kolme.propose_transaction(tx)?;
-
-    tokio::time::timeout(tokio::time::Duration::from_millis(200), async move {
-        for kolme in &*kolmes {
-            kolme.wait_for_tx(txhash).await?;
+async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
+    let mut recv = kolme.subscribe();
+    loop {
+        match recv.recv().await? {
+            Notification::NewBlock(_) => (),
+            Notification::GenesisInstantiation { .. } => (),
+            Notification::Broadcast { .. } => (),
+            Notification::FailedTransaction { txhash, error } => {
+                anyhow::bail!("Error with transaction {txhash}: {error}")
+            }
         }
-        anyhow::Ok(())
-    })
-    .await
-    .with_context(|| format!("Timed out waiting for transaction {txhash}"))?
+    }
+}
+
+async fn client(_: OwnedSemaphorePermit, kolmes: Arc<[Kolme<SampleKolmeApp>]>) -> Result<()> {
+    for _ in 0..10 {
+        let (idx, kolme, secret) = {
+            let mut rng = rand::thread_rng();
+            let idx = rng.gen_range(0..kolmes.len());
+            let kolme = &kolmes[idx];
+            let secret = SecretKey::random(&mut rng);
+            (idx, kolme, secret)
+        };
+        let tx = kolme
+            .read()
+            .await
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])
+            .await?;
+        let txhash = tx.hash();
+        kolme.propose_transaction(tx)?;
+        println!("Proposing transaction to {idx}: {txhash}");
+
+        // FIXME: the timeout is way too long to need to wait for this, need to investigate why
+        // a shorter value of 200 fails. Looks like we have some lag in the system.
+        let kolmes = kolmes.clone();
+        tokio::time::timeout(tokio::time::Duration::from_millis(5000), async move {
+            for (idx, kolme) in kolmes.iter().enumerate() {
+                kolme.wait_for_tx(txhash).await?;
+                println!("Found {txhash} in database {idx}");
+            }
+            anyhow::Ok(())
+        })
+        .await
+        .with_context(|| format!("Timed out waiting for transaction {txhash}"))??;
+    }
+    Ok(())
 }
 
 async fn checker(
