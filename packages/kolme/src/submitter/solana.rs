@@ -29,9 +29,9 @@ pub async fn instantiate(
         executors,
     };
 
-    let program_pubkey = Pubkey::from_str(&program_id)?;
+    let program_pubkey = Pubkey::from_str(program_id)?;
     let blockhash = client.get_latest_blockhash().await?;
-    let tx = init_tx(program_pubkey, blockhash, &keypair, &data).map_err(|x| anyhow::anyhow!(x))?;
+    let tx = init_tx(program_pubkey, blockhash, keypair, &data).map_err(|x| anyhow::anyhow!(x))?;
 
     client.send_and_confirm_transaction(&tx).await?;
 
@@ -50,7 +50,7 @@ pub async fn execute(
     let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
 
-    let program_id = Pubkey::from_str(&program_id)?;
+    let program_id = Pubkey::from_str(program_id)?;
     let mut metas: Vec<AccountMeta> = Vec::with_capacity(1 + payload.accounts.len());
     metas.push(AccountMeta {
         pubkey: Pubkey::new_from_array(payload.program_id),
@@ -85,8 +85,8 @@ pub async fn execute(
     };
 
     let blockhash = client.get_latest_blockhash().await?;
-    let tx = signed_tx(program_id, blockhash, &keypair, &data, &metas)
-        .map_err(|x| anyhow::anyhow!(x))?;
+    let tx =
+        signed_tx(program_id, blockhash, keypair, &data, &metas).map_err(|x| anyhow::anyhow!(x))?;
 
     let sig = client.send_and_confirm_transaction(&tx).await?;
 

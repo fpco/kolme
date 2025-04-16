@@ -265,7 +265,7 @@ impl<App: KolmeApp> KolmeInner<App> {
 
         let mut guard = self.solana_conns.write().await;
         match guard.get(&chain) {
-            Some(client) => Arc::clone(&client),
+            Some(client) => Arc::clone(client),
             None => {
                 let client = Arc::new(chain.make_client());
                 guard.insert(chain, Arc::clone(&client));

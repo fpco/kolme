@@ -32,7 +32,7 @@ pub async fn instantiate(
 
     let res = TxBuilder::default()
         .add_update_contract_admin(&contract, &wallet, &contract)
-        .sign_and_broadcast(&cosmos, &wallet)
+        .sign_and_broadcast(cosmos, &wallet)
         .await?;
 
     tracing::info!(

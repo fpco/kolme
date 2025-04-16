@@ -154,7 +154,7 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let client = self.kolme.read().await.get_solana_client(chain).await;
 
-                solana::instantiate(&client, &keypair, &program_id, args).await?;
+                solana::instantiate(&client, keypair, &program_id, args).await?;
 
                 (program_id, chain.into())
             }

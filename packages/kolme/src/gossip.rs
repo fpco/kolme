@@ -41,6 +41,7 @@ enum BlockRequest {
     GetHeight(BlockHeight),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(bound(
     serialize = "",

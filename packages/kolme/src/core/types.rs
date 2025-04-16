@@ -131,7 +131,7 @@ impl SolanaChain {
             Self::Local => "ws://localhost:8900",
         };
 
-        Ok(SolanaPubsubClient::new(url.into()).await?)
+        Ok(SolanaPubsubClient::new(url).await?)
     }
 }
 
@@ -785,8 +785,8 @@ impl ConfiguredChains {
                     "Trying to configure a Cosmos contract as a Solana bridge."
                 ))
             }
-            BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(&program_id)?,
-            BridgeContract::Deployed(program_id) => Pubkey::from_str(&program_id)?,
+            BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(program_id)?,
+            BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
         };
 
         self.0.insert(chain.into(), config);
@@ -805,7 +805,7 @@ impl ConfiguredChains {
             }
             BridgeContract::NeededCosmosBridge { .. } => (),
             BridgeContract::Deployed(program_id) => {
-                Address::from_str(&program_id)?;
+                Address::from_str(program_id)?;
             }
         }
 

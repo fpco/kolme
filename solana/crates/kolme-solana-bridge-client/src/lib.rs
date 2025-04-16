@@ -139,6 +139,7 @@ impl Secp256k1Signature {
 
         let mut a: [u64; 4] = [0; 4];
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..4 {
             let offset = OFFSET + (4 - i - 1) * 8;
             let bytes: [u8; 8] = self.0.as_slice()[offset..offset + 8].try_into().unwrap();
@@ -151,6 +152,7 @@ impl Secp256k1Signature {
             return false;
         }
 
+        #[allow(clippy::if_same_then_else)]
         let is_lt_q_b = if a3 < 0xffffffffffffffff {
             true
         } else if a2 < 0xfffffffffffffffe {
@@ -165,6 +167,7 @@ impl Secp256k1Signature {
             a0 < 0xbfd25e8cd0364141
         };
 
+        #[allow(clippy::if_same_then_else)]
         let is_s_lt_q_halved = if a3 < 0x7fffffffffffffff {
             true
         } else if a3 > 0x7fffffffffffffff {

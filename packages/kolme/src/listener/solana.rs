@@ -161,7 +161,7 @@ fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
         }
         ContractMessage::Signed { action_id } => BridgeEvent::Signed {
             wallet,
-            action_id: BridgeActionId(action_id.into()),
+            action_id: BridgeActionId(action_id),
         },
     };
 

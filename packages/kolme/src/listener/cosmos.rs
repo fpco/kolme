@@ -54,7 +54,7 @@ async fn listen_once<App: KolmeApp>(
             let signed = kolme
                 .read()
                 .await
-                .create_signed_transaction(&secret, vec![message])
+                .create_signed_transaction(secret, vec![message])
                 .await?;
 
             kolme.propose_transaction(signed)?;

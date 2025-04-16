@@ -5,7 +5,7 @@ pub(crate) enum MerkleDbStore<'a> {
     Pool(&'a sqlx::SqlitePool),
 }
 
-impl<'a> MerkleStore for MerkleDbStore<'a> {
+impl MerkleStore for MerkleDbStore<'_> {
     async fn load_by_hash(
         &mut self,
         hash: shared::types::Sha256Hash,
