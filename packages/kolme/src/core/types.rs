@@ -605,6 +605,12 @@ impl BlockHash {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TxHash(pub Sha256Hash);
 
+impl Display for TxHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// A block containing a single transaction.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(bound = "AppMessage: serde::de::DeserializeOwned")]
@@ -980,6 +986,11 @@ pub enum Notification<AppMessage> {
     /// Broadcast a transaction to be included in the chain.
     Broadcast {
         tx: Arc<SignedTransaction<AppMessage>>,
+    },
+    /// A transaction failed in the processor.
+    FailedTransaction {
+        txhash: TxHash,
+        error: String,
     },
 }
 

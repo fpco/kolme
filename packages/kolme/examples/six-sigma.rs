@@ -312,6 +312,7 @@ impl TxLogger {
                     // we skip initial tx broadcast, only tx as a part of a block
                     continue;
                 }
+                Notification::FailedTransaction { .. } => continue,
                 Notification::NewBlock(msg) => {
                     let block = msg.0.message.as_inner();
                     let height = block.height;

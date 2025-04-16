@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use kolme::*;
 use rand::seq::SliceRandom;
 use tokio::{
@@ -40,9 +40,9 @@ pub enum SampleMessage {
 }
 
 pub fn get_sample_secret_key() -> &'static SecretKey {
+    const HEX: &str = "60cb788cae86b83d8932715e99558d7b4d75b410cbbe379f232eb51fb743ca63";
     static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
+    KEY.get_or_init(|| HEX.parse().unwrap())
 }
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
@@ -160,7 +160,8 @@ async fn client(_: OwnedSemaphorePermit, kolmes: Arc<[Kolme<SampleKolmeApp>]>) -
         }
         anyhow::Ok(())
     })
-    .await?
+    .await
+    .with_context(|| format!("Timed out waiting for transaction {txhash}"))?
 }
 
 async fn checker(

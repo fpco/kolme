@@ -21,19 +21,26 @@ pub struct Processor<App: KolmeApp> {
 ///
 /// Under the surface, this simply uses a PostgreSQL database.
 #[derive(Clone)]
-pub struct BlockDb(sqlx::PgPool);
+pub struct BlockDb {
+    pool: sqlx::PgPool,
+    resync_trigger: tokio::sync::watch::Sender<()>,
+}
 
 impl BlockDb {
     /// Use the given connection pool.
     pub async fn new(pool: sqlx::PgPool) -> Result<Self> {
         let migrator = Migrator::new(PathBuf::from("blockdb-migrations")).await?;
         migrator.run(&pool).await?;
-        Ok(BlockDb(pool))
+        let resync_trigger = tokio::sync::watch::channel(()).0;
+        Ok(BlockDb {
+            pool,
+            resync_trigger,
+        })
     }
 
-    async fn get_new_blocks<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<()> {
+    async fn listen_new_blocks<App: KolmeApp>(self, kolme: Kolme<App>) {
         loop {
-            match self.get_new_blocks_inner(&kolme).await {
+            match self.listen_new_blocks_inner(&kolme).await {
                 Ok(()) => tracing::warn!("Unexpected exit from get_new_blocks_inner"),
                 Err(e) => tracing::warn!("Error from get_new_blocks_inner: {e}"),
             }
@@ -41,13 +48,25 @@ impl BlockDb {
         }
     }
 
-    async fn get_new_blocks_inner<App: KolmeApp>(&self, kolme: &Kolme<App>) -> Result<()> {
-        let mut listener = PgListener::connect_with(&self.0).await?;
+    async fn listen_new_blocks_inner<App: KolmeApp>(&self, kolme: &Kolme<App>) -> Result<()> {
+        let mut listener = PgListener::connect_with(&self.pool).await?;
         listener.listen("new_block_channel").await?;
         self.resync(kolme).await?;
         loop {
             let _ = listener.recv().await?;
             self.resync(kolme).await?;
+        }
+    }
+
+    async fn resync_loop<App: KolmeApp>(self, kolme: Kolme<App>) {
+        let mut recv = self.resync_trigger.subscribe();
+        loop {
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), recv.changed())
+                .await
+                .ok();
+            if let Err(e) = self.resync(&kolme).await {
+                tracing::error!("Unable to resync with block DB: {e}");
+            }
         }
     }
 
@@ -57,7 +76,7 @@ impl BlockDb {
             let rendered: Option<String> =
                 sqlx::query_scalar("SELECT rendered FROM blocks WHERE height=$1")
                     .bind(height.try_into_i64()?)
-                    .fetch_optional(&self.0)
+                    .fetch_optional(&self.pool)
                     .await?;
             let Some(rendered) = rendered else {
                 break Ok(());
@@ -70,13 +89,44 @@ impl BlockDb {
         &self,
         signed_block: &SignedBlock<AppMessage>,
     ) -> Result<()> {
-        sqlx::query("INSERT INTO blocks(height,rendered) VALUES($1, $2)")
-            .bind(signed_block.0.message.as_inner().height.try_into_i64()?)
-            .bind(serde_json::to_string(&signed_block)?)
-            .execute(&self.0)
-            .await?;
-        Ok(())
+        let height = signed_block.0.message.as_inner().height.try_into_i64()?;
+        let rendered = serde_json::to_string(&signed_block)?;
+        if let Err(e) = sqlx::query("INSERT INTO blocks(height,rendered) VALUES($1, $2)")
+            .bind(height)
+            .bind(&rendered)
+            .execute(&self.pool)
+            .await
+        {
+            // TODO is there a way to do this that doesn't involve string comparisons?
+            if e.to_string().contains("violates unique constraint") {
+                // Check if the block is exactly identical to the one we're trying to add.
+                if let Some(current) = sqlx::query_scalar::<_, String>(
+                    "SELECT rendered FROM blocks WHERE height=$1 LIMIT 1",
+                )
+                .bind(height)
+                .fetch_optional(&self.pool)
+                .await?
+                {
+                    if current == rendered {
+                        // It was the same block, so everything is OK
+                        tracing::info!("Block {height} was already present in block DB");
+                        return Ok(());
+                    }
+                }
+                Err(anyhow::Error::from(BlockDbError::AlreadyInDb))
+            } else {
+                Err(e.into())
+            }
+        } else {
+            Ok(())
+        }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BlockDbError {
+    #[error("Block is already present in database")]
+    AlreadyInDb,
 }
 
 impl<App: KolmeApp> Processor<App> {
@@ -90,25 +140,28 @@ impl<App: KolmeApp> Processor<App> {
 
     pub async fn run(self) -> Result<()> {
         match self.block_db.clone() {
-            None => self.run_just_processor().await,
+            None => {
+                self.run_just_processor().await;
+                Err(anyhow::anyhow!("run_just_processor unexpectedly exited"))
+            }
             Some(block_db) => {
                 self.kolme.set_block_db(block_db.clone()).await;
                 let mut set = JoinSet::new();
-                set.spawn(block_db.get_new_blocks(self.kolme.clone()));
+                set.spawn(block_db.clone().listen_new_blocks(self.kolme.clone()));
+                set.spawn(block_db.resync_loop(self.kolme.clone()));
                 set.spawn(self.run_just_processor());
-                while let Some(res) = set.join_next().await {
-                    match res {
-                        Err(e) => return Err(e.into()),
-                        Ok(Err(e)) => return Err(e),
-                        Ok(Ok(())) => (),
-                    }
+                match set.join_next().await {
+                    None => Err(anyhow::anyhow!(
+                        "Processor::run: unexpected end of processing"
+                    )),
+                    Some(Err(e)) => Err(anyhow::anyhow!("Panic within processor: {e}")),
+                    Some(Ok(())) => Err(anyhow::anyhow!("Unexpected end of a processor subtask")),
                 }
-                Ok(())
             }
         }
     }
 
-    async fn run_just_processor(self) -> Result<()> {
+    async fn run_just_processor(self) {
         let chains = self
             .kolme
             .read()
@@ -128,21 +181,27 @@ impl<App: KolmeApp> Processor<App> {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
-        self.approve_actions_all(&chains).await?;
+        self.approve_actions_all(&chains).await;
 
         loop {
-            let notification = receiver.recv().await?;
+            let notification = receiver
+                .recv()
+                .await
+                .expect("Impossible closed notification channel");
             match notification {
                 Notification::NewBlock(_) => {
-                    self.approve_actions_all(&chains).await?;
+                    self.approve_actions_all(&chains).await;
                 }
                 Notification::GenesisInstantiation {
                     chain: _,
                     contract: _,
                 } => (),
+                Notification::FailedTransaction { .. } => (),
                 Notification::Broadcast { tx } => {
                     let tx = Arc::try_unwrap(tx).unwrap_or_else(|tx| tx.deref().clone());
-                    self.add_transaction(tx).await?
+                    if let Err(e) = self.add_transaction(tx).await {
+                        tracing::warn!("Error while adding transaction: {e}");
+                    }
                 }
             }
         }
@@ -174,16 +233,46 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
-        match self.construct_block(tx).await {
-            Ok(block) => {
-                self.kolme.add_block(block).await?;
-                Ok(())
+        // We'll retry adding a transaction multiple times before giving up.
+        // We only retry if the transaction is still not present in the database,
+        // and our failure is because of a block creation race condition.
+        let txhash = tx.hash();
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 5;
+        let res = loop {
+            if self.kolme.read().await.get_tx(txhash).await?.is_some() {
+                break Ok(());
             }
-            Err(e) => {
-                tracing::error!("Error when constructing a block from a transaction. FIXME determine what to do in the future, this can happen legitimately: {e}");
-                Ok(())
+            attempts += 1;
+            match self.construct_block(tx.clone()).await {
+                Ok(block) => {
+                    self.kolme.add_block(block).await?;
+                    break Ok(());
+                }
+                Err(e) => {
+                    if attempts >= MAX_ATTEMPTS {
+                        break Err(e);
+                    }
+                    if let Some(BlockDbError::AlreadyInDb) = e.downcast_ref() {
+                        tracing::warn!(
+                            "Block already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}..."
+                        );
+                        if let Some(block_db) = &self.block_db {
+                            block_db.resync_trigger.send_replace(());
+                        }
+                    } else {
+                        break Err(e);
+                    }
+                }
             }
+        };
+        if let Err(e) = &res {
+            self.kolme.notify(Notification::FailedTransaction {
+                txhash,
+                error: e.to_string(),
+            });
         }
+        res
     }
 
     async fn construct_block(
@@ -222,11 +311,12 @@ impl<App: KolmeApp> Processor<App> {
         Ok(SignedBlock(event.sign(&self.secret)?))
     }
 
-    async fn approve_actions_all(&self, chains: &[ExternalChain]) -> Result<()> {
+    async fn approve_actions_all(&self, chains: &[ExternalChain]) {
         for chain in chains {
-            self.approve_actions(*chain).await?;
+            if let Err(e) = self.approve_actions(*chain).await {
+                tracing::warn!("Error when approving actions for {chain}: {e}");
+            }
         }
-        Ok(())
     }
 
     async fn approve_actions(&self, chain: ExternalChain) -> Result<()> {

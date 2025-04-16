@@ -250,6 +250,7 @@ impl<App: KolmeApp> Kolme<App> {
                         }
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::Broadcast { .. } => (),
+                        Notification::FailedTransaction { .. } => (),
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_block: unexpected Closed"),
@@ -280,6 +281,7 @@ impl<App: KolmeApp> Kolme<App> {
                         }
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::Broadcast { .. } => (),
+                        Notification::FailedTransaction { .. } => (),
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
@@ -807,7 +809,12 @@ async fn store_block<App: KolmeApp>(
     let tx = block.tx.0.message.as_inner();
 
     let height = block.height;
-    assert_eq!(kolme.get_next_height(), height);
+    anyhow::ensure!(
+        kolme.get_next_height() == height,
+        "Proposed block height {} does not match expected next height {}",
+        height,
+        kolme.get_next_height()
+    );
     let height_i64 = height.try_into_i64()?;
 
     let (account_id, nonce) =

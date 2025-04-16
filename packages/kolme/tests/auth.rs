@@ -119,6 +119,7 @@ async fn test_sample_sanity() {
                     }
                     Notification::GenesisInstantiation { .. } => (),
                     Notification::Broadcast { .. } => (),
+                    Notification::FailedTransaction { .. } => (),
                 }
             }
         }

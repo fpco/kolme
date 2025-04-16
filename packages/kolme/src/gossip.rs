@@ -192,6 +192,7 @@ impl<App: KolmeApp> Gossip<App> {
                                 }
                                 Notification::GenesisInstantiation { .. } => (),
                                 Notification::Broadcast { .. } => (),
+                                Notification::FailedTransaction { .. } => (),
                             }
                             self.kolme.notify(msg);
                         }
