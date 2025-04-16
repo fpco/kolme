@@ -91,11 +91,17 @@ impl BlockDb {
     ) -> Result<()> {
         let height = signed_block.0.message.as_inner().height.try_into_i64()?;
         let rendered = serde_json::to_string(&signed_block)?;
-        if let Err(e) = sqlx::query("INSERT INTO blocks(height,rendered) VALUES($1, $2)")
-            .bind(height)
-            .bind(&rendered)
-            .execute(&self.pool)
-            .await
+        let blockhash = signed_block.hash();
+        let txhash = signed_block.0.message.as_inner().tx.hash();
+        if let Err(e) = sqlx::query(
+            "INSERT INTO blocks(height,rendered,blockhash,txhash) VALUES($1, $2, $3, $4)",
+        )
+        .bind(height)
+        .bind(&rendered)
+        .bind(blockhash.to_string())
+        .bind(txhash.to_string())
+        .execute(&self.pool)
+        .await
         {
             // TODO is there a way to do this that doesn't involve string comparisons?
             if e.to_string().contains("violates unique constraint") {
@@ -109,7 +115,7 @@ impl BlockDb {
                 {
                     if current == rendered {
                         // It was the same block, so everything is OK
-                        tracing::info!("Block {height} was already present in block DB");
+                        tracing::debug!("Block {height} was already present in block DB");
                         return Ok(());
                     }
                 }

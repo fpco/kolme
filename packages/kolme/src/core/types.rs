@@ -589,6 +589,10 @@ impl<AppMessage> SignedBlock<AppMessage> {
         anyhow::ensure!(pubkey == self.0.message.as_inner().processor);
         Ok(())
     }
+
+    pub fn hash(&self) -> BlockHash {
+        BlockHash(self.0.message_hash())
+    }
 }
 
 /// The hash of a [Block].
@@ -598,6 +602,12 @@ impl BlockHash {
     pub(crate) fn genesis_parent() -> BlockHash {
         static LOCK: OnceLock<BlockHash> = OnceLock::new();
         *LOCK.get_or_init(|| BlockHash(Sha256Hash::hash("genesis parent")))
+    }
+}
+
+impl Display for BlockHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -642,7 +652,9 @@ impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
         anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
         Ok(())
     }
+}
 
+impl<AppMessage> SignedTransaction<AppMessage> {
     /// Get the hash of the transaction
     pub fn hash(&self) -> TxHash {
         TxHash(self.0.message_hash())

@@ -1,6 +1,8 @@
 CREATE TABLE blocks(
     height SERIAL PRIMARY KEY,
-    rendered TEXT NOT NULL
+    rendered TEXT NOT NULL,
+    blockhash TEXT NOT NULL,
+    txhash TEXT NOT NULL
 );
 
 CREATE OR REPLACE FUNCTION notify_new_block()
