@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 
@@ -65,7 +65,7 @@ impl KolmeApp for SampleKolmeApp {
             needed_listeners: 1,
             approvers: set,
             needed_approvers: 1,
-            chains: BTreeMap::new(),
+            chains: ConfiguredChains::default(),
         }
     }
 

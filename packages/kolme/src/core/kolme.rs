@@ -152,7 +152,8 @@ pub struct KolmeInner<App: KolmeApp> {
     pub(super) app_state: App::State,
     pub(super) next_height: BlockHeight,
     pub(super) current_block_hash: BlockHash,
-    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<ExternalChain, cosmos::Cosmos>>,
+    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
+    pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
     // TODO Intended only for dev-time, we should either remove in the future
     // or gate with feature flags/optimization flags.
     pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
@@ -195,6 +196,7 @@ impl<App: KolmeApp> Kolme<App> {
             next_height,
             current_block_hash,
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
+            solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             deadlock_detector: Default::default(),
             merkle_manager,
         };
@@ -240,17 +242,35 @@ impl<App: KolmeApp> Kolme<App> {
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
-    pub async fn get_cosmos(&self, chain: ExternalChain) -> Result<cosmos::Cosmos> {
+    pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
         }
+
         let mut guard = self.cosmos_conns.write().await;
         match guard.get(&chain) {
             Some(cosmos) => Ok(cosmos.clone()),
             None => {
-                let cosmos = chain.make_cosmos().await?;
+                let cosmos = chain.make_client().await?;
                 guard.insert(chain, cosmos.clone());
                 Ok(cosmos)
+            }
+        }
+    }
+
+    pub async fn get_solana_client(&self, chain: SolanaChain) -> Arc<SolanaClient> {
+        if let Some(client) = self.solana_conns.read().await.get(&chain) {
+            return client.clone();
+        }
+
+        let mut guard = self.solana_conns.write().await;
+        match guard.get(&chain) {
+            Some(client) => Arc::clone(client),
+            None => {
+                let client = Arc::new(chain.make_client());
+                guard.insert(chain, Arc::clone(&client));
+
+                client
             }
         }
     }
@@ -324,22 +344,26 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
-        for (chain, config) in &self.framework_state.chains {
-            match config.bridge {
+        for (chain, config) in &self.framework_state.chains.0 {
+            match &config.bridge {
                 BridgeContract::NeededCosmosBridge { code_id } => {
                     return Some(GenesisAction::InstantiateCosmos {
-                        chain: *chain,
-                        code_id,
-                        processor: self.framework_state.processor,
-                        listeners: self.framework_state.listeners.clone(),
-                        needed_listeners: self.framework_state.needed_listeners,
-                        approvers: self.framework_state.approvers.clone(),
-                        needed_approvers: self.framework_state.needed_approvers,
+                        chain: chain.to_cosmos_chain().unwrap(),
+                        code_id: *code_id,
+                        args: self.framework_state.instantiate_args(),
+                    })
+                }
+                BridgeContract::NeededSolanaBridge { program_id } => {
+                    return Some(GenesisAction::InstantiateSolana {
+                        chain: chain.to_solana_chain().unwrap(),
+                        program_id: program_id.clone(),
+                        args: self.framework_state.instantiate_args(),
                     })
                 }
                 BridgeContract::Deployed(_) => (),
             }
         }
+
         None
     }
 
@@ -403,7 +427,7 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
-        &self.framework_state.chains
+        &self.framework_state.chains.0
     }
 
     pub fn get_balances(&self) -> &Balances {
@@ -649,7 +673,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self,
         chain: ExternalChain,
         action_id: BridgeActionId,
-    ) -> Result<String> {
+    ) -> Result<Vec<u8>> {
         get_action_payload(&self.pool, chain, action_id).await
     }
 }
@@ -658,8 +682,10 @@ pub(super) async fn get_action_payload(
     pool: &sqlx::SqlitePool,
     chain: ExternalChain,
     action_id: BridgeActionId,
-) -> Result<String> {
-    let chain = chain.as_ref();
+) -> Result<Vec<u8>> {
+    use base64::Engine;
+
+    let chain_str = chain.as_ref();
     let action_id = i64::try_from(action_id.0)?;
     let payload = sqlx::query_scalar!(
         r#"
@@ -668,12 +694,21 @@ pub(super) async fn get_action_payload(
                 WHERE chain=$1
                 AND action_id=$2
             "#,
-        chain,
+        chain_str,
         action_id
     )
     .fetch_one(pool)
     .await?;
-    Ok(payload)
+
+    // TODO: This is a hack... we should probably be storing binary blobs in the DB instead of TEXT.
+    match ChainKind::from(chain) {
+        ChainKind::Cosmos(_) => Ok(payload.into_bytes()),
+        ChainKind::Solana(_) => {
+            let payload = base64::engine::general_purpose::STANDARD.decode(&payload)?;
+
+            Ok(payload)
+        }
+    }
 }
 
 /// Response from [get_account_and_next_nonce]

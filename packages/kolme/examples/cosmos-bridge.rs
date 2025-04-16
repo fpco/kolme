@@ -76,7 +76,7 @@ impl KolmeApp for SampleKolmeApp {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        let mut bridges = BTreeMap::new();
+        let mut bridges = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
         assets.insert(
             AssetName(
@@ -87,15 +87,17 @@ impl KolmeApp for SampleKolmeApp {
                 asset_id: AssetId(1),
             },
         );
-        bridges.insert(
-            ExternalChain::OsmosisTestnet,
-            ChainConfig {
-                assets,
-                bridge: BridgeContract::NeededCosmosBridge {
-                    code_id: OSMOSIS_TESTNET_CODE_ID,
+        bridges
+            .insert_cosmos(
+                CosmosChain::OsmosisTestnet,
+                ChainConfig {
+                    assets,
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: OSMOSIS_TESTNET_CODE_ID,
+                    },
                 },
-            },
-        );
+            )
+            .unwrap();
         let mut assets = BTreeMap::new();
         assets.insert(
             AssetName(
@@ -106,15 +108,17 @@ impl KolmeApp for SampleKolmeApp {
                 asset_id: AssetId(1),
             },
         );
-        bridges.insert(
-            ExternalChain::NeutronTestnet,
-            ChainConfig {
-                assets,
-                bridge: BridgeContract::NeededCosmosBridge {
-                    code_id: NEUTRON_TESTNET_CODE_ID,
+        bridges
+            .insert_cosmos(
+                CosmosChain::NeutronTestnet,
+                ChainConfig {
+                    assets,
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: NEUTRON_TESTNET_CODE_ID,
+                    },
                 },
-            },
-        );
+            )
+            .unwrap();
         GenesisInfo {
             kolme_ident: "Cosmos bridge example".to_owned(),
             processor: my_public_key,
@@ -250,10 +254,10 @@ async fn serve(bind: SocketAddr) -> Result<()> {
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(listener.run());
+    set.spawn(listener.run(ChainName::Cosmos));
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
-    let submitter = Submitter::new(
+    let submitter = Submitter::new_cosmos(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
     );

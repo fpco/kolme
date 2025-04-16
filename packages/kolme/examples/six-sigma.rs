@@ -65,7 +65,7 @@ impl KolmeApp for SixSigmaApp {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        let mut bridges = BTreeMap::new();
+        let mut bridges = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
         assets.insert(
             AssetName("uosmo".to_owned()),
@@ -74,15 +74,17 @@ impl KolmeApp for SixSigmaApp {
                 asset_id: AssetId(1),
             },
         );
-        bridges.insert(
-            ExternalChain::OsmosisLocal,
-            ChainConfig {
-                assets,
-                bridge: BridgeContract::NeededCosmosBridge {
-                    code_id: LOCALOSMOSIS_CODE_ID,
+        bridges
+            .insert_cosmos(
+                CosmosChain::OsmosisLocal,
+                ChainConfig {
+                    assets,
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: LOCALOSMOSIS_CODE_ID,
+                    },
                 },
-            },
-        );
+            )
+            .unwrap();
         GenesisInfo {
             kolme_ident: "Six sigma example".to_owned(),
             processor: my_public_key,
@@ -259,10 +261,10 @@ async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(listener.run());
+    set.spawn(listener.run(ChainName::Cosmos));
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
-    let submitter = Submitter::new(
+    let submitter = Submitter::new_cosmos(
         kolme.clone(),
         SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
     );

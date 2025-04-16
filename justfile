@@ -15,8 +15,11 @@ test:
     cargo sqlx prepare --workspace
     cargo test
 
-build-contracts:
+build-optimizer-image:
+    ./.ci/build-optimizer-image.sh
+
+build-contracts: build-optimizer-image
     docker run --rm -v "$(pwd)":/code \
       --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
       --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-      cosmwasm/optimizer:0.16.1
+      optimizer:1.84

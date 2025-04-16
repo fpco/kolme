@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    net::SocketAddr,
-};
+use std::{collections::BTreeSet, net::SocketAddr};
 
 use anyhow::Result;
 use clap::Parser;
@@ -69,7 +66,7 @@ impl KolmeApp for SampleKolmeApp {
             needed_listeners: 1,
             approvers: set,
             needed_approvers: 1,
-            chains: BTreeMap::new(),
+            chains: ConfiguredChains::default(),
         }
     }
 

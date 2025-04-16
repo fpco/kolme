@@ -53,25 +53,29 @@ impl KolmeApp for SampleKolmeApp {
         let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        let mut bridges = BTreeMap::new();
-        bridges.insert(
-            ExternalChain::OsmosisTestnet,
-            ChainConfig {
-                assets: BTreeMap::new(),
-                bridge: BridgeContract::NeededCosmosBridge {
-                    code_id: OSMOSIS_TESTNET_CODE_ID,
+        let mut bridges = ConfiguredChains::default();
+        bridges
+            .insert_cosmos(
+                CosmosChain::OsmosisTestnet,
+                ChainConfig {
+                    assets: BTreeMap::new(),
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: OSMOSIS_TESTNET_CODE_ID,
+                    },
                 },
-            },
-        );
-        bridges.insert(
-            ExternalChain::NeutronTestnet,
-            ChainConfig {
-                assets: BTreeMap::new(),
-                bridge: BridgeContract::NeededCosmosBridge {
-                    code_id: NEUTRON_TESTNET_CODE_ID,
+            )
+            .unwrap();
+        bridges
+            .insert_cosmos(
+                CosmosChain::NeutronTestnet,
+                ChainConfig {
+                    assets: BTreeMap::new(),
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: NEUTRON_TESTNET_CODE_ID,
+                    },
                 },
-            },
-        );
+            )
+            .unwrap();
         GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
             processor: my_public_key,

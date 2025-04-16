@@ -278,10 +278,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     let config = self
                         .framework_state
                         .chains
+                        .0
                         .get_mut(&chain)
                         .context("Found a listener event for a chain we don't care about")?;
                     match config.bridge {
-                        BridgeContract::NeededCosmosBridge { code_id:_ } => (),
+                        BridgeContract::NeededCosmosBridge { .. } |
+                            BridgeContract::NeededSolanaBridge { .. } => (),
                         BridgeContract::Deployed(_) => anyhow::bail!("Already have a bridge contract for {chain:?}, just received another from a listener"),
                     }
                     config.bridge = BridgeContract::Deployed(contract.clone());
@@ -303,6 +305,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         let Some(asset_config) = self
                             .framework_state
                             .chains
+                            .0
                             .get(&chain)
                             .context("Unknown chain")?
                             .assets
@@ -347,7 +350,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         msg_index: usize,
     ) -> Result<()> {
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
-        let key = PublicKey::recover_from_msg(payload.as_bytes(), &signature, recovery)?;
+        let key = PublicKey::recover_from_msg(payload, &signature, recovery)?;
         anyhow::ensure!(self.framework_state.approvers.contains(&key));
         let chain_db = chain.as_ref();
         let action_id_db = i64::try_from(action_id.0)?;
@@ -391,13 +394,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         let payload = get_action_payload(&self.pool, chain, action_id).await?;
 
-        let processor = processor.validate(payload.as_bytes())?;
+        let processor = processor.validate(&payload)?;
         anyhow::ensure!(processor == self.framework_state.processor);
 
         let approvers_checked = approvers
             .iter()
             .map(|sig| {
-                let pubkey = sig.validate(payload.as_bytes())?;
+                let pubkey = sig.validate(&payload)?;
                 anyhow::ensure!(self.framework_state.approvers.contains(&pubkey));
                 Ok(pubkey)
             })
