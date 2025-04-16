@@ -46,7 +46,7 @@ impl MerkleManager {
                 .write()
                 .insert(contents.hash, contents.payload.clone());
         }
-        value.set_merkle_contents(contents.clone());
+        value.set_merkle_contents(&contents);
         Ok(contents)
     }
 

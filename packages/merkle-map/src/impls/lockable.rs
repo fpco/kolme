@@ -40,8 +40,8 @@ impl<T: MerkleSerialize> MerkleSerialize for Lockable<T> {
         self.locked.get().cloned()
     }
 
-    fn set_merkle_contents(&self, contents: Arc<MerkleContents>) {
-        self.locked.set(contents).ok();
+    fn set_merkle_contents(&self, contents: &Arc<MerkleContents>) {
+        self.locked.set(contents.clone()).ok();
     }
 }
 

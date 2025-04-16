@@ -15,6 +15,7 @@ pub enum CoreStateError {
 #[derive(Clone, Debug)]
 pub struct FrameworkState {
     pub(super) processor: PublicKey,
+    // FIXME replace BTreeSet with MerkleSet, and implement a MerkleSet datatype.
     pub(super) listeners: BTreeSet<PublicKey>,
     pub(super) needed_listeners: usize,
     pub(super) approvers: BTreeSet<PublicKey>,

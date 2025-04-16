@@ -33,7 +33,7 @@ pub trait MerkleSerialize {
     }
 
     /// Update the cached Merkle hash and payload, if supported by this type.
-    fn set_merkle_contents(&self, _contents: Arc<MerkleContents>) {}
+    fn set_merkle_contents(&self, _contents: &Arc<MerkleContents>) {}
 }
 
 /// A value that can be deserialized back into a [MerkleMap] value.
