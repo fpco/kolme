@@ -114,23 +114,26 @@ impl BlockDb {
         .execute(&self.pool)
         .await
         {
-            // TODO is there a way to do this that doesn't involve string comparisons?
-            if e.to_string().contains("violates unique constraint") {
-                // Check if the block is exactly identical to the one we're trying to add.
-                if let Some(current) = sqlx::query_scalar::<_, String>(
-                    "SELECT rendered FROM blocks WHERE height=$1 LIMIT 1",
-                )
-                .bind(height)
-                .fetch_optional(&self.pool)
-                .await?
-                {
-                    if current == rendered {
-                        // It was the same block, so everything is OK
-                        tracing::debug!("Block {height} was already present in block DB");
-                        return Ok(());
+            if let Some(db_error) = e.as_database_error() {
+                if db_error.code().as_deref() == Some("23505") {
+                    // Check if the block is exactly identical to the one we're trying to add.
+                    if let Some(current) = sqlx::query_scalar::<_, String>(
+                        "SELECT rendered FROM blocks WHERE height=$1 LIMIT 1",
+                    )
+                    .bind(height)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    {
+                        if current == rendered {
+                            // It was the same block, so everything is OK
+                            tracing::debug!("Block {height} was already present in block DB");
+                            return Ok(());
+                        }
                     }
+                    Err(anyhow::Error::from(BlockDbError::BlockAlreadyInDb))
+                } else {
+                    Err(e.into())
                 }
-                Err(anyhow::Error::from(BlockDbError::BlockAlreadyInDb))
             } else {
                 Err(e.into())
             }
