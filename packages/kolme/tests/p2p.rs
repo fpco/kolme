@@ -87,7 +87,7 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn sanity() {
-    kolme::init_logger(true, None);
+    kolme::init_logger(false, None);
     let mut set = JoinSet::new();
 
     // We're going to run two logically separate Kolmes, using different databases.
@@ -112,34 +112,29 @@ async fn sanity() {
         .unwrap();
     set.spawn(Gossip::new(kolme_client.clone()).await.unwrap().run());
 
-    set.spawn(async move {
+    {
         let secret = SecretKey::random(&mut rand::thread_rng());
         kolme_client
             .wait_for_block(BlockHeight::start())
             .await
             .unwrap();
-        kolme_client
-            .propose_transaction(
-                kolme_client
-                    .read()
-                    .await
-                    .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
-        kolme_client
-            .wait_for_block(BlockHeight::start().next())
+        let tx = kolme_client
+            .read()
+            .await
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
             .unwrap();
-        Ok(())
-    });
-
-    set.join_next()
+        let txhash = tx.hash();
+        kolme_client.propose_transaction(tx).unwrap();
+        let block = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            kolme_client.wait_for_block(BlockHeight::start().next()),
+        )
         .await
-        .expect("Impossible! No task finished")
-        .expect("Unexpected panic")
-        .expect("Unexpected error");
+        .unwrap()
+        .unwrap();
+        assert_eq!(txhash, block.0.message.as_inner().tx.hash());
+    }
 
     // And nothing else should have completed, since all other tasks should run forever.
     assert!(set.try_join_next().is_none());

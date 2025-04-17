@@ -69,6 +69,9 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Send a general purpose notification.
     pub fn notify(&self, note: Notification<App::Message>) {
+        if let Notification::Broadcast { tx } = &note {
+            self.mempool.add(tx.clone());
+        }
         self.notify.send(note).ok();
     }
 
