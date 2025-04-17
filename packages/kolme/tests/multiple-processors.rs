@@ -87,6 +87,7 @@ async fn multiple_processors() {
     };
     if block_db_str == "SKIP" {
         println!("Skipping test due to no local database being available");
+        return;
     }
 
     kolme::init_logger(false, None);
