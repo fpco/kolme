@@ -88,6 +88,7 @@ impl<App: KolmeApp> Submitter<App> {
                     contract: _,
                 } => continue,
                 Notification::Broadcast { tx: _ } => continue,
+                Notification::FailedTransaction { .. } => continue,
             }
             self.submit_zero_or_one(&chains).await?;
         }

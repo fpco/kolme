@@ -31,7 +31,7 @@ impl MerkleDeserializer {
     }
 
     /// Look at the next byte without consuming it from the stream.
-    pub fn peek_byte(&mut self) -> Result<u8, MerkleSerialError> {
+    pub fn peek_byte(&self) -> Result<u8, MerkleSerialError> {
         let byte = *self
             .buff
             .get(self.pos)

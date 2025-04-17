@@ -1,5 +1,11 @@
+mod error;
+mod mempool;
+
+pub use error::KolmeError;
+
 use std::{collections::HashMap, ops::Deref, path::Path};
 
+use mempool::Mempool;
 use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -20,6 +26,7 @@ use crate::core::*;
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<tokio::sync::RwLock<KolmeInner<App>>>,
     notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
+    mempool: Mempool<App::Message>,
 }
 
 impl<App: KolmeApp> Clone for Kolme<App> {
@@ -27,6 +34,7 @@ impl<App: KolmeApp> Clone for Kolme<App> {
         Kolme {
             inner: self.inner.clone(),
             notify: self.notify.clone(),
+            mempool: self.mempool.clone(),
         }
     }
 }
@@ -61,6 +69,9 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Send a general purpose notification.
     pub fn notify(&self, note: Notification<App::Message>) {
+        if let Notification::Broadcast { tx } = &note {
+            self.mempool.add(tx.clone());
+        }
         self.notify.send(note).ok();
     }
 
@@ -73,8 +84,10 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Propose a new event for the processor to add to the chain.
     pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
+        let tx = Arc::new(tx);
+        self.mempool.add(tx.clone());
         self.notify
-            .send(Notification::Broadcast { tx: Arc::new(tx) })
+            .send(Notification::Broadcast { tx })
             .map_err(|_| {
                 anyhow::anyhow!(
                     "Tried to propose an event, but no one is listening to our notifications"
@@ -85,6 +98,7 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
+        let txhash = signed_block.0.message.as_inner().tx.hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
         let exec_results = self
@@ -113,15 +127,42 @@ impl<App: KolmeApp> Kolme<App> {
         let mut kolme = self.inner.write().await;
         let mut trans = kolme.pool.begin().await?;
         store_block(&mut kolme, &mut trans, &signed_block, &exec_results).await?;
+
+        // And try to write to durable storage here, allowing a failure to revert this commit.
+        if let Some(block_db) = &kolme.block_db {
+            block_db.add_block(&signed_block).await?;
+        }
+
         trans.commit().await?;
         kolme.next_height = signed_block.0.message.as_inner().height.next();
-        kolme.current_block_hash = BlockHash(signed_block.0.message_hash());
+        kolme.current_block_hash = signed_block.hash();
         kolme.framework_state = exec_results.framework_state;
         kolme.app_state = exec_results.app_state;
+        self.mempool.drop_tx(txhash);
         self.notify
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
         Ok(())
+    }
+
+    pub(crate) async fn set_block_db(&self, block_db: BlockDb) {
+        self.inner.write().await.block_db = Some(block_db);
+    }
+
+    pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
+        loop {
+            let (txhash, tx) = self.mempool.peek().await;
+            match self.read().await.get_tx(txhash).await {
+                Ok(Some(_)) => self.mempool.drop_tx(txhash),
+                Ok(None) => {
+                    break tx;
+                }
+                Err(e) => {
+                    tracing::warn!("Error checking for transaction in database: {e}");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+            }
+        }
     }
 }
 
@@ -164,6 +205,7 @@ pub struct KolmeInner<App: KolmeApp> {
     #[cfg(feature = "deadlock_detector")]
     pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
     pub(super) merkle_manager: MerkleManager,
+    block_db: Option<BlockDb>,
 }
 
 #[cfg(feature = "deadlock_detector")]
@@ -207,10 +249,12 @@ impl<App: KolmeApp> Kolme<App> {
             #[cfg(feature = "deadlock_detector")]
             deadlock_detector: Default::default(),
             merkle_manager,
+            block_db: None,
         };
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),
             notify: tokio::sync::broadcast::channel(100).0,
+            mempool: Mempool::new(),
         })
     }
 
@@ -219,28 +263,63 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given block is published
-    pub async fn wait_for_block(&self, height: BlockHeight) {
+    pub async fn wait_for_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
         // Start an outer loop so that we can keep processing if we end up Lagged
         loop {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             // And then check if we're at the requested height.
-            if self.read().await.get_next_height() >= height.next() {
-                return;
+            if let Some(block) = self.read().await.get_block(height).await? {
+                return Ok(Arc::new(block));
             }
             loop {
                 match recv.recv().await {
                     Ok(note) => match note {
                         Notification::NewBlock(block) => {
-                            if block.0.message.as_inner().height == height {
-                                return;
+                            if block.0.message.as_inner().height >= height {
+                                return Ok(block);
                             }
                         }
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::Broadcast { .. } => (),
+                        Notification::FailedTransaction { .. } => (),
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_block: unexpected Closed"),
+                        RecvError::Lagged(_) => break,
+                    },
+                }
+            }
+        }
+    }
+
+    /// Wait until the given transaction is published
+    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<Arc<SignedBlock<App::Message>>> {
+        // Start an outer loop so that we can keep processing if we end up Lagged
+        loop {
+            // First subscribe to avoid a race condition...
+            let mut recv = self.subscribe();
+            // And then check if we have that transaction.
+            if let Some(block) = self.read().await.get_tx(tx).await? {
+                break Ok(Arc::new(block));
+            }
+            loop {
+                match recv.recv().await {
+                    Ok(note) => match note {
+                        Notification::NewBlock(block) => {
+                            if block.0.message.as_inner().tx.hash() == tx {
+                                return Ok(block);
+                            }
+                        }
+                        Notification::GenesisInstantiation { .. } => (),
+                        Notification::Broadcast { .. } => (),
+                        Notification::FailedTransaction { .. } => (),
+                    },
+                    Err(e) => match e {
+                        RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
                         RecvError::Lagged(_) => break,
                     },
                 }
@@ -301,6 +380,26 @@ impl<App: KolmeApp> KolmeInner<App> {
                 LIMIT 1
             "#,
             height
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(match rendered {
+            Some(rendered) => serde_json::from_str(&rendered)?,
+            None => None,
+        })
+    }
+
+    /// Get the block information for the given transaction, if present.
+    pub async fn get_tx(&self, tx: TxHash) -> Result<Option<SignedBlock<App::Message>>> {
+        let tx = tx.0;
+        let rendered = sqlx::query_scalar!(
+            r#"
+                SELECT rendered
+                FROM blocks
+                WHERE txhash=$1
+                LIMIT 1
+            "#,
+            tx
         )
         .fetch_optional(&self.pool)
         .await?;
@@ -745,7 +844,13 @@ async fn store_block<App: KolmeApp>(
     let tx = block.tx.0.message.as_inner();
 
     let height = block.height;
-    assert_eq!(kolme.get_next_height(), height);
+    let expected = kolme.get_next_height();
+    if height != expected {
+        return Err(anyhow::Error::from(KolmeError::InvalidAddBlockHeight {
+            proposed: height,
+            expected,
+        }));
+    }
     let height_i64 = height.try_into_i64()?;
 
     let (account_id, nonce) =

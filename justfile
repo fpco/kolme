@@ -13,7 +13,7 @@ test:
     cargo sqlx database reset -y --source packages/kolme/migrations
     cargo sqlx migrate run --source packages/kolme/migrations
     cargo sqlx prepare --workspace
-    cargo test
+    PROCESSOR_BLOCK_DB=SKIP cargo test
 
 build-optimizer-image:
     ./.ci/build-optimizer-image.sh
