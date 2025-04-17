@@ -1,4 +1,4 @@
-mod cosmos;
+pub(crate) mod cosmos;
 mod solana;
 
 use crate::*;
@@ -17,6 +17,7 @@ impl<App: KolmeApp> Listener<App> {
     pub async fn run(self, name: ChainName) -> Result<()> {
         let contracts = self.wait_for_contracts(name).await?;
         let mut set = JoinSet::new();
+        tracing::debug!("Listen on {name:?}");
 
         match name {
             ChainName::Cosmos => {
@@ -35,6 +36,17 @@ impl<App: KolmeApp> Listener<App> {
                         self.kolme.clone(),
                         self.secret.clone(),
                         chain.to_solana_chain().unwrap(),
+                        contract,
+                    ));
+                }
+            }
+            #[cfg(feature = "pass_through")]
+            ChainName::PassThrough => {
+                for (chain, contract) in contracts {
+                    assert!(chain == ExternalChain::PassThrough);
+                    set.spawn(pass_through::listen(
+                        self.kolme.clone(),
+                        self.secret.clone(),
                         contract,
                     ));
                 }
@@ -106,6 +118,10 @@ impl<App: KolmeApp> Listener<App> {
 
                             solana::sanity_check_contract(&client, &contract, &App::genesis_info())
                                 .await
+                        }
+                        #[cfg(feature = "pass_through")]
+                        ChainKind::PassThrough => {
+                            anyhow::bail!("No wait for pass-through contract is expected")
                         }
                     };
 
