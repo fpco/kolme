@@ -6,6 +6,9 @@ resolver = "2"
 license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
+[features]
+deadlock_detector = []
+
 [dependencies]
 anyhow = "1.0.97"
 axum = { version = "0.8.3", features = ["ws"] }
