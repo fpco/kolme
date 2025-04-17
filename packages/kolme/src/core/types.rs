@@ -596,7 +596,7 @@ impl<AppMessage> SignedBlock<AppMessage> {
 }
 
 /// The hash of a [Block].
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub Sha256Hash);
 impl BlockHash {
     pub(crate) fn genesis_parent() -> BlockHash {
@@ -612,7 +612,7 @@ impl Display for BlockHash {
 }
 
 /// The hash of a [Transaction].
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TxHash(pub Sha256Hash);
 
 impl Display for TxHash {

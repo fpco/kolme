@@ -135,10 +135,10 @@ impl<App: KolmeApp> Kolme<App> {
         kolme.current_block_hash = signed_block.hash();
         kolme.framework_state = exec_results.framework_state;
         kolme.app_state = exec_results.app_state;
+        self.mempool.drop_tx(txhash);
         self.notify
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
-        self.mempool.drop_tx(txhash);
         Ok(())
     }
 
@@ -260,21 +260,24 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given block is published
-    pub async fn wait_for_block(&self, height: BlockHeight) {
+    pub async fn wait_for_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
         // Start an outer loop so that we can keep processing if we end up Lagged
         loop {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             // And then check if we're at the requested height.
-            if self.read().await.get_next_height() >= height.next() {
-                return;
+            if let Some(block) = self.read().await.get_block(height).await? {
+                return Ok(Arc::new(block));
             }
             loop {
                 match recv.recv().await {
                     Ok(note) => match note {
                         Notification::NewBlock(block) => {
-                            if block.0.message.as_inner().height == height {
-                                return;
+                            if block.0.message.as_inner().height >= height {
+                                return Ok(block);
                             }
                         }
                         Notification::GenesisInstantiation { .. } => (),
@@ -291,21 +294,21 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given transaction is published
-    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<()> {
+    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<Arc<SignedBlock<App::Message>>> {
         // Start an outer loop so that we can keep processing if we end up Lagged
         loop {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             // And then check if we have that transaction.
-            if self.read().await.get_tx(tx).await?.is_some() {
-                break Ok(());
+            if let Some(block) = self.read().await.get_tx(tx).await? {
+                break Ok(Arc::new(block));
             }
             loop {
                 match recv.recv().await {
                     Ok(note) => match note {
                         Notification::NewBlock(block) => {
                             if block.0.message.as_inner().tx.hash() == tx {
-                                return Ok(());
+                                return Ok(block);
                             }
                         }
                         Notification::GenesisInstantiation { .. } => (),

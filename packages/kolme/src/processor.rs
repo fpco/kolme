@@ -223,11 +223,16 @@ impl<App: KolmeApp> Processor<App> {
 
                 if let Err(e) = self.add_transaction(tx).await {
                     if let Some(KolmeError::InvalidAddBlockHeight { .. }) = e.downcast_ref() {
-                        tracing::warn!("Block height race condition when adding transaction {txhash}, retrying");
+                        tracing::debug!("Block height race condition when adding transaction {txhash}, retrying");
+                    } else if let Some(BlockDbError::BlockAlreadyInDb) = e.downcast_ref() {
+                        // TODO should we unify the different ways of detecting that a block is already in the database?
+                        tracing::debug!("Block height race condition when adding transaction {txhash}, retrying");
                     } else {
-                        tracing::error!("Unable to add transaction from mempool: {e}");
+                        tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
                         break;
                     }
+                } else {
+                    break;
                 }
             }
         }
@@ -263,24 +268,19 @@ impl<App: KolmeApp> Processor<App> {
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
         let txhash = tx.hash();
-        println!("(1)Attempting to add_transaction: {txhash}");
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 5;
         let res = loop {
             if self.kolme.read().await.get_tx(txhash).await?.is_some() {
                 break Ok(());
             }
-            println!("(2)Attempting to add_transaction: {txhash}");
             attempts += 1;
             match self.construct_block(tx.clone()).await {
                 Ok(block) => {
-                    println!("(3)Attempting to add_transaction: {txhash}");
                     self.kolme.add_block(block).await?;
-                    println!("(4)Attempting to add_transaction: {txhash}");
                     break Ok(());
                 }
                 Err(e) => {
-                    println!("(5)Attempting to add_transaction: {txhash}");
                     if attempts >= MAX_ATTEMPTS {
                         break Err(e);
                     }

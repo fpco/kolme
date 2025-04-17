@@ -1,15 +1,13 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::{Arc, OnceLock},
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use kolme::*;
-use rand::Rng;
-use tokio::{
-    sync::{OwnedSemaphorePermit, Semaphore},
-    task::JoinSet,
-};
+use parking_lot::Mutex;
+use rand::seq::SliceRandom;
+use tokio::task::JoinSet;
 
 #[derive(Clone)]
 pub struct SampleKolmeApp;
@@ -121,26 +119,29 @@ async fn multiple_processors() {
     }
 
     for mut ready in readies {
-        println!("Waiting for ready...");
         while !*ready.borrow_and_update() {
             ready.changed().await.ok();
         }
-        println!("It's ready");
     }
 
     let kolmes = Arc::<[_]>::from(kolmes);
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(CLIENT_COUNT));
+    let all_txhashes = Arc::new(Mutex::new(HashSet::new()));
+    let highest_block = Arc::new(Mutex::new(BlockHeight::start()));
 
     for _ in 0..CLIENT_COUNT {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
-        set.spawn(client(permit, kolmes.clone()));
+        set.spawn(client(
+            kolmes.clone(),
+            all_txhashes.clone(),
+            highest_block.clone(),
+        ));
     }
-
-    set.spawn(checker(CLIENT_COUNT, semaphore, kolmes));
 
     while let Some(res) = set.join_next().await {
         res.unwrap().unwrap();
     }
+
+    println!("Finished checking results of all clients, moving on to checker");
+    checker(kolmes, all_txhashes, highest_block).await.unwrap();
 
     // And finally, make sure all the processors are still running
     if let Some(res) = processor_set.try_join_next() {
@@ -162,14 +163,17 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
     }
 }
 
-async fn client(_: OwnedSemaphorePermit, kolmes: Arc<[Kolme<SampleKolmeApp>]>) -> Result<()> {
+async fn client(
+    kolmes: Arc<[Kolme<SampleKolmeApp>]>,
+    all_txhashes: Arc<Mutex<HashSet<TxHash>>>,
+    highest_block: Arc<Mutex<BlockHeight>>,
+) -> Result<()> {
     for _ in 0..10 {
-        let (idx, kolme, secret) = {
+        let (kolme, secret) = {
             let mut rng = rand::thread_rng();
-            let idx = rng.gen_range(0..kolmes.len());
-            let kolme = &kolmes[idx];
+            let kolme = (*kolmes).choose(&mut rng).unwrap();
             let secret = SecretKey::random(&mut rng);
-            (idx, kolme, secret)
+            (kolme, secret)
         };
         let tx = kolme
             .read()
@@ -178,35 +182,55 @@ async fn client(_: OwnedSemaphorePermit, kolmes: Arc<[Kolme<SampleKolmeApp>]>) -
             .await?;
         let txhash = tx.hash();
         kolme.propose_transaction(tx)?;
-        println!("Proposing transaction to {idx}: {txhash}");
 
-        // FIXME: the timeout is way too long to need to wait for this, need to investigate why
-        // a shorter value of 200 fails. Looks like we have some lag in the system.
-        let kolmes = kolmes.clone();
-        tokio::time::timeout(tokio::time::Duration::from_millis(5000), async move {
-            for kolme in &*kolmes {
-                kolme.wait_for_tx(txhash).await?;
+        {
+            let mut guard = all_txhashes.lock();
+            guard.insert(txhash);
+        }
+
+        let res = tokio::time::timeout(
+            tokio::time::Duration::from_secs(100),
+            kolme.wait_for_tx(txhash),
+        )
+        .await;
+        match res {
+            Ok(Ok(block)) => {
+                let height = block.0.message.as_inner().height;
+                let mut guard = highest_block.lock();
+                *guard = guard.max(height);
             }
-            anyhow::Ok(())
-        })
-        .await
-        .with_context(|| format!("Timed out waiting for transaction {txhash}"))??;
+            Ok(Err(e)) => panic!("Error when checking if {txhash} is found: {e}"),
+            Err(e) => panic!("txhash {txhash} not found after timeout: {e}"),
+        }
     }
     Ok(())
 }
 
 async fn checker(
-    count: usize,
-    semaphore: Arc<Semaphore>,
     kolmes: Arc<[Kolme<SampleKolmeApp>]>,
+    all_txhashes: Arc<Mutex<HashSet<TxHash>>>,
+    highest_block: Arc<Mutex<BlockHeight>>,
 ) -> Result<()> {
-    let _ = semaphore.acquire_many(count as u32).await?;
-    let height = kolmes[0].read().await.get_next_height();
+    let highest_block = *highest_block.lock();
+    let highest_block = kolmes[0].wait_for_block(highest_block).await.unwrap();
+    let next_height = kolmes[0].read().await.get_next_height();
+    assert_eq!(
+        next_height,
+        highest_block.0.message.as_inner().height.next()
+    );
     let hash = kolmes[0].read().await.get_current_block_hash();
-    for kolme in &*kolmes {
+    assert_eq!(hash, highest_block.hash());
+    let hashes = std::mem::take(&mut *all_txhashes.lock());
+    for (kolmeidx, kolme) in kolmes.iter().enumerate() {
         let kolme = kolme.read().await;
-        assert_eq!(height, kolme.get_next_height());
+        assert_eq!(next_height, kolme.get_next_height());
         assert_eq!(hash, kolme.get_current_block_hash());
+        for (txidx, txhash) in hashes.iter().enumerate() {
+            assert!(
+                kolme.get_tx(*txhash).await.unwrap().is_some(),
+                "Transaction {txhash}#{txidx} not found in kolme#{kolmeidx}"
+            );
+        }
     }
     Ok(())
 }

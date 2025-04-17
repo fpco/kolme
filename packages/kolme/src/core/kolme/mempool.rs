@@ -37,7 +37,6 @@ impl<AppMessage> Mempool<AppMessage> {
 
         loop {
             if let Some(pair) = self.txs.read().front() {
-                println!("peek(5): {}", pair.0);
                 break pair.clone();
             }
             recv.changed().await.ok();
