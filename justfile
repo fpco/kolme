@@ -1,5 +1,5 @@
 check:
-    cargo check --workspace --tests
+    cargo check --workspace --tests --all-features
 
 clippy:
     cargo clippy --no-deps --workspace --tests -- -Dwarnings
