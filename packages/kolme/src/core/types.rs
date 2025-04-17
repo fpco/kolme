@@ -1,4 +1,4 @@
-mod balances;
+mod accounts;
 
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
@@ -6,7 +6,7 @@ use cosmwasm_std::Uint128;
 
 use crate::*;
 
-pub use balances::{Balances, BalancesError};
+pub use accounts::{Account, Accounts, AccountsError};
 
 pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
 pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -486,7 +486,17 @@ impl FromMerkleKey for AccountId {
 }
 
 #[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Copy,
+    Hash,
+    Debug,
+    Default,
 )]
 pub struct AccountNonce(pub u64);
 
@@ -503,6 +513,20 @@ impl AccountNonce {
 impl Display for AccountNonce {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl MerkleSerialize for AccountNonce {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for AccountNonce {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        u64::merkle_deserialize(deserializer).map(Self)
     }
 }
 
@@ -560,6 +584,24 @@ impl TryFrom<i64> for BlockHeight {
     PartialEq, PartialOrd, Ord, Eq, Clone, Debug, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub struct Wallet(pub String);
+
+impl ToMerkleKey for Wallet {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.0.to_merkle_key()
+    }
+}
+
+impl FromMerkleKey for Wallet {
+    fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
+        String::from_merkle_key(bytes).map(Self)
+    }
+}
+
+impl Display for Wallet {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 impl MerkleSerialize for Wallet {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
@@ -728,12 +770,12 @@ pub enum BridgeEvent {
     Instantiated { contract: String },
     /// Regular action performed by the user
     Regular {
-        wallet: String,
+        wallet: Wallet,
         funds: Vec<BridgedAssetAmount>,
         keys: Vec<PublicKey>,
     },
     Signed {
-        wallet: String,
+        wallet: Wallet,
         action_id: BridgeActionId,
     },
 }
@@ -750,8 +792,8 @@ pub struct BridgedAssetAmount {
 pub enum AuthMessage {
     AddPublicKey { key: PublicKey },
     RemovePublicKey { key: PublicKey },
-    AddWallet { wallet: String },
-    RemoveWallet { wallet: String },
+    AddWallet { wallet: Wallet },
+    RemoveWallet { wallet: Wallet },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

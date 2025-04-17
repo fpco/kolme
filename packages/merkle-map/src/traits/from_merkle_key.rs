@@ -1,3 +1,5 @@
+use shared::cryptography::PublicKey;
+
 use crate::*;
 
 impl FromMerkleKey for String {
@@ -31,5 +33,11 @@ impl FromMerkleKey for u64 {
             .try_into()
             .map(u64::from_le_bytes)
             .map_err(MerkleSerialError::custom)
+    }
+}
+
+impl FromMerkleKey for PublicKey {
+    fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
+        PublicKey::from_bytes(bytes).map_err(MerkleSerialError::custom)
     }
 }

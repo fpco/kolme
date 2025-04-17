@@ -21,7 +21,7 @@ pub struct FrameworkState {
     pub(super) approvers: BTreeSet<PublicKey>,
     pub(super) needed_approvers: usize,
     pub(super) chains: ConfiguredChains,
-    pub(super) balances: Balances,
+    pub(super) accounts: Accounts,
 }
 
 impl MerkleSerialize for FrameworkState {
@@ -33,7 +33,7 @@ impl MerkleSerialize for FrameworkState {
             approvers,
             needed_approvers,
             chains,
-            balances,
+            accounts,
         } = self;
         serializer.store(processor)?;
         serializer.store(listeners)?;
@@ -41,7 +41,7 @@ impl MerkleSerialize for FrameworkState {
         serializer.store(approvers)?;
         serializer.store(needed_approvers)?;
         serializer.store(&chains.0)?;
-        serializer.store(balances)?;
+        serializer.store(accounts)?;
         Ok(())
     }
 }
@@ -57,7 +57,7 @@ impl MerkleDeserialize for FrameworkState {
             approvers: deserializer.load()?,
             needed_approvers: deserializer.load()?,
             chains: ConfiguredChains(deserializer.load()?),
-            balances: deserializer.load()?,
+            accounts: deserializer.load()?,
         })
     }
 }
@@ -81,7 +81,7 @@ impl FrameworkState {
             approvers: approvers.clone(),
             needed_approvers: *needed_approvers,
             chains: chains.clone(),
-            balances: Balances::default(),
+            accounts: Accounts::default(),
         }
     }
 

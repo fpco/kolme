@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO\n            blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash)\n            VALUES($1, $2, $3, $4, $5, $6)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "29982057c789e5587eaedfb11e8f0572d0d65be906086e6d6895579e038ffa80"
+}

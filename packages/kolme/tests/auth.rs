@@ -153,7 +153,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -164,7 +164,7 @@ async fn test_sample_sanity() {
         perform(
             signer,
             AuthMessage::AddWallet {
-                wallet: "deadbeef".to_owned(),
+                wallet: Wallet("deadbeef".to_owned()),
             },
         )
         .await
@@ -185,7 +185,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::RemoveWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -193,7 +193,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::RemoveWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -203,7 +203,7 @@ async fn test_sample_sanity() {
     perform(
         &secret1,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -211,7 +211,7 @@ async fn test_sample_sanity() {
     perform(
         &secret1,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -219,7 +219,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -301,16 +301,16 @@ async fn test_sample_sanity() {
         &secret3,
         vec![
             AuthMessage::AddWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::AddWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
         ],
     )
@@ -320,13 +320,13 @@ async fn test_sample_sanity() {
         &secret3,
         vec![
             AuthMessage::AddWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
         ],
     )

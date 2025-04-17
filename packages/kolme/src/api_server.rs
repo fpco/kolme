@@ -99,14 +99,8 @@ async fn get_next_nonce<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
     Query(NextNonce { pubkey }): Query<NextNonce>,
 ) -> impl IntoResponse {
-    match kolme.read().await.get_account_and_next_nonce(pubkey).await {
-        Ok(nonce) => Json(serde_json::json!({"next_nonce":nonce.next_nonce})).into_response(),
-        Err(e) => {
-            let mut res = e.to_string().into_response();
-            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            res
-        }
-    }
+    let nonce = kolme.read().await.get_next_nonce(pubkey);
+    Json(serde_json::json!({"next_nonce":nonce})).into_response()
 }
 
 async fn ws_handler<App: KolmeApp>(
