@@ -362,7 +362,10 @@ impl MerkleDeserialize for BridgeContract {
             0 => Ok(Self::NeededCosmosBridge {
                 code_id: deserializer.load()?,
             }),
-            1 => Ok(Self::Deployed(deserializer.load()?)),
+            1 => Ok(Self::NeededSolanaBridge {
+                program_id: deserializer.load()?,
+            }),
+            2 => Ok(Self::Deployed(deserializer.load()?)),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }
