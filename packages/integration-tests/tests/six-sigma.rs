@@ -14,10 +14,8 @@ use shared::cosmos::ExecuteMsg;
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
-mod six_sigma;
-
+use example_six_sigma::*;
 use kolme::*;
-use six_sigma::types::*;
 
 #[test_log::test(tokio::test)]
 #[ignore = "depends on localosmosis thus hidden from default tests"]
@@ -366,7 +364,7 @@ async fn prebuild() -> Result<()> {
     // prebuild first
     let mut cmd = Command::new("cargo");
     cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
-        .args(["build", "-p", "kolme", "--example", "six-sigma"])
+        .args(["build", "-p", "example-six-sigma"])
         .spawn()?
         .wait()
         .await?;
@@ -375,13 +373,8 @@ async fn prebuild() -> Result<()> {
 
 fn six_sigma_cmd() -> Command {
     let mut cmd = Command::new("cargo");
-    cmd.current_dir(env!("CARGO_MANIFEST_DIR")).args([
-        "run",
-        "-p",
-        "kolme",
-        "--example",
-        "six-sigma",
-    ]);
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["run", "-p", "example-six-sigma"]);
     cmd
 }
 
@@ -390,9 +383,7 @@ async fn start_the_app(log_path: PathBuf) -> Result<Child> {
     cmd.current_dir(env!("CARGO_MANIFEST_DIR")).args([
         "run",
         "-p",
-        "kolme",
-        "--example",
-        "six-sigma",
+        "example-six-sigma",
         "serve",
         "--tx-log-path",
         log_path.to_str().unwrap(),

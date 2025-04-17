@@ -1976,6 +1976,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-cosmos-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cosmos",
+ "jiff",
+ "kolme",
+ "rand 0.8.5",
+ "reqwest 0.12.15",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "example-p2p"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "jiff",
+ "kolme",
+ "rand 0.8.5",
+ "reqwest 0.12.15",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "example-six-sigma"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cosmos",
+ "jiff",
+ "kolme",
+ "rand 0.8.5",
+ "reqwest 0.12.15",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "strum 0.27.1",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3088,6 +3138,7 @@ dependencies = [
  "backon",
  "cosmos",
  "cosmwasm-std",
+ "example-six-sigma",
  "kolme",
  "pretty_assertions",
  "reqwest 0.12.15",
@@ -3280,7 +3331,6 @@ dependencies = [
  "axum 0.8.3",
  "base64 0.22.1",
  "borsh",
- "clap",
  "cosmos",
  "cosmwasm-std",
  "jiff",
