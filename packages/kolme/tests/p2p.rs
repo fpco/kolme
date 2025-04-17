@@ -114,7 +114,10 @@ async fn sanity() {
 
     set.spawn(async move {
         let secret = SecretKey::random(&mut rand::thread_rng());
-        kolme_client.wait_for_block(BlockHeight::start()).await;
+        kolme_client
+            .wait_for_block(BlockHeight::start())
+            .await
+            .unwrap();
         kolme_client
             .propose_transaction(
                 kolme_client
@@ -127,7 +130,8 @@ async fn sanity() {
             .unwrap();
         kolme_client
             .wait_for_block(BlockHeight::start().next())
-            .await;
+            .await
+            .unwrap();
         Ok(())
     });
 
