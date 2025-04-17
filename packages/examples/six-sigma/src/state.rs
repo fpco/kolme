@@ -256,12 +256,14 @@ impl State {
         let Some(market) = self.markets.get_mut(&market_id) else {
             anyhow::bail!("Market with id {market_id} doesn't exist");
         };
-        if !balances
+
+        if balances
             .get(&market.asset_id)
-            .is_some_and(|balance| balance >= &amount)
+            .is_none_or(|balance| balance < &amount)
         {
             anyhow::bail!("Account doesn't have enough funds to place this bet")
         }
+
         market.place_bet(bettor, wallet, amount, outcome, odds)?;
         Ok(BalanceChange::Burn {
             asset_id: market.asset_id,

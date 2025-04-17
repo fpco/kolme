@@ -1,3 +1,6 @@
+mod state;
+mod types;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
@@ -8,19 +11,15 @@ use std::{
 };
 
 use anyhow::Result;
-use clap::Parser;
 use cosmos::SeedPhrase;
 
 use kolme::*;
 use rust_decimal::{dec, Decimal};
 use tokio::task::JoinSet;
 
-mod six_sigma;
+pub use state::*;
+pub use types::*;
 
-use six_sigma::state::*;
-use six_sigma::types::*;
-
-/// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
 pub struct SixSigmaApp;
 
@@ -202,56 +201,7 @@ impl<App> KolmeDataRequest<App> for OddsSource {
     }
 }
 
-#[derive(clap::Parser)]
-struct Opt {
-    #[clap(subcommand)]
-    cmd: Cmd,
-}
-
-#[derive(clap::Parser)]
-enum Cmd {
-    Serve {
-        #[clap(long, default_value = "[::]:3000")]
-        bind: SocketAddr,
-        #[clap(long)]
-        tx_log_path: Option<PathBuf>,
-    },
-    GenPair {},
-    Broadcast {
-        #[clap(long)]
-        message: String,
-        #[clap(long)]
-        secret: String,
-        #[clap(long, default_value = "http://localhost:3000")]
-        host: String,
-    },
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    main_inner().await
-}
-
-async fn main_inner() -> Result<()> {
-    match Opt::parse().cmd {
-        Cmd::Serve { bind, tx_log_path } => serve(bind, tx_log_path).await,
-        Cmd::GenPair {} => {
-            let mut rng = rand::thread_rng();
-            let secret = SecretKey::random(&mut rng);
-            let public = secret.public_key();
-            println!("Public key: {public}");
-            println!("Secret key: {}", secret.reveal_as_hex());
-            Ok(())
-        }
-        Cmd::Broadcast {
-            message,
-            secret,
-            host,
-        } => broadcast(message, secret, host).await,
-    }
-}
-
-async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
+pub async fn serve(bind: SocketAddr, tx_log_path: Option<PathBuf>) -> Result<()> {
     const DB_PATH: &str = "six-sigma-app.sqlite3";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(SixSigmaApp, DUMMY_CODE_VERSION, DB_PATH).await?;
@@ -337,7 +287,7 @@ impl TxLogger {
     }
 }
 
-async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
+pub async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
     let message = serde_json::from_str::<AppMessage>(&message)?;
     let secret = SecretKey::from_hex(&secret)?;
     let public = secret.public_key();

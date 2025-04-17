@@ -1,1 +1,0 @@
-../../../kolme/examples/six_sigma/types.rs

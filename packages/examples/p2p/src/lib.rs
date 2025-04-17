@@ -1,7 +1,6 @@
 use std::{collections::BTreeSet, net::SocketAddr};
 
 use anyhow::Result;
-use clap::Parser;
 
 use kolme::*;
 use tokio::task::JoinSet;
@@ -86,46 +85,7 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[derive(clap::Parser)]
-struct Opt {
-    #[clap(subcommand)]
-    cmd: Cmd,
-}
-
-#[derive(clap::Parser)]
-enum Cmd {
-    /// Run a node with the processor. Does not include any API server.
-    Processor {},
-    /// Run a node with just basic API server capabilities
-    ApiServer {
-        #[clap(long, default_value = "[::]:3000")]
-        bind: SocketAddr,
-    },
-    /// Send a say hi message over the API server
-    SayHi {
-        /// Secret key, auto-generated if not provided.
-        #[clap(long)]
-        secret: Option<String>,
-        /// Hostname of the API server
-        #[clap(long, default_value = "http://localhost:3000")]
-        host: String,
-    },
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    main_inner().await
-}
-
-async fn main_inner() -> Result<()> {
-    match Opt::parse().cmd {
-        Cmd::Processor {} => processor().await,
-        Cmd::ApiServer { bind } => api_server(bind).await,
-        Cmd::SayHi { secret, host } => say_hi(secret, host).await,
-    }
-}
-
-async fn processor() -> Result<()> {
+pub async fn processor() -> Result<()> {
     const DB_PATH: &str = "example-p2p-processor.sqlite3";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
@@ -154,7 +114,7 @@ async fn processor() -> Result<()> {
     Ok(())
 }
 
-async fn api_server(bind: SocketAddr) -> Result<()> {
+pub async fn api_server(bind: SocketAddr) -> Result<()> {
     const DB_PATH: &str = "example-p2p-api-server.sqlite3";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
@@ -183,7 +143,7 @@ async fn api_server(bind: SocketAddr) -> Result<()> {
     Ok(())
 }
 
-async fn say_hi(secret: Option<String>, host: String) -> Result<()> {
+pub async fn say_hi(secret: Option<String>, host: String) -> Result<()> {
     let secret = match secret {
         Some(secret) => SecretKey::from_hex(&secret)?,
         None => SecretKey::random(&mut rand::thread_rng()),
