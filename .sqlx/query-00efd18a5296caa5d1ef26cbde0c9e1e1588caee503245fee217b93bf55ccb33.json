@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT rendered\n                FROM blocks\n                WHERE txhash=$1\n                LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "rendered",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "00efd18a5296caa5d1ef26cbde0c9e1e1588caee503245fee217b93bf55ccb33"
+}

@@ -21,13 +21,14 @@ base64 = "0.22.1"
 jiff = { version = "0.2.3", features = ["serde"] }
 libp2p = { version = "0.53", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
 merkle-map = { workspace = true }
+parking_lot = "0.12.3"
 rand = "0.8"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }
 rust_decimal = { version = "1.37.1", features = ["macros"] }
 serde = { version = "1.0.218", features = ["derive", "rc"] }
 serde_json = "1.0.140"
 shared = { workspace = true, features = ["cosmwasm", "realcryptography", "sqlx"] }
-sqlx = { version = "0.8.3", features = ["migrate", "runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8.3", features = ["migrate", "runtime-tokio", "sqlite", "postgres"] }
 strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { version = "1.43.0", features = ["full"] }

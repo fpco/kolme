@@ -100,6 +100,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         // Ensure that the signature is valid
         tx.validate_signature()?;
 
+        let txhash = tx.hash();
         let tx = tx.0.message.as_inner();
 
         // Make sure the nonce is correct
@@ -108,7 +109,18 @@ impl<App: KolmeApp> KolmeInner<App> {
             exists,
             next_nonce,
         } = self.get_account_and_next_nonce(tx.pubkey).await?;
-        anyhow::ensure!(next_nonce == tx.nonce);
+        if next_nonce != tx.nonce {
+            match self.get_tx(txhash).await? {
+                Some(_block) => {
+                    anyhow::bail!(
+                        "Mismatched nonce in validate_tx, but the tx is already in the database"
+                    )
+                }
+                None => {
+                    anyhow::bail!("Mismatched nonces in validate_tx, and the tx does not already exist. next_nonce=={next_nonce}, tx.nonce=={}", tx.nonce)
+                }
+            }
+        }
 
         // Make sure this is a genesis event if and only if we have no events so far
         if self.get_next_height().is_start() {

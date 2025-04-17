@@ -113,7 +113,7 @@ mod tests {
 
         assert_eq!(kolme.read().await.get_next_height(), BlockHeight::start());
 
-        let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
+        let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone(), None);
         processor.create_genesis_event().await.unwrap();
         assert_eq!(
             kolme.read().await.get_next_height(),

@@ -589,15 +589,35 @@ impl<AppMessage> SignedBlock<AppMessage> {
         anyhow::ensure!(pubkey == self.0.message.as_inner().processor);
         Ok(())
     }
+
+    pub fn hash(&self) -> BlockHash {
+        BlockHash(self.0.message_hash())
+    }
 }
 
 /// The hash of a [Block].
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub Sha256Hash);
 impl BlockHash {
     pub(crate) fn genesis_parent() -> BlockHash {
         static LOCK: OnceLock<BlockHash> = OnceLock::new();
         *LOCK.get_or_init(|| BlockHash(Sha256Hash::hash("genesis parent")))
+    }
+}
+
+impl Display for BlockHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// The hash of a [Transaction].
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TxHash(pub Sha256Hash);
+
+impl Display for TxHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -631,6 +651,13 @@ impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
         let pubkey = self.0.verify_signature()?;
         anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
         Ok(())
+    }
+}
+
+impl<AppMessage> SignedTransaction<AppMessage> {
+    /// Get the hash of the transaction
+    pub fn hash(&self) -> TxHash {
+        TxHash(self.0.message_hash())
     }
 }
 
@@ -971,6 +998,11 @@ pub enum Notification<AppMessage> {
     /// Broadcast a transaction to be included in the chain.
     Broadcast {
         tx: Arc<SignedTransaction<AppMessage>>,
+    },
+    /// A transaction failed in the processor.
+    FailedTransaction {
+        txhash: TxHash,
+        error: String,
     },
 }
 
