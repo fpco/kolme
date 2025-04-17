@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeSet, HashSet},
     sync::{Arc, OnceLock},
 };
 
@@ -60,7 +60,7 @@ impl KolmeApp for SampleKolmeApp {
             needed_listeners: 1,
             approvers: set,
             needed_approvers: 1,
-            chains: BTreeMap::new(),
+            chains: ConfiguredChains::default(),
         }
     }
 
