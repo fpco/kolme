@@ -59,11 +59,14 @@ impl<App: KolmeApp> Kolme<App> {
                 guard.active_reads.insert(id, backtrace);
                 id
             };
+            KolmeRead {
+                guard: self.inner.clone().read_owned().await,
+                id,
+            }
         }
+        #[cfg(not(feature = "deadlock_detector"))]
         KolmeRead {
             guard: self.inner.clone().read_owned().await,
-            #[cfg(feature = "deadlock_detector")]
-            id,
         }
     }
 
@@ -212,7 +215,7 @@ pub struct KolmeInner<App: KolmeApp> {
 #[derive(Default)]
 pub(super) struct DeadlockDetector {
     pub(super) next_read_id: usize,
-    pub(super) active_reads: HashMap<usize, Backtrace>,
+    pub(super) active_reads: HashMap<usize, std::backtrace::Backtrace>,
 }
 
 impl<App: KolmeApp> Kolme<App> {
