@@ -135,14 +135,6 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Leaf
             values.push(LeafEntry::merkle_deserialize(deserializer)?);
         }
 
-        Ok(Lockable::new_unlocked(LeafContents { values })) // FIXME
-                                                            // Ok(Lockable::new_locked(
-                                                            //     MerkleContents {
-                                                            //         hash: deserializer.get_hash(),
-                                                            //         payload: deserializer.get_full_payload(),
-                                                            //         children: (),
-                                                            //     },
-                                                            //     LeafContents { values },
-                                                            // ))
+        Ok(Lockable::new_unlocked(LeafContents { values }))
     }
 }

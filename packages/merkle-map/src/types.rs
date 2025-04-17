@@ -52,7 +52,6 @@ pub(crate) struct TreeContents<K, V> {
 pub struct MerkleContents {
     pub hash: Sha256Hash,
     pub payload: Arc<[u8]>,
-    /// FIXME figure out a way to not require everything in memory at once
     pub children: Arc<[Arc<MerkleContents>]>,
 }
 
