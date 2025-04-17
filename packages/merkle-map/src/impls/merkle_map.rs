@@ -155,7 +155,7 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for MerkleMap<K, V> {
         self.0.get_merkle_contents()
     }
 
-    fn set_merkle_contents(&self, contents: Arc<MerkleContents>) {
+    fn set_merkle_contents(&self, contents: &Arc<MerkleContents>) {
         self.0.set_merkle_contents(contents)
     }
 }

@@ -79,7 +79,7 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for Node<K, V> {
         }
     }
 
-    fn set_merkle_contents(&self, contents: Arc<MerkleContents>) {
+    fn set_merkle_contents(&self, contents: &Arc<MerkleContents>) {
         match self {
             Node::Leaf(leaf) => leaf.set_merkle_contents(contents),
             Node::Tree(tree) => tree.set_merkle_contents(contents),
