@@ -540,8 +540,8 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self.framework_state.chains.0
     }
 
-    pub fn get_balances(&self) -> &Balances {
-        &self.framework_state.balances
+    pub fn get_balances(&self) -> &Accounts {
+        &self.framework_state.accounts
     }
 
     pub async fn create_signed_transaction(
@@ -550,7 +550,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         messages: Vec<Message<App::Message>>,
     ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key();
-        let nonce = self.get_account_and_next_nonce(pubkey).await?.next_nonce;
+        let nonce = self.get_next_nonce(pubkey);
         let tx = Transaction::<App::Message> {
             pubkey,
             nonce,
@@ -577,54 +577,30 @@ impl<App: KolmeApp> KolmeInner<App> {
         serde_json::from_str(&payload).map_err(anyhow::Error::from)
     }
 
-    /// Get the next available account ID in the database.
-    pub async fn get_next_account_id(&self) -> Result<AccountId> {
-        match sqlx::query_scalar!("SELECT id FROM accounts ORDER BY id DESC LIMIT 1")
-            .fetch_optional(&self.pool)
-            .await?
-        {
-            Some(id) => Ok(AccountId(id.try_into()?).next()),
-            None => Ok(AccountId(1)),
-        }
+    /// Get the next nonce to be used for the account associated with this public key.
+    ///
+    /// This function is read-only, and works for both accounts that do and don't exist.
+    ///
+    /// For new accounts, it will always return the initial nonce.
+    pub fn get_next_nonce(&self, key: PublicKey) -> AccountNonce {
+        self.framework_state
+            .accounts
+            .get_account_for_key(key)
+            .map_or_else(AccountNonce::start, |(_, account)| account.get_next_nonce())
     }
 
-    pub async fn get_account_and_next_nonce(&self, key: PublicKey) -> Result<AccountAndNextNonce> {
-        let account_id = sqlx::query_scalar!(
-            "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
-            key
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let Some(account_id) = account_id else {
-            return Ok(AccountAndNextNonce {
-                id: self.get_next_account_id().await?,
-                exists: false,
-                next_nonce: AccountNonce::start(),
-            });
-        };
-
-        let last_nonce = sqlx::query_scalar!(
-            r#"
-                SELECT nonce
-                FROM blocks
-                WHERE account_id=$1
-                ORDER BY nonce DESC
-                LIMIT 1
-            "#,
-            account_id
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(AccountAndNextNonce {
-            id: AccountId(account_id.try_into()?),
-            exists: true,
-            next_nonce: match last_nonce {
-                Some(last_nonce) => AccountNonce(last_nonce.try_into()?).next(),
-                None => AccountNonce::start(),
-            },
-        })
+    /// Get the account ID and next nonce for the given public key.
+    ///
+    /// This will insert a new account into the accounts map if needed.
+    pub fn get_account_and_next_nonce(&mut self, key: PublicKey) -> AccountAndNextNonce {
+        let (id, account) = self
+            .framework_state
+            .accounts
+            .get_or_add_account_for_pubkey(key);
+        AccountAndNextNonce {
+            id,
+            next_nonce: account.get_next_nonce(),
+        }
     }
 
     pub async fn received_listener_attestation(
@@ -825,8 +801,6 @@ pub(super) async fn get_action_payload(
 pub struct AccountAndNextNonce {
     /// The account ID
     pub id: AccountId,
-    /// Is this already in the database?
-    pub exists: bool,
     /// The next nonce to be used
     pub next_nonce: AccountNonce,
 }
@@ -856,12 +830,6 @@ async fn store_block<App: KolmeApp>(
     }
     let height_i64 = height.try_into_i64()?;
 
-    let (account_id, nonce) =
-        get_or_insert_account_id_and_next_nonce(trans, tx.pubkey, height).await?;
-    anyhow::ensure!(nonce == tx.nonce, "Tried to store block, but expected nonce {nonce} didn't match actual nonce {}. Signed block:\n{}\nTransaction:\n{}", tx.nonce, signed_block.0.message.as_str(), serde_json::to_string_pretty(tx)?);
-    let account_id = i64::try_from(account_id.0)?;
-    let nonce = i64::try_from(nonce.0)?;
-
     let blockhash = signed_block.0.message_hash();
     let rendered = serde_json::to_string(&signed_block)?;
     let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
@@ -875,20 +843,20 @@ async fn store_block<App: KolmeApp>(
     let app_state_hash = kolme.merkle_manager.save(&mut store, app_state).await?.hash;
 
     sqlx::query!(
-            r#"
-                INSERT INTO
-                blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, account_id, nonce)
-                VALUES($1, $2, $3, $4, $5, $6, $7, $8)
-            "#,
-            height_i64,
-            blockhash,
-            rendered,
-            txhash,
-            framework_state_hash,
-            app_state_hash,
-            account_id,
-            nonce,
-        ).execute(&mut **trans).await?;
+        r#"
+            INSERT INTO
+            blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash)
+            VALUES($1, $2, $3, $4, $5, $6)
+        "#,
+        height_i64,
+        blockhash,
+        rendered,
+        txhash,
+        framework_state_hash,
+        app_state_hash,
+    )
+    .execute(&mut **trans)
+    .await?;
 
     let mut message_db_ids = vec![];
 
@@ -1053,75 +1021,6 @@ async fn store_block<App: KolmeApp>(
                     }
                 }
             }
-            DatabaseUpdate::AddAccount { id } => {
-                let id = i64::try_from(id.0)?;
-                sqlx::query!(
-                    "INSERT INTO accounts(id, created) VALUES($1, $2)",
-                    id,
-                    height_i64
-                )
-                .execute(&mut **trans)
-                .await?;
-            }
-            DatabaseUpdate::AddWalletToAccount { id, wallet } => {
-                let id = i64::try_from(id.0)?;
-                sqlx::query!(
-                    "INSERT INTO account_wallets(account_id,wallet) VALUES($1, $2)",
-                    id,
-                    wallet
-                )
-                .execute(&mut **trans)
-                .await?;
-            }
-            DatabaseUpdate::RemoveWalletFromAccount { id, wallet } => {
-                let id = i64::try_from(id.0)?;
-                let rows = sqlx::query!(
-                    "DELETE FROM account_wallets WHERE account_id=$1 AND wallet=$2",
-                    id,
-                    wallet,
-                )
-                .execute(&mut **trans)
-                .await?
-                .rows_affected();
-                anyhow::ensure!(rows == 1);
-            }
-            DatabaseUpdate::AddPubkeyToAccount {
-                id,
-                pubkey,
-                ignore_errors,
-            } => {
-                let id = i64::try_from(id.0)?;
-                if *ignore_errors {
-                    sqlx::query!(
-                        "INSERT OR IGNORE INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
-                        id,
-                        pubkey
-                    )
-                } else {
-                    sqlx::query!(
-                        "INSERT INTO account_pubkeys(account_id,pubkey) VALUES($1, $2)",
-                        id,
-                        pubkey
-                    )
-                }
-                .execute(&mut **trans)
-                .await
-                .with_context(|| {
-                    format!("Error while adding pubkey from DatabaseUpdate: {id}/{pubkey}")
-                })?;
-            }
-            DatabaseUpdate::RemovePubkeyFromAccount { id, key } => {
-                let id = i64::try_from(id.0)?;
-                let rows = sqlx::query!(
-                    "DELETE FROM account_pubkeys WHERE account_id=$1 AND pubkey=$2",
-                    id,
-                    key,
-                )
-                .execute(&mut **trans)
-                .await?
-                .rows_affected();
-                anyhow::ensure!(rows == 1);
-            }
             DatabaseUpdate::ApproveAction {
                 pubkey,
                 signature,
@@ -1193,54 +1092,4 @@ async fn store_block<App: KolmeApp>(
     }
 
     Ok(())
-}
-
-async fn get_or_insert_account_id_and_next_nonce(
-    trans: &mut sqlx::SqliteTransaction<'_>,
-    pubkey: PublicKey,
-    height: BlockHeight,
-) -> Result<(AccountId, AccountNonce)> {
-    let account_id = sqlx::query_scalar!(
-        "SELECT account_id FROM account_pubkeys WHERE pubkey=$1",
-        pubkey
-    )
-    .fetch_optional(&mut **trans)
-    .await?;
-    match account_id {
-        None => {
-            let height = height.try_into_i64()?;
-            let account_id = sqlx::query!("INSERT INTO accounts(created) VALUES($1)", height)
-                .execute(&mut **trans)
-                .await?
-                .last_insert_rowid();
-            sqlx::query!(
-                "INSERT INTO account_pubkeys(account_id, pubkey) VALUES($1, $2)",
-                account_id,
-                pubkey
-            )
-            .execute(&mut **trans)
-            .await
-            .with_context(|| format!("Error while adding pubkey {pubkey}"))?;
-            Ok((AccountId(account_id.try_into()?), AccountNonce::start()))
-        }
-        Some(account_id) => {
-            let nonce = sqlx::query_scalar!(
-                r#"
-                        SELECT nonce
-                        FROM blocks
-                        WHERE account_id=$1
-                        ORDER BY nonce DESC
-                        LIMIT 1
-                    "#,
-                account_id
-            )
-            .fetch_optional(&mut **trans)
-            .await?;
-            let nonce = match nonce {
-                Some(nonce) => AccountNonce(nonce.try_into()?).next(),
-                None => AccountNonce::start(),
-            };
-            Ok((AccountId(account_id.try_into()?), nonce))
-        }
-    }
 }

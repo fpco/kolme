@@ -154,13 +154,13 @@ fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
 
             // TODO: Do we still need to emit if both funds and keys are empty?
             BridgeEvent::Regular {
-                wallet,
+                wallet: Wallet(wallet),
                 funds: new_funds,
                 keys: new_keys,
             }
         }
         ContractMessage::Signed { action_id } => BridgeEvent::Signed {
-            wallet,
+            wallet: Wallet(wallet),
             action_id: BridgeActionId(action_id),
         },
     };

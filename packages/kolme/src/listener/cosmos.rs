@@ -123,7 +123,7 @@ fn to_kolme_message<T>(
                 chain: chain.into(),
                 event_id,
                 event: BridgeEvent::Regular {
-                    wallet,
+                    wallet: Wallet(wallet),
                     funds: new_funds,
                     keys: new_keys,
                 },
@@ -132,7 +132,10 @@ fn to_kolme_message<T>(
         BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
             chain: chain.into(),
             event_id,
-            event: BridgeEvent::Signed { wallet, action_id },
+            event: BridgeEvent::Signed {
+                wallet: Wallet(wallet),
+                action_id,
+            },
         },
     }
 }

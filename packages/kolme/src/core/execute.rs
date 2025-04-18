@@ -14,8 +14,6 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     pubkey: PublicKey,
     pool: sqlx::SqlitePool,
     db_updates: Vec<DatabaseUpdate>,
-    /// Next account ID to assign out
-    next_account_id: AccountId,
     /// ID of the account that signed the transaction
     sender: AccountId,
     /// Public key used to sign the current transaction.
@@ -49,29 +47,6 @@ pub enum DatabaseUpdate {
         action_id: Option<BridgeActionId>,
     },
 
-    AddAccount {
-        id: AccountId,
-    },
-
-    AddWalletToAccount {
-        id: AccountId,
-        wallet: String,
-    },
-    RemoveWalletFromAccount {
-        id: AccountId,
-        wallet: String,
-    },
-
-    AddPubkeyToAccount {
-        id: AccountId,
-        pubkey: PublicKey,
-        /// Ignore errors? Useful for bridge messages.
-        ignore_errors: bool,
-    },
-    RemovePubkeyFromAccount {
-        id: AccountId,
-        key: PublicKey,
-    },
     ApproveAction {
         pubkey: PublicKey,
         signature: Signature,
@@ -87,40 +62,12 @@ pub enum DatabaseUpdate {
     },
 }
 
-struct ValidateTxResponse {
-    sender_account_id: AccountId,
-    next_account_id: AccountId,
-}
-
 impl<App: KolmeApp> KolmeInner<App> {
-    async fn validate_tx(
-        &self,
-        tx: &SignedTransaction<App::Message>,
-    ) -> Result<ValidateTxResponse> {
+    async fn validate_tx(&self, tx: &SignedTransaction<App::Message>) -> Result<()> {
         // Ensure that the signature is valid
         tx.validate_signature()?;
 
-        let txhash = tx.hash();
         let tx = tx.0.message.as_inner();
-
-        // Make sure the nonce is correct
-        let AccountAndNextNonce {
-            id,
-            exists,
-            next_nonce,
-        } = self.get_account_and_next_nonce(tx.pubkey).await?;
-        if next_nonce != tx.nonce {
-            match self.get_tx(txhash).await? {
-                Some(_block) => {
-                    anyhow::bail!(
-                        "Mismatched nonce in validate_tx, but the tx is already in the database"
-                    )
-                }
-                None => {
-                    anyhow::bail!("Mismatched nonces in validate_tx, and the tx does not already exist. next_nonce=={next_nonce}, tx.nonce=={}", tx.nonce)
-                }
-            }
-        }
 
         // Make sure this is a genesis event if and only if we have no events so far
         if self.get_next_height().is_start() {
@@ -130,14 +77,7 @@ impl<App: KolmeApp> KolmeInner<App> {
             tx.ensure_no_genesis()?;
         };
 
-        Ok(ValidateTxResponse {
-            sender_account_id: id,
-            next_account_id: if exists {
-                self.get_next_account_id().await?
-            } else {
-                id.next()
-            },
-        })
+        Ok(())
     }
 
     /// Provide the validation data loads if we're doing a validation of a block.
@@ -147,23 +87,21 @@ impl<App: KolmeApp> KolmeInner<App> {
         timestamp: Timestamp,
         validation_data_loads: Option<Vec<BlockDataLoad>>,
     ) -> Result<ExecutionResults<App>> {
-        let ValidateTxResponse {
-            sender_account_id,
-            next_account_id,
-        } = self.validate_tx(signed_tx).await?;
-
+        self.validate_tx(signed_tx).await?;
         let tx = signed_tx.0.message.as_inner();
+
+        let mut framework_state = self.framework_state.clone();
+        let sender_account_id = framework_state.accounts.use_nonce(tx.pubkey, tx.nonce)?;
 
         let mut outputs = vec![];
         let mut execution_context = ExecutionContext::<App> {
-            framework_state: self.framework_state.clone(),
+            framework_state,
             app_state: self.app_state.clone(),
             output: MessageOutput::default(),
             validation_data_loads: validation_data_loads.map(Into::into),
             pubkey: tx.pubkey,
             pool: self.pool.clone(),
             db_updates: vec![],
-            next_account_id,
             sender: sender_account_id,
             app: &self.app,
             signing_key: signed_tx.0.message.as_inner().pubkey,
@@ -185,7 +123,6 @@ impl<App: KolmeApp> KolmeInner<App> {
             pubkey: _,
             pool: _,
             db_updates,
-            next_account_id: _,
             sender: _,
             app: _,
             signing_key: _,
@@ -305,13 +242,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     funds,
                     keys,
                 } => {
-                    let account_id = self.get_or_add_account_id_for_wallet(wallet).await?;
+                    let account_id = self.get_or_add_account_id_for_wallet(wallet);
                     for key in keys {
-                        self.db_updates.push(DatabaseUpdate::AddPubkeyToAccount {
-                            id: account_id,
-                            pubkey: *key,
-                            ignore_errors: true,
-                        });
+                        self.framework_state
+                            .accounts
+                            .add_pubkey_to_account_ignore_overlap(account_id, *key);
                     }
                     for BridgedAssetAmount { denom, amount } in funds {
                         let Some(asset_config) = self
@@ -326,7 +261,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                             continue;
                         };
 
-                        self.framework_state.balances.mint(
+                        self.framework_state.accounts.mint(
                             account_id,
                             asset_config.asset_id,
                             asset_config.to_decimal(*amount)?,
@@ -429,26 +364,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn get_or_add_account_id_for_wallet(&mut self, wallet: &str) -> Result<AccountId> {
-        let account_id = sqlx::query_scalar!(
-            "SELECT account_id FROM account_wallets WHERE wallet=$1",
-            wallet
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(match account_id {
-            Some(id) => AccountId(id.try_into()?),
-            None => {
-                let id = self.next_account_id;
-                self.next_account_id = self.next_account_id.next();
-                self.db_updates.push(DatabaseUpdate::AddAccount { id });
-                self.db_updates.push(DatabaseUpdate::AddWalletToAccount {
-                    id,
-                    wallet: wallet.to_owned(),
-                });
-                id
-            }
-        })
+    fn get_or_add_account_id_for_wallet(&mut self, wallet: &Wallet) -> AccountId {
+        self.framework_state
+            .accounts
+            .get_or_add_account_for_wallet(wallet)
+            .0
     }
 
     pub fn state_mut(&mut self) -> &mut App::State {
@@ -463,16 +383,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.sender
     }
 
-    pub async fn get_sender_wallets(&self) -> Result<Vec<Wallet>> {
-        let account_id = i64::try_from(self.sender.0)?;
-        let rows = sqlx::query_scalar!(
-            "SELECT wallet FROM account_wallets WHERE account_id=$1",
-            account_id
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        let wallets = rows.into_iter().map(Wallet).collect();
-        Ok(wallets)
+    pub async fn get_sender_wallets(&self) -> &BTreeSet<Wallet> {
+        self.framework_state
+            .accounts
+            .get_wallets_for(self.sender)
+            .unwrap()
     }
 
     pub fn get_signing_key(&self) -> PublicKey {
@@ -483,7 +398,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         &self,
         account_id: &AccountId,
     ) -> Option<&BTreeMap<AssetId, Decimal>> {
-        self.framework_state.balances.get(account_id)
+        self.framework_state.accounts.get_assets(account_id)
     }
 
     /// Withdraw an asset to an external chain.
@@ -498,7 +413,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let config = self.framework_state.get_asset_config(chain, asset_id)?;
         let (amount_dec, amount_u128) = config.to_u128(amount)?;
         self.framework_state
-            .balances
+            .accounts
             .burn(source, asset_id, amount_dec)?;
 
         self.output.actions.push(ExecAction::Transfer {
@@ -533,7 +448,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         amount: Decimal,
     ) -> Result<()> {
         self.framework_state
-            .balances
+            .accounts
             .mint(recipient, asset_id, amount)?;
         Ok(())
     }
@@ -548,7 +463,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         amount: Decimal,
     ) -> Result<()> {
         self.framework_state
-            .balances
+            .accounts
             .burn(owner, asset_id, amount)?;
         Ok(())
     }
@@ -598,149 +513,28 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    /// Get the account ID associate with the given identifier.
-    ///
-    /// Note that this has special logic to look at all pending database actions.
-    async fn get_account_id_for_ident(&self, ident: KeyOrWallet<'_>) -> Result<Option<AccountId>> {
-        let account_id = match ident {
-            KeyOrWallet::Key(key) => {
-                sqlx::query_scalar!(
-                    r#"
-                        SELECT account_id
-                        FROM account_pubkeys
-                        WHERE pubkey=$1
-                        LIMIT 1
-                    "#,
-                    key
-                )
-                .fetch_optional(&self.pool)
-                .await?
-            }
-            KeyOrWallet::Wallet(wallet) => {
-                sqlx::query_scalar!(
-                    r#"
-                        SELECT account_id
-                        FROM account_wallets
-                        WHERE wallet=$1
-                        LIMIT 1
-                    "#,
-                    wallet
-                )
-                .fetch_optional(&self.pool)
-                .await?
-            }
-        };
-
-        let mut account_id = match account_id {
-            Some(id) => Some(AccountId(id.try_into()?)),
-            None => None,
-        };
-
-        for update in &self.db_updates {
-            match update {
-                DatabaseUpdate::ListenerAttestation { .. } => (),
-                DatabaseUpdate::AddAccount { .. } => (),
-                DatabaseUpdate::AddWalletToAccount { id, wallet } => {
-                    if KeyOrWallet::Wallet(wallet) == ident {
-                        account_id = Some(*id);
-                    }
-                }
-                DatabaseUpdate::RemoveWalletFromAccount { id: _, wallet } => {
-                    if KeyOrWallet::Wallet(wallet) == ident {
-                        account_id = None;
-                    }
-                }
-                DatabaseUpdate::AddPubkeyToAccount {
-                    id,
-                    pubkey,
-                    ignore_errors: _,
-                } => {
-                    if KeyOrWallet::Key(*pubkey) == ident {
-                        account_id = Some(*id);
-                    }
-                }
-                DatabaseUpdate::RemovePubkeyFromAccount { id: _, key } => {
-                    if KeyOrWallet::Key(*key) == ident {
-                        account_id = None;
-                    }
-                }
-                DatabaseUpdate::ApproveAction { .. } => (),
-                DatabaseUpdate::ProcessorApproveAction { .. } => (),
-            }
-        }
-        Ok(account_id)
-    }
-
     async fn auth(&mut self, auth: &AuthMessage) -> Result<()> {
         match auth {
-            AuthMessage::AddPublicKey { key } => match self
-                .get_account_id_for_ident(KeyOrWallet::Key(*key))
-                .await?
-            {
-                Some(id) => anyhow::bail!(
-                    "Cannot add key {key} to account {}, it's already added to account {id}",
-                    self.get_sender_id()
-                ),
-                None => self.db_updates.push(DatabaseUpdate::AddPubkeyToAccount {
-                    id: self.get_sender_id(),
-                    pubkey: *key,
-                    ignore_errors: false,
-                }),
-            },
+            AuthMessage::AddPublicKey { key } => {
+                self.framework_state
+                    .accounts
+                    .add_pubkey_to_account_error_overlap(self.get_sender_id(), *key)?;
+            }
             AuthMessage::RemovePublicKey { key } => {
                 anyhow::ensure!(key != &self.signing_key, "Cannot remove public key {key} from account {} with a transaction signed by the same key", self.get_sender_id());
-                match self
-                    .get_account_id_for_ident(KeyOrWallet::Key(*key))
-                    .await?
-                {
-                    Some(id) => {
-                        if id == self.get_sender_id() {
-                            self.db_updates
-                                .push(DatabaseUpdate::RemovePubkeyFromAccount { id, key: *key });
-                        } else {
-                            anyhow::bail!(
-                                "Cannot remove key {key} from account {}, that key is used by {id}",
-                                self.get_sender_id()
-                            )
-                        }
-                    }
-                    None => {
-                        anyhow::bail!("Cannot remove key {key} from account {}, that key is currently unrecognized", self.get_sender_id())
-                    }
-                }
+                self.framework_state
+                    .accounts
+                    .remove_pubkey_from_account(self.get_sender_id(), *key)?;
             }
             AuthMessage::AddWallet { wallet } => {
-                match self.get_account_id_for_ident(KeyOrWallet::Wallet(wallet)).await? {
-                    Some(id) => anyhow::bail!(
-                        "Cannot add wallet {wallet} to account {}, it's already added to account {id}",
-                        self.get_sender_id()
-                    ),
-                    None => self.db_updates.push(DatabaseUpdate::AddWalletToAccount {
-                        id: self.get_sender_id(),
-                        wallet: wallet.to_owned(),
-                    }),
-                }
+                self.framework_state
+                    .accounts
+                    .add_wallet_to_account(self.get_sender_id(), wallet)?;
             }
             AuthMessage::RemoveWallet { wallet } => {
-                match self
-                    .get_account_id_for_ident(KeyOrWallet::Wallet(wallet))
-                    .await?
-                {
-                    Some(id) => {
-                        if id == self.get_sender_id() {
-                            self.db_updates
-                                .push(DatabaseUpdate::RemoveWalletFromAccount {
-                                    id,
-                                    wallet: wallet.to_owned(),
-                                });
-                        } else {
-                            anyhow::bail!("Cannot remove wallet {wallet} from account {}, that wallet is used by {id}", self.get_sender_id())
-                        }
-                    }
-                    None => {
-                        anyhow::bail!("Cannot remove wallet {wallet} from account {}, that wallet is currently unrecognized", self.get_sender_id())
-                    }
-                }
+                self.framework_state
+                    .accounts
+                    .remove_wallet_from_account(self.get_sender_id(), wallet)?;
             }
         }
         Ok(())
@@ -749,12 +543,6 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     pub fn log(&mut self, msg: impl Into<String>) {
         self.output.logs.push(msg.into());
     }
-}
-
-#[derive(PartialEq, Eq)]
-enum KeyOrWallet<'a> {
-    Key(PublicKey),
-    Wallet(&'a str),
 }
 
 async fn has_already_listened(

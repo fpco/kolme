@@ -102,6 +102,16 @@ where
 
 impl<K, V> MerkleMap<K, V>
 where
+    K: ToMerkleKey + Clone,
+    V: Default + Clone,
+{
+    pub fn get_or_default(&mut self, key: K) -> &mut V {
+        self.get_or_insert(key, Default::default)
+    }
+}
+
+impl<K, V> MerkleMap<K, V>
+where
     K: Clone,
     V: Clone,
 {

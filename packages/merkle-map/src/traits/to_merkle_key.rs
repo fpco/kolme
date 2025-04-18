@@ -1,3 +1,5 @@
+use shared::cryptography::PublicKey;
+
 use crate::*;
 
 impl ToMerkleKey for String {
@@ -25,5 +27,11 @@ impl ToMerkleKey for u32 {
 impl ToMerkleKey for u64 {
     fn to_merkle_key(&self) -> MerkleKey {
         MerkleKey::from_slice(&self.to_le_bytes())
+    }
+}
+
+impl ToMerkleKey for PublicKey {
+    fn to_merkle_key(&self) -> MerkleKey {
+        MerkleKey::from_slice(&self.as_bytes())
     }
 }

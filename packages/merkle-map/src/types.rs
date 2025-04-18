@@ -78,4 +78,6 @@ pub enum MerkleSerialError {
     },
     #[error(transparent)]
     Custom(Box<dyn std::error::Error + Send + Sync>),
+    #[error("{0}")]
+    Other(String),
 }

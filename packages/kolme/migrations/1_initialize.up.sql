@@ -1,19 +1,3 @@
-CREATE TABLE accounts(
-    id INTEGER PRIMARY KEY NOT NULL,    
-    -- We'd like to have a reference here, but sqlite barfs on inserts if we do
-    created INTEGER NOT NULL -- REFERENCES blocks(height)
-);
-
-CREATE TABLE account_wallets(
-    account_id INTEGER NOT NULL REFERENCES accounts(id),
-    wallet TEXT NOT NULL UNIQUE
-);
-
-CREATE TABLE account_pubkeys(
-    account_id INTEGER NOT NULL REFERENCES accounts(id),
-    pubkey BLOB NOT NULL UNIQUE
-);
-
 -- Merkle hash storage
 CREATE TABLE merkle_hashes(
     hash BLOB PRIMARY KEY NOT NULL,
@@ -27,12 +11,7 @@ CREATE TABLE blocks(
     rendered TEXT NOT NULL,
     txhash BLOB NOT NULL UNIQUE,
     framework_state_hash BLOB NOT NULL,
-    app_state_hash BLOB NOT NULL,
-    -- Account ID of the transaction proposing
-    account_id INTEGER NOT NULL REFERENCES accounts(id),
-    -- The nonce used for this transaction
-    nonce INTEGER NOT NULL,
-    UNIQUE(account_id, nonce)
+    app_state_hash BLOB NOT NULL
 );
 
 CREATE TABLE messages(
