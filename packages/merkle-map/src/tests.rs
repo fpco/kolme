@@ -337,3 +337,108 @@ quickcheck::quickcheck! {
         rev_iter_prop_helper(pairs)
     }
 }
+
+#[test]
+fn range_asc() {
+    let mut map = MerkleMap::new();
+    for c in 'A'..='Z' {
+        map.insert(format!("{c}"), ());
+    }
+    let in_order_actual = map
+        .range(
+            Some(Bound::Inclusive("K".to_owned())),
+            Some(Bound::Exclusive("W".to_owned())),
+            Order::Asc,
+        )
+        .map(|(x, ())| x.clone())
+        .collect::<Vec<_>>();
+    let in_order_expected = ('K'..='V').map(|c| format!("{c}")).collect::<Vec<_>>();
+    assert_eq!(in_order_actual, in_order_expected);
+}
+
+#[test]
+fn range_desc() {
+    let mut map = MerkleMap::new();
+    for c in 'A'..='Z' {
+        map.insert(format!("{c}"), ());
+    }
+    let in_order_actual = map
+        .range(
+            Some(Bound::Inclusive("K".to_owned())),
+            Some(Bound::Exclusive("W".to_owned())),
+            Order::Desc,
+        )
+        .map(|(x, ())| x.clone())
+        .collect::<Vec<_>>();
+    let in_order_expected = ('K'..='V')
+        .rev()
+        .map(|c| format!("{c}"))
+        .collect::<Vec<_>>();
+    assert_eq!(in_order_actual, in_order_expected);
+}
+
+fn range_helper(
+    pairs: Vec<(String, u32)>,
+    asc: bool,
+    start: Option<String>,
+    start_inc: bool,
+    stop: Option<String>,
+    stop_inc: bool,
+) -> bool {
+    let mut mmap = MerkleMap::new();
+    let mut bmap = BTreeMap::new();
+    let start = start.map(if start_inc {
+        Bound::Inclusive
+    } else {
+        Bound::Exclusive
+    });
+    let stop = stop.map(if stop_inc {
+        Bound::Inclusive
+    } else {
+        Bound::Exclusive
+    });
+    let order = if asc { Order::Asc } else { Order::Desc };
+
+    fn in_range(key: &str, start: &Option<Bound<String>>, stop: &Option<Bound<String>>) -> bool {
+        if let Some(start) = start {
+            let allowed = match start {
+                Bound::Inclusive(start) => start.as_str() <= key,
+                Bound::Exclusive(start) => start.as_str() < key,
+            };
+            if !allowed {
+                return false;
+            }
+        }
+        if let Some(stop) = stop {
+            let allowed = match stop {
+                Bound::Inclusive(stop) => stop.as_str() >= key,
+                Bound::Exclusive(stop) => stop.as_str() > key,
+            };
+            if !allowed {
+                return false;
+            }
+        }
+
+        true
+    }
+    for (key, value) in pairs {
+        if in_range(&key, &start, &stop) {
+            bmap.insert(key.clone(), value);
+        }
+        mmap.insert(key, value);
+    }
+
+    let expected = match order {
+        Order::Asc => bmap.iter().collect::<Vec<_>>(),
+        Order::Desc => bmap.iter().rev().collect(),
+    };
+    let actual = mmap.range(start, stop, order).collect::<Vec<_>>();
+    assert_eq!(expected, actual);
+    true
+}
+
+quickcheck::quickcheck! {
+    fn range(pairs: Vec<(String, u32)>, asc: bool, start: Option<String>, start_inc: bool, stop: Option<String>,stop_inc:bool) -> bool {
+        range_helper(pairs, asc, start, start_inc, stop, stop_inc)
+    }
+}

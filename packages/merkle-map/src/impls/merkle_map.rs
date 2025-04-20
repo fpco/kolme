@@ -136,6 +136,18 @@ impl<K, V> MerkleMap<K, V> {
     }
 }
 
+impl<K: ToMerkleKey, V> MerkleMap<K, V> {
+    // TODO consider generalizing to K: Borrow<Q>
+    pub fn range(
+        &self,
+        lower: Option<Bound<K>>,
+        upper: Option<Bound<K>>,
+        order: Order,
+    ) -> impls::iter::Range<K, V> {
+        self.0.range(lower, upper, order)
+    }
+}
+
 impl<K, V> Default for MerkleMap<K, V> {
     fn default() -> Self {
         Self::new()
