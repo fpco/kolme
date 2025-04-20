@@ -43,29 +43,78 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
         'outer: loop {
             let last = self.stack.last_mut()?;
             match last {
-                IterLayer::Leaf(leaf, idx) => match leaf.values.get(usize::from(*idx)) {
-                    Some(entry) => {
-                        *idx += 1;
-                        return Some((&entry.key, &entry.value));
-                    }
-                    None => {
-                        self.stack.pop();
-                    }
-                },
-                IterLayer::Tree(tree, idx) => {
-                    if *idx == 0 {
-                        *idx += 1;
-                        if let Some(entry) = &tree.leaf {
+                IterLayer::Leaf(leaf, idx_ref) => {
+                    let idx = (*idx_ref).unwrap_or(0);
+                    match leaf.values.get(usize::from(idx)) {
+                        Some(entry) => {
+                            *idx_ref = Some(idx + 1);
                             return Some((&entry.key, &entry.value));
                         }
+                        None => {
+                            self.stack.pop();
+                        }
                     }
-                    while *idx < 17 {
-                        if let Some(entry) = to_iter_layer(&tree.branches[usize::from(*idx - 1)]) {
-                            *idx += 1;
+                }
+                IterLayer::Tree(tree, idx_ref) => {
+                    let mut idx = (*idx_ref).unwrap_or(0);
+                    if idx == 0 {
+                        *idx_ref = Some(1);
+                        if let Some(entry) = &tree.leaf {
+                            return Some((&entry.key, &entry.value));
+                        } else {
+                            idx = 1;
+                        }
+                    }
+                    while idx < 17 {
+                        if let Some(entry) = to_iter_layer(&tree.branches[usize::from(idx - 1)]) {
+                            *idx_ref = Some(idx + 1);
                             self.stack.push(entry);
                             continue 'outer;
                         }
-                        *idx += 1;
+                        idx += 1;
+                    }
+                    self.stack.pop();
+                }
+            }
+        }
+    }
+}
+
+impl<K, V> DoubleEndedIterator for Iter<'_, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        'outer: loop {
+            let last = self.stack.last_mut()?;
+            match last {
+                IterLayer::Leaf(leaf, idx_ref) => {
+                    let mut idx = (*idx_ref).unwrap_or(leaf.values.len() as u16);
+                    if idx == 0 {
+                        self.stack.pop();
+                        continue 'outer;
+                    }
+
+                    idx -= 1;
+
+                    let entry = &leaf.values[usize::from(idx)];
+                    *idx_ref = Some(idx);
+                    return Some((&entry.key, &entry.value));
+                }
+                IterLayer::Tree(tree, idx_ref) => {
+                    let mut idx = (*idx_ref).unwrap_or(16);
+
+                    while idx > 0 {
+                        if let Some(entry) = to_iter_layer(&tree.branches[usize::from(idx - 1)]) {
+                            *idx_ref = Some(idx - 1);
+                            self.stack.push(entry);
+                            continue 'outer;
+                        }
+                        idx -= 1;
+                    }
+
+                    assert_eq!(idx, 0);
+
+                    if let Some(entry) = &tree.leaf {
+                        self.stack.pop();
+                        return Some((&entry.key, &entry.value));
                     }
                     self.stack.pop();
                 }
@@ -79,14 +128,14 @@ pub struct Iter<'a, K, V> {
 }
 
 enum IterLayer<'a, K, V> {
-    Leaf(&'a LeafContents<K, V>, u16),
-    Tree(&'a TreeContents<K, V>, u16),
+    Leaf(&'a LeafContents<K, V>, Option<u16>),
+    Tree(&'a TreeContents<K, V>, Option<u16>),
 }
 
 fn to_iter_layer<K, V>(node: &Node<K, V>) -> Option<IterLayer<K, V>> {
     match node {
-        Node::Leaf(leaf) => Some(IterLayer::Leaf(leaf.as_ref(), 0)),
-        Node::Tree(tree) => Some(IterLayer::Tree(tree.as_ref(), 0)),
+        Node::Leaf(leaf) => Some(IterLayer::Leaf(leaf.as_ref(), None)),
+        Node::Tree(tree) => Some(IterLayer::Tree(tree.as_ref(), None)),
     }
 }
 
