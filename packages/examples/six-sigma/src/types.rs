@@ -1,6 +1,21 @@
+use clap::Subcommand;
 use std::str::FromStr;
 
 use kolme::{AssetId, BlockHeight, Decimal, MerkleDeserialize, MerkleSerialError, MerkleSerialize};
+
+#[derive(Subcommand)]
+pub enum AppComponent {
+    /// Run the API server
+    ApiServer,
+    /// Run the Submitter service
+    Submitter,
+    /// Run the Processor service
+    Processor,
+    /// Run the Listener service
+    Listener,
+    /// Run the Approver service
+    Approver,
+}
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
