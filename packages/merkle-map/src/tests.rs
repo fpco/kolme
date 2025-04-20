@@ -325,8 +325,16 @@ fn rev_iter_prop_helper(pairs: Vec<(String, u32)>) -> bool {
     let in_order_expected = bmap.iter().map(|(x, y)| (x.clone(), y)).collect::<Vec<_>>();
     assert_eq!(in_order_actual, in_order_expected);
 
-    let rev_actual = mmap.iter().map(|(x, y)| (x.clone(), y)).collect::<Vec<_>>();
-    let rev_expected = bmap.iter().map(|(x, y)| (x.clone(), y)).collect::<Vec<_>>();
+    let rev_actual = mmap
+        .iter()
+        .rev()
+        .map(|(x, y)| (x.clone(), y))
+        .collect::<Vec<_>>();
+    let rev_expected = bmap
+        .iter()
+        .rev()
+        .map(|(x, y)| (x.clone(), y))
+        .collect::<Vec<_>>();
     assert_eq!(rev_actual, rev_expected);
 
     true
