@@ -49,7 +49,8 @@ async fn listen_once<App: KolmeApp>(
     {
         GetEventResp::Found { message } => {
             let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
-            let message = to_kolme_message::<App::Message>(message, chain, *next_bridge_event_id);
+            let message =
+                to_kolme_message::<App::Message>(message, chain.into(), *next_bridge_event_id);
 
             let signed = kolme
                 .read()
@@ -96,9 +97,9 @@ pub async fn sanity_check_contract(
     Ok(())
 }
 
-fn to_kolme_message<T>(
+pub(crate) fn to_kolme_message<T>(
     msg: BridgeEventMessage,
-    chain: CosmosChain,
+    chain: ExternalChain,
     event_id: BridgeEventId,
 ) -> Message<T> {
     match msg {
@@ -120,7 +121,7 @@ fn to_kolme_message<T>(
             }
 
             Message::Listener {
-                chain: chain.into(),
+                chain,
                 event_id,
                 event: BridgeEvent::Regular {
                     wallet: Wallet(wallet),
@@ -130,7 +131,7 @@ fn to_kolme_message<T>(
             }
         }
         BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
-            chain: chain.into(),
+            chain,
             event_id,
             event: BridgeEvent::Signed {
                 wallet: Wallet(wallet),

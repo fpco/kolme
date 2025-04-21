@@ -235,6 +235,8 @@ impl<App: KolmeApp> Processor<App> {
                         break;
                     }
                 } else {
+                    // TODO See https://github.com/fpco/kolme/issues/122
+                    self.approve_actions_all(&chains).await;
                     break;
                 }
             }

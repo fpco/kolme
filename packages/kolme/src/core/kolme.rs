@@ -3,6 +3,8 @@ mod mempool;
 
 pub use error::KolmeError;
 
+#[cfg(feature = "pass_through")]
+use std::sync::OnceLock;
 use std::{collections::HashMap, ops::Deref, path::Path};
 
 use mempool::Mempool;
@@ -205,6 +207,8 @@ pub struct KolmeInner<App: KolmeApp> {
     pub(super) current_block_hash: BlockHash,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
+    #[cfg(feature = "pass_through")]
+    pub(super) pass_through_conn: OnceLock<reqwest::Client>,
     #[cfg(feature = "deadlock_detector")]
     pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
     pub(super) merkle_manager: MerkleManager,
@@ -249,6 +253,8 @@ impl<App: KolmeApp> Kolme<App> {
             current_block_hash,
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
+            #[cfg(feature = "pass_through")]
+            pass_through_conn: OnceLock::new(),
             #[cfg(feature = "deadlock_detector")]
             deadlock_detector: Default::default(),
             merkle_manager,
@@ -363,6 +369,13 @@ impl<App: KolmeApp> KolmeInner<App> {
                 client
             }
         }
+    }
+
+    #[cfg(feature = "pass_through")]
+    pub async fn get_pass_through_client(&self) -> reqwest::Client {
+        self.pass_through_conn
+            .get_or_init(reqwest::Client::new)
+            .clone()
     }
 
     pub fn get_next_height(&self) -> BlockHeight {
@@ -794,6 +807,8 @@ pub(super) async fn get_action_payload(
 
             Ok(payload)
         }
+        #[cfg(feature = "pass_through")]
+        ChainKind::PassThrough => Ok(payload.into_bytes()),
     }
 }
 

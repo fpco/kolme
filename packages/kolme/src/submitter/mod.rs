@@ -27,6 +27,10 @@ enum ChainArgs {
     Solana {
         keypair: kolme_solana_bridge_client::keypair::Keypair,
     },
+    #[cfg(feature = "pass_through")]
+    PassThrough {
+        port: u16,
+    },
 }
 
 impl ChainArgs {
@@ -35,6 +39,8 @@ impl ChainArgs {
         match self {
             Self::Cosmos { .. } => chain.to_cosmos_chain().is_some(),
             Self::Solana { .. } => chain.to_solana_chain().is_some(),
+            #[cfg(feature = "pass_through")]
+            Self::PassThrough { .. } => chain == ExternalChain::PassThrough,
         }
     }
 }
@@ -56,6 +62,16 @@ impl<App: KolmeApp> Submitter<App> {
         Submitter {
             kolme,
             args: ChainArgs::Solana { keypair },
+            last_submitted: HashMap::new(),
+            genesis_created: HashSet::new(),
+        }
+    }
+
+    #[cfg(feature = "pass_through")]
+    pub fn new_pass_through(kolme: Kolme<App>, port: u16) -> Self {
+        Submitter {
+            kolme,
+            args: ChainArgs::PassThrough { port },
             last_submitted: HashMap::new(),
             genesis_created: HashSet::new(),
         }
@@ -261,6 +277,12 @@ impl<App: KolmeApp> Submitter<App> {
                     payload,
                 )
                 .await?
+            }
+            #[cfg(feature = "pass_through")]
+            ChainArgs::PassThrough { port } => {
+                anyhow::ensure!(chain == ExternalChain::PassThrough);
+                let client = self.kolme.read().await.get_pass_through_client().await;
+                pass_through::execute(client, *port, *processor, approvers.clone(), payload).await?
             }
         };
 
