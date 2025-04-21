@@ -892,7 +892,7 @@ pub struct MessageOutput {
 }
 
 /// Input and output for a single data load while processing a block.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct BlockDataLoad {
     /// Description of the request
     pub request: String,

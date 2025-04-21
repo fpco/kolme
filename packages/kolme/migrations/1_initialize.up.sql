@@ -28,13 +28,6 @@ CREATE TABLE logs(
     PRIMARY KEY(message, position)
 );
 
-CREATE TABLE loads(
-    message INTEGER NOT NULL REFERENCES messages(id),
-    position INTEGER NOT NULL,
-    payload TEXT NOT NULL,
-    PRIMARY KEY(message, position)
-);
-
 CREATE TABLE actions(
     -- Database-internal primary key
     id INTEGER PRIMARY KEY NOT NULL,

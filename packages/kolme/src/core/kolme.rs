@@ -820,6 +820,8 @@ async fn store_block<App: KolmeApp>(
     let block = signed_block.0.message.as_inner();
     let tx = block.tx.0.message.as_inner();
 
+    let mut expected_loads = block.loads.iter();
+
     let height = block.height;
     let expected = kolme.get_next_height();
     if height != expected {
@@ -890,17 +892,11 @@ async fn store_block<App: KolmeApp>(
             .execute(&mut **trans)
             .await?;
         }
-        for (position, load) in loads.iter().enumerate() {
-            let position = i64::try_from(position)?;
-            let load = serde_json::to_string(&load)?;
-            sqlx::query!(
-                "INSERT INTO loads(message, position, payload) VALUES($1, $2, $3)",
-                message,
-                position,
-                load
-            )
-            .execute(&mut **trans)
-            .await?;
+        for actual_load in loads {
+            let expected_load = expected_loads
+                .next()
+                .context("Mismatched number of data loads")?;
+            anyhow::ensure!(actual_load == expected_load);
         }
         for (position, action) in actions.iter().enumerate() {
             let position = i64::try_from(position)?;
@@ -942,6 +938,11 @@ async fn store_block<App: KolmeApp>(
             .await?;
         }
     }
+
+    anyhow::ensure!(
+        expected_loads.next().is_none(),
+        "More expected data loads than actual data loads"
+    );
 
     for update in db_updates {
         match update {
