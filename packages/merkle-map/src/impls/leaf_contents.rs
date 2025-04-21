@@ -49,14 +49,10 @@ impl<K, V> LeafContents<K, V> {
         }
     }
 
-    pub(crate) fn get(&self, key_bytes: &MerkleKey) -> Option<&V> {
-        self.values.iter().find_map(|entry| {
-            if &entry.key_bytes == key_bytes {
-                Some(&entry.value)
-            } else {
-                None
-            }
-        })
+    pub(crate) fn get(&self, key_bytes: &MerkleKey) -> Option<&LeafEntry<K, V>> {
+        self.values
+            .iter()
+            .find(|entry| &entry.key_bytes == key_bytes)
     }
 
     pub(crate) fn get_mut(&mut self, key_bytes: &MerkleKey) -> Option<&mut V> {
