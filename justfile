@@ -22,8 +22,8 @@ test: postgres
 build-optimizer-image:
     ./.ci/build-optimizer-image.sh
 
-build-contracts: build-optimizer-image
+build-contracts:
     docker run --rm -v "$(pwd)":/code \
       --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
       --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-      optimizer:1.84
+      ghcr.io/fpco/kolme/cosmwasm-optimizer:1.84
