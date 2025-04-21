@@ -2,6 +2,18 @@ use shared::cryptography::PublicKey;
 
 use crate::*;
 
+impl ToMerkleKey for Vec<u8> {
+    fn to_merkle_key(&self) -> MerkleKey {
+        MerkleKey::from_slice(self)
+    }
+}
+
+impl ToMerkleKey for [u8] {
+    fn to_merkle_key(&self) -> MerkleKey {
+        MerkleKey::from_slice(self)
+    }
+}
+
 impl ToMerkleKey for String {
     fn to_merkle_key(&self) -> MerkleKey {
         MerkleKey::from_slice(self.as_bytes())
@@ -9,6 +21,12 @@ impl ToMerkleKey for String {
 }
 
 impl ToMerkleKey for str {
+    fn to_merkle_key(&self) -> MerkleKey {
+        MerkleKey::from_slice(self.as_bytes())
+    }
+}
+
+impl ToMerkleKey for &str {
     fn to_merkle_key(&self) -> MerkleKey {
         MerkleKey::from_slice(self.as_bytes())
     }

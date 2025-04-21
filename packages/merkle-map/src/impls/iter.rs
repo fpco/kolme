@@ -1,3 +1,8 @@
+use std::{
+    borrow::Cow,
+    ops::{Bound, RangeBounds},
+};
+
 use crate::*;
 
 impl<'a, K, V> IntoIterator for &'a Node<K, V> {
@@ -7,7 +12,9 @@ impl<'a, K, V> IntoIterator for &'a Node<K, V> {
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
-            stack: vec![to_iter_layer(self)],
+            node: self,
+            start: Bound::Unbounded,
+            end: Bound::Unbounded,
         }
     }
 }
@@ -24,8 +31,32 @@ impl<'a, K, V> IntoIterator for &'a MerkleMap<K, V> {
     type IntoIter = Iter<'a, K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Iter {
-            stack: vec![to_iter_layer(&self.0)],
+        self.0.into_iter()
+    }
+}
+
+pub struct Iter<'a, K, V> {
+    node: &'a Node<K, V>,
+    start: Bound<Cow<'a, MerkleKey>>,
+    end: Bound<Cow<'a, MerkleKey>>,
+}
+
+impl<K, V> Iter<'_, K, V> {
+    fn is_complete(&self) -> bool {
+        let (start, start_inc) = match &self.start {
+            Bound::Included(start) => (start, true),
+            Bound::Excluded(start) => (start, false),
+            Bound::Unbounded => return false,
+        };
+        let (end, end_inc) = match &self.end {
+            Bound::Included(end) => (end, true),
+            Bound::Excluded(end) => (end, false),
+            Bound::Unbounded => return false,
+        };
+        match start.cmp(end) {
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => !start_inc && !end_inc,
+            std::cmp::Ordering::Greater => true,
         }
     }
 }
@@ -34,107 +65,181 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        'outer: loop {
-            let last = self.stack.last_mut()?;
-            match last {
-                IterLayer::Leaf(leaf, idx_ref) => {
-                    let idx = (*idx_ref).unwrap_or(0);
-                    match leaf.values.get(usize::from(idx)) {
-                        Some(entry) => {
-                            *idx_ref = Some(idx + 1);
-                            return Some((&entry.key, &entry.value));
-                        }
-                        None => {
-                            self.stack.pop();
-                        }
-                    }
-                }
-                IterLayer::Tree(tree, idx_ref) => {
-                    let mut idx = (*idx_ref).unwrap_or(0);
-                    if idx == 0 {
-                        *idx_ref = Some(1);
-                        if let Some(entry) = &tree.leaf {
-                            return Some((&entry.key, &entry.value));
-                        } else {
-                            idx = 1;
-                        }
-                    }
-                    if idx < 17 {
-                        let entry = to_iter_layer(&tree.branches[usize::from(idx - 1)]);
-                        *idx_ref = Some(idx + 1);
-                        self.stack.push(entry);
-                        continue 'outer;
-                    }
-                    self.stack.pop();
-                }
+        if self.is_complete() {
+            return None;
+        }
+        let (key, included) = match &self.start {
+            Bound::Included(start) => (start, true),
+            Bound::Excluded(start) => (start, false),
+            Bound::Unbounded => (&Cow::Owned(MerkleKey::default()), true),
+        };
+
+        if included {
+            if let Some(entry) = self.node.get(0, key) {
+                self.start = Bound::Excluded(Cow::Borrowed(&entry.key_bytes));
+                return Some((&entry.key, &entry.value));
             }
         }
+        let entry = self.node.find_entry_after(0, key)?;
+        self.start = Bound::Excluded(Cow::Borrowed(&entry.key_bytes));
+        match &self.end {
+            Bound::Included(end) => {
+                if end < &Cow::Borrowed(&entry.key_bytes) {
+                    return None;
+                }
+            }
+            Bound::Excluded(end) => {
+                if end <= &Cow::Borrowed(&entry.key_bytes) {
+                    return None;
+                }
+            }
+            Bound::Unbounded => (),
+        }
+        Some((&entry.key, &entry.value))
     }
 }
 
 impl<K, V> DoubleEndedIterator for Iter<'_, K, V> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        'outer: loop {
-            let last = self.stack.last_mut()?;
-            match last {
-                IterLayer::Leaf(leaf, idx_ref) => {
-                    let mut idx = (*idx_ref).unwrap_or(leaf.values.len() as u16);
-                    if idx == 0 {
-                        self.stack.pop();
-                        continue 'outer;
-                    }
+        if self.is_complete() {
+            return None;
+        }
+        let (key, entry) = match &self.end {
+            Bound::Included(end) => (Some(end), self.node.get(0, end)),
+            Bound::Excluded(end) => (Some(end), None),
+            Bound::Unbounded => (None, self.node.find_last_entry()),
+        };
 
-                    idx -= 1;
+        let entry = match entry {
+            Some(entry) => entry,
+            None => {
+                let key = key?;
 
-                    let entry = &leaf.values[usize::from(idx)];
-                    *idx_ref = Some(idx);
-                    return Some((&entry.key, &entry.value));
+                self.node.find_entry_before(0, key)?
+            }
+        };
+
+        self.end = Bound::Excluded(Cow::Borrowed(&entry.key_bytes));
+        match &self.start {
+            Bound::Included(start) => {
+                if start > &Cow::Borrowed(&entry.key_bytes) {
+                    return None;
                 }
-                IterLayer::Tree(tree, idx_ref) => {
-                    let idx = (*idx_ref).unwrap_or(16);
-
-                    if idx > 0 {
-                        let entry = to_iter_layer(&tree.branches[usize::from(idx - 1)]);
-                        *idx_ref = Some(idx - 1);
-                        self.stack.push(entry);
-                        continue 'outer;
-                    }
-
-                    assert_eq!(idx, 0);
-
-                    if let Some(entry) = &tree.leaf {
-                        self.stack.pop();
-                        return Some((&entry.key, &entry.value));
-                    }
-                    self.stack.pop();
+            }
+            Bound::Excluded(start) => {
+                if start >= &Cow::Borrowed(&entry.key_bytes) {
+                    return None;
                 }
+            }
+            Bound::Unbounded => (),
+        }
+        Some((&entry.key, &entry.value))
+    }
+}
+
+impl<K, V> Node<K, V> {
+    fn find_entry_after(&self, depth: u16, key: &MerkleKey) -> Option<&LeafEntry<K, V>> {
+        match self {
+            Node::Leaf(lockable) => lockable
+                .as_ref()
+                .values
+                .iter()
+                .find(|entry| entry.key_bytes > *key),
+            Node::Tree(lockable) => {
+                let tree = lockable.as_ref();
+                if let Some(leaf) = &tree.leaf {
+                    if leaf.key_bytes > *key {
+                        return Some(leaf);
+                    }
+                }
+                let branch = key.get_index_for_depth(depth).unwrap_or_default();
+
+                // For an exact match, continue checking the key's branches
+                if let Some(entry) =
+                    tree.branches[usize::from(branch)].find_entry_after(depth + 1, key)
+                {
+                    return Some(entry);
+                }
+
+                // And for all the other branches, simply try and find the first entry
+                for branch in tree.branches[usize::from(branch)..].iter().skip(1) {
+                    if let Some(entry) = branch.find_first_entry() {
+                        return Some(entry);
+                    }
+                }
+                None
             }
         }
     }
-}
 
-pub struct Iter<'a, K, V> {
-    stack: Vec<IterLayer<'a, K, V>>,
-}
-
-enum IterLayer<'a, K, V> {
-    Leaf(&'a LeafContents<K, V>, Option<u16>),
-    Tree(&'a TreeContents<K, V>, Option<u16>),
-}
-
-impl<K, V> std::fmt::Debug for IterLayer<'_, K, V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn find_entry_before(&self, depth: u16, key: &MerkleKey) -> Option<&LeafEntry<K, V>> {
         match self {
-            IterLayer::Leaf(_, x) => write!(f, "Leaf({x:?})"),
-            IterLayer::Tree(_, x) => write!(f, "Tree({x:?})"),
+            Node::Leaf(lockable) => lockable
+                .as_ref()
+                .values
+                .iter()
+                .rev()
+                .find(|entry| entry.key_bytes < *key),
+            Node::Tree(lockable) => {
+                let tree = lockable.as_ref();
+                let branch = key.get_index_for_depth(depth).unwrap_or_default();
+
+                // Check the specified branch first and continue finding entries before...
+                if let Some(entry) =
+                    tree.branches[usize::from(branch)].find_entry_before(depth + 1, key)
+                {
+                    return Some(entry);
+                }
+
+                // Otherwise, take any entry from the previous branches
+                for branch in tree.branches[0..usize::from(branch)].iter().rev() {
+                    if let Some(entry) = branch.find_last_entry() {
+                        return Some(entry);
+                    }
+                }
+
+                // And if none of the branches have any entries, take our leaf
+                if let Some(leaf) = &tree.leaf {
+                    if leaf.key_bytes < *key {
+                        return Some(leaf);
+                    }
+                }
+                None
+            }
         }
     }
-}
 
-fn to_iter_layer<K, V>(node: &Node<K, V>) -> IterLayer<K, V> {
-    match node {
-        Node::Leaf(leaf) => IterLayer::Leaf(leaf.as_ref(), None),
-        Node::Tree(tree) => IterLayer::Tree(tree.as_ref(), None),
+    fn find_first_entry(&self) -> Option<&LeafEntry<K, V>> {
+        match self {
+            Node::Leaf(leaf) => leaf.as_ref().values.first(),
+            Node::Tree(tree) => {
+                let tree = tree.as_ref();
+                if let Some(leaf) = &tree.leaf {
+                    return Some(leaf);
+                }
+                for branch in tree.branches.iter() {
+                    if let Some(entry) = branch.find_first_entry() {
+                        return Some(entry);
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    fn find_last_entry(&self) -> Option<&LeafEntry<K, V>> {
+        match self {
+            Node::Leaf(leaf) => leaf.as_ref().values.last(),
+            Node::Tree(tree) => {
+                let tree = tree.as_ref();
+                for branch in tree.branches.iter().rev() {
+                    if let Some(entry) = branch.find_last_entry() {
+                        return Some(entry);
+                    }
+                }
+                tree.leaf.as_ref()
+            }
+        }
     }
 }
 
@@ -191,161 +296,17 @@ where
     }
 }
 
-impl<T> Bound<T> {
-    fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Bound<U> {
-        match self {
-            Bound::Inclusive(x) => Bound::Inclusive(f(x)),
-            Bound::Exclusive(x) => Bound::Exclusive(f(x)),
-        }
-    }
-}
-
 impl<'a, K: ToMerkleKey, V> Node<K, V> {
-    pub(crate) fn range(
-        &'a self,
-        lower: Option<Bound<K>>,
-        upper: Option<Bound<K>>,
-        order: Order,
-    ) -> Range<'a, K, V> {
-        fn to_key<K: ToMerkleKey>(x: Option<Bound<K>>) -> Option<Bound<MerkleKey>> {
-            x.map(|bound| bound.map(|k| k.to_merkle_key()))
-        }
-
-        let lower = to_key(lower);
-        let upper = to_key(upper);
-
-        let (start, stop) = match order {
-            Order::Asc => (lower, upper),
-            Order::Desc => (upper, lower),
-        };
-
-        Range {
-            iter: match &start {
-                None => self.iter(),
-                Some(start) => self.iter_from(start, order),
-            },
-            order,
-            start,
-            stop,
-        }
-    }
-
-    fn iter_from(&'a self, start: &Bound<MerkleKey>, order: Order) -> Iter<'a, K, V> {
-        match order {
-            Order::Asc => self.iter_from_asc(start),
-            Order::Desc => self.iter_from_desc(start),
-        }
-    }
-
-    fn iter_from_asc(&'a self, start: &Bound<MerkleKey>) -> Iter<'a, K, V> {
-        let start = match start {
-            Bound::Inclusive(start) => start,
-            Bound::Exclusive(start) => start,
-        };
-        let mut curr = self;
-        let mut stack = vec![];
-        let mut depth = 0;
-        loop {
-            match curr {
-                Node::Leaf(lockable) => {
-                    stack.push(IterLayer::Leaf(lockable.as_ref(), None));
-                    break;
-                }
-                Node::Tree(lockable) => {
-                    let tree = lockable.as_ref();
-                    let branch = match start.get_index_for_depth(depth) {
-                        Some(branch) => branch,
-                        None => {
-                            stack.push(IterLayer::Tree(tree, None));
-                            break;
-                        }
-                    };
-                    depth += 1;
-                    stack.push(IterLayer::Tree(tree, Some((branch + 2).into())));
-                    curr = &tree.branches[usize::from(branch)];
-                }
-            }
-        }
-        Iter { stack }
-    }
-
-    fn iter_from_desc(&'a self, start: &Bound<MerkleKey>) -> Iter<'a, K, V> {
-        let start = match start {
-            Bound::Inclusive(start) => start,
-            Bound::Exclusive(start) => start,
-        };
-        let mut curr = self;
-        let mut stack = vec![];
-        let mut depth = 0;
-        loop {
-            match curr {
-                Node::Leaf(lockable) => {
-                    stack.push(IterLayer::Leaf(lockable.as_ref(), None));
-                    break;
-                }
-                Node::Tree(lockable) => {
-                    let tree = lockable.as_ref();
-                    let branch = match start.get_index_for_depth(depth) {
-                        Some(branch) => branch,
-                        None => {
-                            stack.push(IterLayer::Tree(tree, None));
-                            break;
-                        }
-                    };
-                    depth += 1;
-                    stack.push(IterLayer::Tree(tree, Some((branch).into())));
-                    curr = &tree.branches[usize::from(branch)];
-                }
-            }
-        }
-        Iter { stack }
-    }
-}
-
-pub struct Range<'a, K, V> {
-    iter: Iter<'a, K, V>,
-    order: Order,
-    start: Option<Bound<MerkleKey>>,
-    stop: Option<Bound<MerkleKey>>,
-}
-
-impl<'a, K: ToMerkleKey, V> Iterator for Range<'a, K, V> {
-    type Item = (&'a K, &'a V);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // We only check the start once
-        let start = self.start.take();
-        loop {
-            let pair = match self.order {
-                Order::Asc => self.iter.next(),
-                Order::Desc => self.iter.next_back(),
-            }?;
-            if let Some(start) = &start {
-                let key = pair.0.to_merkle_key();
-                let to_use = match (self.order, start) {
-                    (Order::Asc, Bound::Inclusive(start)) => start <= &key,
-                    (Order::Asc, Bound::Exclusive(start)) => start < &key,
-                    (Order::Desc, Bound::Inclusive(start)) => start >= &key,
-                    (Order::Desc, Bound::Exclusive(start)) => start > &key,
-                };
-                if !to_use {
-                    continue;
-                }
-            }
-
-            if let Some(stop) = &self.stop {
-                let key = pair.0.to_merkle_key();
-                let to_stop = match (self.order, stop) {
-                    (Order::Asc, Bound::Inclusive(stop)) => stop < &key,
-                    (Order::Asc, Bound::Exclusive(stop)) => stop <= &key,
-                    (Order::Desc, Bound::Inclusive(stop)) => stop > &key,
-                    (Order::Desc, Bound::Exclusive(stop)) => stop >= &key,
-                };
-                if to_stop {
-                    return None;
-                }
-            }
-            break Some(pair);
+    pub(crate) fn range<T, R>(&'a self, range: R) -> Iter<'a, K, V>
+    where
+        T: ToMerkleKey + ?Sized,
+        K: Borrow<T>,
+        R: RangeBounds<T>,
+    {
+        Iter {
+            node: self,
+            start: range.start_bound().map(|x| Cow::Owned(x.to_merkle_key())),
+            end: range.end_bound().map(|x| Cow::Owned(x.to_merkle_key())),
         }
     }
 }

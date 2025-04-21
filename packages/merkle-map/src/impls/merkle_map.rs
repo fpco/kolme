@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::RangeBounds};
 
 use crate::*;
 
@@ -62,7 +62,9 @@ where
         Q: ToMerkleKey + ?Sized,
     {
         self.sanity_checks();
-        self.0.get(0, &key.to_merkle_key())
+        self.0
+            .get(0, &key.to_merkle_key())
+            .map(|entry| &entry.value)
     }
 
     pub fn contains_key<Q>(&self, key: &Q) -> bool
@@ -137,14 +139,13 @@ impl<K, V> MerkleMap<K, V> {
 }
 
 impl<K: ToMerkleKey, V> MerkleMap<K, V> {
-    // TODO consider generalizing to K: Borrow<Q>
-    pub fn range(
-        &self,
-        lower: Option<Bound<K>>,
-        upper: Option<Bound<K>>,
-        order: Order,
-    ) -> impls::iter::Range<K, V> {
-        self.0.range(lower, upper, order)
+    pub fn range<T, R>(&self, range: R) -> impls::iter::Iter<K, V>
+    where
+        T: ToMerkleKey + ?Sized,
+        K: Borrow<T>,
+        R: RangeBounds<T>,
+    {
+        self.0.range(range)
     }
 }
 

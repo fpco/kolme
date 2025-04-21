@@ -55,22 +55,6 @@ pub struct MerkleContents {
     pub children: Arc<[Arc<MerkleContents>]>,
 }
 
-/// When ranging over a map, should the bound be exclusive or inclusive?
-#[derive(Debug)]
-pub enum Bound<K> {
-    /// Include a value that matches this exactly.
-    Inclusive(K),
-    /// Do not include this value.
-    Exclusive(K),
-}
-
-/// When ranging, do we move in an ascending or descending manner?
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Order {
-    Asc,
-    Desc,
-}
-
 /// Errors that can occur during serialization of data.
 #[derive(thiserror::Error, Debug)]
 pub enum MerkleSerialError {
