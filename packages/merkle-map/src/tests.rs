@@ -290,3 +290,58 @@ quickcheck::quickcheck! {
         true
     }
 }
+
+#[test]
+fn rev_iter() {
+    let mut map = MerkleMap::new();
+    for c in 'A'..='Z' {
+        map.insert(format!("{c}"), ());
+    }
+    let in_order_actual = map.iter().map(|(x, ())| x.clone()).collect::<Vec<_>>();
+    let in_order_expected = ('A'..='Z').map(|c| format!("{c}")).collect::<Vec<_>>();
+    assert_eq!(in_order_actual, in_order_expected);
+    let rev_actual = map
+        .iter()
+        .rev()
+        .map(|(x, ())| x.clone())
+        .collect::<Vec<_>>();
+    let rev_expected = ('A'..='Z')
+        .rev()
+        .map(|c| format!("{c}"))
+        .collect::<Vec<_>>();
+    assert_eq!(rev_actual, rev_expected);
+}
+
+fn rev_iter_prop_helper(pairs: Vec<(String, u32)>) -> bool {
+    let mut mmap = MerkleMap::new();
+    let mut bmap = BTreeMap::new();
+
+    for (key, value) in pairs {
+        mmap.insert(key.clone(), value);
+        bmap.insert(key, value);
+    }
+
+    let in_order_actual = mmap.iter().map(|(x, y)| (x.clone(), y)).collect::<Vec<_>>();
+    let in_order_expected = bmap.iter().map(|(x, y)| (x.clone(), y)).collect::<Vec<_>>();
+    assert_eq!(in_order_actual, in_order_expected);
+
+    let rev_actual = mmap
+        .iter()
+        .rev()
+        .map(|(x, y)| (x.clone(), y))
+        .collect::<Vec<_>>();
+    let rev_expected = bmap
+        .iter()
+        .rev()
+        .map(|(x, y)| (x.clone(), y))
+        .collect::<Vec<_>>();
+    assert_eq!(rev_actual, rev_expected);
+
+    true
+}
+
+quickcheck::quickcheck! {
+    fn rev_iter_prop(pairs: Vec<(String, u32)>) -> bool {
+        rev_iter_prop_helper(pairs)
+    }
+}
