@@ -1,4 +1,7 @@
-use shared::{cryptography::PublicKey, types::BridgeActionId};
+use shared::{
+    cryptography::PublicKey,
+    types::{BridgeActionId, BridgeEventId},
+};
 
 use crate::*;
 
@@ -39,6 +42,12 @@ impl FromMerkleKey for u64 {
 impl FromMerkleKey for PublicKey {
     fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
         PublicKey::from_bytes(bytes).map_err(MerkleSerialError::custom)
+    }
+}
+
+impl FromMerkleKey for BridgeEventId {
+    fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
+        u64::from_merkle_key(bytes).map(Self)
     }
 }
 

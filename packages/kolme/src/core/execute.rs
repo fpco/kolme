@@ -14,7 +14,6 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     /// Who signed the transaction
     pubkey: PublicKey,
     pool: sqlx::SqlitePool,
-    db_updates: Vec<DatabaseUpdate>,
     /// ID of the account that signed the transaction
     sender: AccountId,
     /// Public key used to sign the current transaction.
@@ -35,20 +34,6 @@ pub struct ExecutionResults<App: KolmeApp> {
     /// Logs collected from each message.
     pub logs: Vec<Vec<String>>,
     pub loads: Vec<BlockDataLoad>,
-    pub db_updates: Vec<DatabaseUpdate>,
-}
-
-#[derive(Debug)]
-pub enum DatabaseUpdate {
-    ListenerAttestation {
-        chain: ExternalChain,
-        event_id: BridgeEventId,
-        event_content: String,
-        msg_index: usize,
-        was_accepted: bool,
-        /// If this is a signed action, what's the action ID?
-        action_id: Option<BridgeActionId>,
-    },
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
@@ -88,7 +73,6 @@ impl<App: KolmeApp> KolmeInner<App> {
             validation_data_loads: validation_data_loads.map(Into::into),
             pubkey: tx.pubkey,
             pool: self.pool.clone(),
-            db_updates: vec![],
             sender: sender_account_id,
             app: &self.app,
             signing_key: signed_tx.0.message.as_inner().pubkey,
@@ -96,10 +80,10 @@ impl<App: KolmeApp> KolmeInner<App> {
             logs: vec![],
             loads: vec![],
         };
-        for (msg_index, message) in tx.messages.iter().enumerate() {
+        for message in &tx.messages {
             execution_context.logs.push(vec![]);
             execution_context
-                .execute_message(&self.app, message, msg_index)
+                .execute_message(&self.app, message)
                 .await?;
         }
 
@@ -109,7 +93,6 @@ impl<App: KolmeApp> KolmeInner<App> {
             validation_data_loads,
             pubkey: _,
             pool: _,
-            db_updates,
             sender: _,
             app: _,
             signing_key: _,
@@ -129,18 +112,12 @@ impl<App: KolmeApp> KolmeInner<App> {
             app_state,
             logs,
             loads,
-            db_updates,
         })
     }
 }
 
 impl<App: KolmeApp> ExecutionContext<'_, App> {
-    async fn execute_message(
-        &mut self,
-        app: &App,
-        message: &Message<App::Message>,
-        msg_index: usize,
-    ) -> Result<()> {
+    async fn execute_message(&mut self, app: &App, message: &Message<App::Message>) -> Result<()> {
         match message {
             Message::Genesis(actual) => {
                 let expected = App::genesis_info();
@@ -154,7 +131,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 event,
                 event_id,
             } => {
-                self.listener(*chain, event, *event_id, msg_index).await?;
+                self.listener(*chain, event, *event_id).await?;
             }
             Message::Approve {
                 chain,
@@ -180,33 +157,56 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         chain: ExternalChain,
         event: &BridgeEvent,
         event_id: BridgeEventId,
-        msg_index: usize,
     ) -> Result<()> {
         anyhow::ensure!(self.framework_state.listeners.contains(&self.pubkey));
-        anyhow::ensure!(!has_already_listened(&self.pool, chain, event_id, &self.pubkey).await?);
-        anyhow::ensure!(!has_already_accepted(&self.pool, chain, event_id).await?);
 
-        // Make sure that all previous events have already been accepted.
-        // This prevents potential censorship-style attacks on the part of
-        // the listeners. We may need to reconsider the approach here in
-        // the future, such as allowing signatures to come in but not accepting
-        // them out of order.
-        if let Some(id) = event_id.prev() {
-            anyhow::ensure!(has_already_accepted(&self.pool, chain, id).await?);
+        let state = self.framework_state.chains.get_mut(chain)?;
+
+        match &state.pending_event {
+            PendingBridgeEvent::None { next_event_id } => {
+                anyhow::ensure!(*next_event_id == event_id);
+                state.pending_event = PendingBridgeEvent::Some {
+                    id: event_id,
+                    event: event.clone(),
+                    attestations: BTreeSet::new(),
+                };
+            }
+            PendingBridgeEvent::Some {
+                id,
+                event: event2,
+                attestations: _,
+            } => {
+                anyhow::ensure!(*id == event_id);
+                anyhow::ensure!(event2 == event);
+            }
         }
-        let event_content = ensure_event_matches(&self.pool, chain, event_id, event).await?;
 
-        // OK, valid event. Let's find out how many existing signatures there are so we can decide if we can execute.
-        let existing_signatures = get_listener_signatures(&self.pool, chain, event_id)
-            .await?
+        let attestations = match &mut state.pending_event {
+            PendingBridgeEvent::None { .. } => unreachable!(),
+            PendingBridgeEvent::Some {
+                id: _,
+                event: _,
+                attestations,
+            } => attestations,
+        };
+
+        let was_inserted = attestations.insert(self.pubkey);
+
+        // Make sure it wasn't already approved
+        anyhow::ensure!(was_inserted);
+
+        // Let's find out how many existing signatures there are so we can decide if we can execute.
+        let existing_signatures = attestations
             .iter()
             .filter(|key| self.framework_state.listeners.contains(key))
             .count();
 
         // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
-        let was_accepted = existing_signatures + 1 >= self.framework_state.needed_listeners;
-        let mut action_id = None;
+        let was_accepted = existing_signatures >= self.framework_state.needed_listeners;
         if was_accepted {
+            state.pending_event = PendingBridgeEvent::None {
+                next_event_id: event_id.next(),
+            };
             match event {
                 BridgeEvent::Instantiated { contract } => {
                     let config = &mut self.framework_state.chains.get_mut(chain)?.config;
@@ -249,21 +249,21 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 }
                 BridgeEvent::Signed {
                     wallet: _,
-                    action_id: action_id_tmp,
+                    action_id,
                 } => {
                     // TODO in the future we may track wallet addresses that submitted signed actions to give them rewards.
-                    action_id = Some(*action_id_tmp);
+                    let actions = &mut self.framework_state.chains.get_mut(chain)?.pending_actions;
+                    let next_action_id = actions
+                        .keys()
+                        .next()
+                        .context("Cannot report on an action when no pending actions present")?;
+                    anyhow::ensure!(next_action_id == action_id);
+                    let (old_id, _old) = actions.remove(&action_id).unwrap();
+                    anyhow::ensure!(old_id == *action_id);
                 }
             }
         }
-        self.db_updates.push(DatabaseUpdate::ListenerAttestation {
-            chain,
-            event_id,
-            event_content,
-            msg_index,
-            was_accepted,
-            action_id,
-        });
+
         Ok(())
     }
 
@@ -525,112 +525,4 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     pub fn log(&mut self, msg: impl Into<String>) {
         self.logs.last_mut().unwrap().push(msg.into());
     }
-}
-
-async fn has_already_listened(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-    pubkey: &PublicKey,
-) -> Result<bool> {
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let count = sqlx::query_scalar!(
-        r#"
-            SELECT COUNT(*)
-            FROM bridge_events
-            INNER JOIN bridge_event_attestations
-            ON bridge_events.id=bridge_event_attestations.event
-            WHERE chain=$1
-            AND event_id=$2
-            AND public_key=$3
-        "#,
-        chain,
-        event_id,
-        pubkey
-    )
-    .fetch_one(pool)
-    .await?;
-    assert!(count == 0 || count == 1);
-    Ok(count == 1)
-}
-
-async fn has_already_accepted(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-) -> Result<bool> {
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let count = sqlx::query_scalar!(
-        r#"
-            SELECT COUNT(*)
-            FROM bridge_events
-            WHERE chain=$1
-            AND event_id=$2
-            AND accepted IS NOT NULL
-        "#,
-        chain,
-        event_id,
-    )
-    .fetch_one(pool)
-    .await?;
-    assert!(count == 0 || count == 1);
-    Ok(count == 1)
-}
-
-async fn get_listener_signatures(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-) -> Result<BTreeSet<PublicKey>> {
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let public_keys = sqlx::query_scalar!(
-        r#"
-            SELECT public_key
-            FROM bridge_events
-            INNER JOIN bridge_event_attestations
-            ON bridge_events.id=bridge_event_attestations.event
-            WHERE chain=$1
-            AND event_id=$2
-        "#,
-        chain,
-        event_id,
-    )
-    .fetch_all(pool)
-    .await?;
-    public_keys
-        .iter()
-        .map(PublicKey::from_bytes)
-        .collect::<Result<_, _>>()
-        .map_err(anyhow::Error::from)
-}
-
-/// Returns the rendered version of the event
-async fn ensure_event_matches(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-    event: &BridgeEvent,
-) -> Result<String> {
-    let new_rendered = serde_json::to_string(event)?;
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let existing = sqlx::query_scalar!(
-        r#"
-            SELECT event
-            FROM bridge_events
-            WHERE chain=$1
-            AND event_id=$2
-        "#,
-        chain,
-        event_id,
-    )
-    .fetch_optional(pool)
-    .await?;
-    if let Some(existing) = existing {
-        anyhow::ensure!(existing == new_rendered);
-    }
-    Ok(new_rendered)
 }

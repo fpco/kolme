@@ -254,6 +254,9 @@ impl ChainConfig {
             config: self,
             next_action_id: BridgeActionId::start(),
             pending_actions: MerkleMap::new(),
+            pending_event: PendingBridgeEvent::None {
+                next_event_id: BridgeEventId::start(),
+            },
         }
     }
 }
@@ -261,9 +264,17 @@ impl ChainConfig {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ChainState {
     pub config: ChainConfig,
+    /// The next action ID Kolme will emit.
     pub next_action_id: BridgeActionId,
     /// Actions which have not yet been confirmed as landing on-chain.
     pub pending_actions: MerkleMap<BridgeActionId, PendingBridgeAction>,
+    /// The next expected event ID from the bridge contract.
+    /// The next pending bridge event.
+    ///
+    /// We only track a single pending bridge event at a time. This ensures
+    /// we don't blow up the storage, and simplifies internal logic.
+    /// The next expected event ID from the bridge contract.
+    pub pending_event: PendingBridgeEvent,
 }
 
 impl MerkleSerialize for ChainState {
@@ -271,11 +282,13 @@ impl MerkleSerialize for ChainState {
         let ChainState {
             config,
             next_action_id,
-            pending_actions: voting_actions,
+            pending_actions,
+            pending_event,
         } = self;
         serializer.store(config)?;
         serializer.store(next_action_id)?;
-        serializer.store(voting_actions)?;
+        serializer.store(pending_actions)?;
+        serializer.store(pending_event)?;
         Ok(())
     }
 }
@@ -288,6 +301,7 @@ impl MerkleDeserialize for ChainState {
             config: deserializer.load()?,
             next_action_id: deserializer.load()?,
             pending_actions: deserializer.load()?,
+            pending_event: deserializer.load()?,
         })
     }
 }
@@ -327,6 +341,60 @@ impl MerkleDeserialize for PendingBridgeAction {
             approvals: deserializer.load()?,
             processor: deserializer.load()?,
         })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub enum PendingBridgeEvent {
+    None {
+        next_event_id: BridgeEventId,
+    },
+    Some {
+        id: BridgeEventId,
+        event: BridgeEvent,
+        /// Attestations from the listeners
+        attestations: BTreeSet<PublicKey>,
+    },
+}
+
+impl MerkleSerialize for PendingBridgeEvent {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        match self {
+            PendingBridgeEvent::None { next_event_id } => {
+                serializer.store_byte(0);
+                serializer.store(next_event_id)?;
+                Ok(())
+            }
+            PendingBridgeEvent::Some {
+                id,
+                event,
+                attestations,
+            } => {
+                serializer.store_byte(1);
+                serializer.store(id)?;
+                serializer.store_json(event)?;
+                serializer.store(attestations)?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl MerkleDeserialize for PendingBridgeEvent {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        match deserializer.pop_byte()? {
+            0 => Ok(PendingBridgeEvent::None {
+                next_event_id: deserializer.load()?,
+            }),
+            1 => Ok(PendingBridgeEvent::Some {
+                id: deserializer.load()?,
+                event: deserializer.load_json()?,
+                attestations: deserializer.load()?,
+            }),
+            byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
+        }
     }
 }
 
@@ -867,7 +935,7 @@ pub enum Message<AppMessage> {
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub enum BridgeEvent {
     /// A bridge was instantiated
@@ -885,7 +953,7 @@ pub enum BridgeEvent {
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct BridgedAssetAmount {
     pub denom: String,
     pub amount: u128,

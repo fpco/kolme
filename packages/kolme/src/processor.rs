@@ -334,7 +334,6 @@ impl<App: KolmeApp> Processor<App> {
         let ExecutionResults {
             framework_state,
             app_state,
-            db_updates: _,
             logs: _,
             loads,
         } = kolme.execute_transaction(&tx, now, None).await?;

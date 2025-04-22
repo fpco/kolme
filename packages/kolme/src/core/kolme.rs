@@ -437,35 +437,6 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.current_block_hash
     }
 
-    /// Get the ID of the next bridge event pending for the given chain.
-    pub async fn get_next_bridge_event_id(
-        &self,
-        chain: ExternalChain,
-        pubkey: PublicKey,
-    ) -> Result<BridgeEventId> {
-        let chain = chain.as_ref();
-        let bridge_event_id = sqlx::query_scalar!(
-            r#"
-                SELECT event_id
-                FROM bridge_events
-                LEFT JOIN bridge_event_attestations
-                ON bridge_events.id=bridge_event_attestations.event
-                WHERE chain=$1
-                AND (public_key=$2 OR accepted IS NOT NULL)
-                ORDER BY event_id DESC
-                LIMIT 1
-            "#,
-            chain,
-            pubkey
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(match bridge_event_id {
-            None => BridgeEventId::start(),
-            Some(bridge_event_id) => BridgeEventId::try_from_i64(bridge_event_id)?.next(),
-        })
-    }
-
     pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
         for (chain, state) in self.framework_state.chains.iter() {
             match &state.config.bridge {
@@ -586,35 +557,6 @@ impl<App: KolmeApp> KolmeInner<App> {
             next_nonce: account.get_next_nonce(),
         }
     }
-
-    pub async fn received_listener_attestation(
-        &self,
-        chain: ExternalChain,
-        pubkey: PublicKey,
-        event_id: BridgeEventId,
-    ) -> Result<bool> {
-        let chain = chain.as_ref();
-        let event_id = i64::try_from(event_id.0)?;
-
-        let count = sqlx::query_scalar!(
-            r#"
-                SELECT COUNT(*)
-                FROM bridge_events
-                INNER JOIN bridge_event_attestations
-                ON bridge_events.id=bridge_event_attestations.event
-                WHERE bridge_events.chain=$1
-                AND bridge_events.event_id=$2
-                AND public_key=$3
-            "#,
-            chain,
-            event_id,
-            pubkey
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        assert!(count == 0 || count == 1);
-        Ok(count == 1)
-    }
 }
 
 /// Response from [get_account_and_next_nonce]
@@ -633,7 +575,6 @@ async fn store_block<App: KolmeApp>(
     ExecutionResults {
         framework_state,
         app_state,
-        db_updates,
         logs,
         loads,
     }: &ExecutionResults<App>,
@@ -704,87 +645,6 @@ async fn store_block<App: KolmeApp>(
             )
             .execute(&mut **trans)
             .await?;
-        }
-    }
-
-    for update in db_updates {
-        match update {
-            DatabaseUpdate::ListenerAttestation {
-                chain,
-                event_id,
-                event_content,
-                msg_index,
-                was_accepted,
-                action_id,
-            } => {
-                let message_db_id = message_db_ids[*msg_index];
-                let chain = chain.as_ref();
-                let event_id = i64::try_from(event_id.0)?;
-
-                let event_db_id = sqlx::query_scalar!(
-                    r#"
-                        SELECT id
-                        FROM bridge_events
-                        WHERE chain=$1
-                        AND event_id=$2
-                    "#,
-                    chain,
-                    event_id
-                )
-                .fetch_optional(&mut **trans)
-                .await?;
-                let event_db_id = match event_db_id {
-                    Some(id) => id,
-                    None => sqlx::query!(
-                        r#"
-                            INSERT INTO
-                            bridge_events(chain, event_id, event)
-                            VALUES($1, $2, $3)
-                        "#,
-                        chain,
-                        event_id,
-                        event_content
-                    )
-                    .execute(&mut **trans)
-                    .await?
-                    .last_insert_rowid(),
-                };
-
-                sqlx::query!(
-                    r#"
-                        INSERT INTO
-                        bridge_event_attestations(event, public_key, message)
-                        VALUES($1, $2, $3)
-                    "#,
-                    event_db_id,
-                    tx.pubkey,
-                    message_db_id,
-                )
-                .execute(&mut **trans)
-                .await?;
-
-                if *was_accepted {
-                    let rows = sqlx::query!(
-                        r#"
-                            UPDATE bridge_events
-                            SET accepted=$1
-                            WHERE chain=$2
-                            AND event_id=$3
-                        "#,
-                        message_db_id,
-                        chain,
-                        event_id,
-                    )
-                    .execute(&mut **trans)
-                    .await?
-                    .rows_affected();
-                    anyhow::ensure!(rows == 1);
-
-                    if let Some(action_id) = *action_id {
-                        todo!("Need to log completion of the action: {action_id}");
-                    }
-                }
-            }
         }
     }
 

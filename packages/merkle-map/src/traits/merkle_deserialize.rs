@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use shared::{
     cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
-    types::{BridgeActionId, Sha256Hash},
+    types::{BridgeActionId, BridgeEventId, Sha256Hash},
 };
 
 use crate::*;
@@ -148,6 +148,14 @@ impl MerkleDeserialize for PublicKey {
     }
 }
 
+impl MerkleDeserialize for BridgeEventId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        u64::merkle_deserialize(deserializer).map(Self)
+    }
+}
+
 impl MerkleDeserialize for BridgeActionId {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
@@ -155,6 +163,7 @@ impl MerkleDeserialize for BridgeActionId {
         u64::merkle_deserialize(deserializer).map(Self)
     }
 }
+
 impl MerkleDeserialize for Signature {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
