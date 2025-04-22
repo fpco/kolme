@@ -2011,8 +2011,10 @@ name = "example-six-sigma"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "backon",
  "clap",
  "cosmos",
+ "cosmwasm-std",
  "jiff",
  "kolme",
  "rand 0.8.5",
@@ -2020,7 +2022,10 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "shared",
  "strum 0.27.1",
+ "tempfile",
+ "test-log",
  "tokio",
  "tracing",
 ]
@@ -3333,6 +3338,7 @@ dependencies = [
  "borsh",
  "cosmos",
  "cosmwasm-std",
+ "futures-util",
  "jiff",
  "kolme-solana-bridge-client",
  "libp2p",
@@ -3350,6 +3356,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.12",
  "tokio",
+ "tokio-tungstenite 0.26.2",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -3958,6 +3965,7 @@ dependencies = [
 name = "merkle-map"
 version = "0.1.0"
 dependencies = [
+ "arrayvec",
  "parameterized",
  "parking_lot",
  "quickcheck",

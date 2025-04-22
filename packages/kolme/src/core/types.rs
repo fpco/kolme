@@ -36,6 +36,8 @@ pub enum ExternalChain {
     SolanaTestnet,
     SolanaDevnet,
     SolanaLocal,
+    #[cfg(feature = "pass_through")]
+    PassThrough,
 }
 
 impl ToMerkleKey for ExternalChain {
@@ -98,12 +100,16 @@ pub enum CosmosChain {
 pub enum ChainName {
     Cosmos,
     Solana,
+    #[cfg(feature = "pass_through")]
+    PassThrough,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum ChainKind {
     Cosmos(CosmosChain),
     Solana(SolanaChain),
+    #[cfg(feature = "pass_through")]
+    PassThrough,
 }
 
 impl CosmosChain {
@@ -156,6 +162,8 @@ impl ExternalChain {
         match ChainKind::from(self) {
             ChainKind::Cosmos(_) => CosmosChain::name(),
             ChainKind::Solana(_) => SolanaChain::name(),
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => ChainName::PassThrough,
         }
     }
 
@@ -163,6 +171,8 @@ impl ExternalChain {
         match ChainKind::from(self) {
             ChainKind::Cosmos(chain) => Some(chain),
             ChainKind::Solana(_) => None,
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => None,
         }
     }
 
@@ -170,6 +180,8 @@ impl ExternalChain {
         match ChainKind::from(self) {
             ChainKind::Cosmos(_) => None,
             ChainKind::Solana(chain) => Some(chain),
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => None,
         }
     }
 }
@@ -205,6 +217,8 @@ impl From<ExternalChain> for ChainKind {
             ExternalChain::SolanaTestnet => ChainKind::Solana(SolanaChain::Testnet),
             ExternalChain::SolanaDevnet => ChainKind::Solana(SolanaChain::Devnet),
             ExternalChain::SolanaLocal => ChainKind::Solana(SolanaChain::Local),
+            #[cfg(feature = "pass_through")]
+            ExternalChain::PassThrough => ChainKind::PassThrough,
         }
     }
 }
@@ -459,7 +473,10 @@ impl MerkleDeserialize for BridgeContract {
             0 => Ok(Self::NeededCosmosBridge {
                 code_id: deserializer.load()?,
             }),
-            1 => Ok(Self::Deployed(deserializer.load()?)),
+            1 => Ok(Self::NeededSolanaBridge {
+                program_id: deserializer.load()?,
+            }),
+            2 => Ok(Self::Deployed(deserializer.load()?)),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }
@@ -1014,6 +1031,28 @@ impl ConfiguredChains {
 
         Ok(())
     }
+
+    #[cfg(feature = "pass_through")]
+    pub fn insert_pass_through(&mut self, config: ChainConfig) -> Result<()> {
+        if let BridgeContract::Deployed(_) = config.bridge {
+            if self
+                .0
+                .get(&ExternalChain::PassThrough)
+                .is_some_and(|existing| *existing != config)
+            {
+                Err(anyhow::anyhow!(
+                    "Multiple pass-through bridges are not supported"
+                ))
+            } else {
+                self.0.insert(ExternalChain::PassThrough, config);
+                Ok(())
+            }
+        } else {
+            Err(anyhow::anyhow!(
+                "Pass-through bridge can't require Cosmos or Solana bridge contract"
+            ))
+        }
+    }
 }
 
 /// Input and output for a single data load while processing a block.
@@ -1132,6 +1171,14 @@ impl ExecAction {
 
                         let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
 
+                        Ok(payload)
+                    }
+                    #[cfg(feature = "pass_through")]
+                    ChainName::PassThrough => {
+                        let payload = serde_json::to_string(&pass_through::Transfer {
+                            recipient: recipient.clone(),
+                            funds: funds.clone(),
+                        })?;
                         Ok(payload)
                     }
                 }

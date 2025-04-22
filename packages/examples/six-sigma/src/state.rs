@@ -6,15 +6,29 @@ use kolme::{
     PublicKey, Wallet,
 };
 use rust_decimal::{dec, Decimal};
+use serde::Serialize;
 
 use crate::{AppState, BalanceChange, Odds, OUTCOME_COUNT};
 
-#[derive(Clone)]
+#[derive(Serialize, Clone)]
 pub struct State {
     admin_keys: BTreeSet<PublicKey>,
-    markets: MerkleMap<u64, Market>,
-    state: AppState,
-    strategic_reserve: BTreeMap<AssetId, Decimal>,
+    #[serde(serialize_with = "as_btree_map")]
+    pub markets: MerkleMap<u64, Market>,
+    pub state: AppState,
+    pub strategic_reserve: BTreeMap<AssetId, Decimal>,
+}
+
+fn as_btree_map<S, K: Serialize + Ord, V: Serialize>(
+    map: &MerkleMap<K, V>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::ser::Serializer,
+{
+    map.iter()
+        .collect::<BTreeMap<&K, &V>>()
+        .serialize(serializer)
 }
 
 impl MerkleSerialize for State {
@@ -66,7 +80,7 @@ const HOUSE_FUNDS: Decimal = dec!(1000); // 1000 coins with 6 decimals
 #[derive(
     PartialEq, serde::Serialize, serde::Deserialize, Clone, strum::AsRefStr, strum::EnumString,
 )]
-enum MarketState {
+pub enum MarketState {
     Operational,
     Settled,
 }
@@ -93,11 +107,11 @@ impl MerkleDeserialize for MarketState {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Market {
-    state: MarketState,
+    pub state: MarketState,
     id: u64,
     asset_id: AssetId,
     name: String,
-    bets: Vec<Bet>,
+    pub bets: Vec<Bet>,
     total_funds: Decimal,
     available_liquidity: Decimal,
     max_allowed_liability: Decimal,
@@ -152,7 +166,7 @@ impl MerkleDeserialize for Market {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
-struct Bet {
+pub struct Bet {
     bettor: AccountId,
     wallet: Wallet,
     amount: Decimal,

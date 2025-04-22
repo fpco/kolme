@@ -6,3 +6,4 @@
 - [Innovations](./innovations.md)
 - [FP Block's Goals](./fp-block-goals.md)
 - [Design decisions](./design-decisions.md)
+- [Why Kolme pitch](./why-kolme.md)

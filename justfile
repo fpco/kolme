@@ -9,17 +9,21 @@ fmt:
 
 lint: fmt check clippy
 
-test:
+postgres:
+    docker compose -f ./packages/integration-tests/docker-compose.yml down
+    docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
+
+test: postgres
     cargo sqlx database reset -y --source packages/kolme/migrations
     cargo sqlx migrate run --source packages/kolme/migrations
     cargo sqlx prepare --workspace
-    PROCESSOR_BLOCK_DB=SKIP cargo test
+    PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:5432/postgres cargo test
 
 build-optimizer-image:
     ./.ci/build-optimizer-image.sh
 
-build-contracts: build-optimizer-image
+build-contracts:
     docker run --rm -v "$(pwd)":/code \
       --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
       --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-      optimizer:1.84
+      ghcr.io/fpco/kolme/cosmwasm-optimizer:1.84

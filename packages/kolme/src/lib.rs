@@ -3,7 +3,9 @@ mod approver;
 mod common;
 mod core;
 mod gossip;
-mod listener;
+pub(crate) mod listener;
+#[cfg(feature = "pass_through")]
+pub mod pass_through;
 mod processor;
 mod submitter;
 
