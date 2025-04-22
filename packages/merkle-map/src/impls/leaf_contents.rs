@@ -3,7 +3,9 @@ use crate::*;
 impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
     fn from(tree: TreeContents<K, V>) -> Self {
         assert!(tree.len() <= 16);
-        let mut leaf = LeafContents { values: arrayvec::ArrayVec::new() };
+        let mut leaf = LeafContents {
+            values: arrayvec::ArrayVec::new(),
+        };
         tree.drain_entries_to(&mut leaf.values);
         leaf
     }
@@ -94,14 +96,19 @@ impl<K, V> LeafContents<K, V> {
         self.values.len()
     }
 
-    pub(crate) fn drain_entries_to(mut self, entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>) {
+    pub(crate) fn drain_entries_to(
+        mut self,
+        entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>,
+    ) {
         entries.extend(&mut self.values.drain(..));
     }
 }
 
 impl<K, V> Default for LeafContents<K, V> {
     fn default() -> Self {
-        Self { values: arrayvec::ArrayVec::new() }
+        Self {
+            values: arrayvec::ArrayVec::new(),
+        }
     }
 }
 
