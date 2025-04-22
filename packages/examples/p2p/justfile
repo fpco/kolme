@@ -1,0 +1,11 @@
+build:
+  SQLX_OFFLINE=true cargo build -p example-p2p
+  cp ../../../target/debug/example-p2p .
+  docker build -t example-p2p-image -f docker/Dockerfile .
+  rm -f example-p2p
+
+up:
+  docker compose -f docker/docker-compose.yml up
+
+down:
+  docker compose -f docker/docker-compose.yml down

@@ -1,0 +1,30 @@
+services:
+  processor_1:
+    image: example-p2p-image
+    command: processor
+    networks:
+      app_net:
+
+  processor_2:
+    image: example-p2p-image
+    command: processor
+    networks:
+      app_net:
+
+  processor_3:
+    image: example-p2p-image
+    command: processor
+    networks:
+      app_net:
+
+  api_server:
+    image: example-p2p-image
+    command: api-server
+    ports:
+      - 3000:3000
+    networks:
+      app_net:
+
+networks:
+  app_net:
+    driver: bridge
