@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+arrayvec = "0.7.6"
 parameterized = "2.0.0"
 parking_lot = "0.12.3"
 rust_decimal = { workspace = true }
