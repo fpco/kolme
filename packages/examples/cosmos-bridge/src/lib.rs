@@ -75,7 +75,7 @@ impl KolmeApp for SampleKolmeApp {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        let mut bridges = ConfiguredChains::default();
+        let mut bridges = ChainStates::default();
         let mut assets = BTreeMap::new();
         assets.insert(
             AssetName(

@@ -37,6 +37,21 @@ pub enum ExternalChain {
     SolanaLocal,
 }
 
+impl ToMerkleKey for ExternalChain {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.as_ref().to_merkle_key()
+    }
+}
+
+impl FromMerkleKey for ExternalChain {
+    fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
+        std::str::from_utf8(bytes)
+            .map_err(MerkleSerialError::custom)?
+            .parse()
+            .map_err(MerkleSerialError::custom)
+    }
+}
+
 #[derive(
     serde::Serialize,
     serde::Deserialize,
@@ -217,6 +232,54 @@ impl MerkleDeserialize for ExternalChain {
 pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
+}
+impl ChainConfig {
+    fn into_state(self) -> ChainState {
+        ChainState {
+            config: self,
+            next_action_id: BridgeActionId::start(),
+            voting_actions: MerkleMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ChainState {
+    pub config: ChainConfig,
+    pub next_action_id: BridgeActionId,
+    pub voting_actions: MerkleMap<BridgeActionId, VotingBridgeAction>,
+}
+
+impl MerkleSerialize for ChainState {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let ChainState {
+            config,
+            next_action_id,
+            voting_actions,
+        } = self;
+        serializer.store(config)?;
+        serializer.store(next_action_id)?;
+        serializer.store(voting_actions)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for ChainState {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(ChainState {
+            config: deserializer.load()?,
+            next_action_id: deserializer.load()?,
+            voting_actions: deserializer.load()?,
+        })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct VotingBridgeAction {
+    pub payload: String,
+    pub approvals: BTreeMap<Signature, RecoveryId>,
 }
 
 impl MerkleSerialize for ChainConfig {
@@ -828,7 +891,7 @@ pub struct GenesisInfo {
     /// How many of the approvers are needed to approve a bridge action?
     pub needed_approvers: usize,
     /// Initial configuration of different chains
-    pub chains: ConfiguredChains,
+    pub chains: BTreeMap<ExternalChain, ChainConfig>,
 }
 
 impl GenesisInfo {
@@ -841,10 +904,10 @@ impl GenesisInfo {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Default, Debug, Clone)]
-pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
+#[derive(PartialEq, Default, Debug, Clone)]
+pub struct ChainStates(pub(crate) MerkleMap<ExternalChain, ChainState>);
 
-impl ConfiguredChains {
+impl ChainStates {
     pub fn insert_solana(&mut self, chain: SolanaChain, config: ChainConfig) -> Result<()> {
         use kolme_solana_bridge_client::pubkey::Pubkey;
 
@@ -858,7 +921,7 @@ impl ConfiguredChains {
             BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
         };
 
-        self.0.insert(chain.into(), config);
+        self.0.insert(chain.into(), config.into_state());
 
         Ok(())
     }
@@ -878,7 +941,7 @@ impl ConfiguredChains {
             }
         }
 
-        self.0.insert(chain.into(), config);
+        self.0.insert(chain.into(), config.into_state());
 
         Ok(())
     }
@@ -916,7 +979,7 @@ impl ExecAction {
     pub(crate) fn to_payload(
         &self,
         chain: ExternalChain,
-        configs: &BTreeMap<ExternalChain, ChainConfig>,
+        configs: &MerkleMap<ExternalChain, ChainState>,
         id: BridgeActionId,
     ) -> Result<String> {
         use base64::Engine;
@@ -935,7 +998,7 @@ impl ExecAction {
             } => {
                 assert_eq!(&chain, chain2);
 
-                let config = configs.get(&chain).context("Missing chain")?;
+                let config = &configs.get(&chain).context("Missing chain")?.config;
                 match chain.name() {
                     ChainName::Cosmos => {
                         let mut coins = vec![];

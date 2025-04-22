@@ -224,12 +224,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         if was_accepted {
             match event {
                 BridgeEvent::Instantiated { contract } => {
-                    let config = self
+                    let config = &mut self
                         .framework_state
                         .chains
                         .0
                         .get_mut(&chain)
-                        .context("Found a listener event for a chain we don't care about")?;
+                        .context("Found a listener event for a chain we don't care about")?
+                        .config;
                     match config.bridge {
                         BridgeContract::NeededCosmosBridge { .. } |
                             BridgeContract::NeededSolanaBridge { .. } => (),
@@ -255,6 +256,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                             .0
                             .get(&chain)
                             .context("Unknown chain")?
+                            .config
                             .assets
                             .get(&AssetName(denom.clone()))
                         else {

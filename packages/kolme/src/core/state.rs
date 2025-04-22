@@ -20,7 +20,7 @@ pub struct FrameworkState {
     pub(super) needed_listeners: usize,
     pub(super) approvers: BTreeSet<PublicKey>,
     pub(super) needed_approvers: usize,
-    pub(super) chains: ConfiguredChains,
+    pub(super) chains: ChainStates,
     pub(super) accounts: Accounts,
 }
 
@@ -56,7 +56,7 @@ impl MerkleDeserialize for FrameworkState {
             needed_listeners: deserializer.load()?,
             approvers: deserializer.load()?,
             needed_approvers: deserializer.load()?,
-            chains: ConfiguredChains(deserializer.load()?),
+            chains: ChainStates(deserializer.load()?),
             accounts: deserializer.load()?,
         })
     }

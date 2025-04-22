@@ -454,8 +454,8 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
-        for (chain, config) in &self.framework_state.chains.0 {
-            match &config.bridge {
+        for (chain, state) in &self.framework_state.chains.0 {
+            match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { code_id } => {
                     return Some(GenesisAction::InstantiateCosmos {
                         chain: chain.to_cosmos_chain().unwrap(),
@@ -536,7 +536,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.framework_state.needed_approvers
     }
 
-    pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
+    pub fn get_bridge_contracts(&self) -> &MerkleMap<ExternalChain, ChainState> {
         &self.framework_state.chains.0
     }
 

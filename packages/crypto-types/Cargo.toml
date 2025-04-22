@@ -1,0 +1,13 @@
+[package]
+name = "crypto-types"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+realcryptography = ["dep:k256", "dep:hex"]
+
+[dependencies]
+hex = { workspace = true, optional = true }
+k256 = { workspace = true, features = ["serde", "ecdsa", "sha256"], optional = true }
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.12"
