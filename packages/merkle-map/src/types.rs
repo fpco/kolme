@@ -76,6 +76,8 @@ pub enum MerkleSerialError {
     HashesNotFound {
         hashes: HashSet<shared::types::Sha256Hash>,
     },
+    #[error("Leaf content limit exceeded: limit {limit}, actual {actual}")]
+    LeafContentLimitExceeded { limit: usize, actual: usize },
     #[error(transparent)]
     Custom(Box<dyn std::error::Error + Send + Sync>),
     #[error("{0}")]

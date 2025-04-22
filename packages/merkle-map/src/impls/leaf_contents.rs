@@ -132,8 +132,13 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Leaf
         if magic_byte != 42 {
             return Err(MerkleSerialError::UnexpectedMagicByte { byte: magic_byte });
         }
-        // TODO: Do we allow a length more than 16 here?
         let len = deserializer.load_usize()?;
+        if len > 16 {
+            return Err(MerkleSerialError::LeafContentLimitExceeded {
+                limit: 16,
+                actual: len,
+            });
+        }
         let mut values = arrayvec::ArrayVec::new();
         for _ in 0..len {
             values.push(LeafEntry::merkle_deserialize(deserializer)?);
