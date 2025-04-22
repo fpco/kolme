@@ -190,7 +190,10 @@ pub(super) async fn validate_genesis_info(
     expected: &GenesisInfo,
 ) -> Result<()> {
     if let Some(actual) = load_genesis_info(pool).await? {
-        anyhow::ensure!(&actual == expected);
+        anyhow::ensure!(
+            &actual == expected,
+            "Mismatched genesis info.\nActual:   {actual:?}\nExpected: {expected:?}"
+        );
     }
     Ok(())
 }
