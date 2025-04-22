@@ -297,7 +297,7 @@ pub async fn serve<C: Config>(
         Some(AppComponent::Listener) => {
             tracing::info!("Running listener ...");
             let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(listener.run(ChainName::Cosmos));
+            set.spawn(listener.run(C::chain_name()));
         }
         Some(AppComponent::Approver) => {
             tracing::info!("Running approver ...");
@@ -319,7 +319,7 @@ pub async fn serve<C: Config>(
             let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
             set.spawn(processor.run());
             let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(listener.run(ChainName::Cosmos));
+            set.spawn(listener.run(C::chain_name()));
             let approver = Approver::new(kolme.clone(), my_secret_key().clone());
             set.spawn(approver.run());
             let submitter = C::new_submitter(kolme.clone());
