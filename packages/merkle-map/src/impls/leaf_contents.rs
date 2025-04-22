@@ -3,7 +3,9 @@ use crate::*;
 impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
     fn from(tree: TreeContents<K, V>) -> Self {
         assert!(tree.len() <= 16);
-        let mut leaf = LeafContents { values: vec![] };
+        let mut leaf = LeafContents {
+            values: arrayvec::ArrayVec::new(),
+        };
         tree.drain_entries_to(&mut leaf.values);
         leaf
     }
@@ -94,14 +96,19 @@ impl<K, V> LeafContents<K, V> {
         self.values.len()
     }
 
-    pub(crate) fn drain_entries_to(mut self, entries: &mut Vec<LeafEntry<K, V>>) {
-        entries.append(&mut self.values);
+    pub(crate) fn drain_entries_to(
+        mut self,
+        entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>,
+    ) {
+        entries.extend(&mut self.values.drain(..));
     }
 }
 
 impl<K, V> Default for LeafContents<K, V> {
     fn default() -> Self {
-        Self { values: vec![] }
+        Self {
+            values: arrayvec::ArrayVec::new(),
+        }
     }
 }
 
@@ -126,7 +133,13 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Leaf
             return Err(MerkleSerialError::UnexpectedMagicByte { byte: magic_byte });
         }
         let len = deserializer.load_usize()?;
-        let mut values = Vec::with_capacity(len);
+        if len > 16 {
+            return Err(MerkleSerialError::LeafContentLimitExceeded {
+                limit: 16,
+                actual: len,
+            });
+        }
+        let mut values = arrayvec::ArrayVec::new();
         for _ in 0..len {
             values.push(LeafEntry::merkle_deserialize(deserializer)?);
         }
