@@ -60,7 +60,7 @@ impl KolmeApp for SampleKolmeApp {
             needed_listeners: 1,
             approvers: set,
             needed_approvers: 1,
-            chains: ChainStates::default(),
+            chains: ConfiguredChains::default(),
         }
     }
 

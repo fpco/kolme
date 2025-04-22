@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use shared::{cryptography::PublicKey, types::Sha256Hash};
+use shared::{
+    cryptography::{PublicKey, RecoveryId, Signature},
+    types::{BridgeActionId, Sha256Hash},
+};
 
 use crate::*;
 
@@ -128,5 +131,29 @@ impl MerkleDeserialize for PublicKey {
     ) -> Result<Self, MerkleSerialError> {
         let bytes = deserializer.load_bytes()?;
         PublicKey::from_bytes(bytes).map_err(MerkleSerialError::custom)
+    }
+}
+
+impl MerkleDeserialize for BridgeActionId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        u64::merkle_deserialize(deserializer).map(Self)
+    }
+}
+impl MerkleDeserialize for Signature {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Signature::from_slice(deserializer.load_bytes()?).map_err(MerkleSerialError::custom)
+    }
+}
+
+impl MerkleDeserialize for RecoveryId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let byte = deserializer.pop_byte()?;
+        RecoveryId::from_byte(byte).map_err(MerkleSerialError::custom)
     }
 }

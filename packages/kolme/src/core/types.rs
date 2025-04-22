@@ -282,6 +282,29 @@ pub struct VotingBridgeAction {
     pub approvals: BTreeMap<Signature, RecoveryId>,
 }
 
+impl MerkleSerialize for VotingBridgeAction {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        let VotingBridgeAction { payload, approvals } = self;
+        serializer.store(payload)?;
+        serializer.store(approvals)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for VotingBridgeAction {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(VotingBridgeAction {
+            payload: deserializer.load()?,
+            approvals: deserializer.load()?,
+        })
+    }
+}
+
 impl MerkleSerialize for ChainConfig {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let ChainConfig { assets, bridge } = self;
@@ -891,7 +914,7 @@ pub struct GenesisInfo {
     /// How many of the approvers are needed to approve a bridge action?
     pub needed_approvers: usize,
     /// Initial configuration of different chains
-    pub chains: BTreeMap<ExternalChain, ChainConfig>,
+    pub chains: ConfiguredChains,
 }
 
 impl GenesisInfo {
@@ -907,7 +930,16 @@ impl GenesisInfo {
 #[derive(PartialEq, Default, Debug, Clone)]
 pub struct ChainStates(pub(crate) MerkleMap<ExternalChain, ChainState>);
 
-impl ChainStates {
+impl From<ConfiguredChains> for ChainStates {
+    fn from(c: ConfiguredChains) -> Self {
+        ChainStates(c.0.into_iter().map(|(k, v)| (k, v.into_state())).collect())
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Default, Debug, Clone)]
+pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
+
+impl ConfiguredChains {
     pub fn insert_solana(&mut self, chain: SolanaChain, config: ChainConfig) -> Result<()> {
         use kolme_solana_bridge_client::pubkey::Pubkey;
 
@@ -921,7 +953,7 @@ impl ChainStates {
             BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
         };
 
-        self.0.insert(chain.into(), config.into_state());
+        self.0.insert(chain.into(), config);
 
         Ok(())
     }
@@ -941,7 +973,7 @@ impl ChainStates {
             }
         }
 
-        self.0.insert(chain.into(), config.into_state());
+        self.0.insert(chain.into(), config);
 
         Ok(())
     }

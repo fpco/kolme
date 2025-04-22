@@ -1,4 +1,4 @@
-use shared::cryptography::PublicKey;
+use shared::{cryptography::PublicKey, types::BridgeActionId};
 
 use crate::*;
 
@@ -33,5 +33,11 @@ impl ToMerkleKey for u64 {
 impl ToMerkleKey for PublicKey {
     fn to_merkle_key(&self) -> MerkleKey {
         MerkleKey::from_slice(&self.as_bytes())
+    }
+}
+
+impl ToMerkleKey for BridgeActionId {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.0.to_merkle_key()
     }
 }

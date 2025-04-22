@@ -80,7 +80,7 @@ impl FrameworkState {
             needed_listeners: *needed_listeners,
             approvers: approvers.clone(),
             needed_approvers: *needed_approvers,
-            chains: chains.clone(),
+            chains: ChainStates::from(chains.clone()),
             accounts: Accounts::default(),
         }
     }
@@ -102,6 +102,7 @@ impl FrameworkState {
             .0
             .get(&chain)
             .ok_or(CoreStateError::ChainNotSupported { chain })?
+            .config
             .assets
             .values()
             .find(|config| config.asset_id == asset_id)

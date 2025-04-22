@@ -198,9 +198,26 @@ pub use sigerr::SignatureError;
 
 use super::SignatureWithRecovery;
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Signature(k256::ecdsa::Signature);
+
+impl PartialOrd for Signature {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Signature {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.to_bytes().cmp(&other.0.to_bytes())
+    }
+}
+
 impl Signature {
+    pub fn as_bytes(&self) -> impl AsRef<[u8]> {
+        self.0.to_bytes()
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         self.0.to_bytes().to_vec()
     }

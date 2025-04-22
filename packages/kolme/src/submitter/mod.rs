@@ -214,7 +214,7 @@ impl<App: KolmeApp> Submitter<App> {
             let kolme = self.kolme.read().await;
             match kolme.get_bridge_contracts().get(&chain) {
                 None => return Ok(()),
-                Some(config) => match &config.bridge {
+                Some(state) => match &state.config.bridge {
                     BridgeContract::NeededCosmosBridge { .. }
                     | BridgeContract::NeededSolanaBridge { .. } => return Ok(()),
                     BridgeContract::Deployed(contract) => contract.clone(),
