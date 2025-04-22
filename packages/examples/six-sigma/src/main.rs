@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
-use example_six_sigma::{broadcast, serve, state, SixSigmaCosmos};
+use example_six_sigma::{broadcast, serve, state, AppComponent, SixSigmaCosmos};
 use kolme::SecretKey;
 
 #[derive(clap::Parser)]
@@ -16,6 +16,8 @@ struct Opt {
 #[derive(clap::Parser)]
 enum Cmd {
     Serve {
+        #[command(subcommand)]
+        component: Option<AppComponent>,
         #[clap(long, default_value = "[::]:3000")]
         bind: SocketAddr,
         #[clap(long)]
@@ -44,9 +46,13 @@ async fn main_inner() -> Result<()> {
     let opt = Opt::parse();
     let db_path = opt.db_path.unwrap_or(DB_PATH.into());
     match opt.cmd {
-        Cmd::Serve { bind, tx_log_path } => {
+        Cmd::Serve {
+            bind,
+            tx_log_path,
+            component,
+        } => {
             kolme::init_logger(true, None);
-            serve::<SixSigmaCosmos>(bind, db_path, tx_log_path).await
+            serve::<SixSigmaCosmos>(bind, db_path, tx_log_path, component).await
         }
         Cmd::GenPair {} => {
             let mut rng = rand::thread_rng();

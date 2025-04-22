@@ -276,26 +276,58 @@ pub async fn serve<C: Config>(
     bind: SocketAddr,
     db_path: PathBuf,
     tx_log_path: Option<PathBuf>,
+    component: Option<AppComponent>,
 ) -> Result<()> {
     tracing::info!("starting");
     let kolme = Kolme::new(SixSigmaApp::<C>::default(), DUMMY_CODE_VERSION, db_path).await?;
 
     let mut set = JoinSet::new();
 
-    let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
-    set.spawn(processor.run());
-    let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(listener.run(C::chain_name()));
-    let approver = Approver::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(approver.run());
-    let submitter = C::new_submitter(kolme.clone());
-    set.spawn(submitter.run());
     if let Some(tx_log_path) = tx_log_path {
         let logger = TxLogger::new(kolme.clone(), tx_log_path);
         set.spawn(logger.run());
     }
-    let api_server = ApiServer::new(kolme);
-    set.spawn(api_server.run(bind));
+
+    match component {
+        Some(AppComponent::Processor) => {
+            tracing::info!("Running processor ...");
+            let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+            set.spawn(processor.run());
+        }
+        Some(AppComponent::Listener) => {
+            tracing::info!("Running listener ...");
+            let listener = Listener::new(kolme.clone(), my_secret_key().clone());
+            set.spawn(listener.run(C::chain_name()));
+        }
+        Some(AppComponent::Approver) => {
+            tracing::info!("Running approver ...");
+            let approver = Approver::new(kolme.clone(), my_secret_key().clone());
+            set.spawn(approver.run());
+        }
+        Some(AppComponent::Submitter) => {
+            tracing::info!("Running submitter ...");
+            let submitter = C::new_submitter(kolme.clone());
+            set.spawn(submitter.run());
+        }
+        Some(AppComponent::ApiServer) => {
+            tracing::info!("Running api-server ...");
+            let api_server = ApiServer::new(kolme);
+            set.spawn(api_server.run(bind));
+        }
+        None => {
+            tracing::info!("Running in monolith mode ...");
+            let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+            set.spawn(processor.run());
+            let listener = Listener::new(kolme.clone(), my_secret_key().clone());
+            set.spawn(listener.run(C::chain_name()));
+            let approver = Approver::new(kolme.clone(), my_secret_key().clone());
+            set.spawn(approver.run());
+            let submitter = C::new_submitter(kolme.clone());
+            set.spawn(submitter.run());
+            let api_server = ApiServer::new(kolme);
+            set.spawn(api_server.run(bind));
+        }
+    }
 
     while let Some(res) = set.join_next().await {
         match res {
@@ -446,6 +478,7 @@ mod tests {
             SocketAddr::from_str("[::]:3001").unwrap(),
             db_path.clone(),
             Some(log_file.path().to_path_buf()),
+            None,
         ));
         let client = reqwest::Client::new();
 
