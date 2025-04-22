@@ -76,11 +76,7 @@ impl<App: KolmeApp> Listener<App> {
                     )
                     .await?
                 {
-                    let config = &kolme
-                        .get_bridge_contracts()
-                        .get(&chain)
-                        .with_context(|| format!("No chain config found for {chain:?}"))?
-                        .config;
+                    let config = &kolme.get_bridge_contracts().get(chain)?.config;
 
                     let expected_code_id = match config.bridge {
                         BridgeContract::NeededCosmosBridge { code_id } => code_id,
@@ -135,7 +131,7 @@ impl<App: KolmeApp> Listener<App> {
     async fn get_contracts(&self, name: ChainName) -> Option<BTreeMap<ExternalChain, String>> {
         let mut res = BTreeMap::new();
 
-        for (chain, state) in self.kolme.read().await.get_bridge_contracts() {
+        for (chain, state) in self.kolme.read().await.get_bridge_contracts().iter() {
             if chain.name() != name {
                 continue;
             }
@@ -144,7 +140,7 @@ impl<App: KolmeApp> Listener<App> {
                 BridgeContract::NeededCosmosBridge { .. }
                 | BridgeContract::NeededSolanaBridge { .. } => return None,
                 BridgeContract::Deployed(contract) => {
-                    res.insert(*chain, contract.clone());
+                    res.insert(chain, contract.clone());
                 }
             }
         }

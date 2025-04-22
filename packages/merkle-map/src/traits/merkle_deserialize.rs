@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shared::{
-    cryptography::{PublicKey, RecoveryId, Signature},
+    cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
     types::{BridgeActionId, Sha256Hash},
 };
 
@@ -47,6 +47,20 @@ impl MerkleDeserialize for String {
         std::str::from_utf8(bytes)
             .map(ToOwned::to_owned)
             .map_err(MerkleSerialError::custom)
+    }
+}
+
+impl<T: MerkleDeserialize> MerkleDeserialize for Option<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        match deserializer.pop_byte()? {
+            0 => Ok(None),
+            1 => T::merkle_deserialize(deserializer).map(Some),
+            x => Err(MerkleSerialError::Other(format!(
+                "When deserializing an Option, invalid byte {x}"
+            ))),
+        }
     }
 }
 
@@ -155,5 +169,24 @@ impl MerkleDeserialize for RecoveryId {
     ) -> Result<Self, MerkleSerialError> {
         let byte = deserializer.pop_byte()?;
         RecoveryId::from_byte(byte).map_err(MerkleSerialError::custom)
+    }
+}
+
+impl MerkleDeserialize for SignatureWithRecovery {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            recid: deserializer.load()?,
+            sig: deserializer.load()?,
+        })
+    }
+}
+
+impl<T1: MerkleDeserialize, T2: MerkleDeserialize> MerkleDeserialize for (T1, T2) {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok((deserializer.load()?, deserializer.load()?))
     }
 }

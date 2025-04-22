@@ -137,10 +137,13 @@ impl SecretKey {
     pub fn sign_recoverable(
         &self,
         msg: impl AsRef<[u8]>,
-    ) -> Result<(Signature, RecoveryId), SecretKeyError> {
+    ) -> Result<SignatureWithRecovery, SecretKeyError> {
         k256::ecdsa::SigningKey::from(&self.0)
             .sign_recoverable(msg.as_ref())
-            .map(|(x, y)| (x.into(), y.into()))
+            .map(|(sig, rec)| SignatureWithRecovery {
+                recid: rec.into(),
+                sig: sig.into(),
+            })
             .map_err(|source| SecretKeyError::SigningFailed { source })
     }
 
@@ -258,7 +261,7 @@ pub enum RecoveryIdError {
     InvalidByte { byte: u8 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RecoveryId(k256::ecdsa::RecoveryId);
 impl RecoveryId {
     pub fn to_byte(&self) -> u8 {

@@ -85,19 +85,11 @@ mod tests {
 
         let secret = SecretKey::random(&mut rng);
 
-        let (signature, recovery) = secret.sign_recoverable(&payload).unwrap();
+        let sigrec = secret.sign_recoverable(&payload).unwrap();
 
         let hash = Sha256::digest(&payload);
 
-        let pubkey = validate_signature(
-            &MockApi::default(),
-            &hash,
-            &SignatureWithRecovery {
-                recid: recovery,
-                sig: signature,
-            },
-        )
-        .unwrap();
+        let pubkey = validate_signature(&MockApi::default(), &hash, &sigrec).unwrap();
 
         assert_eq!(secret.public_key(), pubkey);
     }

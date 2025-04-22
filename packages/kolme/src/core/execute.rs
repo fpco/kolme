@@ -7,7 +7,8 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     framework_state: FrameworkState,
     app: &'a App,
     app_state: App::State,
-    output: MessageOutput,
+    logs: Vec<Vec<String>>,
+    loads: Vec<BlockDataLoad>,
     /// If we're doing a validation run, these are the prior data loads.
     validation_data_loads: Option<VecDeque<BlockDataLoad>>,
     /// Who signed the transaction
@@ -31,7 +32,9 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
 pub struct ExecutionResults<App: KolmeApp> {
     pub framework_state: FrameworkState,
     pub app_state: App::State,
-    pub outputs: Vec<MessageOutput>,
+    /// Logs collected from each message.
+    pub logs: Vec<Vec<String>>,
+    pub loads: Vec<BlockDataLoad>,
     pub db_updates: Vec<DatabaseUpdate>,
 }
 
@@ -45,20 +48,6 @@ pub enum DatabaseUpdate {
         was_accepted: bool,
         /// If this is a signed action, what's the action ID?
         action_id: Option<BridgeActionId>,
-    },
-
-    ApproveAction {
-        pubkey: PublicKey,
-        signature: Signature,
-        recovery: RecoveryId,
-        msg_index: usize,
-        chain: ExternalChain,
-        action_id: BridgeActionId,
-    },
-    ProcessorApproveAction {
-        msg_index: usize,
-        chain: ExternalChain,
-        action_id: BridgeActionId,
     },
 }
 
@@ -93,11 +82,9 @@ impl<App: KolmeApp> KolmeInner<App> {
         let mut framework_state = self.framework_state.clone();
         let sender_account_id = framework_state.accounts.use_nonce(tx.pubkey, tx.nonce)?;
 
-        let mut outputs = vec![];
         let mut execution_context = ExecutionContext::<App> {
             framework_state,
             app_state: self.app_state.clone(),
-            output: MessageOutput::default(),
             validation_data_loads: validation_data_loads.map(Into::into),
             pubkey: tx.pubkey,
             pool: self.pool.clone(),
@@ -106,19 +93,19 @@ impl<App: KolmeApp> KolmeInner<App> {
             app: &self.app,
             signing_key: signed_tx.0.message.as_inner().pubkey,
             timestamp,
+            logs: vec![],
+            loads: vec![],
         };
         for (msg_index, message) in tx.messages.iter().enumerate() {
+            execution_context.logs.push(vec![]);
             execution_context
                 .execute_message(&self.app, message, msg_index)
                 .await?;
-            let output = std::mem::take(&mut execution_context.output);
-            outputs.push(output);
         }
 
         let ExecutionContext {
             framework_state,
             app_state,
-            output: _,
             validation_data_loads,
             pubkey: _,
             pool: _,
@@ -127,6 +114,8 @@ impl<App: KolmeApp> KolmeInner<App> {
             app: _,
             signing_key: _,
             timestamp: _,
+            logs,
+            loads,
         } = execution_context;
 
         if let Some(loads) = validation_data_loads {
@@ -138,7 +127,8 @@ impl<App: KolmeApp> KolmeInner<App> {
         Ok(ExecutionResults {
             framework_state,
             app_state,
-            outputs,
+            logs,
+            loads,
             db_updates,
         })
     }
@@ -170,19 +160,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 chain,
                 action_id,
                 signature,
-                recovery,
-            } => {
-                self.approve(*chain, *action_id, *signature, *recovery, msg_index)
-                    .await?
-            }
+            } => self.approve(*chain, *action_id, *signature).await?,
             Message::ProcessorApprove {
                 chain,
                 action_id,
                 processor,
                 approvers,
             } => {
-                self.processor_approve(*chain, *action_id, processor, approvers, msg_index)
-                    .await?;
+                self.processor_approve(*chain, *action_id, processor, approvers)?;
             }
             Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(auth) => self.auth(auth).await?,
@@ -224,13 +209,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         if was_accepted {
             match event {
                 BridgeEvent::Instantiated { contract } => {
-                    let config = &mut self
-                        .framework_state
-                        .chains
-                        .0
-                        .get_mut(&chain)
-                        .context("Found a listener event for a chain we don't care about")?
-                        .config;
+                    let config = &mut self.framework_state.chains.get_mut(chain)?.config;
                     match config.bridge {
                         BridgeContract::NeededCosmosBridge { .. } |
                             BridgeContract::NeededSolanaBridge { .. } => (),
@@ -253,9 +232,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         let Some(asset_config) = self
                             .framework_state
                             .chains
-                            .0
-                            .get(&chain)
-                            .context("Unknown chain")?
+                            .get(chain)?
                             .config
                             .assets
                             .get(&AssetName(denom.clone()))
@@ -294,74 +271,58 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         &mut self,
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: Signature,
-        recovery: RecoveryId,
-        msg_index: usize,
+        signature: SignatureWithRecovery,
     ) -> Result<()> {
-        let payload = get_action_payload(&self.pool, chain, action_id).await?;
-        let key = PublicKey::recover_from_msg(payload, &signature, recovery)?;
+        let action = self
+            .framework_state
+            .chains
+            .get_mut(chain)?
+            .pending_actions
+            .get_mut(&action_id)
+            .with_context(|| {
+                format!("Cannot approve missing bridge action ID {action_id} for chain {chain}")
+            })?;
+        let key = signature.validate(action.payload.as_bytes())?;
         anyhow::ensure!(self.framework_state.approvers.contains(&key));
-        let chain_db = chain.as_ref();
-        let action_id_db = i64::try_from(action_id.0)?;
-        let count = sqlx::query_scalar!(
-            r#"
-                SELECT COUNT(*)
-                FROM actions
-                INNER JOIN action_approvals
-                ON actions.id=action_approvals.action
-                WHERE chain=$1
-                AND action_id=$2
-                AND public_key=$3
-            "#,
-            chain_db,
-            action_id_db,
-            key
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        anyhow::ensure!(count == 0);
-        self.db_updates.push(DatabaseUpdate::ApproveAction {
-            pubkey: key,
-            signature,
-            recovery,
-            msg_index,
-            chain,
-            action_id,
-        });
+        let old = action.approvals.insert(key, signature);
+        assert!(old.is_none(), "Cannot approve bridge action ID {action_id} for chain {chain} with already-used public key {key}");
         Ok(())
     }
 
-    async fn processor_approve(
+    fn processor_approve(
         &mut self,
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: &SignatureWithRecovery,
         approvers: &[SignatureWithRecovery],
-        msg_index: usize,
     ) -> Result<()> {
         anyhow::ensure!(approvers.len() >= self.framework_state.needed_approvers);
 
-        let payload = get_action_payload(&self.pool, chain, action_id).await?;
+        let action = self
+            .framework_state
+            .chains
+            .get_mut(chain)?
+            .pending_actions
+            .get_mut(&action_id)
+            .with_context(|| format!("No pending action {action_id} found for {chain}"))?;
 
-        let processor = processor.validate(&payload)?;
-        anyhow::ensure!(processor == self.framework_state.processor);
+        anyhow::ensure!(action.processor.is_none());
+
+        let payload = action.payload.as_bytes();
+        let processor_key = processor.validate(payload)?;
+        anyhow::ensure!(processor_key == self.framework_state.processor);
 
         let approvers_checked = approvers
             .iter()
             .map(|sig| {
-                let pubkey = sig.validate(&payload)?;
+                let pubkey = sig.validate(payload)?;
                 anyhow::ensure!(self.framework_state.approvers.contains(&pubkey));
                 Ok(pubkey)
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
         anyhow::ensure!(approvers.len() == approvers_checked.len());
 
-        self.db_updates
-            .push(DatabaseUpdate::ProcessorApproveAction {
-                msg_index,
-                chain,
-                action_id,
-            });
+        action.processor = Some(*processor);
 
         Ok(())
     }
@@ -403,6 +364,22 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state.accounts.get_assets(account_id)
     }
 
+    fn add_action(&mut self, chain: ExternalChain, action: ExecAction) -> Result<()> {
+        let state = self.framework_state.chains.get_mut(chain)?;
+        let id = state.next_action_id;
+        let payload = action.to_payload(chain, &state.config, id)?;
+        state.pending_actions.insert(
+            id,
+            PendingBridgeAction {
+                payload,
+                approvals: BTreeMap::new(),
+                processor: None,
+            },
+        );
+        state.next_action_id = state.next_action_id.next();
+        Ok(())
+    }
+
     /// Withdraw an asset to an external chain.
     pub fn withdraw_asset(
         &mut self,
@@ -418,14 +395,17 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .accounts
             .burn(source, asset_id, amount_dec)?;
 
-        self.output.actions.push(ExecAction::Transfer {
+        self.add_action(
             chain,
-            recipient: wallet.clone(),
-            funds: vec![AssetAmount {
-                id: asset_id,
-                amount: amount_u128,
-            }],
-        });
+            ExecAction::Transfer {
+                chain,
+                recipient: wallet.clone(),
+                funds: vec![AssetAmount {
+                    id: asset_id,
+                    amount: amount_u128,
+                }],
+            },
+        )?;
         Ok(())
     }
 
@@ -489,7 +469,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             None => req.load(self.app).await?,
         };
-        self.output.loads.push(BlockDataLoad {
+        self.loads.push(BlockDataLoad {
             request: request_str,
             response: serde_json::to_string(&res)?,
         });
@@ -543,7 +523,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     }
 
     pub fn log(&mut self, msg: impl Into<String>) {
-        self.output.logs.push(msg.into());
+        self.logs.last_mut().unwrap().push(msg.into());
     }
 }
 

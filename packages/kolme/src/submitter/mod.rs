@@ -68,7 +68,6 @@ impl<App: KolmeApp> Submitter<App> {
             .await
             .get_bridge_contracts()
             .keys()
-            .copied()
             .filter(|x| self.args.can_handle(*x))
             .collect::<Vec<_>>();
 
@@ -105,14 +104,10 @@ impl<App: KolmeApp> Submitter<App> {
         }
 
         for chain in chains {
-            if let Some(bridge_action) = self
-                .kolme
-                .read()
-                .await
-                .get_next_bridge_action(*chain)
-                .await?
+            if let Some((action_id, action)) =
+                self.kolme.read().await.get_next_bridge_action(*chain)?
             {
-                return self.handle_bridge_action(bridge_action).await;
+                return self.handle_bridge_action(action_id, *chain, action).await;
             }
         }
 
@@ -170,55 +165,30 @@ impl<App: KolmeApp> Submitter<App> {
 
     async fn handle_bridge_action(
         &mut self,
+        action_id: BridgeActionId,
+        chain: ExternalChain,
         PendingBridgeAction {
-            chain,
             payload,
-            height,
-            message: msg_index,
-            action_id,
-        }: PendingBridgeAction,
+            approvals,
+            processor,
+        }: &PendingBridgeAction,
     ) -> Result<()> {
+        let Some(processor) = processor else {
+            return Ok(());
+        };
         if let Some(last) = self.last_submitted.get(&chain) {
             if *last <= action_id {
                 return Ok(());
             }
         }
 
-        let block = self.kolme.read().await.load_block(height).await?;
-        let message = block
-            .0
-            .message
-            .as_inner()
-            .tx
-            .0
-            .message
-            .as_inner()
-            .messages
-            .get(msg_index)
-            .with_context(|| format!("Block height {height} is missing message #{msg_index}"))?;
-
-        let Message::ProcessorApprove {
-            chain: chain2,
-            action_id: action_id2,
-            processor,
-            approvers,
-        } = message
-        else {
-            anyhow::bail!("Wrong message type for {height}#{msg_index}");
-        };
-
-        anyhow::ensure!(&chain == chain2);
-        anyhow::ensure!(&action_id == action_id2);
-
         let contract = {
             let kolme = self.kolme.read().await;
-            match kolme.get_bridge_contracts().get(&chain) {
-                None => return Ok(()),
-                Some(state) => match &state.config.bridge {
-                    BridgeContract::NeededCosmosBridge { .. }
-                    | BridgeContract::NeededSolanaBridge { .. } => return Ok(()),
-                    BridgeContract::Deployed(contract) => contract.clone(),
-                },
+            let state = kolme.get_bridge_contracts().get(chain)?;
+            match &state.config.bridge {
+                BridgeContract::NeededCosmosBridge { .. }
+                | BridgeContract::NeededSolanaBridge { .. } => return Ok(()),
+                BridgeContract::Deployed(contract) => contract.clone(),
             }
         };
 
@@ -235,7 +205,7 @@ impl<App: KolmeApp> Submitter<App> {
                     seed_phrase,
                     &contract,
                     *processor,
-                    approvers.clone(),
+                    approvals,
                     payload,
                 )
                 .await?
@@ -252,15 +222,7 @@ impl<App: KolmeApp> Submitter<App> {
                     .get_solana_client(solana_chain)
                     .await;
 
-                solana::execute(
-                    &client,
-                    keypair,
-                    &contract,
-                    *processor,
-                    approvers.clone(),
-                    payload,
-                )
-                .await?
+                solana::execute(&client, keypair, &contract, *processor, approvals, payload).await?
             }
         };
 

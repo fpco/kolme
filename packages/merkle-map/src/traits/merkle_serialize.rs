@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use shared::{
-    cryptography::{PublicKey, RecoveryId, Signature},
+    cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
     types::{BridgeActionId, Sha256Hash},
 };
 
@@ -46,6 +46,21 @@ impl MerkleSerialize for str {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_slice(self.as_bytes());
         Ok(())
+    }
+}
+
+impl<T: MerkleSerialize> MerkleSerialize for Option<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        match self {
+            Some(x) => {
+                serializer.store_byte(1);
+                x.merkle_serialize(serializer)
+            }
+            None => {
+                serializer.store_byte(0);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -126,6 +141,23 @@ impl MerkleSerialize for Signature {
 impl MerkleSerialize for RecoveryId {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_byte(self.to_byte());
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for SignatureWithRecovery {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self { recid, sig } = self;
+        serializer.store(recid)?;
+        serializer.store(sig)?;
+        Ok(())
+    }
+}
+
+impl<T1: MerkleSerialize, T2: MerkleSerialize> MerkleSerialize for (T1, T2) {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store(&self.0)?;
+        serializer.store(&self.1)?;
         Ok(())
     }
 }

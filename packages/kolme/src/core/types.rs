@@ -1,5 +1,6 @@
 mod accounts;
 
+use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
@@ -238,7 +239,7 @@ impl ChainConfig {
         ChainState {
             config: self,
             next_action_id: BridgeActionId::start(),
-            voting_actions: MerkleMap::new(),
+            pending_actions: MerkleMap::new(),
         }
     }
 }
@@ -247,7 +248,8 @@ impl ChainConfig {
 pub struct ChainState {
     pub config: ChainConfig,
     pub next_action_id: BridgeActionId,
-    pub voting_actions: MerkleMap<BridgeActionId, VotingBridgeAction>,
+    /// Actions which have not yet been confirmed as landing on-chain.
+    pub pending_actions: MerkleMap<BridgeActionId, PendingBridgeAction>,
 }
 
 impl MerkleSerialize for ChainState {
@@ -255,7 +257,7 @@ impl MerkleSerialize for ChainState {
         let ChainState {
             config,
             next_action_id,
-            voting_actions,
+            pending_actions: voting_actions,
         } = self;
         serializer.store(config)?;
         serializer.store(next_action_id)?;
@@ -271,36 +273,45 @@ impl MerkleDeserialize for ChainState {
         Ok(ChainState {
             config: deserializer.load()?,
             next_action_id: deserializer.load()?,
-            voting_actions: deserializer.load()?,
+            pending_actions: deserializer.load()?,
         })
     }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct VotingBridgeAction {
+pub struct PendingBridgeAction {
     pub payload: String,
-    pub approvals: BTreeMap<Signature, RecoveryId>,
+    /// Approvals from the approvers
+    pub approvals: BTreeMap<PublicKey, SignatureWithRecovery>,
+    /// Processor signature finalizing this operation
+    pub processor: Option<SignatureWithRecovery>,
 }
 
-impl MerkleSerialize for VotingBridgeAction {
+impl MerkleSerialize for PendingBridgeAction {
     fn merkle_serialize(
         &self,
         serializer: &mut MerkleSerializer,
     ) -> std::result::Result<(), MerkleSerialError> {
-        let VotingBridgeAction { payload, approvals } = self;
+        let PendingBridgeAction {
+            payload,
+            approvals,
+            processor,
+        } = self;
         serializer.store(payload)?;
         serializer.store(approvals)?;
+        serializer.store(processor)?;
         Ok(())
     }
 }
 
-impl MerkleDeserialize for VotingBridgeAction {
+impl MerkleDeserialize for PendingBridgeAction {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        Ok(VotingBridgeAction {
+        Ok(PendingBridgeAction {
             payload: deserializer.load()?,
             approvals: deserializer.load()?,
+            processor: deserializer.load()?,
         })
     }
 }
@@ -475,15 +486,6 @@ pub struct InstantiateArgs {
     pub needed_listeners: usize,
     pub approvers: BTreeSet<PublicKey>,
     pub needed_approvers: usize,
-}
-
-pub struct PendingBridgeAction {
-    pub chain: ExternalChain,
-    pub payload: String,
-    pub height: BlockHeight,
-    /// Index of the message within the block
-    pub message: usize,
-    pub action_id: BridgeActionId,
 }
 
 #[derive(
@@ -833,8 +835,7 @@ pub enum Message<AppMessage> {
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: Signature,
-        recovery: RecoveryId,
+        signature: SignatureWithRecovery,
     },
     /// Final approval from the processor to confirm approvals from approvers.
     ProcessorApprove {
@@ -928,11 +929,47 @@ impl GenesisInfo {
 }
 
 #[derive(PartialEq, Default, Debug, Clone)]
-pub struct ChainStates(pub(crate) MerkleMap<ExternalChain, ChainState>);
+pub struct ChainStates(MerkleMap<ExternalChain, ChainState>);
 
 impl From<ConfiguredChains> for ChainStates {
     fn from(c: ConfiguredChains) -> Self {
         ChainStates(c.0.into_iter().map(|(k, v)| (k, v.into_state())).collect())
+    }
+}
+
+impl MerkleSerialize for ChainStates {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for ChainStates {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
+
+impl ChainStates {
+    pub fn get(&self, chain: ExternalChain) -> Result<&ChainState, CoreStateError> {
+        self.0
+            .get(&chain)
+            .ok_or(CoreStateError::ChainNotSupported { chain })
+    }
+
+    pub fn get_mut(&mut self, chain: ExternalChain) -> Result<&mut ChainState, CoreStateError> {
+        self.0
+            .get_mut(&chain)
+            .ok_or(CoreStateError::ChainNotSupported { chain })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (ExternalChain, &ChainState)> {
+        self.0.iter().map(|(k, v)| (*k, v))
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = ExternalChain> + '_ {
+        self.0.keys().copied()
     }
 }
 
@@ -979,13 +1016,6 @@ impl ConfiguredChains {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct MessageOutput {
-    pub logs: Vec<String>,
-    pub loads: Vec<BlockDataLoad>,
-    pub actions: Vec<ExecAction>,
-}
-
 /// Input and output for a single data load while processing a block.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct BlockDataLoad {
@@ -1011,7 +1041,7 @@ impl ExecAction {
     pub(crate) fn to_payload(
         &self,
         chain: ExternalChain,
-        configs: &MerkleMap<ExternalChain, ChainState>,
+        config: &ChainConfig,
         id: BridgeActionId,
     ) -> Result<String> {
         use base64::Engine;
@@ -1030,7 +1060,6 @@ impl ExecAction {
             } => {
                 assert_eq!(&chain, chain2);
 
-                let config = &configs.get(&chain).context("Missing chain")?.config;
                 match chain.name() {
                     ChainName::Cosmos => {
                         let mut coins = vec![];

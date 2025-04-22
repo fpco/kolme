@@ -61,7 +61,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         bridges: kolme
             .get_bridge_contracts()
             .iter()
-            .map(|(k, v)| (*k, &v.config))
+            .map(|(k, v)| (k, &v.config))
             .collect(),
         balances: kolme.get_balances().iter().collect(),
     };

@@ -40,7 +40,7 @@ impl MerkleSerialize for FrameworkState {
         serializer.store(needed_listeners)?;
         serializer.store(approvers)?;
         serializer.store(needed_approvers)?;
-        serializer.store(&chains.0)?;
+        serializer.store(chains)?;
         serializer.store(accounts)?;
         Ok(())
     }
@@ -56,7 +56,7 @@ impl MerkleDeserialize for FrameworkState {
             needed_listeners: deserializer.load()?,
             approvers: deserializer.load()?,
             needed_approvers: deserializer.load()?,
-            chains: ChainStates(deserializer.load()?),
+            chains: deserializer.load()?,
             accounts: deserializer.load()?,
         })
     }
@@ -99,9 +99,7 @@ impl FrameworkState {
         asset_id: AssetId,
     ) -> Result<&AssetConfig, CoreStateError> {
         self.chains
-            .0
-            .get(&chain)
-            .ok_or(CoreStateError::ChainNotSupported { chain })?
+            .get(chain)?
             .config
             .assets
             .values()

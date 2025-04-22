@@ -48,13 +48,13 @@ pub async fn execute(
     seed_phrase: &SeedPhrase,
     contract: &str,
     processor: SignatureWithRecovery,
-    approvers: Vec<SignatureWithRecovery>,
-    payload: String,
+    approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
+    payload: &str,
 ) -> Result<String> {
     let msg = ExecuteMsg::Signed {
         processor,
-        approvers,
-        payload,
+        approvers: approvals.values().copied().collect(),
+        payload: payload.to_owned(),
     };
 
     let contract = cosmos.make_contract(contract.parse()?);
