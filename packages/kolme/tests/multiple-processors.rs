@@ -94,39 +94,21 @@ async fn multiple_processors() {
     let mut processor_set = JoinSet::new();
     let mut set = JoinSet::new();
     let mut kolmes = vec![];
-    let mut readies = vec![];
     const PROCESSOR_COUNT: usize = 10;
     const CLIENT_COUNT: usize = 100;
 
-    let tempdir = tempfile::tempdir().unwrap();
-
-    for i in 0..PROCESSOR_COUNT {
-        let mut path = tempdir.path().to_owned();
-        path.push(format!("db{i}.sqlite3"));
+    for _ in 0..PROCESSOR_COUNT {
         let kolme = Kolme::new(
             SampleKolmeApp,
             DUMMY_CODE_VERSION,
-            KolmeStore::new_sqlite(path).await.unwrap(),
+            KolmeStore::new_postgres(&block_db_str).await.unwrap(),
         )
         .await
         .unwrap();
-        let pool = sqlx::PgPool::connect(&block_db_str).await.unwrap();
-        let block_db = BlockDb::new(pool).await.unwrap();
-        let processor = Processor::new(
-            kolme.clone(),
-            get_sample_secret_key().clone(),
-            Some(block_db),
-        );
-        readies.push(processor.ready_watcher());
+        let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         processor_set.spawn(processor.run());
         processor_set.spawn(check_failed_txs(kolme.clone()));
         kolmes.push(kolme);
-    }
-
-    for mut ready in readies {
-        while !*ready.borrow_and_update() {
-            ready.changed().await.ok();
-        }
     }
 
     let kolmes = Arc::<[_]>::from(kolmes);

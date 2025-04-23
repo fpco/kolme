@@ -97,7 +97,7 @@ pub async fn processor() -> Result<()> {
 
     let mut set = JoinSet::new();
 
-    let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
     let gossip = Gossip::new(kolme).await?;
     set.spawn(gossip.run());

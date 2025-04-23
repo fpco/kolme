@@ -1,16 +1,28 @@
+mod listen;
 mod merkle_db_store;
 
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_db_store::MerkleDbStore;
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
 
+#[derive(Clone)]
 pub struct KolmeStorePostgres(sqlx::PgPool);
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum KeepGoing {
+    Continue,
+    Stop,
+}
 
 impl KolmeStorePostgres {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
         let pool = sqlx::PgPool::connect(url).await?;
         sqlx::migrate!().run(&pool).await?;
         Ok(Self(pool))
+    }
+
+    pub async fn listen_new_blocks<F: FnMut() -> KeepGoing>(self, mut f: F) {
+        todo!()
     }
 
     pub async fn load_latest_block<
@@ -132,7 +144,7 @@ impl KolmeStorePostgres {
         let app_state_hash = app_state_hash.as_array().as_slice();
         let logs_hash = logs_hash.as_array().as_slice();
 
-        sqlx::query!(
+        let res = sqlx::query!(
             r#"
                 INSERT INTO
                 blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, logs_hash)
@@ -147,9 +159,39 @@ impl KolmeStorePostgres {
             logs_hash,
         )
         .execute(&mut *trans)
-        .await.map_err(KolmeStoreError::custom)?;
-        trans.commit().await.map_err(KolmeStoreError::custom)?;
-        Ok(())
+        .await;
+        let res = match res {
+            Err(e) => Err(e),
+            Ok(_) => trans.commit().await,
+        };
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                eprintln!("Error inserting in Postgres");
+                // If the block already exists in the database, ignore the error
+                if let Some(db_error) = e.as_database_error() {
+                    if db_error.code().as_deref() == Some("23505") {
+                        let actualhash = sqlx::query_scalar!(
+                            r#"
+                                SELECT blockhash FROM blocks
+                                WHERE height=$1
+                                LIMIT 1
+                            "#,
+                            height_i64,
+                        )
+                        .fetch_optional(&self.0)
+                        .await
+                        .map_err(KolmeStoreError::custom)?;
+                        if let Some(actualhash) = actualhash {
+                            if actualhash == blockhash {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                Err(KolmeStoreError::custom(e))
+            }
+        }
     }
 
     pub async fn get_height_for_tx(

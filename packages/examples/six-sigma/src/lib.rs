@@ -296,7 +296,7 @@ pub async fn serve<C: Config>(
     match component {
         Some(AppComponent::Processor) => {
             tracing::info!("Running processor ...");
-            let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+            let processor = Processor::new(kolme.clone(), my_secret_key().clone());
             set.spawn(processor.run());
         }
         Some(AppComponent::Listener) => {
@@ -321,7 +321,7 @@ pub async fn serve<C: Config>(
         }
         None => {
             tracing::info!("Running in monolith mode ...");
-            let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+            let processor = Processor::new(kolme.clone(), my_secret_key().clone());
             set.spawn(processor.run());
             let listener = Listener::new(kolme.clone(), my_secret_key().clone());
             set.spawn(listener.run(C::chain_name()));

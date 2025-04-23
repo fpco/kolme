@@ -135,11 +135,6 @@ impl<App: KolmeApp> Kolme<App> {
         let mut kolme = self.inner.write().await;
         store_block(&mut kolme, &signed_block, &exec_results).await?;
 
-        // And try to write to durable storage here, allowing a failure to revert this commit.
-        if let Some(block_db) = &kolme.block_db {
-            block_db.add_block(&signed_block).await?;
-        }
-
         kolme.next_height = signed_block.0.message.as_inner().height.next();
         kolme.current_block_hash = signed_block.hash();
         kolme.framework_state = exec_results.framework_state;
@@ -149,10 +144,6 @@ impl<App: KolmeApp> Kolme<App> {
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
         Ok(())
-    }
-
-    pub(crate) async fn set_block_db(&self, block_db: BlockDb) {
-        self.inner.write().await.block_db = Some(block_db);
     }
 
     pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
@@ -213,7 +204,6 @@ pub struct KolmeInner<App: KolmeApp> {
     #[cfg(feature = "deadlock_detector")]
     pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
     pub(super) merkle_manager: MerkleManager,
-    block_db: Option<BlockDb>,
 }
 
 #[cfg(feature = "deadlock_detector")]
@@ -252,7 +242,6 @@ impl<App: KolmeApp> Kolme<App> {
             #[cfg(feature = "deadlock_detector")]
             deadlock_detector: Default::default(),
             merkle_manager,
-            block_db: None,
         };
         Ok(Kolme {
             inner: Arc::new(tokio::sync::RwLock::new(inner)),

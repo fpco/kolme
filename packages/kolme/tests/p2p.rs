@@ -105,7 +105,7 @@ async fn sanity() {
     )
     .await
     .unwrap();
-    set.spawn(Processor::new(kolme_processor.clone(), my_secret_key().clone(), None).run());
+    set.spawn(Processor::new(kolme_processor.clone(), my_secret_key().clone()).run());
     set.spawn(Gossip::new(kolme_processor).await.unwrap().run());
 
     let tempfile_client = tempfile::NamedTempFile::new().unwrap();
