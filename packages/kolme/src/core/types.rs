@@ -368,7 +368,7 @@ impl MerkleDeserialize for BridgeContract {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum GenesisAction {
     InstantiateCosmos {
         chain: CosmosChain,
@@ -382,7 +382,7 @@ pub enum GenesisAction {
     },
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct InstantiateArgs {
     pub processor: PublicKey,
     pub listeners: BTreeSet<PublicKey>,
@@ -951,10 +951,11 @@ impl ExecAction {
                             kolme_solana_bridge_client::pubkey::Pubkey::from_str(&recipient.0)?;
                         let amount = u64::try_from(coins[0].1)?;
 
-                        let payload = kolme_solana_bridge_client::transfer_payload(
-                            id.0, program_id, mint, recipient, amount,
-                        );
+                        // let payload = kolme_solana_bridge_client::transfer_payload(
+                        //     id.0, program_id, mint, recipient, amount,
+                        // );
 
+                        let payload = todo!();
                         let len = borsh::object_length(&payload).map_err(|x| {
                             anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
                         })?;

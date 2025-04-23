@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use kolme::*;
 
-use example_cosmos_bridge::{broadcast, serve};
+use example_cosmos_bridge::{broadcast, serve, CosmosBridgeApp};
 
 #[derive(clap::Parser)]
 struct Opt {
@@ -45,7 +45,15 @@ async fn main() -> Result<()> {
 
 async fn main_inner() -> Result<()> {
     match Opt::parse().cmd {
-        Cmd::Serve { bind } => serve(bind).await,
+        Cmd::Serve { bind } => {
+            const DB_PATH: &str = "example-cosmos-bridge.sqlite3";
+            const DUMMY_CODE_VERSION: &str = "dummy code version";
+
+            kolme::init_logger(true, None);
+            let kolme = Kolme::new(CosmosBridgeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
+
+            serve(kolme, bind).await
+        }
         Cmd::GenPair {} => {
             let mut rng = rand::thread_rng();
             let secret = SecretKey::random(&mut rng);

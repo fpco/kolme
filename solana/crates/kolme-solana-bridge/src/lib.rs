@@ -1,4 +1,3 @@
-use pinocchio_pubkey::declare_id;
 use borsh::{BorshDeserialize, BorshSerialize};
 use kolme_solana_bridge_client::{
     InitializeIxData,  RegularMsgIxData, SignedMsgIxData,
@@ -7,9 +6,11 @@ use kolme_solana_bridge_client::{
     SIGNED_IX, TOKEN_HOLDER_SEED
 };
 use solbox::{
-    token,
+    token::{self, state::{TokenAccount, Mint}},
+    token2022,
+    pubkey::declare_id,
     pinocchio::{
-        account_info::AccountInfo,
+        account_info::{AccountInfo, Ref},
         instruction::{AccountMeta, Instruction, Seed, Signer},
         pubkey::{Pubkey, find_program_address},
         program_error::ProgramError,
@@ -192,10 +193,19 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             let holder_acc = ctx.account(index + 2, AccountReq::WRITABLE)?;
             let holder_ata_acc = ctx.account(index + 3, AccountReq::WRITABLE)?;
 
+            // SAFETY: The owner of this cannot be changed here.
+            let token_program = unsafe { *mint_acc.owner() };
+
+            if token_program != token::ID && token_program != token2022::ID {
+                log!("Mint is not owned by a token program.");
+
+                return Err(ProgramError::IllegalOwner);
+            }
+
             let (holder_ata_acc_address, _) = find_program_address(
                 &[
                     &holder_acc.key().as_slice(),
-                    &token::ID.as_slice(),
+                    &token_program.as_slice(),
                     &mint_acc.key().as_slice(),
                 ],
                 &ata_program::ID
@@ -207,19 +217,21 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
 
             // SAFETY: We are not keeping a reference or have called .assign() at all.
             unsafe {
-                if mint_acc.owner() != &token::ID {
+                if holder_ata_acc.owner() != mint_acc.owner() {
+                    log!("Holder ATA not created or illegal account.");
+
                     return Err(ProgramError::IllegalOwner);
                 }
 
-                if holder_ata_acc.owner() != mint_acc.owner() {
-                    log!("Holder ATA not created or illegal account.");
+                if sender_ata_acc.owner() != mint_acc.owner() {
+                    log!("Sender ATA not created or illegal account.");
 
                     return Err(ProgramError::IllegalOwner);
                 }
             }
 
             {
-                let sender_ata = token::state::TokenAccount::from_account_info(&sender_ata_acc)?;
+                let sender_ata = ata_data(&sender_ata_acc)?;
 
                 if sender_ata.mint() != mint_acc.key() || sender_ata.owner() != sender_acc.key() {
                     return Err(RegularIxError::WrongATA.into());
@@ -243,7 +255,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             }
 
             {
-                let holder_ata = token::state::TokenAccount::from_account_info(&holder_ata_acc)?;
+                let holder_ata = ata_data(&holder_ata_acc)?;
 
                 if holder_ata.has_close_authority() || holder_ata.has_delegate() {
                     return Err(RegularIxError::CannotHaveCloseAuthorityOrDelegate.into());
@@ -260,12 +272,17 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
                 amount
             });
 
-            token::instructions::Transfer {
+            let decimals = mint_data(&mint_acc)?.decimals();
+            let transfer = token::instructions::TransferChecked {
                 from: &sender_ata_acc,
+                mint: &mint_acc,
                 to: &holder_ata_acc,
                 authority: &sender_acc,
-                amount
-            }.invoke()?;
+                amount,
+                decimals
+            };
+
+            execute_transfer(transfer, &token_program)?;
 
             index += ACCOUNTS_PER_TRANSFER;
         }
@@ -396,6 +413,85 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     log_base64(&[bytes.as_slice()]);
 
     Ok(())
+}
+
+// A slightly modified version of TokenAccount::from_account_info to support Token 2022.
+fn ata_data(account_info: &AccountInfo) -> Result<Ref<TokenAccount>, ProgramError> {
+    if account_info.data_len() < TokenAccount::LEN {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if !account_info.is_owned_by(&token::ID) &&
+        !account_info.is_owned_by(&token2022::ID) {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    Ok(Ref::map(account_info.try_borrow_data()?, |data| unsafe {
+        TokenAccount::from_bytes(&data[..TokenAccount::LEN])
+    }))
+}
+
+pub fn mint_data(account_info: &AccountInfo) -> Result<Ref<Mint>, ProgramError> {
+    if account_info.data_len() != Mint::LEN {
+        log!("Invalid mint data len.");
+
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if !account_info.is_owned_by(&token::ID) &&
+        !account_info.is_owned_by(&token2022::ID) {
+        log!("Invalid mint data");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    Ok(Ref::map(account_info.try_borrow_data()?, |data| unsafe {
+        Mint::from_bytes(data)
+    }))
+
+}
+
+fn execute_transfer(transfer: token::instructions::TransferChecked<'_>, token_program: &Pubkey) -> ProgramResult {
+    use std::mem::MaybeUninit;
+
+    const UNINIT_BYTE: MaybeUninit<u8> = MaybeUninit::<u8>::uninit();
+
+    #[inline(always)]
+    fn write_bytes(destination: &mut [MaybeUninit<u8>], source: &[u8]) {
+        for (d, s) in destination.iter_mut().zip(source.iter()) {
+            d.write(*s);
+        }
+    }
+
+    let account_metas: [AccountMeta; 4] = [
+        AccountMeta::writable(transfer.from.key()),
+        AccountMeta::readonly(transfer.mint.key()),
+        AccountMeta::writable(transfer.to.key()),
+        AccountMeta::readonly_signer(transfer.authority.key()),
+    ];
+
+    // Instruction data layout:
+    // -  [0]: instruction discriminator (1 byte, u8)
+    // -  [1..9]: amount (8 bytes, u64)
+    // -  [9]: decimals (1 byte, u8)
+    let mut instruction_data = [UNINIT_BYTE; 10];
+
+    // Set discriminator as u8 at offset [0]
+    write_bytes(&mut instruction_data, &[12]);
+    // Set amount as u64 at offset [1..9]
+    write_bytes(&mut instruction_data[1..9], &transfer.amount.to_le_bytes());
+    // Set decimals as u8 at offset [9]
+    write_bytes(&mut instruction_data[9..], &[transfer.decimals]);
+
+    let instruction = Instruction {
+        program_id: token_program,
+        accounts: &account_metas,
+        data: unsafe { std::slice::from_raw_parts(instruction_data.as_ptr() as _, 10) },
+    };
+
+    cpi::invoke(
+        &instruction,
+        &[transfer.from, transfer.mint, transfer.to, transfer.authority],
+    )
 }
 
 fn secp256k1_recover(

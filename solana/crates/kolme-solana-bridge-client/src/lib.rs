@@ -11,6 +11,9 @@ pub use solana_pubkey as pubkey;
 pub use solana_keypair as keypair;
 
 #[cfg(feature = "client")]
+pub use solana_signer as signer;
+
+#[cfg(feature = "client")]
 pub use solana_instruction as instruction;
 
 use borsh::{BorshDeserialize, BorshSerialize};
