@@ -1,4 +1,3 @@
-mod listen;
 mod merkle_db_store;
 
 use kolme_store::{KolmeStoreError, StorableBlock};
@@ -19,10 +18,6 @@ impl KolmeStorePostgres {
         let pool = sqlx::PgPool::connect(url).await?;
         sqlx::migrate!().run(&pool).await?;
         Ok(Self(pool))
-    }
-
-    pub async fn listen_new_blocks<F: FnMut() -> KeepGoing>(self, mut f: F) {
-        todo!()
     }
 
     pub async fn load_latest_block<
