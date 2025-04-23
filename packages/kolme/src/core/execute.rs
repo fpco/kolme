@@ -7,13 +7,12 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     framework_state: FrameworkState,
     app: &'a App,
     app_state: App::State,
-    output: MessageOutput,
+    logs: Vec<Vec<String>>,
+    loads: Vec<BlockDataLoad>,
     /// If we're doing a validation run, these are the prior data loads.
     validation_data_loads: Option<VecDeque<BlockDataLoad>>,
     /// Who signed the transaction
     pubkey: PublicKey,
-    pool: sqlx::SqlitePool,
-    db_updates: Vec<DatabaseUpdate>,
     /// ID of the account that signed the transaction
     sender: AccountId,
     /// Public key used to sign the current transaction.
@@ -31,35 +30,9 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
 pub struct ExecutionResults<App: KolmeApp> {
     pub framework_state: FrameworkState,
     pub app_state: App::State,
-    pub outputs: Vec<MessageOutput>,
-    pub db_updates: Vec<DatabaseUpdate>,
-}
-
-#[derive(Debug)]
-pub enum DatabaseUpdate {
-    ListenerAttestation {
-        chain: ExternalChain,
-        event_id: BridgeEventId,
-        event_content: String,
-        msg_index: usize,
-        was_accepted: bool,
-        /// If this is a signed action, what's the action ID?
-        action_id: Option<BridgeActionId>,
-    },
-
-    ApproveAction {
-        pubkey: PublicKey,
-        signature: Signature,
-        recovery: RecoveryId,
-        msg_index: usize,
-        chain: ExternalChain,
-        action_id: BridgeActionId,
-    },
-    ProcessorApproveAction {
-        msg_index: usize,
-        chain: ExternalChain,
-        action_id: BridgeActionId,
-    },
+    /// Logs collected from each message.
+    pub logs: Vec<Vec<String>>,
+    pub loads: Vec<BlockDataLoad>,
 }
 
 impl<App: KolmeApp> KolmeInner<App> {
@@ -93,40 +66,36 @@ impl<App: KolmeApp> KolmeInner<App> {
         let mut framework_state = self.framework_state.clone();
         let sender_account_id = framework_state.accounts.use_nonce(tx.pubkey, tx.nonce)?;
 
-        let mut outputs = vec![];
         let mut execution_context = ExecutionContext::<App> {
             framework_state,
             app_state: self.app_state.clone(),
-            output: MessageOutput::default(),
             validation_data_loads: validation_data_loads.map(Into::into),
             pubkey: tx.pubkey,
-            pool: self.pool.clone(),
-            db_updates: vec![],
             sender: sender_account_id,
             app: &self.app,
             signing_key: signed_tx.0.message.as_inner().pubkey,
             timestamp,
+            logs: vec![],
+            loads: vec![],
         };
-        for (msg_index, message) in tx.messages.iter().enumerate() {
+        for message in &tx.messages {
+            execution_context.logs.push(vec![]);
             execution_context
-                .execute_message(&self.app, message, msg_index)
+                .execute_message(&self.app, message)
                 .await?;
-            let output = std::mem::take(&mut execution_context.output);
-            outputs.push(output);
         }
 
         let ExecutionContext {
             framework_state,
             app_state,
-            output: _,
             validation_data_loads,
             pubkey: _,
-            pool: _,
-            db_updates,
             sender: _,
             app: _,
             signing_key: _,
             timestamp: _,
+            logs,
+            loads,
         } = execution_context;
 
         if let Some(loads) = validation_data_loads {
@@ -138,19 +107,14 @@ impl<App: KolmeApp> KolmeInner<App> {
         Ok(ExecutionResults {
             framework_state,
             app_state,
-            outputs,
-            db_updates,
+            logs,
+            loads,
         })
     }
 }
 
 impl<App: KolmeApp> ExecutionContext<'_, App> {
-    async fn execute_message(
-        &mut self,
-        app: &App,
-        message: &Message<App::Message>,
-        msg_index: usize,
-    ) -> Result<()> {
+    async fn execute_message(&mut self, app: &App, message: &Message<App::Message>) -> Result<()> {
         match message {
             Message::Genesis(actual) => {
                 let expected = App::genesis_info();
@@ -164,25 +128,20 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 event,
                 event_id,
             } => {
-                self.listener(*chain, event, *event_id, msg_index).await?;
+                self.listener(*chain, event, *event_id)?;
             }
             Message::Approve {
                 chain,
                 action_id,
                 signature,
-                recovery,
-            } => {
-                self.approve(*chain, *action_id, *signature, *recovery, msg_index)
-                    .await?
-            }
+            } => self.approve(*chain, *action_id, *signature).await?,
             Message::ProcessorApprove {
                 chain,
                 action_id,
                 processor,
                 approvers,
             } => {
-                self.processor_approve(*chain, *action_id, processor, approvers, msg_index)
-                    .await?;
+                self.processor_approve(*chain, *action_id, processor, approvers)?;
             }
             Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(auth) => self.auth(auth).await?,
@@ -190,46 +149,97 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn listener(
+    fn listener(
         &mut self,
         chain: ExternalChain,
         event: &BridgeEvent,
         event_id: BridgeEventId,
-        msg_index: usize,
     ) -> Result<()> {
         anyhow::ensure!(self.framework_state.listeners.contains(&self.pubkey));
-        anyhow::ensure!(!has_already_listened(&self.pool, chain, event_id, &self.pubkey).await?);
-        anyhow::ensure!(!has_already_accepted(&self.pool, chain, event_id).await?);
 
-        // Make sure that all previous events have already been accepted.
-        // This prevents potential censorship-style attacks on the part of
-        // the listeners. We may need to reconsider the approach here in
-        // the future, such as allowing signatures to come in but not accepting
-        // them out of order.
-        if let Some(id) = event_id.prev() {
-            anyhow::ensure!(has_already_accepted(&self.pool, chain, id).await?);
+        let state = self.framework_state.chains.get_mut(chain)?;
+
+        let attestations = match state.pending_events.get_mut(&event_id) {
+            Some(pending) => {
+                anyhow::ensure!(pending.event == *event);
+                &mut pending.attestations
+            }
+            None => {
+                anyhow::ensure!(event_id == state.next_event_id);
+                state.next_event_id = event_id.next();
+                state.pending_events.insert(
+                    event_id,
+                    PendingBridgeEvent {
+                        event: event.clone(),
+                        attestations: BTreeSet::new(),
+                    },
+                );
+                &mut state
+                    .pending_events
+                    .get_mut(&event_id)
+                    .unwrap()
+                    .attestations
+            }
+        };
+
+        let was_inserted = attestations.insert(self.pubkey);
+
+        // Make sure it wasn't already approved
+        anyhow::ensure!(was_inserted);
+
+        // Now that we've added a signature, go through all pending events
+        // in order and process them if they have sufficient attestations.
+        self.process_ready_events(chain)
+    }
+
+    fn process_ready_events(&mut self, chain: ExternalChain) -> Result<()> {
+        fn get_next_ready_event(
+            framework_state: &FrameworkState,
+            chain: ExternalChain,
+        ) -> Option<BridgeEventId> {
+            let (event_id, pending) = framework_state
+                .chains
+                .get(chain)
+                .unwrap()
+                .pending_events
+                .iter()
+                .next()?;
+
+            // Let's find out how many existing signatures there are so we can decide if we can execute.
+            let existing_signatures = pending
+                .attestations
+                .iter()
+                .filter(|key| framework_state.listeners.contains(key))
+                .count();
+
+            // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
+            let was_accepted = existing_signatures >= framework_state.needed_listeners;
+
+            // If this event isn't accepted yet, we simply exit. We never try to
+            // process later events while an earlier one is unprocessed.
+            if was_accepted {
+                Some(*event_id)
+            } else {
+                None
+            }
         }
-        let event_content = ensure_event_matches(&self.pool, chain, event_id, event).await?;
 
-        // OK, valid event. Let's find out how many existing signatures there are so we can decide if we can execute.
-        let existing_signatures = get_listener_signatures(&self.pool, chain, event_id)
-            .await?
-            .iter()
-            .filter(|key| self.framework_state.listeners.contains(key))
-            .count();
+        loop {
+            let Some(event_id) = get_next_ready_event(&self.framework_state, chain) else {
+                break;
+            };
+            let (_event_id, pending) = self
+                .framework_state
+                .chains
+                .get_mut(chain)
+                .unwrap()
+                .pending_events
+                .remove(&event_id)
+                .unwrap();
 
-        // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
-        let was_accepted = existing_signatures + 1 >= self.framework_state.needed_listeners;
-        let mut action_id = None;
-        if was_accepted {
-            match event {
+            match &pending.event {
                 BridgeEvent::Instantiated { contract } => {
-                    let config = self
-                        .framework_state
-                        .chains
-                        .0
-                        .get_mut(&chain)
-                        .context("Found a listener event for a chain we don't care about")?;
+                    let config = &mut self.framework_state.chains.get_mut(chain)?.config;
                     match config.bridge {
                         BridgeContract::NeededCosmosBridge { .. } |
                             BridgeContract::NeededSolanaBridge { .. } => (),
@@ -252,9 +262,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         let Some(asset_config) = self
                             .framework_state
                             .chains
-                            .0
-                            .get(&chain)
-                            .context("Unknown chain")?
+                            .get(chain)?
+                            .config
                             .assets
                             .get(&AssetName(denom.clone()))
                         else {
@@ -270,21 +279,22 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 }
                 BridgeEvent::Signed {
                     wallet: _,
-                    action_id: action_id_tmp,
+                    action_id,
                 } => {
                     // TODO in the future we may track wallet addresses that submitted signed actions to give them rewards.
-                    action_id = Some(*action_id_tmp);
+                    let action_id = *action_id;
+                    let actions = &mut self.framework_state.chains.get_mut(chain)?.pending_actions;
+                    let next_action_id = actions
+                        .keys()
+                        .next()
+                        .context("Cannot report on an action when no pending actions present")?;
+                    anyhow::ensure!(*next_action_id == action_id);
+                    let (old_id, _old) = actions.remove(&action_id).unwrap();
+                    anyhow::ensure!(old_id == action_id);
                 }
             }
         }
-        self.db_updates.push(DatabaseUpdate::ListenerAttestation {
-            chain,
-            event_id,
-            event_content,
-            msg_index,
-            was_accepted,
-            action_id,
-        });
+
         Ok(())
     }
 
@@ -292,74 +302,58 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         &mut self,
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: Signature,
-        recovery: RecoveryId,
-        msg_index: usize,
+        signature: SignatureWithRecovery,
     ) -> Result<()> {
-        let payload = get_action_payload(&self.pool, chain, action_id).await?;
-        let key = PublicKey::recover_from_msg(payload, &signature, recovery)?;
+        let action = self
+            .framework_state
+            .chains
+            .get_mut(chain)?
+            .pending_actions
+            .get_mut(&action_id)
+            .with_context(|| {
+                format!("Cannot approve missing bridge action ID {action_id} for chain {chain}")
+            })?;
+        let key = signature.validate(action.payload.as_bytes())?;
         anyhow::ensure!(self.framework_state.approvers.contains(&key));
-        let chain_db = chain.as_ref();
-        let action_id_db = i64::try_from(action_id.0)?;
-        let count = sqlx::query_scalar!(
-            r#"
-                SELECT COUNT(*)
-                FROM actions
-                INNER JOIN action_approvals
-                ON actions.id=action_approvals.action
-                WHERE chain=$1
-                AND action_id=$2
-                AND public_key=$3
-            "#,
-            chain_db,
-            action_id_db,
-            key
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        anyhow::ensure!(count == 0);
-        self.db_updates.push(DatabaseUpdate::ApproveAction {
-            pubkey: key,
-            signature,
-            recovery,
-            msg_index,
-            chain,
-            action_id,
-        });
+        let old = action.approvals.insert(key, signature);
+        assert!(old.is_none(), "Cannot approve bridge action ID {action_id} for chain {chain} with already-used public key {key}");
         Ok(())
     }
 
-    async fn processor_approve(
+    fn processor_approve(
         &mut self,
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: &SignatureWithRecovery,
         approvers: &[SignatureWithRecovery],
-        msg_index: usize,
     ) -> Result<()> {
         anyhow::ensure!(approvers.len() >= self.framework_state.needed_approvers);
 
-        let payload = get_action_payload(&self.pool, chain, action_id).await?;
+        let action = self
+            .framework_state
+            .chains
+            .get_mut(chain)?
+            .pending_actions
+            .get_mut(&action_id)
+            .with_context(|| format!("No pending action {action_id} found for {chain}"))?;
 
-        let processor = processor.validate(&payload)?;
-        anyhow::ensure!(processor == self.framework_state.processor);
+        anyhow::ensure!(action.processor.is_none());
+
+        let payload = action.payload.as_bytes();
+        let processor_key = processor.validate(payload)?;
+        anyhow::ensure!(processor_key == self.framework_state.processor);
 
         let approvers_checked = approvers
             .iter()
             .map(|sig| {
-                let pubkey = sig.validate(&payload)?;
+                let pubkey = sig.validate(payload)?;
                 anyhow::ensure!(self.framework_state.approvers.contains(&pubkey));
                 Ok(pubkey)
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
         anyhow::ensure!(approvers.len() == approvers_checked.len());
 
-        self.db_updates
-            .push(DatabaseUpdate::ProcessorApproveAction {
-                msg_index,
-                chain,
-                action_id,
-            });
+        action.processor = Some(*processor);
 
         Ok(())
     }
@@ -401,6 +395,22 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state.accounts.get_assets(account_id)
     }
 
+    fn add_action(&mut self, chain: ExternalChain, action: ExecAction) -> Result<()> {
+        let state = self.framework_state.chains.get_mut(chain)?;
+        let id = state.next_action_id;
+        let payload = action.to_payload(chain, &state.config, id)?;
+        state.pending_actions.insert(
+            id,
+            PendingBridgeAction {
+                payload,
+                approvals: BTreeMap::new(),
+                processor: None,
+            },
+        );
+        state.next_action_id = state.next_action_id.next();
+        Ok(())
+    }
+
     /// Withdraw an asset to an external chain.
     pub fn withdraw_asset(
         &mut self,
@@ -416,14 +426,17 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .accounts
             .burn(source, asset_id, amount_dec)?;
 
-        self.output.actions.push(ExecAction::Transfer {
+        self.add_action(
             chain,
-            recipient: wallet.clone(),
-            funds: vec![AssetAmount {
-                id: asset_id,
-                amount: amount_u128,
-            }],
-        });
+            ExecAction::Transfer {
+                chain,
+                recipient: wallet.clone(),
+                funds: vec![AssetAmount {
+                    id: asset_id,
+                    amount: amount_u128,
+                }],
+            },
+        )?;
         Ok(())
     }
 
@@ -487,7 +500,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             None => req.load(self.app).await?,
         };
-        self.output.loads.push(BlockDataLoad {
+        self.loads.push(BlockDataLoad {
             request: request_str,
             response: serde_json::to_string(&res)?,
         });
@@ -541,114 +554,6 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     }
 
     pub fn log(&mut self, msg: impl Into<String>) {
-        self.output.logs.push(msg.into());
+        self.logs.last_mut().unwrap().push(msg.into());
     }
-}
-
-async fn has_already_listened(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-    pubkey: &PublicKey,
-) -> Result<bool> {
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let count = sqlx::query_scalar!(
-        r#"
-            SELECT COUNT(*)
-            FROM bridge_events
-            INNER JOIN bridge_event_attestations
-            ON bridge_events.id=bridge_event_attestations.event
-            WHERE chain=$1
-            AND event_id=$2
-            AND public_key=$3
-        "#,
-        chain,
-        event_id,
-        pubkey
-    )
-    .fetch_one(pool)
-    .await?;
-    assert!(count == 0 || count == 1);
-    Ok(count == 1)
-}
-
-async fn has_already_accepted(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-) -> Result<bool> {
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let count = sqlx::query_scalar!(
-        r#"
-            SELECT COUNT(*)
-            FROM bridge_events
-            WHERE chain=$1
-            AND event_id=$2
-            AND accepted IS NOT NULL
-        "#,
-        chain,
-        event_id,
-    )
-    .fetch_one(pool)
-    .await?;
-    assert!(count == 0 || count == 1);
-    Ok(count == 1)
-}
-
-async fn get_listener_signatures(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-) -> Result<BTreeSet<PublicKey>> {
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let public_keys = sqlx::query_scalar!(
-        r#"
-            SELECT public_key
-            FROM bridge_events
-            INNER JOIN bridge_event_attestations
-            ON bridge_events.id=bridge_event_attestations.event
-            WHERE chain=$1
-            AND event_id=$2
-        "#,
-        chain,
-        event_id,
-    )
-    .fetch_all(pool)
-    .await?;
-    public_keys
-        .iter()
-        .map(PublicKey::from_bytes)
-        .collect::<Result<_, _>>()
-        .map_err(anyhow::Error::from)
-}
-
-/// Returns the rendered version of the event
-async fn ensure_event_matches(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    event_id: BridgeEventId,
-    event: &BridgeEvent,
-) -> Result<String> {
-    let new_rendered = serde_json::to_string(event)?;
-    let chain = chain.as_ref();
-    let event_id = i64::try_from(event_id.0)?;
-    let existing = sqlx::query_scalar!(
-        r#"
-            SELECT event
-            FROM bridge_events
-            WHERE chain=$1
-            AND event_id=$2
-        "#,
-        chain,
-        event_id,
-    )
-    .fetch_optional(pool)
-    .await?;
-    if let Some(existing) = existing {
-        anyhow::ensure!(existing == new_rendered);
-    }
-    Ok(new_rendered)
 }

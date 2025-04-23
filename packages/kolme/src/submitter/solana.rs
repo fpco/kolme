@@ -43,10 +43,10 @@ pub async fn execute(
     keypair: &Keypair,
     program_id: &str,
     processor: SignatureWithRecovery,
-    approvers: Vec<SignatureWithRecovery>,
-    payload: String,
+    approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
+    payload: &str,
 ) -> Result<String> {
-    let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload)?;
+    let payload_bytes = base64::engine::general_purpose::STANDARD.decode(payload)?;
     let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
 
@@ -64,9 +64,9 @@ pub async fn execute(
         is_signer: false,
     }));
 
-    let mut executors = Vec::with_capacity(approvers.len());
+    let mut executors = Vec::with_capacity(approvals.len());
 
-    for a in approvers {
+    for a in approvals.values() {
         let sig = Signature {
             signature: Secp256k1Signature(a.sig.to_bytes().deref().try_into()?),
             recovery_id: processor.recid.to_byte(),

@@ -9,10 +9,10 @@ use axum::{
 };
 use cosmwasm_std::Coin;
 use futures_util::StreamExt;
+use listener::cosmos::get_next_bridge_event_id;
 use reqwest::{header::CONTENT_TYPE, Method};
 use serde::{Deserialize, Serialize};
 use shared::cosmos::{BridgeEventMessage, ExecuteMsg};
-use std::mem;
 use tokio::sync::{broadcast, RwLock};
 use tokio_tungstenite::connect_async;
 use tower_http::cors::{Any, CorsLayer};
@@ -51,8 +51,8 @@ pub async fn execute(
     client: reqwest::Client,
     port: u16,
     processor: SignatureWithRecovery,
-    approvers: Vec<SignatureWithRecovery>,
-    payload: String,
+    approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
+    payload: &str,
 ) -> Result<String> {
     let url = format!("http://localhost:{port}/actions");
     tracing::debug!("Sending bridge action to {url}");
@@ -60,8 +60,8 @@ pub async fn execute(
         .post(url)
         .json(&Action {
             processor,
-            approvers,
-            payload,
+            approvers: approvals.values().copied().collect(),
+            payload: payload.to_owned(),
         })
         .send()
         .await?;
@@ -108,11 +108,11 @@ pub async fn listen<App: KolmeApp>(
     port: String,
 ) -> Result<()> {
     tracing::debug!("pass through listen");
-    let kolme_r = kolme.read().await;
-    let mut next_bridge_event_id = kolme_r
-        .get_next_bridge_event_id(ExternalChain::PassThrough, secret.public_key())
-        .await?;
-    mem::drop(kolme_r);
+    let mut next_bridge_event_id = get_next_bridge_event_id(
+        &kolme.read().await,
+        secret.public_key(),
+        ExternalChain::PassThrough,
+    );
 
     let ws_url = format!("ws://localhost:{}/notifications", port);
     tracing::debug!("Connecting to {ws_url}");

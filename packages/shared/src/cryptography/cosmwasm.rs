@@ -36,7 +36,9 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord,
+)]
 pub struct RecoveryId(u8);
 
 impl RecoveryId {
@@ -51,7 +53,7 @@ impl Display for RecoveryId {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct Signature([u8; 64]);
 
 impl Signature {
