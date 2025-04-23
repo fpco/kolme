@@ -4,12 +4,12 @@ mod store;
 
 pub use error::KolmeError;
 use kolme_store::{KolmeStoreError, StorableBlock};
-use kolme_store_sqlite::KolmeStoreSqlite;
+pub use store::KolmeStore;
 use store::LoadStateResult;
 
 #[cfg(feature = "pass_through")]
 use std::sync::OnceLock;
-use std::{collections::HashMap, ops::Deref, path::Path};
+use std::{collections::HashMap, ops::Deref};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -224,14 +224,9 @@ pub(super) struct DeadlockDetector {
 }
 
 impl<App: KolmeApp> Kolme<App> {
-    pub async fn new(
-        app: App,
-        _code_version: impl AsRef<str>,
-        db_path: impl AsRef<Path>,
-    ) -> Result<Self> {
+    pub async fn new(app: App, _code_version: impl AsRef<str>, store: KolmeStore) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
-        let store = store::KolmeStore::Sqlite(KolmeStoreSqlite::new(db_path).await?);
         let info = App::genesis_info();
         let merkle_manager = MerkleManager::default();
         store

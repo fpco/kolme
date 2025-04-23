@@ -24,6 +24,7 @@ jiff = { version = "0.2.3", features = ["serde"] }
 rust_decimal = "1.37.1"
 kolme = { path = "packages/kolme" }
 kolme-store = { path = "packages/kolme-store" }
+kolme-store-postgresql = { path = "packages/kolme-store-postgresql" }
 kolme-store-sqlite = { path = "packages/kolme-store-sqlite" }
 merkle-map = { path = "packages/merkle-map" }
 shared = { path = "packages/shared" }

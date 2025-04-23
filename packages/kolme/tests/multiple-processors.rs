@@ -103,9 +103,13 @@ async fn multiple_processors() {
     for i in 0..PROCESSOR_COUNT {
         let mut path = tempdir.path().to_owned();
         path.push(format!("db{i}.sqlite3"));
-        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, path)
-            .await
-            .unwrap();
+        let kolme = Kolme::new(
+            SampleKolmeApp,
+            DUMMY_CODE_VERSION,
+            KolmeStore::new_sqlite(path).await.unwrap(),
+        )
+        .await
+        .unwrap();
         let pool = sqlx::PgPool::connect(&block_db_str).await.unwrap();
         let block_db = BlockDb::new(pool).await.unwrap();
         let processor = Processor::new(

@@ -182,7 +182,12 @@ impl<App> KolmeDataRequest<App> for RandomU32 {
 pub async fn serve(bind: SocketAddr) -> Result<()> {
     const DB_PATH: &str = "example-cosmos-bridge.sqlite3";
     kolme::init_logger(true, None);
-    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
+    let kolme = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(DB_PATH).await?,
+    )
+    .await?;
 
     let mut set = JoinSet::new();
 

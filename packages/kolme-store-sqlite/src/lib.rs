@@ -173,4 +173,12 @@ impl KolmeStoreSqlite {
             Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
         }
     }
+
+    pub async fn clear_blocks(&self) -> Result<(), KolmeStoreError> {
+        sqlx::query!("DELETE FROM blocks")
+            .execute(&self.0)
+            .await
+            .map(|_| ())
+            .map_err(KolmeStoreError::custom)
+    }
 }

@@ -13,11 +13,17 @@ postgres:
     docker compose -f ./packages/integration-tests/docker-compose.yml down
     docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
 
-test: sqlx-prepare-sqlite postgres
+test: sqlx-prepare-sqlite sqlx-prepare-postgres
     PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
 
 [working-directory: "packages/kolme-store-sqlite"]
 sqlx-prepare-sqlite $DATABASE_URL="sqlite:///tmp/kolme-prepare-db.sqlite3":
+    cargo sqlx database reset -y
+    cargo sqlx migrate run
+    cargo sqlx prepare
+
+[working-directory: "packages/kolme-store-postgresql"]
+sqlx-prepare-postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres":
     cargo sqlx database reset -y
     cargo sqlx migrate run
     cargo sqlx prepare

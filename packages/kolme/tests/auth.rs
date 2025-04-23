@@ -79,9 +79,13 @@ async fn test_sample_sanity() {
     init_logger(false, None);
     let tempfile = tempfile::NamedTempFile::new().unwrap();
 
-    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, tempfile.path())
-        .await
-        .unwrap();
+    let kolme = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(tempfile.path()).await.unwrap(),
+    )
+    .await
+    .unwrap();
 
     let mut subscription = kolme.subscribe();
 

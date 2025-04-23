@@ -104,10 +104,8 @@ impl KolmeApp for SampleKolmeApp {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_sample_sanity() {
-        let tempfile = tempfile::NamedTempFile::new().unwrap();
-        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, tempfile.path())
+    async fn test_sample_sanity(store: KolmeStore) {
+        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store)
             .await
             .unwrap();
 
@@ -126,5 +124,28 @@ mod tests {
             kolme.read().await.get_next_height(),
             BlockHeight::start().next()
         );
+    }
+
+    #[tokio::test]
+    async fn test_sample_sanity_sqlite() {
+        let tempfile = tempfile::NamedTempFile::new().unwrap();
+        test_sample_sanity(KolmeStore::new_sqlite(tempfile.path()).await.unwrap()).await
+    }
+
+    #[tokio::test]
+    async fn test_sample_sanity_postgres() {
+        const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
+        let block_db_str = match std::env::var(ENVVAR) {
+        Ok(x) => x,
+        Err(e) => panic!("Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}")
+    };
+        if block_db_str == "SKIP" {
+            println!("Skipping test due to no local database being available");
+            return;
+        }
+
+        let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
+        store.clear_blocks().await.unwrap();
+        test_sample_sanity(store).await
     }
 }

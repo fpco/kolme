@@ -1,13 +1,31 @@
+use std::path::Path;
+
 use crate::core::*;
 
 use kolme_store::{KolmeStoreError, StorableBlock};
+use kolme_store_postgresql::KolmeStorePostgres;
 use kolme_store_sqlite::KolmeStoreSqlite;
 
-pub(in crate::core) enum KolmeStore {
+pub enum KolmeStore {
     Sqlite(KolmeStoreSqlite),
+    Postgres(KolmeStorePostgres),
 }
 
 impl KolmeStore {
+    pub async fn new_sqlite(db_path: impl AsRef<Path>) -> Result<Self> {
+        KolmeStoreSqlite::new(db_path)
+            .await
+            .map(KolmeStore::Sqlite)
+            .map_err(anyhow::Error::from)
+    }
+
+    pub async fn new_postgres(url: &str) -> Result<Self> {
+        KolmeStorePostgres::new(url)
+            .await
+            .map(KolmeStore::Postgres)
+            .map_err(anyhow::Error::from)
+    }
+
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
     pub(super) async fn validate_genesis_info<AppState: MerkleDeserialize>(
         &self,
@@ -48,6 +66,14 @@ impl KolmeStore {
             _ => Err(anyhow::anyhow!("Invalid messages in first block")),
         }
     }
+
+    /// Very dangerous function! Intended for testing. Deletes all blocks in the database.
+    pub async fn clear_blocks(&self) -> Result<(), KolmeStoreError> {
+        match self {
+            KolmeStore::Sqlite(kolme_store_sqlite) => kolme_store_sqlite.clear_blocks().await,
+            KolmeStore::Postgres(kolme_store_postgres) => kolme_store_postgres.clear_blocks().await,
+        }
+    }
 }
 
 pub(super) struct LoadStateResult<AppState> {
@@ -66,6 +92,11 @@ impl KolmeStore {
             KolmeStore::Sqlite(kolme_store_sqlite) => {
                 kolme_store_sqlite.load_latest_block(merkle_manager).await?
             }
+            KolmeStore::Postgres(kolme_store_postgres) => {
+                kolme_store_postgres
+                    .load_latest_block(merkle_manager)
+                    .await?
+            }
         })
     }
 
@@ -77,6 +108,11 @@ impl KolmeStore {
         let res = match self {
             KolmeStore::Sqlite(kolme_store_sqlite) => {
                 kolme_store_sqlite
+                    .load_block(merkle_manager, height.0)
+                    .await
+            }
+            KolmeStore::Postgres(kolme_store_postgres) => {
+                kolme_store_postgres
                     .load_block(merkle_manager, height.0)
                     .await
             }
@@ -131,6 +167,11 @@ impl KolmeStore {
                 .await
                 .map(|x| x.map(BlockHeight))
                 .map_err(anyhow::Error::from),
+            KolmeStore::Postgres(kolme_store_postgres) => kolme_store_postgres
+                .get_height_for_tx(txhash.0)
+                .await
+                .map(|x| x.map(BlockHeight))
+                .map_err(anyhow::Error::from),
         }
     }
 
@@ -141,6 +182,10 @@ impl KolmeStore {
     ) -> Result<()> {
         match self {
             KolmeStore::Sqlite(kolme_store_sqlite) => kolme_store_sqlite
+                .add_block(merkle_manager, block)
+                .await
+                .map_err(anyhow::Error::from),
+            KolmeStore::Postgres(kolme_store_postgres) => kolme_store_postgres
                 .add_block(merkle_manager, block)
                 .await
                 .map_err(anyhow::Error::from),

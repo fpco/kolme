@@ -3342,6 +3342,7 @@ dependencies = [
  "jiff",
  "kolme-solana-bridge-client",
  "kolme-store",
+ "kolme-store-postgresql",
  "kolme-store-sqlite",
  "libp2p",
  "merkle-map",
@@ -3404,6 +3405,13 @@ dependencies = [
 [[package]]
 name = "kolme-store-postgresql"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kolme-store",
+ "merkle-map",
+ "shared",
+ "sqlx",
+]
 
 [[package]]
 name = "kolme-store-sqlite"
