@@ -14,7 +14,7 @@ postgres:
     docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
 
 test: sqlx-prepare-sqlite sqlx-prepare-postgres
-    PROCESSOR_BLOCK_DB=SKIP cargo test
+    PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
 
 [working-directory: "packages/kolme-store-sqlite"]
 sqlx-prepare-sqlite $DATABASE_URL="sqlite:///tmp/kolme-prepare-db.sqlite3":
