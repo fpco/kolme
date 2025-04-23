@@ -39,12 +39,12 @@ impl ToMerkleKey for u8 {
 }
 impl ToMerkleKey for u32 {
     fn to_merkle_key(&self) -> MerkleKey {
-        MerkleKey::from_slice(&self.to_le_bytes())
+        MerkleKey::from_slice(&self.to_be_bytes())
     }
 }
 impl ToMerkleKey for u64 {
     fn to_merkle_key(&self) -> MerkleKey {
-        MerkleKey::from_slice(&self.to_le_bytes())
+        MerkleKey::from_slice(&self.to_be_bytes())
     }
 }
 
