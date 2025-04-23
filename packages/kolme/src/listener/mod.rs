@@ -1,7 +1,8 @@
-mod cosmos;
+pub(crate) mod cosmos;
 mod solana;
 
 use crate::*;
+use cosmos::get_next_bridge_event_id;
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {
@@ -17,6 +18,7 @@ impl<App: KolmeApp> Listener<App> {
     pub async fn run(self, name: ChainName) -> Result<()> {
         let contracts = self.wait_for_contracts(name).await?;
         let mut set = JoinSet::new();
+        tracing::debug!("Listen on {name:?}");
 
         match name {
             ChainName::Cosmos => {
@@ -35,6 +37,17 @@ impl<App: KolmeApp> Listener<App> {
                         self.kolme.clone(),
                         self.secret.clone(),
                         chain.to_solana_chain().unwrap(),
+                        contract,
+                    ));
+                }
+            }
+            #[cfg(feature = "pass_through")]
+            ChainName::PassThrough => {
+                for (chain, contract) in contracts {
+                    assert!(chain == ExternalChain::PassThrough);
+                    set.spawn(pass_through::listen(
+                        self.kolme.clone(),
+                        self.secret.clone(),
                         contract,
                     ));
                 }
@@ -68,18 +81,9 @@ impl<App: KolmeApp> Listener<App> {
                 }
 
                 let kolme = self.kolme.read().await;
-                if !kolme
-                    .received_listener_attestation(
-                        chain,
-                        self.secret.public_key(),
-                        BridgeEventId::start(),
-                    )
-                    .await?
-                {
-                    let config = kolme
-                        .get_bridge_contracts()
-                        .get(&chain)
-                        .with_context(|| format!("No chain config found for {chain:?}"))?;
+                let next = get_next_bridge_event_id(&kolme, self.secret.public_key(), chain);
+                if next == BridgeEventId::start() {
+                    let config = &kolme.get_bridge_contracts().get(chain)?.config;
 
                     let expected_code_id = match config.bridge {
                         BridgeContract::NeededCosmosBridge { code_id } => code_id,
@@ -106,6 +110,10 @@ impl<App: KolmeApp> Listener<App> {
 
                             solana::sanity_check_contract(&client, &contract, &App::genesis_info())
                                 .await
+                        }
+                        #[cfg(feature = "pass_through")]
+                        ChainKind::PassThrough => {
+                            anyhow::bail!("No wait for pass-through contract is expected")
                         }
                     };
 
@@ -134,16 +142,16 @@ impl<App: KolmeApp> Listener<App> {
     async fn get_contracts(&self, name: ChainName) -> Option<BTreeMap<ExternalChain, String>> {
         let mut res = BTreeMap::new();
 
-        for (chain, config) in self.kolme.read().await.get_bridge_contracts() {
+        for (chain, state) in self.kolme.read().await.get_bridge_contracts().iter() {
             if chain.name() != name {
                 continue;
             }
 
-            match &config.bridge {
+            match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { .. }
                 | BridgeContract::NeededSolanaBridge { .. } => return None,
                 BridgeContract::Deployed(contract) => {
-                    res.insert(*chain, contract.clone());
+                    res.insert(chain, contract.clone());
                 }
             }
         }

@@ -194,8 +194,8 @@ impl<App: KolmeApp> Processor<App> {
             .read()
             .await
             .get_bridge_contracts()
-            .keys()
-            .copied()
+            .iter()
+            .map(|(k, _)| k)
             .collect::<Vec<_>>();
 
         // If we're working with a block DB, wait until the first sync finishes
@@ -235,6 +235,8 @@ impl<App: KolmeApp> Processor<App> {
                         break;
                     }
                 } else {
+                    // TODO See https://github.com/fpco/kolme/issues/122
+                    self.approve_actions_all(&chains).await;
                     break;
                 }
             }
@@ -332,8 +334,8 @@ impl<App: KolmeApp> Processor<App> {
         let ExecutionResults {
             framework_state,
             app_state,
-            outputs,
-            db_updates: _,
+            logs: _,
+            loads,
         } = kolme.execute_transaction(&tx, now, None).await?;
 
         let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
@@ -347,10 +349,7 @@ impl<App: KolmeApp> Processor<App> {
             parent: kolme.get_current_block_hash(),
             framework_state,
             app_state,
-            loads: outputs
-                .into_iter()
-                .flat_map(|output| output.loads)
-                .collect(),
+            loads,
         };
         let event = TaggedJson::new(approved_block)?;
         Ok(SignedBlock(event.sign(&self.secret)?))
@@ -370,18 +369,13 @@ impl<App: KolmeApp> Processor<App> {
         // need to approve anything else.
         let kolme = self.kolme.read().await;
 
-        let Some(action_id) = kolme.get_first_unapproved_action(chain).await? else {
+        let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());
         };
 
-        let payload = kolme.get_action_payload(chain, action_id).await?;
-
-        let sigs = kolme
-            .get_action_approval_signatures(chain, action_id)
-            .await?;
         let mut approvers = vec![];
-        for (key, sig) in &sigs {
-            let key2 = sig.validate(&payload)?;
+        for (key, sig) in &action.approvals {
+            let key2 = sig.validate(action.payload.as_bytes())?;
             anyhow::ensure!(key == &key2);
             if kolme.get_approver_pubkeys().contains(key) {
                 approvers.push(*sig);
@@ -393,8 +387,7 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
 
-        let (sig, recid) = self.secret.sign_recoverable(&payload)?;
-        let processor = SignatureWithRecovery { sig, recid };
+        let processor = self.secret.sign_recoverable(&action.payload)?;
 
         let tx = kolme
             .create_signed_transaction(

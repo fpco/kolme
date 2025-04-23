@@ -19,11 +19,8 @@ pub async fn listen<App: KolmeApp>(
     const PROGRAM_DATA_LOG: &str = "Program data: ";
 
     let client = chain.make_pubsub_client().await?;
-    let mut next_bridge_event_id = kolme
-        .read()
-        .await
-        .get_next_bridge_event_id(chain.into(), secret.public_key())
-        .await?;
+    let mut next_bridge_event_id =
+        get_next_bridge_event_id(&kolme.read().await, secret.public_key(), chain.into());
 
     let filter = RpcTransactionLogsFilter::Mentions(vec![contract.clone()]);
     let config = RpcTransactionLogsConfig {
@@ -154,13 +151,13 @@ fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
 
             // TODO: Do we still need to emit if both funds and keys are empty?
             BridgeEvent::Regular {
-                wallet,
+                wallet: Wallet(wallet),
                 funds: new_funds,
                 keys: new_keys,
             }
         }
         ContractMessage::Signed { action_id } => BridgeEvent::Signed {
-            wallet,
+            wallet: Wallet(wallet),
             action_id: BridgeActionId(action_id),
         },
     };

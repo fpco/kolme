@@ -69,10 +69,10 @@ async fn main_inner() -> Result<()> {
         } => broadcast(message, secret, host).await,
         Cmd::Sign { payload, secret } => {
             let secret = SecretKey::from_hex(&secret)?;
-            let (signature, recovery) = secret.sign_recoverable(&payload)?;
+            let SignatureWithRecovery { recid, sig } = secret.sign_recoverable(&payload)?;
             println!("Public key: {}", secret.public_key());
-            println!("Signature: {signature}");
-            println!("Recovery: {recovery:?}");
+            println!("Signature: {sig}");
+            println!("Recovery: {recid:?}");
             Ok(())
         }
     }

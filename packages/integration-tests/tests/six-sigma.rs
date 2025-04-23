@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    future::Future,
     io::{self, BufRead},
     path::PathBuf,
     str::FromStr,
@@ -18,7 +19,7 @@ use example_six_sigma::*;
 use kolme::*;
 
 #[test_log::test(tokio::test)]
-#[ignore = "depends on localosmosis thus hidden from default tests"]
+#[ignore = "depends on localosmosis thus hidden from default tests, also doesn't work with pass-through enable"]
 async fn basic_scenario() {
     tracing::debug!("starting");
     prebuild().await.unwrap();
@@ -36,16 +37,14 @@ async fn basic_scenario() {
 
     register_funder_account(&client, &contract).await.unwrap();
     tracing::debug!("Sending initial funds for the application");
-    broadcast(
+    broadcast_check_state(
         FUNDER_SECRET_KEY,
         AppMessage::SendFunds {
             asset_id: AssetId(1),
             amount: dec!(100_000),
         },
-        &client,
         |state| {
             ensure!(state
-                .app_state
                 .strategic_reserve
                 .get(&AssetId(1))
                 .is_some_and(|balance| balance == &dec!(100_000)));
@@ -56,24 +55,23 @@ async fn basic_scenario() {
     .unwrap();
 
     tracing::debug!("Initializing the contract");
-    broadcast(ADMIN_SECRET_KEY, AppMessage::Init, &client, |state| {
-        ensure!(matches!(state.app_state.state, AppState::Operational));
+    broadcast_check_state(ADMIN_SECRET_KEY, AppMessage::Init, |state| {
+        ensure!(matches!(state.state, AppState::Operational));
         Ok(())
     })
     .await
     .unwrap();
 
     tracing::debug!("Creating a market");
-    broadcast(
+    broadcast_check_state(
         ADMIN_SECRET_KEY,
         AppMessage::AddMarket {
             id: 1,
             asset_id: AssetId(1),
             name: "sample market".to_string(),
         },
-        &client,
         |state| {
-            ensure!(state.app_state.markets.len() == 1);
+            ensure!(state.markets.len() == 1);
             Ok(())
         },
     )
@@ -131,7 +129,7 @@ async fn basic_scenario() {
             .await
             .unwrap();
     tracing::debug!("Placing a bet");
-    broadcast(
+    broadcast_check_state(
         BETTOR_SECRET_KEY,
         AppMessage::PlaceBet {
             wallet: bettor_wallet.get_address_string(),
@@ -139,10 +137,8 @@ async fn basic_scenario() {
             market_id: 1,
             outcome: 0,
         },
-        &client,
         |state| {
             ensure!(state
-                .app_state
                 .markets
                 .iter()
                 .next()
@@ -162,16 +158,14 @@ async fn basic_scenario() {
     .unwrap();
 
     tracing::debug!("Settling the market");
-    broadcast(
+    broadcast_check_state(
         ADMIN_SECRET_KEY,
         AppMessage::SettleMarket {
             market_id: 1,
             outcome: 0,
         },
-        &client,
         |state| {
             ensure!(state
-                .app_state
                 .markets
                 .iter()
                 .next()
@@ -210,25 +204,43 @@ async fn basic_scenario() {
     assert_eq!(app.try_wait().unwrap(), None);
 }
 
-async fn broadcast(
+async fn broadcast_check_state(
     secret: &str,
     msg: AppMessage,
-    client: &reqwest::Client,
-    check: impl Fn(ServerState) -> Result<()>,
+    check: impl Fn(SixSigmaState) -> Result<()>,
 ) -> Result<()> {
-    let status = six_sigma_cmd()
-        .args([
-            "broadcast",
-            "--secret",
-            secret,
-            "--message",
-            &serde_json::to_string(&msg)?,
-        ])
-        .status()
-        .await?;
+    let cmd = six_sigma_cmd();
+    basic_broadcast_check_state(secret, msg, "http://localhost:3000", cmd, state, check).await
+}
+
+async fn basic_broadcast_check_state<F, Fut>(
+    secret: &str,
+    msg: AppMessage,
+    host: &str,
+    mut cmd: Command,
+    get_state: F,
+    check: impl Fn(SixSigmaState) -> Result<()>,
+) -> Result<()>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<SixSigmaState>>,
+{
+    cmd.args([
+        "broadcast",
+        "--secret",
+        secret,
+        "--message",
+        &serde_json::to_string(&msg)?,
+        "--host",
+        host,
+    ]);
+    if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        cmd.env("RUST_LOG", rust_log);
+    }
+    let status = cmd.status().await?;
     ensure!(status.success());
     (|| async {
-        let state = server_state(client).await?;
+        let state = get_state().await?;
         check(state)
     })
     .retry(
@@ -237,6 +249,16 @@ async fn broadcast(
             .with_max_times(10),
     )
     .await
+}
+
+async fn state() -> Result<SixSigmaState> {
+    let out = six_sigma_cmd().args(["state"]).output().await?;
+    ensure!(
+        out.status.success(),
+        "err was: {}",
+        std::str::from_utf8(&out.stderr).unwrap()
+    );
+    serde_json::from_slice(&out.stdout).map_err(Into::into)
 }
 
 async fn register_funder_account(client: &reqwest::Client, contract: &Contract) -> Result<()> {
@@ -430,7 +452,6 @@ async fn server_state(client: &reqwest::Client) -> Result<ServerState> {
 struct ServerState {
     bridges: BTreeMap<ExternalChain, ChainConfig>,
     balances: BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>,
-    app_state: SixSigmaState,
 }
 
 #[derive(serde::Deserialize, Debug)]

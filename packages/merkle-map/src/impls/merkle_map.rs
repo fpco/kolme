@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::RangeBounds};
 
 use crate::*;
 
@@ -62,7 +62,9 @@ where
         Q: ToMerkleKey + ?Sized,
     {
         self.sanity_checks();
-        self.0.get(0, &key.to_merkle_key())
+        self.0
+            .get(0, &key.to_merkle_key())
+            .map(|entry| &entry.value)
     }
 
     pub fn contains_key<Q>(&self, key: &Q) -> bool
@@ -102,6 +104,16 @@ where
 
 impl<K, V> MerkleMap<K, V>
 where
+    K: ToMerkleKey + Clone,
+    V: Default + Clone,
+{
+    pub fn get_or_default(&mut self, key: K) -> &mut V {
+        self.get_or_insert(key, Default::default)
+    }
+}
+
+impl<K, V> MerkleMap<K, V>
+where
     K: Clone,
     V: Clone,
 {
@@ -123,6 +135,21 @@ impl<K, V> MerkleMap<K, V> {
     pub fn iter(&self) -> crate::impls::iter::Iter<K, V> {
         self.sanity_checks();
         self.into_iter()
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.iter().map(|(k, _v)| k)
+    }
+}
+
+impl<K: ToMerkleKey, V> MerkleMap<K, V> {
+    pub fn range<T, R>(&self, range: R) -> impls::iter::Iter<K, V>
+    where
+        T: ToMerkleKey + ?Sized,
+        K: Borrow<T>,
+        R: RangeBounds<T>,
+    {
+        self.0.range(range)
     }
 }
 
@@ -165,5 +192,15 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for MerkleMap<K, 
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Node::merkle_deserialize(deserializer).map(MerkleMap)
+    }
+}
+
+impl<K: ToMerkleKey + Clone, V: Clone> FromIterator<(K, V)> for MerkleMap<K, V> {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let mut m = MerkleMap::new();
+        for (k, v) in iter {
+            m.insert(k, v);
+        }
+        m
     }
 }

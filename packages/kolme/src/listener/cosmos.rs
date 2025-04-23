@@ -5,6 +5,22 @@ use ::cosmos::{Contract, Cosmos};
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
 
+pub(crate) fn get_next_bridge_event_id<App: KolmeApp>(
+    kolme: &KolmeRead<App>,
+    public: PublicKey,
+    chain: ExternalChain,
+) -> BridgeEventId {
+    let state = kolme.get_bridge_contracts().get(chain).unwrap();
+
+    for (event_id, pending) in &state.pending_events {
+        if !pending.attestations.contains(&public) {
+            return *event_id;
+        }
+    }
+
+    state.next_event_id
+}
+
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
@@ -16,9 +32,8 @@ pub async fn listen<App: KolmeApp>(
     let cosmos = kolme_r.get_cosmos(chain).await?;
     let contract = cosmos.make_contract(contract.parse()?);
 
-    let mut next_bridge_event_id = kolme_r
-        .get_next_bridge_event_id(chain.into(), secret.public_key())
-        .await?;
+    let mut next_bridge_event_id =
+        get_next_bridge_event_id(&kolme_r, secret.public_key(), chain.into());
 
     mem::drop(kolme_r);
 
@@ -49,7 +64,8 @@ async fn listen_once<App: KolmeApp>(
     {
         GetEventResp::Found { message } => {
             let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
-            let message = to_kolme_message::<App::Message>(message, chain, *next_bridge_event_id);
+            let message =
+                to_kolme_message::<App::Message>(message, chain.into(), *next_bridge_event_id);
 
             let signed = kolme
                 .read()
@@ -96,9 +112,9 @@ pub async fn sanity_check_contract(
     Ok(())
 }
 
-fn to_kolme_message<T>(
+pub(crate) fn to_kolme_message<T>(
     msg: BridgeEventMessage,
-    chain: CosmosChain,
+    chain: ExternalChain,
     event_id: BridgeEventId,
 ) -> Message<T> {
     match msg {
@@ -120,19 +136,22 @@ fn to_kolme_message<T>(
             }
 
             Message::Listener {
-                chain: chain.into(),
+                chain,
                 event_id,
                 event: BridgeEvent::Regular {
-                    wallet,
+                    wallet: Wallet(wallet),
                     funds: new_funds,
                     keys: new_keys,
                 },
             }
         }
         BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
-            chain: chain.into(),
+            chain,
             event_id,
-            event: BridgeEvent::Signed { wallet, action_id },
+            event: BridgeEvent::Signed {
+                wallet: Wallet(wallet),
+                action_id,
+            },
         },
     }
 }

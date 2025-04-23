@@ -57,8 +57,8 @@ pub enum BridgeMessage {
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
-const OSMOSIS_TESTNET_CODE_ID: u64 = 12279;
-const NEUTRON_TESTNET_CODE_ID: u64 = 11328;
+const OSMOSIS_TESTNET_CODE_ID: u64 = 12390;
+const NEUTRON_TESTNET_CODE_ID: u64 = 11650;
 
 fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
