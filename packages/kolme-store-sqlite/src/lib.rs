@@ -132,6 +132,12 @@ impl KolmeStoreSqlite {
         let app_state_hash = merkle_manager.save(&mut store, app_state).await?.hash;
         let logs_hash = merkle_manager.save(&mut store, logs).await?.hash;
 
+        let blockhash = blockhash.as_array().as_slice();
+        let txhash = txhash.as_array().as_slice();
+        let framework_state_hash = framework_state_hash.as_array().as_slice();
+        let app_state_hash = app_state_hash.as_array().as_slice();
+        let logs_hash = logs_hash.as_array().as_slice();
+
         sqlx::query!(
             r#"
                 INSERT INTO
@@ -156,6 +162,7 @@ impl KolmeStoreSqlite {
         &self,
         txhash: Sha256Hash,
     ) -> Result<Option<u64>, KolmeStoreError> {
+        let txhash = txhash.as_array().as_slice();
         let height =
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
                 .fetch_optional(&self.0)
