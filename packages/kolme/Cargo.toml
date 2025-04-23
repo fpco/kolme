@@ -31,7 +31,6 @@ rust_decimal = { workspace = true, features = ["macros"] }
 serde = { version = "1.0.218", features = ["derive", "rc"] }
 serde_json = { workspace = true }
 shared = { workspace = true, features = ["cosmwasm", "realcryptography", "sqlx"] }
-sqlx = { version = "0.8.3", features = ["migrate", "runtime-tokio", "sqlite", "postgres"] }
 strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { workspace = true }
