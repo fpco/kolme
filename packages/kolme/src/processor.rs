@@ -1,3 +1,5 @@
+use kolme_store::KolmeStoreError;
+
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
@@ -50,7 +52,7 @@ impl<App: KolmeApp> Processor<App> {
                         //     // TODO should we unify the different ways of detecting that a block is already in the database?
                         //     tracing::debug!("Block height race condition when adding transaction {txhash}, retrying");
                     } else {
-                        // tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
+                        tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
                         break;
                     }
                 } else {
@@ -99,31 +101,27 @@ impl<App: KolmeApp> Processor<App> {
                 break Ok(());
             }
             attempts += 1;
-            match self.construct_block(tx.clone()).await {
-                Ok(block) => {
-                    self.kolme.add_block(block).await?;
+            let res = async {
+                let block = self.construct_block(tx.clone()).await?;
+                self.kolme.add_block(block).await
+            }
+            .await;
+            match res {
+                Ok(()) => {
                     break Ok(());
                 }
                 Err(e) => {
                     if attempts >= MAX_ATTEMPTS {
                         break Err(e);
                     }
-                    todo!()
-                    // if let Some(e) = e.downcast_ref() {
-                    // match e {
-                    //     BlockDbError::BlockAlreadyInDb => {
-                    //         tracing::warn!("Block already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}...");
-                    //         if let Some(block_db) = &self.block_db {
-                    //             block_db.resync_trigger.send_modify(|x| *x += 1);
-                    //         }
-                    //     }
-                    //     BlockDbError::TxAlreadyInDb => {
-                    //         return Ok(());
-                    //     }
-                    // }
-                    // } else {
-                    // break Err(e);
-                    // }
+                    if let Some(KolmeStoreError::BlockAlreadyInDb { height }) = e.downcast_ref() {
+                        if let Err(e) = self.kolme.resync(444).await {
+                            tracing::error!("Error while resyncing with database: {e}");
+                        }
+                        tracing::warn!("Block {height} already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}...");
+                        continue;
+                    }
+                    break Err(e);
                 }
             }
         };
@@ -146,8 +144,9 @@ impl<App: KolmeApp> Processor<App> {
 
         let txhash = tx.hash();
         if kolme.get_tx(txhash).await?.is_some() {
-            todo!()
-            // return Err(anyhow::Error::from(BlockDbError::TxAlreadyInDb));
+            return Err(anyhow::Error::from(KolmeStoreError::TxAlreadyInDb {
+                txhash: txhash.0,
+            }));
         }
 
         let now = Timestamp::now();

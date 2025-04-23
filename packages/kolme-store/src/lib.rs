@@ -19,6 +19,10 @@ pub enum KolmeStoreError {
     Merkle(#[from] MerkleSerialError),
     #[error("Block not found in storage: {height}")]
     BlockNotFound { height: u64 },
+    #[error("Block already in database: {height}")]
+    BlockAlreadyInDb { height: u64 },
+    #[error("Transaction is already present in database: {txhash}")]
+    TxAlreadyInDb { txhash: Sha256Hash },
 }
 
 impl KolmeStoreError {

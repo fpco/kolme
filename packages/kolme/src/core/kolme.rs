@@ -104,6 +104,51 @@ impl<App: KolmeApp> Kolme<App> {
             .map(|_| ())
     }
 
+    /// Resync with the database.
+    pub async fn resync(&self, ident: usize) -> Result<()> {
+        {
+            let kolme = self.read().await;
+            let latest = kolme
+                .store
+                .load_latest_block::<App::State>(&kolme.merkle_manager)
+                .await?;
+            let Some(latest) = latest else { return Ok(()) };
+            if kolme.next_height.0 > latest.height {
+                tracing::info!("{ident} resync3");
+                return Ok(());
+            }
+        }
+
+        let mut kolme = self.inner.write().await;
+        let latest = kolme
+            .store
+            .load_latest_block::<App::State>(&kolme.merkle_manager)
+            .await?
+            .expect("Impossible: resync missing latest after we already saw it");
+        let StorableBlock {
+            height,
+            blockhash,
+            txhash: _,
+            rendered,
+            framework_state,
+            app_state,
+            logs: _,
+        } = latest;
+        if kolme.next_height.0 > height {
+            // Maybe we resynced between our read above and the new write here.
+            return Ok(());
+        }
+
+        let block = serde_json::from_str(&rendered)?;
+
+        kolme.framework_state = framework_state;
+        kolme.app_state = app_state;
+        kolme.next_height = BlockHeight(height).next();
+        kolme.current_block_hash = BlockHash(blockhash);
+        self.notify(Notification::NewBlock(Arc::new(block)));
+        Ok(())
+    }
+
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
         let txhash = signed_block.0.message.as_inner().tx.hash();

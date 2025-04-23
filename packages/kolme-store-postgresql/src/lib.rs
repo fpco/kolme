@@ -167,7 +167,6 @@ impl KolmeStorePostgres {
         match res {
             Ok(_) => Ok(()),
             Err(e) => {
-                eprintln!("Error inserting in Postgres");
                 // If the block already exists in the database, ignore the error
                 if let Some(db_error) = e.as_database_error() {
                     if db_error.code().as_deref() == Some("23505") {
@@ -187,6 +186,7 @@ impl KolmeStorePostgres {
                                 return Ok(());
                             }
                         }
+                        return Err(KolmeStoreError::BlockAlreadyInDb { height: *height });
                     }
                 }
                 Err(KolmeStoreError::custom(e))
