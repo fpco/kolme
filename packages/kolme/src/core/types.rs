@@ -254,9 +254,8 @@ impl ChainConfig {
             config: self,
             next_action_id: BridgeActionId::start(),
             pending_actions: MerkleMap::new(),
-            pending_event: PendingBridgeEvent::None {
-                next_event_id: BridgeEventId::start(),
-            },
+            next_event_id: BridgeEventId::start(),
+            pending_events: MerkleMap::new(),
         }
     }
 }
@@ -269,12 +268,17 @@ pub struct ChainState {
     /// Actions which have not yet been confirmed as landing on-chain.
     pub pending_actions: MerkleMap<BridgeActionId, PendingBridgeAction>,
     /// The next expected event ID from the bridge contract.
-    /// The next pending bridge event.
     ///
-    /// We only track a single pending bridge event at a time. This ensures
-    /// we don't blow up the storage, and simplifies internal logic.
-    /// The next expected event ID from the bridge contract.
-    pub pending_event: PendingBridgeEvent,
+    /// This represents the next ID that will be added to `pending_events`.
+    /// It does not mean that all events before this have been processed
+    /// already.
+    pub next_event_id: BridgeEventId,
+    /// Events which have not been fully processed.
+    ///
+    /// We always process events in order. If a later event has
+    /// sufficient signatures, but an earlier event hasn't, they
+    /// will both remain pending.
+    pub pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
 }
 
 impl MerkleSerialize for ChainState {
@@ -283,12 +287,14 @@ impl MerkleSerialize for ChainState {
             config,
             next_action_id,
             pending_actions,
-            pending_event,
+            next_event_id,
+            pending_events,
         } = self;
         serializer.store(config)?;
         serializer.store(next_action_id)?;
         serializer.store(pending_actions)?;
-        serializer.store(pending_event)?;
+        serializer.store(next_event_id)?;
+        serializer.store(pending_events)?;
         Ok(())
     }
 }
@@ -301,7 +307,8 @@ impl MerkleDeserialize for ChainState {
             config: deserializer.load()?,
             next_action_id: deserializer.load()?,
             pending_actions: deserializer.load()?,
-            pending_event: deserializer.load()?,
+            next_event_id: deserializer.load()?,
+            pending_events: deserializer.load()?,
         })
     }
 }
@@ -345,38 +352,21 @@ impl MerkleDeserialize for PendingBridgeAction {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
-pub enum PendingBridgeEvent {
-    None {
-        next_event_id: BridgeEventId,
-    },
-    Some {
-        id: BridgeEventId,
-        event: BridgeEvent,
-        /// Attestations from the listeners
-        attestations: BTreeSet<PublicKey>,
-    },
+pub struct PendingBridgeEvent {
+    pub event: BridgeEvent,
+    /// Attestations from the listeners
+    pub attestations: BTreeSet<PublicKey>,
 }
 
 impl MerkleSerialize for PendingBridgeEvent {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        match self {
-            PendingBridgeEvent::None { next_event_id } => {
-                serializer.store_byte(0);
-                serializer.store(next_event_id)?;
-                Ok(())
-            }
-            PendingBridgeEvent::Some {
-                id,
-                event,
-                attestations,
-            } => {
-                serializer.store_byte(1);
-                serializer.store(id)?;
-                serializer.store_json(event)?;
-                serializer.store(attestations)?;
-                Ok(())
-            }
-        }
+        let Self {
+            event,
+            attestations,
+        } = self;
+        serializer.store_json(event)?;
+        serializer.store(attestations)?;
+        Ok(())
     }
 }
 
@@ -384,17 +374,10 @@ impl MerkleDeserialize for PendingBridgeEvent {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        match deserializer.pop_byte()? {
-            0 => Ok(PendingBridgeEvent::None {
-                next_event_id: deserializer.load()?,
-            }),
-            1 => Ok(PendingBridgeEvent::Some {
-                id: deserializer.load()?,
-                event: deserializer.load_json()?,
-                attestations: deserializer.load()?,
-            }),
-            byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
-        }
+        Ok(Self {
+            event: deserializer.load_json()?,
+            attestations: deserializer.load()?,
+        })
     }
 }
 

@@ -2,6 +2,7 @@ pub(crate) mod cosmos;
 mod solana;
 
 use crate::*;
+use cosmos::get_next_bridge_event_id;
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {
@@ -80,14 +81,8 @@ impl<App: KolmeApp> Listener<App> {
                 }
 
                 let kolme = self.kolme.read().await;
-                if !kolme
-                    .received_listener_attestation(
-                        chain,
-                        self.secret.public_key(),
-                        BridgeEventId::start(),
-                    )
-                    .await?
-                {
+                let next = get_next_bridge_event_id(&kolme, self.secret.public_key(), chain);
+                if next == BridgeEventId::start() {
                     let config = &kolme.get_bridge_contracts().get(chain)?.config;
 
                     let expected_code_id = match config.bridge {

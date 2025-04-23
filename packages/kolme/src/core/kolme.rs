@@ -580,7 +580,6 @@ async fn store_block<App: KolmeApp>(
     }: &ExecutionResults<App>,
 ) -> Result<()> {
     let block = signed_block.0.message.as_inner();
-    let tx = block.tx.0.message.as_inner();
 
     anyhow::ensure!(loads == &block.loads);
 

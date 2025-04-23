@@ -13,7 +13,6 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     validation_data_loads: Option<VecDeque<BlockDataLoad>>,
     /// Who signed the transaction
     pubkey: PublicKey,
-    pool: sqlx::SqlitePool,
     /// ID of the account that signed the transaction
     sender: AccountId,
     /// Public key used to sign the current transaction.
@@ -72,7 +71,6 @@ impl<App: KolmeApp> KolmeInner<App> {
             app_state: self.app_state.clone(),
             validation_data_loads: validation_data_loads.map(Into::into),
             pubkey: tx.pubkey,
-            pool: self.pool.clone(),
             sender: sender_account_id,
             app: &self.app,
             signing_key: signed_tx.0.message.as_inner().pubkey,
@@ -92,7 +90,6 @@ impl<App: KolmeApp> KolmeInner<App> {
             app_state,
             validation_data_loads,
             pubkey: _,
-            pool: _,
             sender: _,
             app: _,
             signing_key: _,
@@ -131,7 +128,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 event,
                 event_id,
             } => {
-                self.listener(*chain, event, *event_id).await?;
+                self.listener(*chain, event, *event_id)?;
             }
             Message::Approve {
                 chain,
@@ -152,7 +149,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn listener(
+    fn listener(
         &mut self,
         chain: ExternalChain,
         event: &BridgeEvent,
@@ -162,32 +159,27 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         let state = self.framework_state.chains.get_mut(chain)?;
 
-        match &state.pending_event {
-            PendingBridgeEvent::None { next_event_id } => {
-                anyhow::ensure!(*next_event_id == event_id);
-                state.pending_event = PendingBridgeEvent::Some {
-                    id: event_id,
-                    event: event.clone(),
-                    attestations: BTreeSet::new(),
-                };
+        let attestations = match state.pending_events.get_mut(&event_id) {
+            Some(pending) => {
+                anyhow::ensure!(pending.event == *event);
+                &mut pending.attestations
             }
-            PendingBridgeEvent::Some {
-                id,
-                event: event2,
-                attestations: _,
-            } => {
-                anyhow::ensure!(*id == event_id);
-                anyhow::ensure!(event2 == event);
+            None => {
+                anyhow::ensure!(event_id == state.next_event_id);
+                state.next_event_id = event_id.next();
+                state.pending_events.insert(
+                    event_id,
+                    PendingBridgeEvent {
+                        event: event.clone(),
+                        attestations: BTreeSet::new(),
+                    },
+                );
+                &mut state
+                    .pending_events
+                    .get_mut(&event_id)
+                    .unwrap()
+                    .attestations
             }
-        }
-
-        let attestations = match &mut state.pending_event {
-            PendingBridgeEvent::None { .. } => unreachable!(),
-            PendingBridgeEvent::Some {
-                id: _,
-                event: _,
-                attestations,
-            } => attestations,
         };
 
         let was_inserted = attestations.insert(self.pubkey);
@@ -195,19 +187,57 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         // Make sure it wasn't already approved
         anyhow::ensure!(was_inserted);
 
-        // Let's find out how many existing signatures there are so we can decide if we can execute.
-        let existing_signatures = attestations
-            .iter()
-            .filter(|key| self.framework_state.listeners.contains(key))
-            .count();
+        // Now that we've added a signature, go through all pending events
+        // in order and process them if they have sufficient attestations.
+        self.process_ready_events(chain)
+    }
 
-        // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
-        let was_accepted = existing_signatures >= self.framework_state.needed_listeners;
-        if was_accepted {
-            state.pending_event = PendingBridgeEvent::None {
-                next_event_id: event_id.next(),
+    fn process_ready_events(&mut self, chain: ExternalChain) -> Result<()> {
+        fn get_next_ready_event(
+            framework_state: &FrameworkState,
+            chain: ExternalChain,
+        ) -> Option<BridgeEventId> {
+            let (event_id, pending) = framework_state
+                .chains
+                .get(chain)
+                .unwrap()
+                .pending_events
+                .iter()
+                .next()?;
+
+            // Let's find out how many existing signatures there are so we can decide if we can execute.
+            let existing_signatures = pending
+                .attestations
+                .iter()
+                .filter(|key| framework_state.listeners.contains(key))
+                .count();
+
+            // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
+            let was_accepted = existing_signatures >= framework_state.needed_listeners;
+
+            // If this event isn't accepted yet, we simply exit. We never try to
+            // process later events while an earlier one is unprocessed.
+            if was_accepted {
+                Some(*event_id)
+            } else {
+                None
+            }
+        }
+
+        loop {
+            let Some(event_id) = get_next_ready_event(&self.framework_state, chain) else {
+                break;
             };
-            match event {
+            let (_event_id, pending) = self
+                .framework_state
+                .chains
+                .get_mut(chain)
+                .unwrap()
+                .pending_events
+                .remove(&event_id)
+                .unwrap();
+
+            match &pending.event {
                 BridgeEvent::Instantiated { contract } => {
                     let config = &mut self.framework_state.chains.get_mut(chain)?.config;
                     match config.bridge {
@@ -252,14 +282,15 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     action_id,
                 } => {
                     // TODO in the future we may track wallet addresses that submitted signed actions to give them rewards.
+                    let action_id = *action_id;
                     let actions = &mut self.framework_state.chains.get_mut(chain)?.pending_actions;
                     let next_action_id = actions
                         .keys()
                         .next()
                         .context("Cannot report on an action when no pending actions present")?;
-                    anyhow::ensure!(next_action_id == action_id);
+                    anyhow::ensure!(*next_action_id == action_id);
                     let (old_id, _old) = actions.remove(&action_id).unwrap();
-                    anyhow::ensure!(old_id == *action_id);
+                    anyhow::ensure!(old_id == action_id);
                 }
             }
         }
