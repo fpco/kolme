@@ -91,11 +91,11 @@ impl<T: serde::Serialize> TaggedJson<T> {
     }
 
     pub fn sign(self, key: &SecretKey) -> Result<SignedTaggedJson<T>> {
-        let (signature, recovery_id) = key.sign_recoverable(self.as_bytes())?;
+        let SignatureWithRecovery { recid, sig } = key.sign_recoverable(self.as_bytes())?;
         Ok(SignedTaggedJson {
             message: self,
-            signature,
-            recovery_id,
+            signature: sig,
+            recovery_id: recid,
         })
     }
 }

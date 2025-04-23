@@ -5,6 +5,22 @@ use ::cosmos::{Contract, Cosmos};
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
 
+pub(crate) fn get_next_bridge_event_id<App: KolmeApp>(
+    kolme: &KolmeRead<App>,
+    public: PublicKey,
+    chain: ExternalChain,
+) -> BridgeEventId {
+    let state = kolme.get_bridge_contracts().get(chain).unwrap();
+
+    for (event_id, pending) in &state.pending_events {
+        if !pending.attestations.contains(&public) {
+            return *event_id;
+        }
+    }
+
+    state.next_event_id
+}
+
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
@@ -16,9 +32,8 @@ pub async fn listen<App: KolmeApp>(
     let cosmos = kolme_r.get_cosmos(chain).await?;
     let contract = cosmos.make_contract(contract.parse()?);
 
-    let mut next_bridge_event_id = kolme_r
-        .get_next_bridge_event_id(chain.into(), secret.public_key())
-        .await?;
+    let mut next_bridge_event_id =
+        get_next_bridge_event_id(&kolme_r, secret.public_key(), chain.into());
 
     mem::drop(kolme_r);
 

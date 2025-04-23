@@ -1,5 +1,6 @@
 mod accounts;
 
+use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
@@ -37,6 +38,21 @@ pub enum ExternalChain {
     SolanaLocal,
     #[cfg(feature = "pass_through")]
     PassThrough,
+}
+
+impl ToMerkleKey for ExternalChain {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.as_ref().to_merkle_key()
+    }
+}
+
+impl FromMerkleKey for ExternalChain {
+    fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
+        std::str::from_utf8(bytes)
+            .map_err(MerkleSerialError::custom)?
+            .parse()
+            .map_err(MerkleSerialError::custom)
+    }
 }
 
 #[derive(
@@ -232,6 +248,138 @@ pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
 }
+impl ChainConfig {
+    fn into_state(self) -> ChainState {
+        ChainState {
+            config: self,
+            next_action_id: BridgeActionId::start(),
+            pending_actions: MerkleMap::new(),
+            next_event_id: BridgeEventId::start(),
+            pending_events: MerkleMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ChainState {
+    pub config: ChainConfig,
+    /// The next action ID Kolme will emit.
+    pub next_action_id: BridgeActionId,
+    /// Actions which have not yet been confirmed as landing on-chain.
+    pub pending_actions: MerkleMap<BridgeActionId, PendingBridgeAction>,
+    /// The next expected event ID from the bridge contract.
+    ///
+    /// This represents the next ID that will be added to `pending_events`.
+    /// It does not mean that all events before this have been processed
+    /// already.
+    pub next_event_id: BridgeEventId,
+    /// Events which have not been fully processed.
+    ///
+    /// We always process events in order. If a later event has
+    /// sufficient signatures, but an earlier event hasn't, they
+    /// will both remain pending.
+    pub pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
+}
+
+impl MerkleSerialize for ChainState {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let ChainState {
+            config,
+            next_action_id,
+            pending_actions,
+            next_event_id,
+            pending_events,
+        } = self;
+        serializer.store(config)?;
+        serializer.store(next_action_id)?;
+        serializer.store(pending_actions)?;
+        serializer.store(next_event_id)?;
+        serializer.store(pending_events)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for ChainState {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(ChainState {
+            config: deserializer.load()?,
+            next_action_id: deserializer.load()?,
+            pending_actions: deserializer.load()?,
+            next_event_id: deserializer.load()?,
+            pending_events: deserializer.load()?,
+        })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PendingBridgeAction {
+    pub payload: String,
+    /// Approvals from the approvers
+    pub approvals: BTreeMap<PublicKey, SignatureWithRecovery>,
+    /// Processor signature finalizing this operation
+    pub processor: Option<SignatureWithRecovery>,
+}
+
+impl MerkleSerialize for PendingBridgeAction {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        let PendingBridgeAction {
+            payload,
+            approvals,
+            processor,
+        } = self;
+        serializer.store(payload)?;
+        serializer.store(approvals)?;
+        serializer.store(processor)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for PendingBridgeAction {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(PendingBridgeAction {
+            payload: deserializer.load()?,
+            approvals: deserializer.load()?,
+            processor: deserializer.load()?,
+        })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PendingBridgeEvent {
+    pub event: BridgeEvent,
+    /// Attestations from the listeners
+    pub attestations: BTreeSet<PublicKey>,
+}
+
+impl MerkleSerialize for PendingBridgeEvent {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            event,
+            attestations,
+        } = self;
+        serializer.store_json(event)?;
+        serializer.store(attestations)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for PendingBridgeEvent {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            event: deserializer.load_json()?,
+            attestations: deserializer.load()?,
+        })
+    }
+}
 
 impl MerkleSerialize for ChainConfig {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
@@ -406,15 +554,6 @@ pub struct InstantiateArgs {
     pub needed_listeners: usize,
     pub approvers: BTreeSet<PublicKey>,
     pub needed_approvers: usize,
-}
-
-pub struct PendingBridgeAction {
-    pub chain: ExternalChain,
-    pub payload: String,
-    pub height: BlockHeight,
-    /// Index of the message within the block
-    pub message: usize,
-    pub action_id: BridgeActionId,
 }
 
 #[derive(
@@ -764,8 +903,7 @@ pub enum Message<AppMessage> {
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: Signature,
-        recovery: RecoveryId,
+        signature: SignatureWithRecovery,
     },
     /// Final approval from the processor to confirm approvals from approvers.
     ProcessorApprove {
@@ -780,7 +918,7 @@ pub enum Message<AppMessage> {
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub enum BridgeEvent {
     /// A bridge was instantiated
@@ -798,7 +936,7 @@ pub enum BridgeEvent {
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct BridgedAssetAmount {
     pub denom: String,
     pub amount: u128,
@@ -855,6 +993,51 @@ impl GenesisInfo {
         anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
         anyhow::ensure!(self.needed_approvers > 0);
         Ok(())
+    }
+}
+
+#[derive(PartialEq, Default, Debug, Clone)]
+pub struct ChainStates(MerkleMap<ExternalChain, ChainState>);
+
+impl From<ConfiguredChains> for ChainStates {
+    fn from(c: ConfiguredChains) -> Self {
+        ChainStates(c.0.into_iter().map(|(k, v)| (k, v.into_state())).collect())
+    }
+}
+
+impl MerkleSerialize for ChainStates {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for ChainStates {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
+
+impl ChainStates {
+    pub fn get(&self, chain: ExternalChain) -> Result<&ChainState, CoreStateError> {
+        self.0
+            .get(&chain)
+            .ok_or(CoreStateError::ChainNotSupported { chain })
+    }
+
+    pub fn get_mut(&mut self, chain: ExternalChain) -> Result<&mut ChainState, CoreStateError> {
+        self.0
+            .get_mut(&chain)
+            .ok_or(CoreStateError::ChainNotSupported { chain })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (ExternalChain, &ChainState)> {
+        self.0.iter().map(|(k, v)| (*k, v))
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = ExternalChain> + '_ {
+        self.0.keys().copied()
     }
 }
 
@@ -923,15 +1106,8 @@ impl ConfiguredChains {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct MessageOutput {
-    pub logs: Vec<String>,
-    pub loads: Vec<BlockDataLoad>,
-    pub actions: Vec<ExecAction>,
-}
-
 /// Input and output for a single data load while processing a block.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct BlockDataLoad {
     /// Description of the request
     pub request: String,
@@ -955,7 +1131,7 @@ impl ExecAction {
     pub(crate) fn to_payload(
         &self,
         chain: ExternalChain,
-        configs: &BTreeMap<ExternalChain, ChainConfig>,
+        config: &ChainConfig,
         id: BridgeActionId,
     ) -> Result<String> {
         use base64::Engine;
@@ -974,7 +1150,6 @@ impl ExecAction {
             } => {
                 assert_eq!(&chain, chain2);
 
-                let config = configs.get(&chain).context("Missing chain")?;
                 match chain.name() {
                     ChainName::Cosmos => {
                         let mut coins = vec![];

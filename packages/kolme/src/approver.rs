@@ -22,40 +22,24 @@ impl<App: KolmeApp> Approver<App> {
 
     async fn catch_up_approvals_all(&self) -> Result<()> {
         let kolme = self.kolme.read().await;
-        for chain in kolme.get_bridge_contracts().keys() {
-            self.catch_up_approvals(&kolme, *chain).await?;
+        for (chain, _) in kolme.get_bridge_contracts().iter() {
+            self.catch_up_approvals(&kolme, chain).await?;
         }
         Ok(())
     }
 
     async fn catch_up_approvals(&self, kolme: &KolmeRead<App>, chain: ExternalChain) -> Result<()> {
-        let Some(latest) = kolme.get_latest_action(chain).await? else {
+        let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());
         };
-        let my_latest = kolme
-            .get_latest_approval(chain, self.secret.public_key())
-            .await?;
-        let mut next = match my_latest {
-            None => BridgeActionId::start(),
-            Some(latest) => latest.next(),
-        };
-
-        while next <= latest {
-            self.approve(kolme, chain, next).await?;
-            next = next.next();
+        let key = self.secret.public_key();
+        if action.approvals.contains_key(&key) {
+            // We've already approved this action, wait for it to be approved
+            // and submitted before approving the next one.
+            return Ok(());
         }
 
-        Ok(())
-    }
-
-    async fn approve(
-        &self,
-        kolme: &KolmeRead<App>,
-        chain: ExternalChain,
-        action_id: BridgeActionId,
-    ) -> Result<()> {
-        let payload = kolme.get_action_payload(chain, action_id).await?;
-        let (signature, recovery) = self.secret.sign_recoverable(&payload)?;
+        let signature = self.secret.sign_recoverable(&action.payload)?;
         let tx = kolme
             .create_signed_transaction(
                 &self.secret,
@@ -63,7 +47,6 @@ impl<App: KolmeApp> Approver<App> {
                     chain,
                     action_id,
                     signature,
-                    recovery,
                 }],
             )
             .await?;

@@ -19,11 +19,8 @@ pub async fn listen<App: KolmeApp>(
     const PROGRAM_DATA_LOG: &str = "Program data: ";
 
     let client = chain.make_pubsub_client().await?;
-    let mut next_bridge_event_id = kolme
-        .read()
-        .await
-        .get_next_bridge_event_id(chain.into(), secret.public_key())
-        .await?;
+    let mut next_bridge_event_id =
+        get_next_bridge_event_id(&kolme.read().await, secret.public_key(), chain.into());
 
     let filter = RpcTransactionLogsFilter::Mentions(vec![contract.clone()]);
     let config = RpcTransactionLogsConfig {

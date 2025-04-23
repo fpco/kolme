@@ -136,6 +136,10 @@ impl<K, V> MerkleMap<K, V> {
         self.sanity_checks();
         self.into_iter()
     }
+
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.iter().map(|(k, _v)| k)
+    }
 }
 
 impl<K: ToMerkleKey, V> MerkleMap<K, V> {
@@ -188,5 +192,15 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for MerkleMap<K, 
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Node::merkle_deserialize(deserializer).map(MerkleMap)
+    }
+}
+
+impl<K: ToMerkleKey + Clone, V: Clone> FromIterator<(K, V)> for MerkleMap<K, V> {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let mut m = MerkleMap::new();
+        for (k, v) in iter {
+            m.insert(k, v);
+        }
+        m
     }
 }
