@@ -1,4 +1,5 @@
 use kolme_store::KolmeStoreError;
+use rand::Rng;
 
 use crate::*;
 
@@ -95,7 +96,7 @@ impl<App: KolmeApp> Processor<App> {
         // and our failure is because of a block creation race condition.
         let txhash = tx.hash();
         let mut attempts = 0;
-        const MAX_ATTEMPTS: u32 = 5;
+        const MAX_ATTEMPTS: u32 = 50;
         let res = loop {
             if self.kolme.read().await.get_tx(txhash).await?.is_some() {
                 break Ok(());
@@ -115,10 +116,18 @@ impl<App: KolmeApp> Processor<App> {
                         break Err(e);
                     }
                     if let Some(KolmeStoreError::BlockAlreadyInDb { height }) = e.downcast_ref() {
-                        if let Err(e) = self.kolme.resync(444).await {
+                        if let Err(e) = self.kolme.resync().await {
                             tracing::error!("Error while resyncing with database: {e}");
                         }
                         tracing::warn!("Block {height} already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}...");
+
+                        // Introduce a random delay to help with processor contention.
+                        let millis = {
+                            let mut rng = rand::thread_rng();
+                            rng.gen_range(200..600)
+                        };
+                        tokio::time::sleep(tokio::time::Duration::from_millis(millis)).await;
+
                         continue;
                     }
                     break Err(e);

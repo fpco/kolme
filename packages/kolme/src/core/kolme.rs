@@ -105,7 +105,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Resync with the database.
-    pub async fn resync(&self, ident: usize) -> Result<()> {
+    pub async fn resync(&self) -> Result<()> {
         {
             let kolme = self.read().await;
             let latest = kolme
@@ -114,7 +114,6 @@ impl<App: KolmeApp> Kolme<App> {
                 .await?;
             let Some(latest) = latest else { return Ok(()) };
             if kolme.next_height.0 > latest.height {
-                tracing::info!("{ident} resync3");
                 return Ok(());
             }
         }

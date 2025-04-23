@@ -124,6 +124,12 @@ async fn multiple_processors() {
     }
 
     while let Some(res) = set.join_next().await {
+        // Often times an error in a check is _actually_ a bug in the processor.
+        // So check if one of those has crashed to get more useful errors.
+        while let Some(res) = processor_set.try_join_next() {
+            res.unwrap().unwrap();
+            println!("Unexpected processor exit")
+        }
         res.unwrap().unwrap();
     }
 
