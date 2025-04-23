@@ -17,7 +17,7 @@ test: postgres
     cargo sqlx database reset -y --source packages/kolme/migrations
     cargo sqlx migrate run --source packages/kolme/migrations
     cargo sqlx prepare --workspace
-    PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:5432/postgres cargo test
+    PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
 
 build-optimizer-image:
     ./.ci/build-optimizer-image.sh
