@@ -19,6 +19,8 @@ borsh = { version = "1.5.5", default-features = false }
 cosmwasm-std = "2.2.2"
 base64 = "0.22.1"
 jiff = { workspace = true }
+kolme-store.workspace = true
+kolme-store-sqlite.workspace = true
 libp2p = { version = "0.53", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
 merkle-map = { workspace = true }
 parking_lot = "0.12.3"

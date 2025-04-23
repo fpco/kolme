@@ -5,6 +5,9 @@ members = [
   "packages/examples/*",
   "packages/integration-tests",
   "packages/kolme",
+  "packages/kolme-store",
+  "packages/kolme-store-postgresql",
+  "packages/kolme-store-sqlite",
   "packages/merkle-map",
   "packages/shared",
 ]
@@ -20,5 +23,8 @@ serde_json = "1.0.140"
 jiff = { version = "0.2.3", features = ["serde"] }
 rust_decimal = "1.37.1"
 kolme = { path = "packages/kolme" }
+kolme-store = { path = "packages/kolme-store" }
+kolme-store-sqlite = { path = "packages/kolme-store-sqlite" }
 merkle-map = { path = "packages/merkle-map" }
 shared = { path = "packages/shared" }
+sqlx = { version = "0.8.3" }

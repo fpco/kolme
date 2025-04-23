@@ -1,14 +1,17 @@
 mod error;
 mod mempool;
+mod store;
 
 pub use error::KolmeError;
+use kolme_store::{KolmeStoreError, StorableBlock};
+use kolme_store_sqlite::KolmeStoreSqlite;
+use store::LoadStateResult;
 
 #[cfg(feature = "pass_through")]
 use std::sync::OnceLock;
 use std::{collections::HashMap, ops::Deref, path::Path};
 
 use mempool::Mempool;
-use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::core::*;
@@ -130,15 +133,13 @@ impl<App: KolmeApp> Kolme<App> {
             }
         }
         let mut kolme = self.inner.write().await;
-        let mut trans = kolme.pool.begin().await?;
-        store_block(&mut kolme, &mut trans, &signed_block, &exec_results).await?;
+        store_block(&mut kolme, &signed_block, &exec_results).await?;
 
         // And try to write to durable storage here, allowing a failure to revert this commit.
         if let Some(block_db) = &kolme.block_db {
             block_db.add_block(&signed_block).await?;
         }
 
-        trans.commit().await?;
         kolme.next_height = signed_block.0.message.as_inner().height.next();
         kolme.current_block_hash = signed_block.hash();
         kolme.framework_state = exec_results.framework_state;
@@ -199,7 +200,7 @@ impl<App: KolmeApp> Deref for KolmeRead<App> {
 }
 
 pub struct KolmeInner<App: KolmeApp> {
-    pub(super) pool: sqlx::SqlitePool,
+    pub(super) store: store::KolmeStore,
     pub(super) app: App,
     pub(super) framework_state: FrameworkState,
     pub(super) app_state: App::State,
@@ -230,22 +231,20 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
-        let options = SqliteConnectOptions::new()
-            .filename(db_path)
-            .create_if_missing(true);
-        let pool = sqlx::SqlitePool::connect_with(options).await?;
-        sqlx::migrate!().run(&pool).await?;
+        let store = store::KolmeStore::Sqlite(KolmeStoreSqlite::new(db_path).await?);
         let info = App::genesis_info();
-        validate_genesis_info(&pool, &info).await?;
         let merkle_manager = MerkleManager::default();
+        store
+            .validate_genesis_info::<App::State>(&merkle_manager, &info)
+            .await?;
         let LoadStateResult {
             framework_state,
             app_state,
             next_height,
             current_block_hash,
-        } = state::load_state::<App>(&pool, &info, &merkle_manager).await?;
+        } = store.load_state::<App>(&info, &merkle_manager).await?;
         let inner = KolmeInner {
-            pool,
+            store,
             app,
             framework_state,
             app_state,
@@ -387,42 +386,26 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Option<SignedBlock<App::Message>>> {
-        let height = i64::try_from(height.0)?;
-        let rendered = sqlx::query_scalar!(
-            r#"
-                SELECT rendered
-                FROM blocks
-                WHERE height=$1
-                LIMIT 1
-            "#,
-            height
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(match rendered {
-            Some(rendered) => serde_json::from_str(&rendered)?,
+        let storable_block = self
+            .store
+            .load_block::<App::State>(&self.merkle_manager, height)
+            .await?;
+        Ok(match storable_block {
+            Some(storable_block) => serde_json::from_str(&storable_block.rendered)?,
             None => None,
         })
     }
 
     /// Get the block information for the given transaction, if present.
     pub async fn get_tx(&self, tx: TxHash) -> Result<Option<SignedBlock<App::Message>>> {
-        let tx = tx.0;
-        let rendered = sqlx::query_scalar!(
-            r#"
-                SELECT rendered
-                FROM blocks
-                WHERE txhash=$1
-                LIMIT 1
-            "#,
-            tx
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(match rendered {
-            Some(rendered) => serde_json::from_str(&rendered)?,
-            None => None,
-        })
+        match self.store.get_height_for_tx(tx).await? {
+            None => Ok(None),
+            Some(height) => self
+                .get_block(height)
+                .await?
+                .with_context(|| format!("get_tx: expected height {height} not found"))
+                .map(Some),
+        }
     }
 
     /// Get the [MerkleManager]
@@ -517,19 +500,9 @@ impl<App: KolmeApp> KolmeInner<App> {
 
     /// Load the block details from the database
     pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
-        let height = height.try_into_i64()?;
-        let payload = sqlx::query_scalar!(
-            r#"
-                SELECT rendered
-                FROM blocks
-                WHERE height=$1
-                LIMIT 1
-            "#,
-            height
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        serde_json::from_str(&payload).map_err(anyhow::Error::from)
+        self.get_block(height)
+            .await?
+            .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
     }
 
     /// Get the next nonce to be used for the account associated with this public key.
@@ -570,7 +543,6 @@ pub struct AccountAndNextNonce {
 /// Also performs validation of the data
 async fn store_block<App: KolmeApp>(
     kolme: &mut KolmeInner<App>,
-    trans: &mut sqlx::SqliteTransaction<'_>,
     signed_block: &SignedBlock<App::Message>,
     ExecutionResults {
         framework_state,
@@ -591,37 +563,25 @@ async fn store_block<App: KolmeApp>(
             expected,
         }));
     }
-    let height_i64 = height.try_into_i64()?;
 
-    let blockhash = signed_block.0.message_hash();
-    let rendered = serde_json::to_string(&signed_block)?;
-    let txhash = signed_block.0.message.as_inner().tx.0.message_hash();
-
-    let mut store = MerkleDbStore::Conn(trans);
-    let framework_state_hash = kolme
-        .merkle_manager
-        .save(&mut store, framework_state)
-        .await?
-        .hash;
-    let app_state_hash = kolme.merkle_manager.save(&mut store, app_state).await?.hash;
-    let logs_hash = kolme.merkle_manager.save(&mut store, logs).await?.hash;
-
-    sqlx::query!(
-        r#"
-            INSERT INTO
-            blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, logs_hash)
-            VALUES($1, $2, $3, $4, $5, $6, $7)
-        "#,
-        height_i64,
-        blockhash,
-        rendered,
-        txhash,
-        framework_state_hash,
-        app_state_hash,
-        logs_hash,
-    )
-    .execute(&mut **trans)
-    .await?;
+    kolme
+        .store
+        .add_block(
+            &kolme.merkle_manager,
+            &StorableBlock {
+                height: height.0,
+                blockhash: signed_block.0.message_hash(),
+                txhash: signed_block.0.message.as_inner().tx.0.message_hash(),
+                rendered: serde_json::to_string(&signed_block)?,
+                // FIXME don't require the clone
+                framework_state: framework_state.clone(),
+                // FIXME don't require the clone
+                app_state: app_state.clone(),
+                // TODO remove the unnecessary clone
+                logs: logs.clone(),
+            },
+        )
+        .await?;
 
     Ok(())
 }

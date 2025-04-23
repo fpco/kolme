@@ -14,8 +14,8 @@ postgres:
     docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
 
 test: postgres
-    cargo sqlx database reset -y --source packages/kolme/migrations
-    cargo sqlx migrate run --source packages/kolme/migrations
+    cargo sqlx database reset -y --source packages/kolme-store-sqlite/migrations
+    cargo sqlx migrate run --source packages/kolme-store-sqlite/migrations
     cargo sqlx prepare --workspace
     PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
 

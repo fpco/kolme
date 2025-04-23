@@ -1,0 +1,8 @@
+[package]
+name = "kolme-store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+merkle-map.workspace = true
+thiserror = "2.0.12"
