@@ -604,12 +604,13 @@ async fn store_block<App: KolmeApp>(
         .await?
         .hash;
     let app_state_hash = kolme.merkle_manager.save(&mut store, app_state).await?.hash;
+    let logs_hash = kolme.merkle_manager.save(&mut store, logs).await?.hash;
 
     sqlx::query!(
         r#"
             INSERT INTO
-            blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash)
-            VALUES($1, $2, $3, $4, $5, $6)
+            blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, logs_hash)
+            VALUES($1, $2, $3, $4, $5, $6, $7)
         "#,
         height_i64,
         blockhash,
@@ -617,35 +618,10 @@ async fn store_block<App: KolmeApp>(
         txhash,
         framework_state_hash,
         app_state_hash,
+        logs_hash,
     )
     .execute(&mut **trans)
     .await?;
-
-    let mut message_db_ids = vec![];
-
-    for (message, logs) in logs.iter().enumerate() {
-        let message = i64::try_from(message)?;
-        let message = sqlx::query!(
-            "INSERT INTO messages(height, message) VALUES($1, $2)",
-            height_i64,
-            message
-        )
-        .execute(&mut **trans)
-        .await?
-        .last_insert_rowid();
-        message_db_ids.push(message);
-        for (position, log) in logs.iter().enumerate() {
-            let position = i64::try_from(position)?;
-            sqlx::query!(
-                "INSERT INTO logs(message, position, payload) VALUES($1, $2, $3)",
-                message,
-                position,
-                log
-            )
-            .execute(&mut **trans)
-            .await?;
-        }
-    }
 
     Ok(())
 }
