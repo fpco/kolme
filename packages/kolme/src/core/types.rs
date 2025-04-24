@@ -1,4 +1,5 @@
 mod accounts;
+mod sqlx_impls;
 
 use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
