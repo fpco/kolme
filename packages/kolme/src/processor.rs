@@ -94,6 +94,8 @@ impl<App: KolmeApp> Processor<App> {
             }
             attempts += 1;
             let res = async {
+                let _construct_lock = self.kolme.take_construct_lock().await?;
+                self.kolme.resync().await?;
                 let block = self.construct_block(tx.clone()).await?;
                 self.kolme.add_block(block).await
             }
