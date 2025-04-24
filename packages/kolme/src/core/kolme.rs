@@ -5,6 +5,7 @@ mod store;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
+use store::KolmeConstructLock;
 pub use store::KolmeStore;
 
 #[cfg(feature = "pass_through")]
@@ -355,6 +356,11 @@ impl<App: KolmeApp> Kolme<App> {
 
     pub fn get_app(&self) -> &App {
         &self.inner.app
+    }
+
+    /// Take a lock on constructing new blocks.
+    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
+        self.inner.store.take_construct_lock().await
     }
 }
 

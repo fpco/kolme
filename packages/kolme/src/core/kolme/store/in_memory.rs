@@ -1,15 +1,23 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
+    time::Instant,
 };
 
 use kolme_store::KolmeStoreError;
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleMemoryStore, Sha256Hash};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::{BlockHeight, TxHash};
 
-#[derive(Default, Clone)]
-pub struct KolmeStoreInMemory(Arc<tokio::sync::RwLock<Inner>>);
+#[derive(Clone)]
+pub struct KolmeStoreInMemory(Arc<tokio::sync::RwLock<Inner>>, Arc<tokio::sync::Semaphore>);
+
+impl Default for KolmeStoreInMemory {
+    fn default() -> Self {
+        Self(Default::default(), Arc::new(Semaphore::new(1)))
+    }
+}
 
 #[derive(Default)]
 struct Inner {
@@ -76,22 +84,31 @@ impl KolmeStoreInMemory {
         merkle_manager: &MerkleManager,
         block: &kolme_store::StorableBlock<super::FrameworkState, AppState>,
     ) -> Result<(), anyhow::Error> {
-        let mut guard = self.0.write().await;
-
         let height = BlockHeight(block.height);
         let txhash = TxHash(block.txhash);
 
-        if guard.blocks.contains_key(&height) {
-            return Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 }.into());
-        }
-        if guard.txhashes.contains_key(&txhash) {
-            return Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 }.into());
-        }
+        let checks = |inner: &Inner| {
+            if inner.blocks.contains_key(&height) {
+                Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 })
+            } else if inner.txhashes.contains_key(&txhash) {
+                Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 })
+            } else {
+                Ok(())
+            }
+        };
 
+        checks(&*self.0.read().await)?;
+
+        let mut guard = self.0.write().await;
+        checks(&guard)?;
         guard.txhashes.insert(txhash, height);
 
         let hash = merkle_manager.save(&mut guard.merkle, block).await?;
         guard.blocks.insert(height, hash.hash);
         Ok(())
+    }
+
+    pub(crate) async fn take_construct_lock(&self) -> OwnedSemaphorePermit {
+        self.1.clone().acquire_owned().await.unwrap()
     }
 }
