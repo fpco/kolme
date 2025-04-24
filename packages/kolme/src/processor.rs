@@ -104,7 +104,14 @@ impl<App: KolmeApp> Processor<App> {
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 50;
         let res = loop {
-            if self.kolme.read().await.get_tx(txhash).await?.is_some() {
+            if self
+                .kolme
+                .read()
+                .await
+                .get_tx_height(txhash)
+                .await?
+                .is_some()
+            {
                 break Ok(());
             }
             attempts += 1;
@@ -158,7 +165,7 @@ impl<App: KolmeApp> Processor<App> {
         let kolme = self.kolme.read().await;
 
         let txhash = tx.hash();
-        if kolme.get_tx(txhash).await?.is_some() {
+        if kolme.get_tx_height(txhash).await?.is_some() {
             return Err(anyhow::Error::from(KolmeStoreError::TxAlreadyInDb {
                 txhash: txhash.0,
             }));

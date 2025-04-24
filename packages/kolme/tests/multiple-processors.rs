@@ -191,8 +191,7 @@ async fn client(
         )
         .await;
         match res {
-            Ok(Ok(block)) => {
-                let height = block.0.message.as_inner().height;
+            Ok(Ok(height)) => {
                 let mut guard = highest_block.lock();
                 *guard = guard.max(height);
             }
@@ -234,7 +233,7 @@ async fn checker(
         assert_eq!(hash, kolme.get_current_block_hash());
         for (txidx, txhash) in hashes.iter().enumerate() {
             assert!(
-                kolme.get_tx(*txhash).await.unwrap().is_some(),
+                kolme.get_tx_height(*txhash).await.unwrap().is_some(),
                 "Transaction {txhash}#{txidx} not found in kolme#{kolmeidx}"
             );
         }

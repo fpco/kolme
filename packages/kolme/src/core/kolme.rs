@@ -193,7 +193,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
         loop {
             let (txhash, tx) = self.mempool.peek().await;
-            match self.read().await.get_tx(txhash).await {
+            match self.read().await.get_tx_height(txhash).await {
                 Ok(Some(_)) => self.mempool.drop_tx(txhash),
                 Ok(None) => {
                     break tx;
@@ -333,21 +333,21 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given transaction is published
-    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<Arc<SignedBlock<App::Message>>> {
+    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<BlockHeight> {
         // Start an outer loop so that we can keep processing if we end up Lagged
         loop {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             // And then check if we have that transaction.
-            if let Some(block) = self.read().await.get_tx(tx).await? {
-                break Ok(Arc::new(block));
+            if let Some(height) = self.read().await.get_tx_height(tx).await? {
+                break Ok(height);
             }
             loop {
                 match recv.recv().await {
                     Ok(note) => match note {
                         Notification::NewBlock(block) => {
                             if block.0.message.as_inner().tx.hash() == tx {
-                                return Ok(block);
+                                return Ok(block.0.message.as_inner().height);
                             }
                         }
                         Notification::GenesisInstantiation { .. } => (),
@@ -424,16 +424,9 @@ impl<App: KolmeApp> KolmeInner<App> {
         })
     }
 
-    /// Get the block information for the given transaction, if present.
-    pub async fn get_tx(&self, tx: TxHash) -> Result<Option<SignedBlock<App::Message>>> {
-        match self.store.get_height_for_tx(tx).await? {
-            None => Ok(None),
-            Some(height) => self
-                .get_block(height)
-                .await?
-                .with_context(|| format!("get_tx: expected height {height} not found"))
-                .map(Some),
-        }
+    /// Get the block height for the given transaction, if present.
+    pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>> {
+        self.store.get_height_for_tx(tx).await
     }
 
     /// Get the [MerkleManager]
