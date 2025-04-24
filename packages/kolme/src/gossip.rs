@@ -37,9 +37,9 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + 'static> 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 enum BlockRequest {
     /// Return the height of the next block to be generated.
-    Next,
+    NextHeight,
     /// Return the contents of a specific block.
-    GetHeight(BlockHeight),
+    BlockAtHeight(BlockHeight),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -228,7 +228,7 @@ impl<App: KolmeApp> Gossip<App> {
                     request,
                     channel,
                 } => match request {
-                    BlockRequest::Next => {
+                    BlockRequest::NextHeight => {
                         if let Err(e) = swarm.behaviour_mut().request_response.send_response(
                             channel,
                             BlockResponse::Next(self.kolme.read().await.get_next_height()),
@@ -236,7 +236,7 @@ impl<App: KolmeApp> Gossip<App> {
                             tracing::warn!("Unable to answer Next request: {e:?}");
                         }
                     }
-                    BlockRequest::GetHeight(height) => {
+                    BlockRequest::BlockAtHeight(height) => {
                         let res = match self.kolme.read().await.get_block(height).await? {
                             None => BlockResponse::HeightNotFound(height),
                             Some(block) => BlockResponse::Block(block),
@@ -302,7 +302,7 @@ impl<App: KolmeApp> Gossip<App> {
             swarm
                 .behaviour_mut()
                 .request_response
-                .send_request(peer, BlockRequest::Next);
+                .send_request(peer, BlockRequest::NextHeight);
         }
 
         let next = self.kolme.read().await.get_next_height();
@@ -311,7 +311,7 @@ impl<App: KolmeApp> Gossip<App> {
                 swarm
                     .behaviour_mut()
                     .request_response
-                    .send_request(peer, BlockRequest::GetHeight(next));
+                    .send_request(peer, BlockRequest::BlockAtHeight(next));
             }
         }
     }
