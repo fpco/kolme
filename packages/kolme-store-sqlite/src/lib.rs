@@ -138,7 +138,7 @@ impl KolmeStoreSqlite {
         let app_state_hash = app_state_hash.as_array().as_slice();
         let logs_hash = logs_hash.as_array().as_slice();
 
-        sqlx::query!(
+        let res = sqlx::query!(
             r#"
                 INSERT INTO
                 blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, logs_hash)
@@ -153,9 +153,37 @@ impl KolmeStoreSqlite {
             logs_hash,
         )
         .execute(&mut *trans)
-        .await.map_err(KolmeStoreError::custom)?;
-        trans.commit().await.map_err(KolmeStoreError::custom)?;
-        Ok(())
+        .await;
+        let res = match res {
+            Err(e) => Err(e),
+            Ok(_) => trans.commit().await,
+        };
+        match res {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if let Some(db_error) = e.as_database_error() {
+                    if db_error.code().as_deref() == Some("1555") {
+                        let actualhash = sqlx::query_scalar!(
+                            r#"
+                                SELECT blockhash FROM blocks
+                                WHERE height=$1
+                                LIMIT 1
+                            "#,
+                            height_i64,
+                        )
+                        .fetch_optional(&self.0)
+                        .await
+                        .map_err(KolmeStoreError::custom)?;
+                        if let Some(actualhash) = actualhash {
+                            if actualhash == blockhash {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                Err(KolmeStoreError::custom(e))
+            }
+        }
     }
 
     pub async fn get_height_for_tx(
