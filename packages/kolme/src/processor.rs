@@ -86,8 +86,14 @@ impl<App: KolmeApp> Processor<App> {
             )
             .await?;
         let block = self.construct_block(signed).await?;
-        self.kolme.add_block(block).await?;
-        Ok(())
+        if let Err(e) = self.kolme.add_block(block).await {
+            if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
+                self.kolme.resync().await?;
+            }
+            Err(e)
+        } else {
+            Ok(())
+        }
     }
 
     async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
