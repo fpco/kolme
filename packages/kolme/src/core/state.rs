@@ -20,7 +20,7 @@ pub struct FrameworkState {
     pub(super) needed_listeners: usize,
     pub(super) approvers: BTreeSet<PublicKey>,
     pub(super) needed_approvers: usize,
-    pub(super) chains: ConfiguredChains,
+    pub(super) chains: ChainStates,
     pub(super) accounts: Accounts,
 }
 
@@ -40,7 +40,7 @@ impl MerkleSerialize for FrameworkState {
         serializer.store(needed_listeners)?;
         serializer.store(approvers)?;
         serializer.store(needed_approvers)?;
-        serializer.store(&chains.0)?;
+        serializer.store(chains)?;
         serializer.store(accounts)?;
         Ok(())
     }
@@ -56,7 +56,7 @@ impl MerkleDeserialize for FrameworkState {
             needed_listeners: deserializer.load()?,
             approvers: deserializer.load()?,
             needed_approvers: deserializer.load()?,
-            chains: ConfiguredChains(deserializer.load()?),
+            chains: deserializer.load()?,
             accounts: deserializer.load()?,
         })
     }
@@ -80,7 +80,7 @@ impl FrameworkState {
             needed_listeners: *needed_listeners,
             approvers: approvers.clone(),
             needed_approvers: *needed_approvers,
-            chains: chains.clone(),
+            chains: ChainStates::from(chains.clone()),
             accounts: Accounts::default(),
         }
     }
@@ -99,9 +99,8 @@ impl FrameworkState {
         asset_id: AssetId,
     ) -> Result<&AssetConfig, CoreStateError> {
         self.chains
-            .0
-            .get(&chain)
-            .ok_or(CoreStateError::ChainNotSupported { chain })?
+            .get(chain)?
+            .config
             .assets
             .values()
             .find(|config| config.asset_id == asset_id)
@@ -191,7 +190,10 @@ pub(super) async fn validate_genesis_info(
     expected: &GenesisInfo,
 ) -> Result<()> {
     if let Some(actual) = load_genesis_info(pool).await? {
-        anyhow::ensure!(&actual == expected);
+        anyhow::ensure!(
+            &actual == expected,
+            "Mismatched genesis info.\nActual:   {actual:?}\nExpected: {expected:?}"
+        );
     }
     Ok(())
 }

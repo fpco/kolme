@@ -387,7 +387,6 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Option<SignedBlock<App::Message>>> {
-        let height = i64::try_from(height.0)?;
         let rendered = sqlx::query_scalar!(
             r#"
                 SELECT rendered
@@ -437,38 +436,9 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.current_block_hash
     }
 
-    /// Get the ID of the next bridge event pending for the given chain.
-    pub async fn get_next_bridge_event_id(
-        &self,
-        chain: ExternalChain,
-        pubkey: PublicKey,
-    ) -> Result<BridgeEventId> {
-        let chain = chain.as_ref();
-        let bridge_event_id = sqlx::query_scalar!(
-            r#"
-                SELECT event_id
-                FROM bridge_events
-                LEFT JOIN bridge_event_attestations
-                ON bridge_events.id=bridge_event_attestations.event
-                WHERE chain=$1
-                AND (public_key=$2 OR accepted IS NOT NULL)
-                ORDER BY event_id DESC
-                LIMIT 1
-            "#,
-            chain,
-            pubkey
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(match bridge_event_id {
-            None => BridgeEventId::start(),
-            Some(bridge_event_id) => BridgeEventId::try_from_i64(bridge_event_id)?.next(),
-        })
-    }
-
     pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
-        for (chain, config) in &self.framework_state.chains.0 {
-            match &config.bridge {
+        for (chain, state) in self.framework_state.chains.iter() {
+            match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { code_id } => {
                     return Some(GenesisAction::InstantiateCosmos {
                         chain: chain.to_cosmos_chain().unwrap(),
@@ -490,47 +460,18 @@ impl<App: KolmeApp> KolmeInner<App> {
         None
     }
 
-    pub async fn get_next_bridge_action(
+    pub fn get_next_bridge_action(
         &self,
         chain: ExternalChain,
-    ) -> Result<Option<PendingBridgeAction>> {
-        struct Helper {
-            height: i64,
-            message: i64,
-            payload: String,
-            action_id: i64,
-        }
-        let chain_str = chain.as_ref();
-        let helper = sqlx::query_as!(
-            Helper,
-            r#"
-                SELECT messages.height, messages.message, actions.payload, actions.action_id
-                FROM actions
-                INNER JOIN messages
-                ON actions.approved=messages.id
-                WHERE chain=$1
-                AND confirmed IS NULL
-            "#,
-            chain_str
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        let Some(Helper {
-            payload,
-            height,
-            message,
-            action_id,
-        }) = helper
-        else {
-            return Ok(None);
-        };
-        Ok(Some(PendingBridgeAction {
-            chain,
-            payload,
-            height: BlockHeight::try_from(height)?,
-            message: message.try_into()?,
-            action_id: BridgeActionId(action_id.try_into()?),
-        }))
+    ) -> Result<Option<(BridgeActionId, &PendingBridgeAction)>> {
+        Ok(self
+            .framework_state
+            .chains
+            .get(chain)?
+            .pending_actions
+            .iter()
+            .next()
+            .map(|(k, v)| (*k, v)))
     }
 
     pub fn get_app_state(&self) -> &App::State {
@@ -549,8 +490,8 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.framework_state.needed_approvers
     }
 
-    pub fn get_bridge_contracts(&self) -> &BTreeMap<ExternalChain, ChainConfig> {
-        &self.framework_state.chains.0
+    pub fn get_bridge_contracts(&self) -> &ChainStates {
+        &self.framework_state.chains
     }
 
     pub fn get_balances(&self) -> &Accounts {
@@ -575,7 +516,6 @@ impl<App: KolmeApp> KolmeInner<App> {
 
     /// Load the block details from the database
     pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
-        let height = height.try_into_i64()?;
         let payload = sqlx::query_scalar!(
             r#"
                 SELECT rendered
@@ -615,201 +555,6 @@ impl<App: KolmeApp> KolmeInner<App> {
             next_nonce: account.get_next_nonce(),
         }
     }
-
-    pub async fn received_listener_attestation(
-        &self,
-        chain: ExternalChain,
-        pubkey: PublicKey,
-        event_id: BridgeEventId,
-    ) -> Result<bool> {
-        let chain = chain.as_ref();
-        let event_id = i64::try_from(event_id.0)?;
-
-        let count = sqlx::query_scalar!(
-            r#"
-                SELECT COUNT(*)
-                FROM bridge_events
-                INNER JOIN bridge_event_attestations
-                ON bridge_events.id=bridge_event_attestations.event
-                WHERE bridge_events.chain=$1
-                AND bridge_events.event_id=$2
-                AND public_key=$3
-            "#,
-            chain,
-            event_id,
-            pubkey
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        assert!(count == 0 || count == 1);
-        Ok(count == 1)
-    }
-
-    /// Get the ID of the latest action emitted for the given chain, if present.
-    pub async fn get_latest_action(&self, chain: ExternalChain) -> Result<Option<BridgeActionId>> {
-        let chain = chain.as_ref();
-        let id = sqlx::query_scalar!(
-            r#"
-                SELECT action_id
-                FROM actions
-                WHERE chain=$1
-                ORDER BY action_id DESC
-                LIMIT 1
-            "#,
-            chain
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        match id {
-            Some(id) => Ok(Some(BridgeActionId(id.try_into()?))),
-            None => Ok(None),
-        }
-    }
-
-    /// Get the ID of the latest action on the given chain signed by the given key.
-    pub async fn get_latest_approval(
-        &self,
-        chain: ExternalChain,
-        pubkey: PublicKey,
-    ) -> Result<Option<BridgeActionId>> {
-        let chain = chain.as_ref();
-        let latest_action_id = sqlx::query_scalar!(
-            r#"
-                SELECT actions.action_id
-                FROM actions
-                INNER JOIN action_approvals
-                ON actions.id=action_approvals.action
-                WHERE chain=$1
-                AND public_key=$2
-            "#,
-            chain,
-            pubkey,
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(match latest_action_id {
-            Some(id) => Some(BridgeActionId(id.try_into()?).next()),
-            None => None,
-        })
-    }
-
-    /// Get the ID of the first action which has not yet been approved by the processor.
-    pub async fn get_first_unapproved_action(
-        &self,
-        chain: ExternalChain,
-    ) -> Result<Option<BridgeActionId>> {
-        let chain = chain.as_ref();
-        let id = sqlx::query_scalar!(
-            r#"
-                SELECT action_id
-                FROM actions
-                WHERE chain=$1
-                AND approved IS NULL
-                ORDER BY action_id ASC
-                LIMIT 1
-            "#,
-            chain
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        match id {
-            Some(id) => Ok(Some(BridgeActionId(id.try_into()?))),
-            None => Ok(None),
-        }
-    }
-
-    /// Get the public keys of all approver approvals on an action.
-    pub async fn get_action_approval_signatures(
-        &self,
-        chain: ExternalChain,
-        action_id: BridgeActionId,
-    ) -> Result<BTreeMap<PublicKey, SignatureWithRecovery>> {
-        struct Helper {
-            public_key: Vec<u8>,
-            signature: Vec<u8>,
-            recovery: i64,
-        }
-        let chain = chain.as_ref();
-        let action_id = i64::try_from(action_id.0)?;
-        let helpers = sqlx::query_as!(
-            Helper,
-            r#"
-                SELECT public_key, signature, recovery
-                FROM actions
-                INNER JOIN action_approvals
-                ON actions.id=action_approvals.action
-                WHERE chain=$1
-                AND action_id=$2
-            "#,
-            chain,
-            action_id,
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        helpers
-            .into_iter()
-            .map(
-                |Helper {
-                     public_key,
-                     signature,
-                     recovery,
-                 }| {
-                    Ok((
-                        PublicKey::try_from_bytes(&public_key)?,
-                        SignatureWithRecovery {
-                            sig: Signature::from_slice(&signature)?,
-                            recid: RecoveryId::from_byte(recovery.try_into()?)
-                                .context("Invalid recovery found")?,
-                        },
-                    ))
-                },
-            )
-            .collect()
-    }
-
-    /// Get the payload of a bridge action.
-    pub async fn get_action_payload(
-        &self,
-        chain: ExternalChain,
-        action_id: BridgeActionId,
-    ) -> Result<Vec<u8>> {
-        get_action_payload(&self.pool, chain, action_id).await
-    }
-}
-
-pub(super) async fn get_action_payload(
-    pool: &sqlx::SqlitePool,
-    chain: ExternalChain,
-    action_id: BridgeActionId,
-) -> Result<Vec<u8>> {
-    use base64::Engine;
-
-    let chain_str = chain.as_ref();
-    let action_id = i64::try_from(action_id.0)?;
-    let payload = sqlx::query_scalar!(
-        r#"
-                SELECT payload
-                FROM actions
-                WHERE chain=$1
-                AND action_id=$2
-            "#,
-        chain_str,
-        action_id
-    )
-    .fetch_one(pool)
-    .await?;
-
-    // TODO: This is a hack... we should probably be storing binary blobs in the DB instead of TEXT.
-    match ChainKind::from(chain) {
-        ChainKind::Cosmos(_) => Ok(payload.into_bytes()),
-        ChainKind::Solana(_) => {
-            let payload = base64::engine::general_purpose::STANDARD.decode(&payload)?;
-
-            Ok(payload)
-        }
-        #[cfg(feature = "pass_through")]
-        ChainKind::PassThrough => Ok(payload.into_bytes()),
-    }
 }
 
 /// Response from [get_account_and_next_nonce]
@@ -828,12 +573,13 @@ async fn store_block<App: KolmeApp>(
     ExecutionResults {
         framework_state,
         app_state,
-        outputs,
-        db_updates,
+        logs,
+        loads,
     }: &ExecutionResults<App>,
 ) -> Result<()> {
     let block = signed_block.0.message.as_inner();
-    let tx = block.tx.0.message.as_inner();
+
+    anyhow::ensure!(loads == &block.loads);
 
     let height = block.height;
     let expected = kolme.get_next_height();
@@ -856,12 +602,13 @@ async fn store_block<App: KolmeApp>(
         .await?
         .hash;
     let app_state_hash = kolme.merkle_manager.save(&mut store, app_state).await?.hash;
+    let logs_hash = kolme.merkle_manager.save(&mut store, logs).await?.hash;
 
     sqlx::query!(
         r#"
             INSERT INTO
-            blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash)
-            VALUES($1, $2, $3, $4, $5, $6)
+            blocks(height, blockhash, rendered, txhash, framework_state_hash, app_state_hash, logs_hash)
+            VALUES($1, $2, $3, $4, $5, $6, $7)
         "#,
         height_i64,
         blockhash,
@@ -869,242 +616,10 @@ async fn store_block<App: KolmeApp>(
         txhash,
         framework_state_hash,
         app_state_hash,
+        logs_hash,
     )
     .execute(&mut **trans)
     .await?;
-
-    let mut message_db_ids = vec![];
-
-    for (
-        message,
-        MessageOutput {
-            logs,
-            loads,
-            actions,
-        },
-    ) in outputs.iter().enumerate()
-    {
-        let message = i64::try_from(message)?;
-        let message = sqlx::query!(
-            "INSERT INTO messages(height, message) VALUES($1, $2)",
-            height_i64,
-            message
-        )
-        .execute(&mut **trans)
-        .await?
-        .last_insert_rowid();
-        message_db_ids.push(message);
-        for (position, log) in logs.iter().enumerate() {
-            let position = i64::try_from(position)?;
-            sqlx::query!(
-                "INSERT INTO logs(message, position, payload) VALUES($1, $2, $3)",
-                message,
-                position,
-                log
-            )
-            .execute(&mut **trans)
-            .await?;
-        }
-        for (position, load) in loads.iter().enumerate() {
-            let position = i64::try_from(position)?;
-            let load = serde_json::to_string(&load)?;
-            sqlx::query!(
-                "INSERT INTO loads(message, position, payload) VALUES($1, $2, $3)",
-                message,
-                position,
-                load
-            )
-            .execute(&mut **trans)
-            .await?;
-        }
-        for (position, action) in actions.iter().enumerate() {
-            let position = i64::try_from(position)?;
-            let chain = match action {
-                ExecAction::Transfer {
-                    chain,
-                    recipient: _,
-                    funds: _,
-                } => *chain,
-            };
-            let chain_str = chain.as_ref();
-
-            let latest_action_id = sqlx::query_scalar!(
-                "SELECT action_id FROM actions WHERE chain=$1 ORDER BY action_id DESC LIMIT 1",
-                chain_str
-            )
-            .fetch_optional(&mut **trans)
-            .await?;
-            let action_id = latest_action_id.map_or(0, |x| x + 1);
-
-            let payload = action.to_payload(
-                chain,
-                kolme.get_bridge_contracts(),
-                BridgeActionId(action_id.try_into()?),
-            )?;
-
-            sqlx::query!(
-                r#"
-                    INSERT INTO actions(chain, action_id, message, position, payload)
-                    VALUES($1, $2, $3, $4, $5)
-                "#,
-                chain_str,
-                action_id,
-                message,
-                position,
-                payload,
-            )
-            .execute(&mut **trans)
-            .await?;
-        }
-    }
-
-    for update in db_updates {
-        match update {
-            DatabaseUpdate::ListenerAttestation {
-                chain,
-                event_id,
-                event_content,
-                msg_index,
-                was_accepted,
-                action_id,
-            } => {
-                let message_db_id = message_db_ids[*msg_index];
-                let chain = chain.as_ref();
-                let event_id = i64::try_from(event_id.0)?;
-
-                let event_db_id = sqlx::query_scalar!(
-                    r#"
-                        SELECT id
-                        FROM bridge_events
-                        WHERE chain=$1
-                        AND event_id=$2
-                    "#,
-                    chain,
-                    event_id
-                )
-                .fetch_optional(&mut **trans)
-                .await?;
-                let event_db_id = match event_db_id {
-                    Some(id) => id,
-                    None => sqlx::query!(
-                        r#"
-                            INSERT INTO
-                            bridge_events(chain, event_id, event)
-                            VALUES($1, $2, $3)
-                        "#,
-                        chain,
-                        event_id,
-                        event_content
-                    )
-                    .execute(&mut **trans)
-                    .await?
-                    .last_insert_rowid(),
-                };
-
-                sqlx::query!(
-                    r#"
-                        INSERT INTO
-                        bridge_event_attestations(event, public_key, message)
-                        VALUES($1, $2, $3)
-                    "#,
-                    event_db_id,
-                    tx.pubkey,
-                    message_db_id,
-                )
-                .execute(&mut **trans)
-                .await?;
-
-                if *was_accepted {
-                    let rows = sqlx::query!(
-                        r#"
-                            UPDATE bridge_events
-                            SET accepted=$1
-                            WHERE chain=$2
-                            AND event_id=$3
-                        "#,
-                        message_db_id,
-                        chain,
-                        event_id,
-                    )
-                    .execute(&mut **trans)
-                    .await?
-                    .rows_affected();
-                    anyhow::ensure!(rows == 1);
-
-                    if let Some(action_id) = *action_id {
-                        todo!("Need to log completion of the action: {action_id}");
-                    }
-                }
-            }
-            DatabaseUpdate::ApproveAction {
-                pubkey,
-                signature,
-                recovery,
-                msg_index,
-                chain,
-                action_id,
-            } => {
-                let chain = chain.as_ref();
-                let action_id = i64::try_from(action_id.0)?;
-                let action = sqlx::query_scalar!(
-                    r#"
-                        SELECT id
-                        FROM actions
-                        WHERE chain=$1
-                        AND action_id=$2
-                    "#,
-                    chain,
-                    action_id,
-                )
-                .fetch_one(&mut **trans)
-                .await?;
-
-                let message_db_id = message_db_ids[*msg_index];
-                let signature = signature.to_bytes();
-                let signature = signature.as_slice();
-                let recovery = recovery.to_byte();
-                sqlx::query!(
-                    r#"
-                        INSERT INTO action_approvals
-                        (action, public_key, signature, recovery, message)
-                        VALUES($1, $2, $3, $4, $5)
-                    "#,
-                    action,
-                    pubkey,
-                    signature,
-                    recovery,
-                    message_db_id
-                )
-                .execute(&mut **trans)
-                .await?;
-            }
-            DatabaseUpdate::ProcessorApproveAction {
-                msg_index,
-                chain,
-                action_id,
-            } => {
-                let chain = chain.as_ref();
-                let action_id = i64::try_from(action_id.0)?;
-                let message_db_id = message_db_ids[*msg_index];
-
-                let rows = sqlx::query!(
-                    r#"
-                        UPDATE actions
-                        SET approved=$1
-                        WHERE chain=$2
-                        AND action_id=$3
-                    "#,
-                    message_db_id,
-                    chain,
-                    action_id
-                )
-                .execute(&mut **trans)
-                .await?
-                .rows_affected();
-                anyhow::ensure!(rows == 1);
-            }
-        }
-    }
 
     Ok(())
 }

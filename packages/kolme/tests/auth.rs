@@ -76,6 +76,7 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn test_sample_sanity() {
+    init_logger(false, None);
     let tempfile = tempfile::NamedTempFile::new().unwrap();
 
     let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, tempfile.path())
