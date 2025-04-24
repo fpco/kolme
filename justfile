@@ -23,7 +23,7 @@ sqlx-prepare-sqlite $DATABASE_URL="sqlite:///tmp/kolme-prepare-db.sqlite3":
     cargo sqlx prepare
 
 [working-directory: "packages/kolme-store-postgresql"]
-sqlx-prepare-postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres":
+sqlx-prepare-postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
     cargo sqlx database reset -y
     cargo sqlx migrate run
     cargo sqlx prepare
