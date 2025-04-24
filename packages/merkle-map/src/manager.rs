@@ -151,6 +151,6 @@ impl MerkleManager {
         let Some(payload) = self.cache.read().get(&hash).cloned() else {
             return Ok(None);
         };
-        self.deserialize(hash, payload.clone()).map(Some)
+        self.deserialize(hash, payload).map(Some)
     }
 }
