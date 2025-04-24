@@ -7,6 +7,7 @@ use merkle_db_store::MerkleDbStore;
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
 use sqlx::sqlite::SqliteConnectOptions;
 
+#[derive(Clone)]
 pub struct KolmeStoreSqlite(sqlx::SqlitePool);
 
 impl KolmeStoreSqlite {
