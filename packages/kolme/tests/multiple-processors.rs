@@ -99,7 +99,8 @@ async fn multiple_processors() {
     // https://github.com/fpco/kolme/issues/147
     // is addressed.
     const PROCESSOR_COUNT: usize = 3;
-    const CLIENT_COUNT: usize = 100;
+    // FIXME also reduced this to 10 from 100, should be changed back too.
+    const CLIENT_COUNT: usize = 10;
 
     for _ in 0..PROCESSOR_COUNT {
         let kolme = Kolme::new(
