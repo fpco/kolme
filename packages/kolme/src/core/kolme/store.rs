@@ -1,14 +1,19 @@
+mod in_memory;
+
 use std::path::Path;
 
 use crate::core::*;
 
+use in_memory::KolmeStoreInMemory;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use kolme_store_postgresql::KolmeStorePostgres;
 use kolme_store_sqlite::KolmeStoreSqlite;
 
+#[derive(Clone)]
 pub enum KolmeStore {
     Sqlite(KolmeStoreSqlite),
     Postgres(KolmeStorePostgres),
+    InMemory(in_memory::KolmeStoreInMemory),
 }
 
 impl KolmeStore {
@@ -24,6 +29,10 @@ impl KolmeStore {
             .await
             .map(KolmeStore::Postgres)
             .map_err(anyhow::Error::from)
+    }
+
+    pub fn new_in_memory() -> Self {
+        KolmeStore::InMemory(KolmeStoreInMemory::default())
     }
 
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
@@ -72,6 +81,9 @@ impl KolmeStore {
         match self {
             KolmeStore::Sqlite(kolme_store_sqlite) => kolme_store_sqlite.clear_blocks().await,
             KolmeStore::Postgres(kolme_store_postgres) => kolme_store_postgres.clear_blocks().await,
+            KolmeStore::InMemory(kolme_store_in_memory) => {
+                kolme_store_in_memory.clear_blocks().await
+            }
         }
     }
 }
@@ -87,6 +99,11 @@ impl KolmeStore {
             }
             KolmeStore::Postgres(kolme_store_postgres) => {
                 kolme_store_postgres
+                    .load_latest_block(merkle_manager)
+                    .await?
+            }
+            KolmeStore::InMemory(kolme_store_in_memory) => {
+                kolme_store_in_memory
                     .load_latest_block(merkle_manager)
                     .await?
             }
@@ -109,6 +126,11 @@ impl KolmeStore {
                     .load_block(merkle_manager, height.0)
                     .await
             }
+            KolmeStore::InMemory(kolme_store_in_memory) => {
+                kolme_store_in_memory
+                    .load_block(merkle_manager, height)
+                    .await
+            }
         };
         match res {
             Err(KolmeStoreError::BlockNotFound { height: _ }) => Ok(None),
@@ -129,6 +151,9 @@ impl KolmeStore {
                 .await
                 .map(|x| x.map(BlockHeight))
                 .map_err(anyhow::Error::from),
+            KolmeStore::InMemory(kolme_store_in_memory) => {
+                kolme_store_in_memory.get_height_for_tx(txhash).await
+            }
         }
     }
 
@@ -146,6 +171,9 @@ impl KolmeStore {
                 .add_block(merkle_manager, block)
                 .await
                 .map_err(anyhow::Error::from),
+            KolmeStore::InMemory(kolme_store_in_memory) => {
+                kolme_store_in_memory.add_block(merkle_manager, block).await
+            }
         }
     }
 }
