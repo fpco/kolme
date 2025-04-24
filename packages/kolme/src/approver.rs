@@ -21,7 +21,7 @@ impl<App: KolmeApp> Approver<App> {
     }
 
     async fn catch_up_approvals_all(&self) -> Result<()> {
-        let kolme = self.kolme.read().await;
+        let kolme = self.kolme.read();
         for (chain, _) in kolme.get_bridge_contracts().iter() {
             self.catch_up_approvals(&kolme, chain).await?;
         }

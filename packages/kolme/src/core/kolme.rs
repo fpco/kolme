@@ -1,15 +1,15 @@
-mod error;
+mod block_info;
 mod mempool;
 mod store;
 
-pub use error::KolmeError;
+pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeStoreError, StorableBlock};
+use parking_lot::RwLock;
 pub use store::KolmeStore;
-use store::LoadStateResult;
 
 #[cfg(feature = "pass_through")]
 use std::sync::OnceLock;
-use std::{collections::HashMap, ops::Deref};
+use std::{cmp::Ordering, collections::HashMap, ops::Deref};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -25,21 +25,46 @@ use crate::core::*;
 /// to be shared across multiple different components in a single
 /// executable.
 ///
-/// All operations must start with either getting a read or write lock.
-/// This ensures both database and in-memory storage are appropriately
-/// locked during write operations to prevent data races.
+/// This data structures uses shared storage. To avoid potential
+/// inconsistent data from different block heights, any operations
+/// that read block-specific data must first clone a copy of that
+/// data by calling the [Kolme::read] method. This clone is a simple
+/// [Arc] clone, and so is very cheap.
 pub struct Kolme<App: KolmeApp> {
-    inner: Arc<tokio::sync::RwLock<KolmeInner<App>>>,
+    inner: Arc<KolmeInner<App>>,
+}
+
+pub(super) struct KolmeInner<App: KolmeApp> {
     notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
     mempool: Mempool<App::Message>,
+    pub(super) store: store::KolmeStore,
+    pub(super) app: App,
+    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
+    pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
+    #[cfg(feature = "pass_through")]
+    pub(super) pass_through_conn: OnceLock<reqwest::Client>,
+    pub(super) merkle_manager: MerkleManager,
+    current_block: RwLock<Arc<MaybeBlockInfo<App>>>,
+}
+
+/// Access to a specific block height.
+pub struct KolmeRead<App: KolmeApp> {
+    kolme: Kolme<App>,
+    current: Arc<MaybeBlockInfo<App>>,
+}
+
+impl<App: KolmeApp> Deref for KolmeRead<App> {
+    type Target = Kolme<App>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.kolme
+    }
 }
 
 impl<App: KolmeApp> Clone for Kolme<App> {
     fn clone(&self) -> Self {
         Kolme {
             inner: self.inner.clone(),
-            notify: self.notify.clone(),
-            mempool: self.mempool.clone(),
         }
     }
 }
@@ -52,40 +77,25 @@ impl<App: KolmeApp> Kolme<App> {
     ///
     /// Under the surface, this uses an [tokio::sync::RwLock], so
     /// multiple reads do not block each other.
-    pub async fn read(&self) -> KolmeRead<App> {
-        #[cfg(feature = "deadlock_detector")]
-        {
-            let backtrace = std::backtrace::Backtrace::force_capture();
-            let id = {
-                let guard = self.inner.read().await;
-                let mut guard = guard.deadlock_detector.write().unwrap();
-                let id = guard.next_read_id;
-                guard.next_read_id += 1;
-                guard.active_reads.insert(id, backtrace);
-                id
-            };
-            KolmeRead {
-                guard: self.inner.clone().read_owned().await,
-                id,
-            }
-        }
-        #[cfg(not(feature = "deadlock_detector"))]
+    pub fn read(&self) -> KolmeRead<App> {
         KolmeRead {
-            guard: self.inner.clone().read_owned().await,
+            kolme: self.clone(),
+            current: self.inner.current_block.read().clone(),
         }
     }
 
     /// Send a general purpose notification.
     pub fn notify(&self, note: Notification<App::Message>) {
         if let Notification::Broadcast { tx } = &note {
-            self.mempool.add(tx.clone());
+            self.inner.mempool.add(tx.clone());
         }
-        self.notify.send(note).ok();
+        self.inner.notify.send(note).ok();
     }
 
     /// Notify the system of a genesis contract instantiation.
     pub fn notify_genesis_instantiation(&self, chain: ExternalChain, contract: String) {
-        self.notify
+        self.inner
+            .notify
             .send(Notification::GenesisInstantiation { chain, contract })
             .ok();
     }
@@ -93,8 +103,9 @@ impl<App: KolmeApp> Kolme<App> {
     /// Propose a new event for the processor to add to the chain.
     pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
         let tx = Arc::new(tx);
-        self.mempool.add(tx.clone());
-        self.notify
+        self.inner.mempool.add(tx.clone());
+        self.inner
+            .notify
             .send(Notification::Broadcast { tx })
             .map_err(|_| {
                 anyhow::anyhow!(
@@ -106,45 +117,33 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Resync with the database.
     pub async fn resync(&self) -> Result<()> {
-        {
-            let kolme = self.read().await;
-            let latest = kolme
-                .store
-                .load_latest_block::<App::State>(&kolme.merkle_manager)
-                .await?;
-            let Some(latest) = latest else { return Ok(()) };
-            if kolme.next_height.0 > latest.height {
-                return Ok(());
-            }
-        }
-
-        let mut kolme = self.inner.write().await;
-        let latest = kolme
+        let latest = self
+            .inner
             .store
-            .load_latest_block::<App::State>(&kolme.merkle_manager)
-            .await?
-            .expect("Impossible: resync missing latest after we already saw it");
-        let StorableBlock {
-            height,
-            blockhash,
-            txhash: _,
-            rendered,
-            framework_state,
-            app_state,
-            logs: _,
-        } = latest;
-        if kolme.next_height.0 > height {
-            // Maybe we resynced between our read above and the new write here.
+            .load_latest_block::<App::State>(&self.inner.merkle_manager)
+            .await?;
+        let Some(latest) = latest else { return Ok(()) };
+
+        // Do a read first to avoid creating lock contention.
+        if self.inner.current_block.read().get_next_height().0 > latest.height {
             return Ok(());
         }
 
-        let block = serde_json::from_str(&rendered)?;
+        // Do this before grabbing the write lock to reduce contention
+        let latest = BlockInfo::<App>::try_from(latest)?;
 
-        kolme.framework_state = framework_state;
-        kolme.app_state = app_state;
-        kolme.next_height = BlockHeight(height).next();
-        kolme.current_block_hash = BlockHash(blockhash);
-        self.notify(Notification::NewBlock(Arc::new(block)));
+        // Now do the write lock
+        let mut guard = self.inner.current_block.write();
+
+        if guard.get_next_height() > latest.get_height() {
+            return Ok(());
+        }
+
+        let block = latest.block.clone();
+        *guard = Arc::new(MaybeBlockInfo::Some(latest));
+        std::mem::drop(guard);
+
+        self.notify(Notification::NewBlock(block));
         Ok(())
     }
 
@@ -153,38 +152,47 @@ impl<App: KolmeApp> Kolme<App> {
         let txhash = signed_block.0.message.as_inner().tx.hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
-        let exec_results = self
+        let ExecutionResults {
+            framework_state,
+            app_state,
+            logs,
+            loads,
+        } = self
             .read()
-            .await
             .execute_transaction(
                 &block.tx,
                 block.timestamp,
                 Some(signed_block.0.message.as_inner().loads.clone()),
             )
             .await?;
-        #[cfg(feature = "deadlock_detector")]
-        {
-            for (id, backtrace) in &self
-                .inner
-                .read()
-                .await
-                .deadlock_detector
-                .read()
-                .unwrap()
-                .active_reads
-            {
-                println!("{id}: {backtrace}");
-            }
-        }
-        let mut kolme = self.inner.write().await;
-        store_block(&mut kolme, &signed_block, &exec_results).await?;
 
-        kolme.next_height = signed_block.0.message.as_inner().height.next();
-        kolme.current_block_hash = signed_block.hash();
-        kolme.framework_state = exec_results.framework_state;
-        kolme.app_state = exec_results.app_state;
-        self.mempool.drop_tx(txhash);
-        self.notify
+        anyhow::ensure!(loads == block.loads);
+
+        self.inner
+            .store
+            .add_block(
+                &self.inner.merkle_manager,
+                &StorableBlock {
+                    height: signed_block.height().0,
+                    blockhash: signed_block.hash().0,
+                    txhash: signed_block.tx().hash().0,
+                    rendered: serde_json::to_string(&signed_block)?,
+                    framework_state,
+                    app_state,
+                    // TODO remove the unnecessary clone
+                    logs: logs.clone(),
+                },
+            )
+            .await?;
+
+        self.inner.mempool.drop_tx(txhash);
+
+        // TODO check if this is inefficient and, if so, write an optimized version
+        // here that uses the already loaded data
+        self.resync().await?;
+
+        self.inner
+            .notify
             .send(Notification::NewBlock(Arc::new(signed_block)))
             .ok();
         Ok(())
@@ -192,9 +200,9 @@ impl<App: KolmeApp> Kolme<App> {
 
     pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
         loop {
-            let (txhash, tx) = self.mempool.peek().await;
-            match self.read().await.get_tx_height(txhash).await {
-                Ok(Some(_)) => self.mempool.drop_tx(txhash),
+            let (txhash, tx) = self.inner.mempool.peek().await;
+            match self.get_tx_height(txhash).await {
+                Ok(Some(_)) => self.inner.mempool.drop_tx(txhash),
                 Ok(None) => {
                     break tx;
                 }
@@ -205,59 +213,7 @@ impl<App: KolmeApp> Kolme<App> {
             }
         }
     }
-}
 
-/// Read-only access to Kolme.
-pub struct KolmeRead<App: KolmeApp> {
-    guard: tokio::sync::OwnedRwLockReadGuard<KolmeInner<App>>,
-    #[cfg(feature = "deadlock_detector")]
-    id: usize,
-}
-
-#[cfg(feature = "deadlock_detector")]
-impl<App: KolmeApp> Drop for KolmeRead<App> {
-    fn drop(&mut self) {
-        self.guard
-            .deadlock_detector
-            .write()
-            .unwrap()
-            .active_reads
-            .remove(&self.id);
-    }
-}
-
-impl<App: KolmeApp> Deref for KolmeRead<App> {
-    type Target = KolmeInner<App>;
-
-    fn deref(&self) -> &Self::Target {
-        self.guard.deref()
-    }
-}
-
-pub struct KolmeInner<App: KolmeApp> {
-    pub(super) store: store::KolmeStore,
-    pub(super) app: App,
-    pub(super) framework_state: FrameworkState,
-    pub(super) app_state: App::State,
-    pub(super) next_height: BlockHeight,
-    pub(super) current_block_hash: BlockHash,
-    pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
-    pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
-    #[cfg(feature = "pass_through")]
-    pub(super) pass_through_conn: OnceLock<reqwest::Client>,
-    #[cfg(feature = "deadlock_detector")]
-    pub(super) deadlock_detector: std::sync::RwLock<DeadlockDetector>,
-    pub(super) merkle_manager: MerkleManager,
-}
-
-#[cfg(feature = "deadlock_detector")]
-#[derive(Default)]
-pub(super) struct DeadlockDetector {
-    pub(super) next_read_id: usize,
-    pub(super) active_reads: HashMap<usize, std::backtrace::Backtrace>,
-}
-
-impl<App: KolmeApp> Kolme<App> {
     pub async fn new(app: App, _code_version: impl AsRef<str>, store: KolmeStore) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
@@ -266,36 +222,26 @@ impl<App: KolmeApp> Kolme<App> {
         store
             .validate_genesis_info::<App::State>(&merkle_manager, &info)
             .await?;
-        let LoadStateResult {
-            framework_state,
-            app_state,
-            next_height,
-            current_block_hash,
-        } = store.load_state::<App>(&info, &merkle_manager).await?;
+        let current_block = MaybeBlockInfo::<App>::load(&store, &info, &merkle_manager).await?;
         let inner = KolmeInner {
             store,
             app,
-            framework_state,
-            app_state,
-            next_height,
-            current_block_hash,
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "pass_through")]
             pass_through_conn: OnceLock::new(),
-            #[cfg(feature = "deadlock_detector")]
-            deadlock_detector: Default::default(),
             merkle_manager,
-        };
-        Ok(Kolme {
-            inner: Arc::new(tokio::sync::RwLock::new(inner)),
             notify: tokio::sync::broadcast::channel(100).0,
             mempool: Mempool::new(),
+            current_block: RwLock::new(Arc::new(current_block)),
+        };
+        Ok(Kolme {
+            inner: Arc::new(inner),
         })
     }
 
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App::Message>> {
-        self.notify.subscribe()
+        self.inner.notify.subscribe()
     }
 
     /// Wait until the given block is published
@@ -308,17 +254,20 @@ impl<App: KolmeApp> Kolme<App> {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             // And then check if we're at the requested height.
-            if let Some(block) = self.read().await.get_block(height).await? {
+            if let Some(block) = self.get_block(height).await? {
                 return Ok(Arc::new(block));
             }
             loop {
                 match recv.recv().await {
                     Ok(note) => match note {
-                        Notification::NewBlock(block) => {
-                            if block.0.message.as_inner().height >= height {
-                                return Ok(block);
+                        Notification::NewBlock(block) => match block.height().cmp(&height) {
+                            Ordering::Less => (),
+                            Ordering::Equal => return Ok(block),
+                            Ordering::Greater => {
+                                let block = self.get_block(height).await?.with_context(|| format!("wait_for_block: received notification that block {} is available, but unable to find {height} in database", block.height()))?;
+                                return Ok(Arc::new(block));
                             }
-                        }
+                        },
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::Broadcast { .. } => (),
                         Notification::FailedTransaction { .. } => (),
@@ -339,7 +288,7 @@ impl<App: KolmeApp> Kolme<App> {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             // And then check if we have that transaction.
-            if let Some(height) = self.read().await.get_tx_height(tx).await? {
+            if let Some(height) = self.read().get_tx_height(tx).await? {
                 break Ok(height);
             }
             loop {
@@ -362,15 +311,13 @@ impl<App: KolmeApp> Kolme<App> {
             }
         }
     }
-}
 
-impl<App: KolmeApp> KolmeInner<App> {
     pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
-        if let Some(cosmos) = self.cosmos_conns.read().await.get(&chain) {
+        if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
         }
 
-        let mut guard = self.cosmos_conns.write().await;
+        let mut guard = self.inner.cosmos_conns.write().await;
         match guard.get(&chain) {
             Some(cosmos) => Ok(cosmos.clone()),
             None => {
@@ -382,11 +329,11 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub async fn get_solana_client(&self, chain: SolanaChain) -> Arc<SolanaClient> {
-        if let Some(client) = self.solana_conns.read().await.get(&chain) {
+        if let Some(client) = self.inner.solana_conns.read().await.get(&chain) {
             return client.clone();
         }
 
-        let mut guard = self.solana_conns.write().await;
+        let mut guard = self.inner.solana_conns.write().await;
         match guard.get(&chain) {
             Some(client) => Arc::clone(client),
             None => {
@@ -400,23 +347,27 @@ impl<App: KolmeApp> KolmeInner<App> {
 
     #[cfg(feature = "pass_through")]
     pub async fn get_pass_through_client(&self) -> reqwest::Client {
-        self.pass_through_conn
+        self.inner
+            .pass_through_conn
             .get_or_init(reqwest::Client::new)
             .clone()
     }
 
-    pub fn get_next_height(&self) -> BlockHeight {
-        self.next_height
+    pub fn get_app(&self) -> &App {
+        &self.inner.app
     }
+}
 
+impl<App: KolmeApp> Kolme<App> {
     /// Returns the given block, if available.
     pub async fn get_block(
         &self,
         height: BlockHeight,
     ) -> Result<Option<SignedBlock<App::Message>>> {
         let storable_block = self
+            .inner
             .store
-            .load_block::<App::State>(&self.merkle_manager, height)
+            .load_block::<App::State>(&self.inner.merkle_manager, height)
             .await?;
         Ok(match storable_block {
             Some(storable_block) => serde_json::from_str(&storable_block.rendered)?,
@@ -426,36 +377,49 @@ impl<App: KolmeApp> KolmeInner<App> {
 
     /// Get the block height for the given transaction, if present.
     pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>> {
-        self.store.get_height_for_tx(tx).await
+        self.inner.store.get_height_for_tx(tx).await
     }
 
     /// Get the [MerkleManager]
     pub fn get_merkle_manager(&self) -> &MerkleManager {
-        &self.merkle_manager
+        &self.inner.merkle_manager
+    }
+
+    /// Load the block details from the database
+    pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
+        self.get_block(height)
+            .await?
+            .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
+    }
+}
+
+impl<App: KolmeApp> KolmeRead<App> {
+    pub fn get_next_height(&self) -> BlockHeight {
+        self.current.get_next_height()
     }
 
     /// Returns the hash of the most recent block.
     ///
     /// If there is no event present, returns the special parent for the genesis block.
     pub fn get_current_block_hash(&self) -> BlockHash {
-        self.current_block_hash
+        self.current.get_block_hash()
     }
 
     pub fn get_next_genesis_action(&self) -> Option<GenesisAction> {
-        for (chain, state) in self.framework_state.chains.iter() {
+        for (chain, state) in self.get_framework_state().chains.iter() {
             match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { code_id } => {
                     return Some(GenesisAction::InstantiateCosmos {
                         chain: chain.to_cosmos_chain().unwrap(),
                         code_id: *code_id,
-                        args: self.framework_state.instantiate_args(),
+                        args: self.get_framework_state().instantiate_args(),
                     })
                 }
                 BridgeContract::NeededSolanaBridge { program_id } => {
                     return Some(GenesisAction::InstantiateSolana {
                         chain: chain.to_solana_chain().unwrap(),
                         program_id: program_id.clone(),
-                        args: self.framework_state.instantiate_args(),
+                        args: self.get_framework_state().instantiate_args(),
                     })
                 }
                 BridgeContract::Deployed(_) => (),
@@ -470,7 +434,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         chain: ExternalChain,
     ) -> Result<Option<(BridgeActionId, &PendingBridgeAction)>> {
         Ok(self
-            .framework_state
+            .get_framework_state()
             .chains
             .get(chain)?
             .pending_actions
@@ -480,27 +444,31 @@ impl<App: KolmeApp> KolmeInner<App> {
     }
 
     pub fn get_app_state(&self) -> &App::State {
-        &self.app_state
+        self.current.get_app_state()
+    }
+
+    pub fn get_framework_state(&self) -> &FrameworkState {
+        self.current.get_framework_state()
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.framework_state.processor
+        self.get_framework_state().processor
     }
 
     pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.framework_state.approvers
+        &self.get_framework_state().approvers
     }
 
     pub fn get_needed_approvers(&self) -> usize {
-        self.framework_state.needed_approvers
+        self.get_framework_state().needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &ChainStates {
-        &self.framework_state.chains
+        &self.get_framework_state().chains
     }
 
     pub fn get_balances(&self) -> &Accounts {
-        &self.framework_state.accounts
+        &self.get_framework_state().accounts
     }
 
     pub async fn create_signed_transaction(
@@ -519,90 +487,15 @@ impl<App: KolmeApp> KolmeInner<App> {
         tx.sign(secret)
     }
 
-    /// Load the block details from the database
-    pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
-        self.get_block(height)
-            .await?
-            .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
-    }
-
     /// Get the next nonce to be used for the account associated with this public key.
     ///
     /// This function is read-only, and works for both accounts that do and don't exist.
     ///
     /// For new accounts, it will always return the initial nonce.
     pub fn get_next_nonce(&self, key: PublicKey) -> AccountNonce {
-        self.framework_state
+        self.get_framework_state()
             .accounts
             .get_account_for_key(key)
             .map_or_else(AccountNonce::start, |(_, account)| account.get_next_nonce())
     }
-
-    /// Get the account ID and next nonce for the given public key.
-    ///
-    /// This will insert a new account into the accounts map if needed.
-    pub fn get_account_and_next_nonce(&mut self, key: PublicKey) -> AccountAndNextNonce {
-        let (id, account) = self
-            .framework_state
-            .accounts
-            .get_or_add_account_for_pubkey(key);
-        AccountAndNextNonce {
-            id,
-            next_nonce: account.get_next_nonce(),
-        }
-    }
-}
-
-/// Response from [get_account_and_next_nonce]
-pub struct AccountAndNextNonce {
-    /// The account ID
-    pub id: AccountId,
-    /// The next nonce to be used
-    pub next_nonce: AccountNonce,
-}
-
-/// Also performs validation of the data
-async fn store_block<App: KolmeApp>(
-    kolme: &mut KolmeInner<App>,
-    signed_block: &SignedBlock<App::Message>,
-    ExecutionResults {
-        framework_state,
-        app_state,
-        logs,
-        loads,
-    }: &ExecutionResults<App>,
-) -> Result<()> {
-    let block = signed_block.0.message.as_inner();
-
-    anyhow::ensure!(loads == &block.loads);
-
-    let height = block.height;
-    let expected = kolme.get_next_height();
-    if height != expected {
-        return Err(anyhow::Error::from(KolmeError::InvalidAddBlockHeight {
-            proposed: height,
-            expected,
-        }));
-    }
-
-    kolme
-        .store
-        .add_block(
-            &kolme.merkle_manager,
-            &StorableBlock {
-                height: height.0,
-                blockhash: signed_block.0.message_hash(),
-                txhash: signed_block.0.message.as_inner().tx.0.message_hash(),
-                rendered: serde_json::to_string(&signed_block)?,
-                // FIXME don't require the clone
-                framework_state: framework_state.clone(),
-                // FIXME don't require the clone
-                app_state: app_state.clone(),
-                // TODO remove the unnecessary clone
-                logs: logs.clone(),
-            },
-        )
-        .await?;
-
-    Ok(())
 }

@@ -22,7 +22,6 @@ impl<App: KolmeApp> Processor<App> {
         let chains = self
             .kolme
             .read()
-            .await
             .get_bridge_contracts()
             .iter()
             .map(|(k, _)| k)
@@ -42,31 +41,22 @@ impl<App: KolmeApp> Processor<App> {
         loop {
             let tx = self.kolme.wait_on_mempool().await;
             let txhash = tx.hash();
-            loop {
-                let tx = (*tx).clone();
+            let tx = Arc::unwrap_or_clone(tx);
 
-                if let Err(e) = self.add_transaction(tx).await {
-                    if let Some(KolmeError::InvalidAddBlockHeight { .. }) = e.downcast_ref() {
-                        tracing::debug!("Block height race condition when adding transaction {txhash}, retrying");
-                        //FIXME
-                        // } else if let Some(BlockDbError::BlockAlreadyInDb) = e.downcast_ref() {
-                        //     // TODO should we unify the different ways of detecting that a block is already in the database?
-                        //     tracing::debug!("Block height race condition when adding transaction {txhash}, retrying");
-                    } else {
-                        tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
-                        break;
-                    }
-                } else {
+            match self.add_transaction(tx).await {
+                Ok(()) => {
                     // TODO See https://github.com/fpco/kolme/issues/122
                     self.approve_actions_all(&chains).await;
-                    break;
+                }
+                Err(e) => {
+                    tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
                 }
             }
         }
     }
 
     async fn ensure_genesis_event(&self) -> Result<()> {
-        if self.kolme.read().await.get_next_height().is_start() {
+        if self.kolme.read().get_next_height().is_start() {
             tracing::info!("Creating genesis event");
             self.create_genesis_event().await
         } else {
@@ -79,7 +69,6 @@ impl<App: KolmeApp> Processor<App> {
         let signed = self
             .kolme
             .read()
-            .await
             .create_signed_transaction(
                 &self.secret,
                 vec![Message::<App::Message>::Genesis(App::genesis_info())],
@@ -104,14 +93,7 @@ impl<App: KolmeApp> Processor<App> {
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 50;
         let res = loop {
-            if self
-                .kolme
-                .read()
-                .await
-                .get_tx_height(txhash)
-                .await?
-                .is_some()
-            {
+            if self.kolme.read().get_tx_height(txhash).await?.is_some() {
                 break Ok(());
             }
             attempts += 1;
@@ -162,7 +144,7 @@ impl<App: KolmeApp> Processor<App> {
         tx: SignedTransaction<App::Message>,
     ) -> Result<SignedBlock<App::Message>> {
         // Stop any changes from happening while we're processing.
-        let kolme = self.kolme.read().await;
+        let kolme = self.kolme.read();
 
         let txhash = tx.hash();
         if kolme.get_tx_height(txhash).await?.is_some() {
@@ -209,7 +191,7 @@ impl<App: KolmeApp> Processor<App> {
         // We only need to bother approving one action at a time. Each time we
         // approve an action, it produces a new block, which will allow us to check if we
         // need to approve anything else.
-        let kolme = self.kolme.read().await;
+        let kolme = self.kolme.read();
 
         let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());

@@ -81,7 +81,6 @@ impl<App: KolmeApp> Submitter<App> {
         let chains = self
             .kolme
             .read()
-            .await
             .get_bridge_contracts()
             .keys()
             .filter(|x| self.args.can_handle(*x))
@@ -114,15 +113,13 @@ impl<App: KolmeApp> Submitter<App> {
     /// We only do 0 or 1, since we always wait for listeners to confirm that our actions succeeded before continuing.
     async fn submit_zero_or_one(&mut self, chains: &[ExternalChain]) -> Result<()> {
         // TODO we can probably unify genesis and other actions into a single per-chain feed
-        let genesis_action = self.kolme.read().await.get_next_genesis_action();
+        let genesis_action = self.kolme.read().get_next_genesis_action();
         if let Some(genesis_action) = genesis_action {
             return self.handle_genesis(genesis_action).await;
         }
 
         for chain in chains {
-            if let Some((action_id, action)) =
-                self.kolme.read().await.get_next_bridge_action(*chain)?
-            {
+            if let Some((action_id, action)) = self.kolme.read().get_next_bridge_action(*chain)? {
                 return self.handle_bridge_action(action_id, *chain, action).await;
             }
         }
@@ -145,7 +142,7 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 }
 
-                let cosmos = self.kolme.read().await.get_cosmos(chain).await?;
+                let cosmos = self.kolme.read().get_cosmos(chain).await?;
 
                 let addr = cosmos::instantiate(&cosmos, seed_phrase, code_id, args).await?;
 
@@ -164,7 +161,7 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 }
 
-                let client = self.kolme.read().await.get_solana_client(chain).await;
+                let client = self.kolme.read().get_solana_client(chain).await;
 
                 solana::instantiate(&client, keypair, &program_id, args).await?;
 
@@ -199,7 +196,7 @@ impl<App: KolmeApp> Submitter<App> {
         }
 
         let contract = {
-            let kolme = self.kolme.read().await;
+            let kolme = self.kolme.read();
             let state = kolme.get_bridge_contracts().get(chain)?;
             match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { .. }
@@ -214,7 +211,7 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 };
 
-                let cosmos = self.kolme.read().await.get_cosmos(cosmos_chain).await?;
+                let cosmos = self.kolme.read().get_cosmos(cosmos_chain).await?;
 
                 cosmos::execute(
                     &cosmos,
@@ -231,19 +228,14 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 };
 
-                let client = self
-                    .kolme
-                    .read()
-                    .await
-                    .get_solana_client(solana_chain)
-                    .await;
+                let client = self.kolme.read().get_solana_client(solana_chain).await;
 
                 solana::execute(&client, keypair, &contract, *processor, approvals, payload).await?
             }
             #[cfg(feature = "pass_through")]
             ChainArgs::PassThrough { port } => {
                 anyhow::ensure!(chain == ExternalChain::PassThrough);
-                let client = self.kolme.read().await.get_pass_through_client().await;
+                let client = self.kolme.read().get_pass_through_client().await;
                 pass_through::execute(client, *port, *processor, approvals, payload).await?
             }
         };

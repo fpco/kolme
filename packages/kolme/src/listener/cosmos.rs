@@ -27,7 +27,7 @@ pub async fn listen<App: KolmeApp>(
     chain: CosmosChain,
     contract: String,
 ) -> Result<()> {
-    let kolme_r = kolme.read().await;
+    let kolme_r = kolme.read();
 
     let cosmos = kolme_r.get_cosmos(chain).await?;
     let contract = cosmos.make_contract(contract.parse()?);
@@ -69,7 +69,6 @@ async fn listen_once<App: KolmeApp>(
 
             let signed = kolme
                 .read()
-                .await
                 .create_signed_transaction(secret, vec![message])
                 .await?;
 

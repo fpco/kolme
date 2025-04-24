@@ -80,7 +80,7 @@ impl<App: KolmeApp> Listener<App> {
                     continue;
                 }
 
-                let kolme = self.kolme.read().await;
+                let kolme = self.kolme.read();
                 let next = get_next_bridge_event_id(&kolme, self.secret.public_key(), chain);
                 if next == BridgeEventId::start() {
                     let config = &kolme.get_bridge_contracts().get(chain)?.config;
@@ -142,7 +142,7 @@ impl<App: KolmeApp> Listener<App> {
     async fn get_contracts(&self, name: ChainName) -> Option<BTreeMap<ExternalChain, String>> {
         let mut res = BTreeMap::new();
 
-        for (chain, state) in self.kolme.read().await.get_bridge_contracts().iter() {
+        for (chain, state) in self.kolme.read().get_bridge_contracts().iter() {
             if chain.name() != name {
                 continue;
             }

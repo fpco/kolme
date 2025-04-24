@@ -128,7 +128,6 @@ async fn sanity() {
             .unwrap();
         let tx = kolme_client
             .read()
-            .await
             .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
             .unwrap();

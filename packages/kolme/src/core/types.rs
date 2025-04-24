@@ -787,6 +787,14 @@ impl<AppMessage> SignedBlock<AppMessage> {
     pub fn hash(&self) -> BlockHash {
         BlockHash(self.0.message_hash())
     }
+
+    pub fn height(&self) -> BlockHeight {
+        self.0.message.as_inner().height
+    }
+
+    pub fn tx(&self) -> &SignedTransaction<AppMessage> {
+        &self.0.message.as_inner().tx
+    }
 }
 
 /// The hash of a [Block].

@@ -244,22 +244,6 @@ impl Accounts {
         Ok(())
     }
 
-    pub(crate) fn get_or_add_account_for_pubkey(
-        &mut self,
-        key: PublicKey,
-    ) -> (AccountId, &Account) {
-        match self.pubkeys.get(&key).cloned() {
-            Some(id) => (id, self.accounts.get_mut(&id).unwrap()),
-            None => {
-                let id = AccountId(self.accounts.len().try_into().unwrap());
-                self.pubkeys.insert(key, id);
-                let account = self.accounts.get_or_default(id);
-                account.pubkeys.insert(key);
-                (id, account)
-            }
-        }
-    }
-
     /// Use the nonce for the given public key
     ///
     /// Returns an error if the wrong nonce is provided. Initiates the account if necessary.

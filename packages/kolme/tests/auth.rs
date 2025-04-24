@@ -104,16 +104,14 @@ async fn test_sample_sanity() {
         async move {
             let tx = kolme
                 .read()
-                .await
                 .create_signed_transaction(&signer, msgs.into_iter().map(Message::Auth).collect())
                 .await?;
             kolme
                 .read()
-                .await
                 .execute_transaction(&tx, Timestamp::now(), None)
                 .await?;
             let mut subscribe = kolme.subscribe();
-            let next_height = kolme.read().await.get_next_height();
+            let next_height = kolme.read().get_next_height();
             kolme.propose_transaction(tx)?;
             loop {
                 match subscribe.recv().await? {
