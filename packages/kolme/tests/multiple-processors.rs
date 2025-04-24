@@ -208,8 +208,18 @@ async fn checker(
     all_txhashes: Arc<Mutex<HashSet<TxHash>>>,
     highest_block: Arc<Mutex<BlockHeight>>,
 ) -> Result<()> {
+    // Resynchronize all the Kolmes so they have the most up to date state from the database.
+    for kolme in &*kolmes {
+        kolme.resync().await.unwrap();
+    }
     let highest_block = *highest_block.lock();
-    let highest_block = kolmes[0].wait_for_block(highest_block).await.unwrap();
+    let highest_block = kolmes[0]
+        .read()
+        .await
+        .get_block(highest_block)
+        .await
+        .unwrap()
+        .unwrap();
     let next_height = kolmes[0].read().await.get_next_height();
     assert_eq!(
         next_height,
