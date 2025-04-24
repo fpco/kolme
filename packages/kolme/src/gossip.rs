@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
     kolme: Kolme<App>,
+    last_seen_watch: tokio::sync::watch::Sender<Option<BlockHeight>>,
     swarm: Mutex<Swarm<KolmeBehaviour<App::Message>>>,
     notifications: IdentTopic,
     find_peers: IdentTopic,
@@ -118,12 +119,19 @@ impl<App: KolmeApp> Gossip<App> {
         swarm.listen_on("/ip6/::/udp/0/quic-v1".parse()?)?;
         swarm.listen_on("/ip6/::/tcp/0".parse()?)?;
 
+        let (last_seen_watch, _) = tokio::sync::watch::channel(None);
+
         Ok(Self {
             kolme,
+            last_seen_watch,
             swarm: Mutex::new(swarm),
             notifications,
             find_peers,
         })
+    }
+
+    pub fn subscribe_last_seen(&self) -> tokio::sync::watch::Receiver<Option<BlockHeight>> {
+        self.last_seen_watch.subscribe()
     }
 
     pub async fn run(self) -> Result<()> {
@@ -246,8 +254,18 @@ impl<App: KolmeApp> Gossip<App> {
                     request_id: _,
                     response,
                 } => match response {
-                    BlockResponse::Next(height) => {
-                        state.observe_next_block_height(height);
+                    BlockResponse::Next(next_height) => {
+                        let updated = state.observe_next_block_height(next_height);
+                        if updated {
+                            // event state starts with BlockHeight::start (equal to 0) and
+                            // if max next height was updated we should have received at least 1
+                            let height = BlockHeight(next_height.0 - 1);
+                            if let Err(e) = self.last_seen_watch.send(Some(height)) {
+                                tracing::warn!(
+                                    "Unable to notify about new last seen block height: {e}"
+                                )
+                            }
+                        }
                     }
                     BlockResponse::Block(block) => {
                         self.add_block(&block).await;
@@ -334,8 +352,14 @@ impl EventState {
         tracing::debug!("Current list of peers: {:?}", self.peers);
     }
 
-    fn observe_next_block_height(&mut self, next: BlockHeight) {
-        self.expected_next_block = self.expected_next_block.max(next);
+    /// stores max next height and returns true if it was updated
+    fn observe_next_block_height(&mut self, next: BlockHeight) -> bool {
+        if next > self.expected_next_block {
+            self.expected_next_block = next;
+            true
+        } else {
+            false
+        }
     }
 
     fn get_next_peer(&mut self) -> Option<&PeerId> {
