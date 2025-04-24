@@ -90,26 +90,27 @@ async fn multiple_processors() {
         return;
     }
 
+    let store = if block_db_str == "MEMORY" {
+        KolmeStore::new_in_memory()
+    } else if block_db_str == "SQLITE" {
+        KolmeStore::new_sqlite("multi-processors.sqlite3")
+            .await
+            .unwrap()
+    } else {
+        KolmeStore::new_postgres(&block_db_str).await.unwrap()
+    };
+
     kolme::init_logger(false, None);
     let mut processor_set = JoinSet::new();
     let mut set = JoinSet::new();
     let mut kolmes = vec![];
-    // FIXME reduced this to 3 to deal with failing tests due to
-    // heavy contention. Should be changed back to 10 ideally when
-    // https://github.com/fpco/kolme/issues/147
-    // is addressed.
-    const PROCESSOR_COUNT: usize = 3;
-    // FIXME also reduced this to 10 from 100, should be changed back too.
-    const CLIENT_COUNT: usize = 10;
+    const PROCESSOR_COUNT: usize = 10;
+    const CLIENT_COUNT: usize = 100;
 
     for _ in 0..PROCESSOR_COUNT {
-        let kolme = Kolme::new(
-            SampleKolmeApp,
-            DUMMY_CODE_VERSION,
-            KolmeStore::new_postgres(&block_db_str).await.unwrap(),
-        )
-        .await
-        .unwrap();
+        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store.clone())
+            .await
+            .unwrap();
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         processor_set.spawn(processor.run());
         processor_set.spawn(check_failed_txs(kolme.clone()));
