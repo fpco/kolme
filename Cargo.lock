@@ -3354,7 +3354,6 @@ dependencies = [
  "serde_json",
  "shared",
  "solana-client",
- "sqlx",
  "strum 0.27.1",
  "tempfile",
  "thiserror 2.0.12",
