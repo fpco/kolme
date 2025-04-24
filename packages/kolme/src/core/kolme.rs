@@ -387,7 +387,6 @@ impl<App: KolmeApp> KolmeInner<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Option<SignedBlock<App::Message>>> {
-        let height = i64::try_from(height.0)?;
         let rendered = sqlx::query_scalar!(
             r#"
                 SELECT rendered
@@ -517,7 +516,6 @@ impl<App: KolmeApp> KolmeInner<App> {
 
     /// Load the block details from the database
     pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
-        let height = height.try_into_i64()?;
         let payload = sqlx::query_scalar!(
             r#"
                 SELECT rendered
