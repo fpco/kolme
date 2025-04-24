@@ -91,13 +91,15 @@ async fn multiple_processors() {
     }
 
     let store = if block_db_str == "MEMORY" {
-        KolmeStore::new_in_memory()
+        Some(KolmeStore::new_in_memory())
     } else if block_db_str == "SQLITE" {
-        KolmeStore::new_sqlite("multi-processors.sqlite3")
-            .await
-            .unwrap()
+        Some(
+            KolmeStore::new_sqlite("multi-processors.sqlite3")
+                .await
+                .unwrap(),
+        )
     } else {
-        KolmeStore::new_postgres(&block_db_str).await.unwrap()
+        None
     };
 
     kolme::init_logger(false, None);
@@ -108,6 +110,10 @@ async fn multiple_processors() {
     const CLIENT_COUNT: usize = 100;
 
     for _ in 0..PROCESSOR_COUNT {
+        let store = match &store {
+            Some(store) => store.clone(),
+            None => KolmeStore::new_postgres(&block_db_str).await.unwrap(),
+        };
         let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store.clone())
             .await
             .unwrap();

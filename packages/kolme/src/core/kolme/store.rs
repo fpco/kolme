@@ -6,7 +6,7 @@ use crate::core::*;
 
 use in_memory::KolmeStoreInMemory;
 use kolme_store::{KolmeStoreError, StorableBlock};
-use kolme_store_postgresql::KolmeStorePostgres;
+use kolme_store_postgresql::{ConstructLock, KolmeStorePostgres};
 use kolme_store_sqlite::KolmeStoreSqlite;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -19,8 +19,8 @@ pub enum KolmeStore {
 
 pub enum KolmeConstructLock {
     Sqlite,
-    Postgres,
-    InMemory(OwnedSemaphorePermit),
+    Postgres { _lock: ConstructLock },
+    InMemory { _permit: OwnedSemaphorePermit },
 }
 
 impl KolmeStore {
@@ -98,10 +98,12 @@ impl KolmeStore {
         match self {
             // No locking for SQLite
             KolmeStore::Sqlite(_kolme_store_sqlite) => Ok(KolmeConstructLock::Sqlite),
-            KolmeStore::Postgres(kolme_store_postgres) => todo!(),
-            KolmeStore::InMemory(kolme_store_in_memory) => Ok(KolmeConstructLock::InMemory(
-                kolme_store_in_memory.take_construct_lock().await,
-            )),
+            KolmeStore::Postgres(kolme_store_postgres) => Ok(KolmeConstructLock::Postgres {
+                _lock: kolme_store_postgres.take_construct_lock().await?,
+            }),
+            KolmeStore::InMemory(kolme_store_in_memory) => Ok(KolmeConstructLock::InMemory {
+                _permit: kolme_store_in_memory.take_construct_lock().await,
+            }),
         }
     }
 }

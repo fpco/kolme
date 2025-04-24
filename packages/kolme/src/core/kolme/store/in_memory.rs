@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
-    time::Instant,
 };
 
 use kolme_store::KolmeStoreError;

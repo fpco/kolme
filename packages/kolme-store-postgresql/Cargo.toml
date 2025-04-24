@@ -9,3 +9,5 @@ merkle-map.workspace = true
 kolme-store.workspace = true
 shared.workspace = true
 sqlx = { workspace = true, features = ["migrate", "runtime-tokio", "postgres"] }
+tracing = "0.1.41"
+tokio.workspace = true

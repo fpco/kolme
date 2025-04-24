@@ -3,19 +3,17 @@ mod merkle_db_store;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_db_store::MerkleDbStore;
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
+use sqlx::postgres::PgAdvisoryLock;
 
 #[derive(Clone)]
 pub struct KolmeStorePostgres(sqlx::PgPool);
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum KeepGoing {
-    Continue,
-    Stop,
-}
-
 impl KolmeStorePostgres {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
-        let pool = sqlx::PgPool::connect(url).await?;
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(20)
+            .connect(url)
+            .await?;
         sqlx::migrate!().run(&pool).await?;
         Ok(Self(pool))
     }
@@ -211,5 +209,46 @@ impl KolmeStorePostgres {
             .await
             .map(|_| ())
             .map_err(KolmeStoreError::custom)
+    }
+
+    pub async fn take_construct_lock(&self) -> Result<ConstructLock, KolmeStoreError> {
+        let (tx_locked, rx_locked) = tokio::sync::oneshot::channel();
+        let conn = self.0.acquire().await.map_err(KolmeStoreError::custom)?;
+        let lock = PgAdvisoryLock::new("construct");
+        tokio::spawn(async move {
+            match lock.acquire(conn).await.map_err(KolmeStoreError::custom) {
+                Ok(guard) => {
+                    let (tx_unlock, rx_unlock) = tokio::sync::oneshot::channel::<()>();
+                    if tx_locked.send(Ok(tx_unlock)).is_ok() {
+                        rx_unlock.await.ok();
+                    }
+                    if let Err(e) = guard.release_now().await {
+                        tracing::error!("Error releasing PostgreSQL construction lock: {e}");
+                    }
+                }
+                Err(e) => {
+                    tx_locked.send(Err(e)).ok();
+                }
+            }
+        });
+        match rx_locked.await {
+            Ok(Ok(tx_unlock)) => Ok(ConstructLock {
+                tx_unlock: Some(tx_unlock),
+            }),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(KolmeStoreError::custom(e)),
+        }
+    }
+}
+
+pub struct ConstructLock {
+    tx_unlock: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl Drop for ConstructLock {
+    fn drop(&mut self) {
+        if self.tx_unlock.take().unwrap().send(()).is_err() {
+            tracing::error!("Error while dropping a PostgreSQL construct lock");
+        }
     }
 }

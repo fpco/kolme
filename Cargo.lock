@@ -3410,6 +3410,8 @@ dependencies = [
  "merkle-map",
  "shared",
  "sqlx",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
