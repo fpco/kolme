@@ -169,8 +169,10 @@ impl<App: KolmeApp> Submitter<App> {
             }
         };
 
-        self.kolme
-            .notify_genesis_instantiation(chain, contract_addr);
+        self.kolme.notify(Notification::GenesisInstantiation {
+            chain,
+            contract: contract_addr,
+        });
         self.genesis_created.insert(chain);
 
         Ok(())

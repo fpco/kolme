@@ -69,6 +69,8 @@ impl<App: KolmeApp> Clone for Kolme<App> {
     }
 }
 
+struct NoNotificationListenersError;
+
 impl<App: KolmeApp> Kolme<App> {
     /// Lock the local storage and the database.
     ///
@@ -86,33 +88,33 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Send a general purpose notification.
     pub fn notify(&self, note: Notification<App::Message>) {
+        // Ignore errors from notifications, it just means no one
+        // is subscribed.
+        self.notify_inner(note).ok();
+    }
+
+    fn notify_inner(
+        &self,
+        note: Notification<App::Message>,
+    ) -> Result<(), NoNotificationListenersError> {
         if let Notification::Broadcast { tx } = &note {
             self.inner.mempool.add(tx.clone());
         }
-        self.inner.notify.send(note).ok();
-    }
-
-    /// Notify the system of a genesis contract instantiation.
-    pub fn notify_genesis_instantiation(&self, chain: ExternalChain, contract: String) {
         self.inner
             .notify
-            .send(Notification::GenesisInstantiation { chain, contract })
-            .ok();
+            .send(note)
+            .map(|_| ())
+            .map_err(|_| NoNotificationListenersError)
     }
 
     /// Propose a new event for the processor to add to the chain.
     pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
-        let tx = Arc::new(tx);
-        self.inner.mempool.add(tx.clone());
-        self.inner
-            .notify
-            .send(Notification::Broadcast { tx })
+        self.notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
             .map_err(|_| {
                 anyhow::anyhow!(
-                    "Tried to propose an event, but no one is listening to our notifications"
+                    "Tried to propose a transaction, but no one is listening to our notifications"
                 )
             })
-            .map(|_| ())
     }
 
     /// Resync with the database.
