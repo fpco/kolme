@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
     kolme: Kolme<App>,
+    last_seen_watch: tokio::sync::watch::Sender<Option<BlockHeight>>,
     swarm: Mutex<Swarm<KolmeBehaviour<App::Message>>>,
     notifications: IdentTopic,
     find_peers: IdentTopic,
@@ -36,9 +37,9 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + 'static> 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
 enum BlockRequest {
     /// Return the height of the next block to be generated.
-    Next,
+    NextHeight,
     /// Return the contents of a specific block.
-    GetHeight(BlockHeight),
+    BlockAtHeight(BlockHeight),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -118,12 +119,19 @@ impl<App: KolmeApp> Gossip<App> {
         swarm.listen_on("/ip6/::/udp/0/quic-v1".parse()?)?;
         swarm.listen_on("/ip6/::/tcp/0".parse()?)?;
 
+        let (last_seen_watch, _) = tokio::sync::watch::channel(None);
+
         Ok(Self {
             kolme,
+            last_seen_watch,
             swarm: Mutex::new(swarm),
             notifications,
             find_peers,
         })
+    }
+
+    pub fn subscribe_last_seen(&self) -> tokio::sync::watch::Receiver<Option<BlockHeight>> {
+        self.last_seen_watch.subscribe()
     }
 
     pub async fn run(self) -> Result<()> {
@@ -220,7 +228,7 @@ impl<App: KolmeApp> Gossip<App> {
                     request,
                     channel,
                 } => match request {
-                    BlockRequest::Next => {
+                    BlockRequest::NextHeight => {
                         if let Err(e) = swarm.behaviour_mut().request_response.send_response(
                             channel,
                             BlockResponse::Next(self.kolme.read().get_next_height()),
@@ -228,7 +236,7 @@ impl<App: KolmeApp> Gossip<App> {
                             tracing::warn!("Unable to answer Next request: {e:?}");
                         }
                     }
-                    BlockRequest::GetHeight(height) => {
+                    BlockRequest::BlockAtHeight(height) => {
                         let res = match self.kolme.read().get_block(height).await? {
                             None => BlockResponse::HeightNotFound(height),
                             Some(block) => BlockResponse::Block(block),
@@ -246,8 +254,18 @@ impl<App: KolmeApp> Gossip<App> {
                     request_id: _,
                     response,
                 } => match response {
-                    BlockResponse::Next(height) => {
-                        state.observe_next_block_height(height);
+                    BlockResponse::Next(next_height) => {
+                        let updated = state.observe_next_block_height(next_height);
+                        // event state starts with BlockHeight::start (equal to 0) and if max next height
+                        // was updated we should have received at least 1 but we do an extra check for safety
+                        if updated && !next_height.is_start() {
+                            let height = BlockHeight(next_height.0 - 1);
+                            if let Err(e) = self.last_seen_watch.send(Some(height)) {
+                                tracing::warn!(
+                                    "Unable to notify about new last seen block height: {e}"
+                                )
+                            }
+                        }
                     }
                     BlockResponse::Block(block) => {
                         self.add_block(&block).await;
@@ -284,7 +302,7 @@ impl<App: KolmeApp> Gossip<App> {
             swarm
                 .behaviour_mut()
                 .request_response
-                .send_request(peer, BlockRequest::Next);
+                .send_request(peer, BlockRequest::NextHeight);
         }
 
         let next = self.kolme.read().get_next_height();
@@ -293,7 +311,7 @@ impl<App: KolmeApp> Gossip<App> {
                 swarm
                     .behaviour_mut()
                     .request_response
-                    .send_request(peer, BlockRequest::GetHeight(next));
+                    .send_request(peer, BlockRequest::BlockAtHeight(next));
             }
         }
     }
@@ -334,8 +352,14 @@ impl EventState {
         tracing::debug!("Current list of peers: {:?}", self.peers);
     }
 
-    fn observe_next_block_height(&mut self, next: BlockHeight) {
-        self.expected_next_block = self.expected_next_block.max(next);
+    /// stores max next height and returns true if it was updated
+    fn observe_next_block_height(&mut self, next: BlockHeight) -> bool {
+        if next > self.expected_next_block {
+            self.expected_next_block = next;
+            true
+        } else {
+            false
+        }
     }
 
     fn get_next_peer(&mut self) -> Option<&PeerId> {
