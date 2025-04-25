@@ -25,7 +25,7 @@ use crate::core::*;
 /// to be shared across multiple different components in a single
 /// executable.
 ///
-/// This data structures uses shared storage. To avoid potential
+/// This data structure uses shared storage. To avoid potential
 /// inconsistent data from different block heights, any operations
 /// that read block-specific data must first clone a copy of that
 /// data by calling the [Kolme::read] method. This clone is a simple
