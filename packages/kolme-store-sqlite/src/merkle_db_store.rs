@@ -10,6 +10,7 @@ impl MerkleStore for MerkleDbStore<'_> {
         &mut self,
         hash: shared::types::Sha256Hash,
     ) -> Result<Option<std::sync::Arc<[u8]>>, merkle_map::MerkleSerialError> {
+        let hash = hash.as_array().as_slice();
         let query = sqlx::query_scalar!("SELECT payload FROM merkle_hashes WHERE hash=$1", hash);
         let res = match self {
             MerkleDbStore::Conn(conn) => query.fetch_optional(&mut **conn).await,
@@ -24,6 +25,7 @@ impl MerkleStore for MerkleDbStore<'_> {
         hash: shared::types::Sha256Hash,
         payload: &[u8],
     ) -> Result<(), merkle_map::MerkleSerialError> {
+        let hash = hash.as_array().as_slice();
         let query = sqlx::query!(
             "INSERT OR IGNORE INTO merkle_hashes(hash, payload) VALUES($1, $2)",
             hash,
@@ -41,6 +43,7 @@ impl MerkleStore for MerkleDbStore<'_> {
         &mut self,
         hash: shared::types::Sha256Hash,
     ) -> Result<bool, merkle_map::MerkleSerialError> {
+        let hash = hash.as_array().as_slice();
         let query = sqlx::query_scalar!("SELECT COUNT(*) FROM merkle_hashes WHERE hash=$1", hash);
         let res = match self {
             MerkleDbStore::Conn(conn) => query.fetch_one(&mut **conn).await,

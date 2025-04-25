@@ -3341,6 +3341,9 @@ dependencies = [
  "futures-util",
  "jiff",
  "kolme-solana-bridge-client",
+ "kolme-store",
+ "kolme-store-postgresql",
+ "kolme-store-sqlite",
  "libp2p",
  "merkle-map",
  "parking_lot",
@@ -3351,7 +3354,6 @@ dependencies = [
  "serde_json",
  "shared",
  "solana-client",
- "sqlx",
  "strum 0.27.1",
  "tempfile",
  "thiserror 2.0.12",
@@ -3389,6 +3391,36 @@ dependencies = [
  "solana-signer",
  "solana-transaction",
  "spl-associated-token-account-client",
+]
+
+[[package]]
+name = "kolme-store"
+version = "0.1.0"
+dependencies = [
+ "merkle-map",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "kolme-store-postgresql"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kolme-store",
+ "merkle-map",
+ "shared",
+ "sqlx",
+]
+
+[[package]]
+name = "kolme-store-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kolme-store",
+ "merkle-map",
+ "shared",
+ "sqlx",
 ]
 
 [[package]]

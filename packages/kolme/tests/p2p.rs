@@ -99,17 +99,25 @@ async fn sanity() {
     let kolme_processor = Kolme::new(
         SampleKolmeApp,
         DUMMY_CODE_VERSION,
-        tempfile_processor.path(),
+        KolmeStore::new_sqlite(tempfile_processor.path())
+            .await
+            .unwrap(),
     )
     .await
     .unwrap();
-    set.spawn(Processor::new(kolme_processor.clone(), my_secret_key().clone(), None).run());
+    set.spawn(Processor::new(kolme_processor.clone(), my_secret_key().clone()).run());
     set.spawn(Gossip::new(kolme_processor).await.unwrap().run());
 
     let tempfile_client = tempfile::NamedTempFile::new().unwrap();
-    let kolme_client = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, tempfile_client.path())
-        .await
-        .unwrap();
+    let kolme_client = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(tempfile_client.path())
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
     set.spawn(Gossip::new(kolme_client.clone()).await.unwrap().run());
 
     {

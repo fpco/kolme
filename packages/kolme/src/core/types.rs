@@ -1,5 +1,4 @@
 mod accounts;
-mod sqlx_impls;
 
 use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
@@ -711,10 +710,6 @@ impl BlockHeight {
 
     pub(crate) fn is_start(&self) -> bool {
         self.0 == 0
-    }
-
-    pub(crate) fn try_into_i64(self) -> Result<i64> {
-        self.0.try_into().map_err(anyhow::Error::from)
     }
 }
 
