@@ -88,11 +88,16 @@ impl KolmeApp for SampleKolmeApp {
 pub async fn processor() -> Result<()> {
     const DB_PATH: &str = "example-p2p-processor.sqlite3";
     kolme::init_logger(true, None);
-    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
+    let kolme = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(DB_PATH).await?,
+    )
+    .await?;
 
     let mut set = JoinSet::new();
 
-    let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
     let gossip = Gossip::new(kolme).await?;
     set.spawn(gossip.run());
@@ -117,7 +122,12 @@ pub async fn processor() -> Result<()> {
 pub async fn api_server(bind: SocketAddr) -> Result<()> {
     const DB_PATH: &str = "example-p2p-api-server.sqlite3";
     kolme::init_logger(true, None);
-    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
+    let kolme = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(DB_PATH).await?,
+    )
+    .await?;
 
     let mut set = JoinSet::new();
 

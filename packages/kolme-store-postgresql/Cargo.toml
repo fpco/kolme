@@ -1,0 +1,11 @@
+[package]
+name = "kolme-store-postgresql"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+merkle-map.workspace = true
+kolme-store.workspace = true
+shared.workspace = true
+sqlx = { workspace = true, features = ["migrate", "runtime-tokio", "postgres"] }

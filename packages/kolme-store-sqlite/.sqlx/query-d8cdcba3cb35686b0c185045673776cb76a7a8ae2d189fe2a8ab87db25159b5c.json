@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                                SELECT blockhash FROM blocks\n                                WHERE height=$1\n                                LIMIT 1\n                            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "blockhash",
+        "ordinal": 0,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d8cdcba3cb35686b0c185045673776cb76a7a8ae2d189fe2a8ab87db25159b5c"
+}

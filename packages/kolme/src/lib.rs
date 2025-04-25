@@ -16,7 +16,7 @@ pub use core::*;
 pub use gossip::Gossip;
 pub use listener::Listener;
 pub use merkle_map::*;
-pub use processor::{BlockDb, Processor};
+pub use processor::Processor;
 pub use rust_decimal::Decimal;
 pub use shared::{cryptography::*, types::*};
 pub use submitter::Submitter;

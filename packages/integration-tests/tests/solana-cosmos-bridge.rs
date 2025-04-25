@@ -53,7 +53,8 @@ async fn bridge_transfer() {
         },
     );
 
-    let kolme = Kolme::new(SolanaCosmosBridgeApp, DUMMY_CODE_VERSION, DB_PATH)
+    let store = KolmeStore::new_sqlite(DB_PATH).await.unwrap();
+    let kolme = Kolme::new(SolanaCosmosBridgeApp, DUMMY_CODE_VERSION, store)
         .await
         .unwrap();
 

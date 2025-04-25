@@ -279,7 +279,12 @@ pub async fn serve<C: Config>(
     component: Option<AppComponent>,
 ) -> Result<()> {
     tracing::info!("starting");
-    let kolme = Kolme::new(SixSigmaApp::<C>::default(), DUMMY_CODE_VERSION, db_path).await?;
+    let kolme = Kolme::new(
+        SixSigmaApp::<C>::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(db_path).await?,
+    )
+    .await?;
 
     let mut set = JoinSet::new();
 
@@ -291,7 +296,7 @@ pub async fn serve<C: Config>(
     match component {
         Some(AppComponent::Processor) => {
             tracing::info!("Running processor ...");
-            let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+            let processor = Processor::new(kolme.clone(), my_secret_key().clone());
             set.spawn(processor.run());
         }
         Some(AppComponent::Listener) => {
@@ -316,7 +321,7 @@ pub async fn serve<C: Config>(
         }
         None => {
             tracing::info!("Running in monolith mode ...");
-            let processor = Processor::new(kolme.clone(), my_secret_key().clone(), None);
+            let processor = Processor::new(kolme.clone(), my_secret_key().clone());
             set.spawn(processor.run());
             let listener = Listener::new(kolme.clone(), my_secret_key().clone());
             set.spawn(listener.run(C::chain_name()));
@@ -347,10 +352,14 @@ pub async fn serve<C: Config>(
 }
 
 pub async fn state<C: Config>(db_path: PathBuf) -> Result<State> {
-    let kolme = Kolme::new(SixSigmaApp::<C>::default(), DUMMY_CODE_VERSION, db_path)
-        .await?
-        .read()
-        .await;
+    let kolme = Kolme::new(
+        SixSigmaApp::<C>::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(db_path).await?,
+    )
+    .await?
+    .read()
+    .await;
     Ok(kolme.get_app_state().clone())
 }
 

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT height FROM blocks WHERE txhash=$1 LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "height",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d55731bad3c4c88e4c2c4b41c73c825a9fdb662ca79ddea7a87a10886a617d5d"
+}

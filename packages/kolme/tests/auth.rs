@@ -79,14 +79,18 @@ async fn test_sample_sanity() {
     init_logger(false, None);
     let tempfile = tempfile::NamedTempFile::new().unwrap();
 
-    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, tempfile.path())
-        .await
-        .unwrap();
+    let kolme = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(tempfile.path()).await.unwrap(),
+    )
+    .await
+    .unwrap();
 
     let mut subscription = kolme.subscribe();
 
     let mut set = JoinSet::new();
-    set.spawn(Processor::new(kolme.clone(), get_sample_secret_key().clone(), None).run());
+    set.spawn(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
     subscription.recv().await.unwrap();
 
     let mut rng = rand::thread_rng();

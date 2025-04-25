@@ -50,7 +50,12 @@ async fn main_inner() -> Result<()> {
             const DUMMY_CODE_VERSION: &str = "dummy code version";
 
             kolme::init_logger(true, None);
-            let kolme = Kolme::new(CosmosBridgeApp, DUMMY_CODE_VERSION, DB_PATH).await?;
+            let kolme = Kolme::new(
+                CosmosBridgeApp,
+                DUMMY_CODE_VERSION,
+                KolmeStore::new_sqlite(DB_PATH).await?,
+            )
+            .await?;
 
             serve(kolme, bind).await
         }
