@@ -256,9 +256,9 @@ impl<App: KolmeApp> Gossip<App> {
                 } => match response {
                     BlockResponse::Next(next_height) => {
                         let updated = state.observe_next_block_height(next_height);
-                        if updated {
-                            // event state starts with BlockHeight::start (equal to 0) and
-                            // if max next height was updated we should have received at least 1
+                        // event state starts with BlockHeight::start (equal to 0) and if max next height
+                        // was updated we should have received at least 1 but we do an extra check for safety
+                        if updated && !next_height.is_start() {
                             let height = BlockHeight(next_height.0 - 1);
                             if let Err(e) = self.last_seen_watch.send(Some(height)) {
                                 tracing::warn!(
