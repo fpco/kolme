@@ -55,7 +55,7 @@ pub struct SignedMsgIxData {
     /// Signatures from the executors
     pub executors: Vec<Signature>,
     /// The raw payload to execute
-    pub payload: Vec<u8>,
+    pub payload: String,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]

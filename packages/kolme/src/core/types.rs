@@ -1135,6 +1135,7 @@ impl ExecAction {
         id: BridgeActionId,
     ) -> Result<String> {
         use base64::Engine;
+        use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
 
         #[derive(serde::Serialize)]
         struct CwPayload {
@@ -1199,19 +1200,21 @@ impl ExecAction {
                         };
 
                         // TODO: Need to support multiple signed messages (https://github.com/fpco/kolme/issues/106)
-                        let mint =
-                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(coins[0].0)?;
-                        let program_id =
-                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(&program_id)?;
-                        let recipient =
-                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(&recipient.0)?;
+                        let mint = SolanaPubkey::from_str(coins[0].0)?;
+                        let program_id = SolanaPubkey::from_str(&program_id)?;
+                        let recipient = SolanaPubkey::from_str(&recipient.0)?;
                         let amount = u64::try_from(coins[0].1)?;
 
-                        // let payload = kolme_solana_bridge_client::transfer_payload(
-                        //     id.0, program_id, mint, recipient, amount,
-                        // );
+                        let payload = kolme_solana_bridge_client::transfer_payload(
+                            id.0,
+                            program_id,
+                            // TODO: Determine the type of token being sent (https://github.com/fpco/kolme/issues/105)
+                            TokenProgram::Legacy,
+                            mint,
+                            recipient,
+                            amount,
+                        );
 
-                        let payload = todo!();
                         let len = borsh::object_length(&payload).map_err(|x| {
                             anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
                         })?;

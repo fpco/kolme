@@ -32,3 +32,4 @@ kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-c
 spl-token-client = "0.14.0"
 solana-client = "2.2.7"
 solana-commitment-config = "2.2.1"
+rand = "0.8"

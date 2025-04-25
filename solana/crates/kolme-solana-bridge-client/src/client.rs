@@ -9,8 +9,8 @@ use solana_transaction::Transaction;
 use spl_associated_token_account_client as spl_client;
 
 use crate::{
-    InitializeIxData, RegularMsgIxData, SignedMsgIxData, InstructionAccount,
-    Payload, SignerAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
+    InitializeIxData, InstructionAccount, Payload, RegularMsgIxData, SignedMsgIxData,
+    SignerAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
 };
 
 const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
@@ -20,7 +20,7 @@ const TOKEN_2022: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
 pub enum TokenProgram {
     Legacy,
-    Token2022
+    Token2022,
 }
 
 pub fn init_tx(
@@ -112,7 +112,14 @@ pub fn regular_tx(
     data: &RegularMsgIxData,
     token_mints: &[Pubkey],
 ) -> borsh::io::Result<Transaction> {
-    let msg = regular_ix(program_id, token_program, &blockhash, sender.pubkey(), data, token_mints)?;
+    let msg = regular_ix(
+        program_id,
+        token_program,
+        &blockhash,
+        sender.pubkey(),
+        data,
+        token_mints,
+    )?;
 
     Ok(Transaction::new(&[sender], msg, blockhash))
 }
@@ -129,7 +136,7 @@ pub fn regular_ix(
     bytes.push(REGULAR_IX);
     data.serialize(&mut bytes)?;
 
-    let accounts = if token_mints.len() == 0 {
+    let accounts = if token_mints.is_empty() {
         vec![AccountMeta::new(sender, true)]
     } else {
         let token_program = token_program.program_id();
@@ -143,13 +150,21 @@ pub fn regular_ix(
         for mint in token_mints {
             accounts.push(AccountMeta::new_readonly(*mint, false));
 
-            let sender_ata = spl_client::address::get_associated_token_address_with_program_id(&sender, mint, &token_program);
+            let sender_ata = spl_client::address::get_associated_token_address_with_program_id(
+                &sender,
+                mint,
+                &token_program,
+            );
             accounts.push(AccountMeta::new(sender_ata, false));
 
             let holder = derive_token_holder_acc(&program_id, mint, &sender);
             accounts.push(AccountMeta::new(holder, false));
 
-            let holder_ata = spl_client::address::get_associated_token_address_with_program_id(&holder, mint, &token_program);
+            let holder_ata = spl_client::address::get_associated_token_address_with_program_id(
+                &holder,
+                mint,
+                &token_program,
+            );
             accounts.push(AccountMeta::new(holder_ata, false));
         }
 
@@ -199,8 +214,16 @@ pub fn transfer_payload(
     ];
 
     let token_program = token_program.program_id();
-    let from_ata = spl_client::address::get_associated_token_address_with_program_id(&authority, &mint, &token_program);
-    let to_ata = spl_client::address::get_associated_token_address_with_program_id(&to, &mint, &token_program);
+    let from_ata = spl_client::address::get_associated_token_address_with_program_id(
+        &authority,
+        &mint,
+        &token_program,
+    );
+    let to_ata = spl_client::address::get_associated_token_address_with_program_id(
+        &to,
+        &mint,
+        &token_program,
+    );
 
     let accounts = vec![
         InstructionAccount {

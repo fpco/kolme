@@ -4,9 +4,9 @@ use std::{
 };
 
 use anyhow::Result;
-use cosmos::{HasAddressHrp, SeedPhrase as CosmosSeedPhrase};
-use solana_pubkey::{Pubkey as SolanaPubkey};
-use solana_keypair::{Keypair as SolanaKeypair};
+use cosmos::SeedPhrase as CosmosSeedPhrase;
+use solana_keypair::Keypair as SolanaKeypair;
+use solana_pubkey::Pubkey as SolanaPubkey;
 
 use kolme::*;
 use tokio::task::JoinSet;
@@ -18,15 +18,13 @@ pub struct SolanaCosmosBridgeApp;
 pub struct State;
 
 impl MerkleSerialize for State {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+    fn merkle_serialize(&self, _: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         Ok(())
     }
 }
 
 impl MerkleDeserialize for State {
-    fn merkle_deserialize(
-        deserializer: &mut MerkleDeserializer,
-    ) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(_: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
         Ok(State)
     }
 }
@@ -46,7 +44,6 @@ pub enum BridgeMessage {
 
 pub const ASSET_ID: AssetId = AssetId(1);
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
-const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
 const OSMOSIS_CODE_ID: u64 = 1;
 
@@ -89,9 +86,7 @@ impl KolmeApp for SolanaCosmosBridgeApp {
 
         let mut assets = BTreeMap::new();
         assets.insert(
-            AssetName(
-                "osmof7hTFAuNjwMCcxVNThBDDftMNjiLR2cidDQzvwQ".into(),
-            ),
+            AssetName("osmof7hTFAuNjwMCcxVNThBDDftMNjiLR2cidDQzvwQ".into()),
             AssetConfig {
                 decimals: 6,
                 asset_id: ASSET_ID,
@@ -139,7 +134,7 @@ impl KolmeApp for SolanaCosmosBridgeApp {
                     &Wallet(to.to_string()),
                     *amount,
                 )?;
-            },
+            }
             BridgeMessage::ToCosmos { to, amount } => {
                 ctx.withdraw_asset(
                     ASSET_ID,
@@ -159,7 +154,7 @@ pub async fn serve(
     kolme: Kolme<SolanaCosmosBridgeApp>,
     solana_submitter: SolanaKeypair,
     cosmos_submitter: CosmosSeedPhrase,
-    bind: SocketAddr
+    bind: SocketAddr,
 ) -> Result<()> {
     let mut set = JoinSet::new();
 
@@ -168,6 +163,9 @@ pub async fn serve(
 
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run(ChainName::Cosmos));
+
+    let listener = Listener::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(listener.run(ChainName::Solana));
 
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
@@ -198,7 +196,11 @@ pub async fn serve(
     Ok(())
 }
 
-pub async fn broadcast(message: BridgeMessage, secret: SecretKey, host: String) -> Result<()> {
+pub async fn broadcast(
+    message: BridgeMessage,
+    secret: SecretKey,
+    host: &str,
+) -> Result<Sha256Hash> {
     let public = secret.public_key();
     let client = reqwest::Client::new();
 
@@ -243,7 +245,6 @@ pub async fn broadcast(message: BridgeMessage, secret: SecretKey, host: String) 
     }
 
     let Res { txhash } = res.json().await?;
-    println!("txhash: {txhash}");
 
-    Ok(())
+    Ok(txhash)
 }

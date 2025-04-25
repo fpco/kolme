@@ -3742,6 +3742,7 @@ dependencies = [
  "kolme",
  "kolme-solana-bridge-client",
  "pretty_assertions",
+ "rand 0.8.5",
  "reqwest 0.12.15",
  "rust_decimal",
  "serde",

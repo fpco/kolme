@@ -1,3 +1,4 @@
+use base64::Engine;
 use borsh::{BorshDeserialize, BorshSerialize};
 use kolme_solana_bridge_client::{
     InitializeIxData,  RegularMsgIxData, SignedMsgIxData,
@@ -73,7 +74,8 @@ pub enum SignedIxError {
     DuplicateExecutorKey = 3,
     ProcessorKeyMismatch = 4,
     IncorrectOutgoingId = 5,
-    AccountMetaAndPassedAccountsMismatch = 6
+    AccountMetaAndPassedAccountsMismatch = 6,
+    InvalidBase64Payload = 7
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -324,7 +326,10 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     let data = SignedMsgIxData::try_from_slice(instruction_data).map_err(|_| ProgramError::BorshIoError)?;
     let mut state_pda: StatePda = ctx.load_pda(&state_acc, STATE_DERIVATION.seeds)?;
 
-    let payload = Payload::try_from_slice(&data.payload).map_err(|_| ProgramError::BorshIoError)?;
+    let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&data.payload)
+        .map_err(|_| SignedIxError::InvalidBase64Payload)?;
+
+    let payload = Payload::try_from_slice(&payload_bytes).map_err(|_| ProgramError::BorshIoError)?;
 
     if payload.id != state_pda.data.next_action_id {
         return Err(SignedIxError::IncorrectOutgoingId.into());
@@ -341,7 +346,7 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         return Err(SignedIxError::InsufficientSignatures.into());
     }
 
-    let hash = sha256(&data.payload);
+    let hash = sha256(data.payload.as_bytes());
     let recovered_key = secp256k1_recover(&hash, data.processor.recovery_id, &data.processor.signature)?;
 
     if recovered_key.to_sec1_bytes() != state_pda.data.processor {
@@ -431,6 +436,7 @@ fn ata_data(account_info: &AccountInfo) -> Result<Ref<TokenAccount>, ProgramErro
     }))
 }
 
+// A slightly modified version of Mint::from_account_info to support Token 2022.
 pub fn mint_data(account_info: &AccountInfo) -> Result<Ref<Mint>, ProgramError> {
     if account_info.data_len() != Mint::LEN {
         log!("Invalid mint data len.");
@@ -450,6 +456,7 @@ pub fn mint_data(account_info: &AccountInfo) -> Result<Ref<Mint>, ProgramError> 
 
 }
 
+// A slightly modified version of TransferChecked::invoke to support Token 2022.
 fn execute_transfer(transfer: token::instructions::TransferChecked<'_>, token_program: &Pubkey) -> ProgramResult {
     use std::mem::MaybeUninit;
 
