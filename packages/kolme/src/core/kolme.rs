@@ -191,10 +191,6 @@ impl<App: KolmeApp> Kolme<App> {
         // here that uses the already loaded data
         self.resync().await?;
 
-        self.inner
-            .notify
-            .send(Notification::NewBlock(Arc::new(signed_block)))
-            .ok();
         Ok(())
     }
 
