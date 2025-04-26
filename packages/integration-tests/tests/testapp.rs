@@ -2,9 +2,9 @@ use anyhow::Result;
 use futures_util::future::join_all;
 use futures_util::StreamExt;
 use kolme::{
-    AccountId, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext,
-    GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer,
-    MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor, Transaction,
+    AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext, GenesisInfo,
+    Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer, MerkleSerialError,
+    MerkleSerialize, MerkleSerializer, Message, Processor, Transaction,
 };
 
 use rust_decimal::dec;
@@ -381,7 +381,7 @@ async fn test_rejected_transaction_insufficient_balance() {
             &secret,
             vec![Message::Bank(BankMessage::Transfer {
                 asset: AssetId(1),
-                dest: AccountId::from(kolme::AccountId(0)),
+                dest: kolme::AccountId(0),
                 amount: dec!(500),
             })],
         )
