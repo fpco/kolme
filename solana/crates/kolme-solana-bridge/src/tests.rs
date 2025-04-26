@@ -778,7 +778,8 @@ fn max_accounts_in_signed_instruction() {
         additional_metas.push(AccountMeta::new_readonly(Keypair::new().pubkey(), false));
     }
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
+    let (payload, mut metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
+    metas.extend(additional_metas);
     let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let result = p.signed(&sender, &data, &metas[..]).unwrap_err();
