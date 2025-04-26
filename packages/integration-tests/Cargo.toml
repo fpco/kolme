@@ -8,21 +8,21 @@ authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 [dependencies]
 
 [dev-dependencies]
+example-six-sigma = { path = "../examples/six-sigma" }
 test-log = { version = "0.2", features = ["trace"] }
-anyhow = "1"
+anyhow = { workspace = true }
 reqwest = { version = "0.12.15", features = ["json"] }
 strum = { version = "0.27.1", features = ["derive"] }
-tokio = { version = "1.43.0", features = ["full"] }
-tokio-util = { version = "0.7", features = ["full"] }
+tokio = { workspace = true }
 tracing = "0.1.41"
 backon = "1.4.1"
-kolme = { workspace = true }
+kolme = { workspace = true, features = ["pass_through"] }
 serde = "1.0.219"
 cosmos = { workspace = true }
 shared = { workspace = true, features = ["cosmwasm"] }
 cosmwasm-std = "2.2.2"
-serde_json = "1.0.140"
-rust_decimal = "1.37.1"
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
 tempfile = "3.19.1"
 pretty_assertions = "1.4.1"
 axum = { version = "0.8.3", features = ["ws"] }

@@ -2,16 +2,30 @@
 resolver = "2"
 members = [
   "contracts/cosmos",
+  "packages/examples/*",
   "packages/integration-tests",
   "packages/kolme",
+  "packages/kolme-store",
+  "packages/kolme-store-postgresql",
+  "packages/kolme-store-sqlite",
   "packages/merkle-map",
   "packages/shared",
 ]
 
 [workspace.dependencies]
+tokio = { version = "1.43.0", features = ["full"] }
+clap = { version = "4.5.20", features = ["derive", "env", "unicode"] }
 cosmos = { git = "https://github.com/fpco/cosmos-rs", rev = "6f6fea0f7c04e4b64f5c091b006e4736dba1b10e", features = ["config"] }
 hex = "0.4.3"
 k256 = "0.13.4"
+anyhow = "1.0.97"
+serde_json = "1.0.140"
+jiff = { version = "0.2.3", features = ["serde"] }
+rust_decimal = "1.37.1"
 kolme = { path = "packages/kolme" }
+kolme-store = { path = "packages/kolme-store" }
+kolme-store-postgresql = { path = "packages/kolme-store-postgresql" }
+kolme-store-sqlite = { path = "packages/kolme-store-sqlite" }
 merkle-map = { path = "packages/merkle-map" }
 shared = { path = "packages/shared" }
+sqlx = { version = "0.8.3" }

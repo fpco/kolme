@@ -10,4 +10,13 @@ services:
       - "127.0.0.1:9091:9091"
     volumes:
       - ./local-workspace:/var/workspace
-    restart: always
+
+  postgres:
+    container_name: postgres
+    image: "postgres:16"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:45921:5432"

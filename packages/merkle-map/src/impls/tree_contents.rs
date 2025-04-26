@@ -34,17 +34,21 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         }
         v
     }
+}
 
-    pub(crate) fn get(&self, depth: u16, key_bytes: &MerkleKey) -> Option<&V> {
+impl<K, V> TreeContents<K, V> {
+    pub(crate) fn get(&self, depth: u16, key_bytes: &MerkleKey) -> Option<&LeafEntry<K, V>> {
         let Some(index) = key_bytes.get_index_for_depth(depth) else {
             debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
-            return self.leaf.as_ref().map(|entry| &entry.value);
+            return self.leaf.as_ref();
         };
         debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
         self.branches[index].get(depth + 1, key_bytes)
     }
+}
 
+impl<K: Clone, V: Clone> TreeContents<K, V> {
     pub(crate) fn get_mut(&mut self, depth: u16, key_bytes: &MerkleKey) -> Option<&mut V> {
         let Some(index) = key_bytes.get_index_for_depth(depth) else {
             debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
@@ -71,7 +75,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
             self.len -= 1;
         }
         let node = if self.len <= 16 {
-            let mut values = vec![];
+            let mut values = arrayvec::ArrayVec::new();
             self.drain_entries_to(&mut values);
             Node::Leaf(Lockable::new_unlocked(LeafContents { values }))
         } else {
@@ -80,7 +84,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         (node, v)
     }
 
-    pub(crate) fn drain_entries_to(self, entries: &mut Vec<LeafEntry<K, V>>) {
+    pub(crate) fn drain_entries_to(self, entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>) {
         if let Some(entry) = self.leaf {
             entries.push(entry);
         }

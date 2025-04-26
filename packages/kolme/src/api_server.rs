@@ -50,7 +50,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
     struct Basics<'a> {
         next_height: BlockHeight,
         next_genesis_action: Option<GenesisAction>,
-        bridges: &'a BTreeMap<ExternalChain, ChainConfig>,
+        bridges: BTreeMap<ExternalChain, &'a ChainConfig>,
         balances: BTreeMap<&'a AccountId, &'a BTreeMap<AssetId, Decimal>>,
     }
 
@@ -58,7 +58,11 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
     let basics = Basics {
         next_height: kolme.get_next_height(),
         next_genesis_action: kolme.get_next_genesis_action(),
-        bridges: kolme.get_bridge_contracts(),
+        bridges: kolme
+            .get_bridge_contracts()
+            .iter()
+            .map(|(k, v)| (k, &v.config))
+            .collect(),
         balances: kolme.get_balances().iter().collect(),
     };
 
@@ -99,14 +103,8 @@ async fn get_next_nonce<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
     Query(NextNonce { pubkey }): Query<NextNonce>,
 ) -> impl IntoResponse {
-    match kolme.read().await.get_account_and_next_nonce(pubkey).await {
-        Ok(nonce) => Json(serde_json::json!({"next_nonce":nonce.next_nonce})).into_response(),
-        Err(e) => {
-            let mut res = e.to_string().into_response();
-            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            res
-        }
-    }
+    let nonce = kolme.read().await.get_next_nonce(pubkey);
+    Json(serde_json::json!({"next_nonce":nonce})).into_response()
 }
 
 async fn ws_handler<App: KolmeApp>(

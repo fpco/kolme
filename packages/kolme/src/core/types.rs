@@ -1,12 +1,16 @@
-mod balances;
+mod accounts;
 
-use std::{fmt::Display, sync::OnceLock};
+use crate::core::CoreStateError;
+use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
 
 use crate::*;
 
-pub use balances::{Balances, BalancesError};
+pub use accounts::{Account, Accounts, AccountsError};
+
+pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
+pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;
 
 #[derive(
     serde::Serialize,
@@ -28,16 +32,194 @@ pub enum ExternalChain {
     OsmosisTestnet,
     NeutronTestnet,
     OsmosisLocal,
+    SolanaMainnet,
+    SolanaTestnet,
+    SolanaDevnet,
+    SolanaLocal,
+    #[cfg(feature = "pass_through")]
+    PassThrough,
+}
+
+impl ToMerkleKey for ExternalChain {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.as_ref().to_merkle_key()
+    }
+}
+
+impl FromMerkleKey for ExternalChain {
+    fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
+        std::str::from_utf8(bytes)
+            .map_err(MerkleSerialError::custom)?
+            .parse()
+            .map_err(MerkleSerialError::custom)
+    }
+}
+
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    Hash,
+    strum::AsRefStr,
+)]
+#[strum(serialize_all = "kebab-case")]
+pub enum SolanaChain {
+    Mainnet,
+    Testnet,
+    Devnet,
+    Local,
+}
+
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    Hash,
+    strum::AsRefStr,
+)]
+#[strum(serialize_all = "kebab-case")]
+pub enum CosmosChain {
+    OsmosisTestnet,
+    NeutronTestnet,
+    OsmosisLocal,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum ChainName {
+    Cosmos,
+    Solana,
+    #[cfg(feature = "pass_through")]
+    PassThrough,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum ChainKind {
+    Cosmos(CosmosChain),
+    Solana(SolanaChain),
+    #[cfg(feature = "pass_through")]
+    PassThrough,
+}
+
+impl CosmosChain {
+    pub const fn name() -> ChainName {
+        ChainName::Cosmos
+    }
+
+    pub async fn make_client(self) -> Result<cosmos::Cosmos> {
+        let network = match self {
+            Self::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
+            Self::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
+            Self::OsmosisLocal => cosmos::CosmosNetwork::OsmosisLocal,
+        };
+
+        Ok(network.builder_with_config().await?.build()?)
+    }
+}
+
+impl SolanaChain {
+    pub const fn name() -> ChainName {
+        ChainName::Solana
+    }
+
+    pub fn make_client(self) -> SolanaClient {
+        let url = match self {
+            Self::Mainnet => "https://api.mainnet-beta.solana.com",
+            Self::Testnet => "https://api.testnet.solana.com",
+            Self::Devnet => "https://api.devnet.solana.com",
+            Self::Local => "http://localhost:8899",
+        };
+
+        SolanaClient::new(url.into())
+    }
+
+    // TODO: We should have a way to configure those endpoints - the public ones are not suitable for production use.
+    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
+        let url = match self {
+            Self::Mainnet => "wss://api.mainnet-beta.solana.com",
+            Self::Testnet => "wss://api.testnet.solana.com",
+            Self::Devnet => "wss://api.devnet.solana.com/",
+            Self::Local => "ws://localhost:8900",
+        };
+
+        Ok(SolanaPubsubClient::new(url).await?)
+    }
 }
 
 impl ExternalChain {
-    pub async fn make_cosmos(self) -> Result<cosmos::Cosmos> {
-        let network = match self {
-            ExternalChain::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
-            ExternalChain::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
-            ExternalChain::OsmosisLocal => cosmos::CosmosNetwork::OsmosisLocal,
-        };
-        Ok(network.builder_with_config().await?.build()?)
+    pub fn name(self) -> ChainName {
+        match ChainKind::from(self) {
+            ChainKind::Cosmos(_) => CosmosChain::name(),
+            ChainKind::Solana(_) => SolanaChain::name(),
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => ChainName::PassThrough,
+        }
+    }
+
+    pub fn to_cosmos_chain(self) -> Option<CosmosChain> {
+        match ChainKind::from(self) {
+            ChainKind::Cosmos(chain) => Some(chain),
+            ChainKind::Solana(_) => None,
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => None,
+        }
+    }
+
+    pub fn to_solana_chain(self) -> Option<SolanaChain> {
+        match ChainKind::from(self) {
+            ChainKind::Cosmos(_) => None,
+            ChainKind::Solana(chain) => Some(chain),
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => None,
+        }
+    }
+}
+
+impl From<CosmosChain> for ExternalChain {
+    fn from(c: CosmosChain) -> ExternalChain {
+        match c {
+            CosmosChain::OsmosisTestnet => ExternalChain::OsmosisTestnet,
+            CosmosChain::NeutronTestnet => ExternalChain::NeutronTestnet,
+            CosmosChain::OsmosisLocal => ExternalChain::OsmosisLocal,
+        }
+    }
+}
+
+impl From<SolanaChain> for ExternalChain {
+    fn from(c: SolanaChain) -> ExternalChain {
+        match c {
+            SolanaChain::Mainnet => ExternalChain::SolanaMainnet,
+            SolanaChain::Testnet => ExternalChain::SolanaTestnet,
+            SolanaChain::Devnet => ExternalChain::SolanaDevnet,
+            SolanaChain::Local => ExternalChain::SolanaLocal,
+        }
+    }
+}
+
+impl From<ExternalChain> for ChainKind {
+    fn from(c: ExternalChain) -> ChainKind {
+        match c {
+            ExternalChain::OsmosisTestnet => ChainKind::Cosmos(CosmosChain::OsmosisTestnet),
+            ExternalChain::NeutronTestnet => ChainKind::Cosmos(CosmosChain::NeutronTestnet),
+            ExternalChain::OsmosisLocal => ChainKind::Cosmos(CosmosChain::OsmosisLocal),
+            ExternalChain::SolanaMainnet => ChainKind::Solana(SolanaChain::Mainnet),
+            ExternalChain::SolanaTestnet => ChainKind::Solana(SolanaChain::Testnet),
+            ExternalChain::SolanaDevnet => ChainKind::Solana(SolanaChain::Devnet),
+            ExternalChain::SolanaLocal => ChainKind::Solana(SolanaChain::Local),
+            #[cfg(feature = "pass_through")]
+            ExternalChain::PassThrough => ChainKind::PassThrough,
+        }
     }
 }
 
@@ -65,6 +247,138 @@ impl MerkleDeserialize for ExternalChain {
 pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
+}
+impl ChainConfig {
+    fn into_state(self) -> ChainState {
+        ChainState {
+            config: self,
+            next_action_id: BridgeActionId::start(),
+            pending_actions: MerkleMap::new(),
+            next_event_id: BridgeEventId::start(),
+            pending_events: MerkleMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ChainState {
+    pub config: ChainConfig,
+    /// The next action ID Kolme will emit.
+    pub next_action_id: BridgeActionId,
+    /// Actions which have not yet been confirmed as landing on-chain.
+    pub pending_actions: MerkleMap<BridgeActionId, PendingBridgeAction>,
+    /// The next expected event ID from the bridge contract.
+    ///
+    /// This represents the next ID that will be added to `pending_events`.
+    /// It does not mean that all events before this have been processed
+    /// already.
+    pub next_event_id: BridgeEventId,
+    /// Events which have not been fully processed.
+    ///
+    /// We always process events in order. If a later event has
+    /// sufficient signatures, but an earlier event hasn't, they
+    /// will both remain pending.
+    pub pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
+}
+
+impl MerkleSerialize for ChainState {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let ChainState {
+            config,
+            next_action_id,
+            pending_actions,
+            next_event_id,
+            pending_events,
+        } = self;
+        serializer.store(config)?;
+        serializer.store(next_action_id)?;
+        serializer.store(pending_actions)?;
+        serializer.store(next_event_id)?;
+        serializer.store(pending_events)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for ChainState {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(ChainState {
+            config: deserializer.load()?,
+            next_action_id: deserializer.load()?,
+            pending_actions: deserializer.load()?,
+            next_event_id: deserializer.load()?,
+            pending_events: deserializer.load()?,
+        })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PendingBridgeAction {
+    pub payload: String,
+    /// Approvals from the approvers
+    pub approvals: BTreeMap<PublicKey, SignatureWithRecovery>,
+    /// Processor signature finalizing this operation
+    pub processor: Option<SignatureWithRecovery>,
+}
+
+impl MerkleSerialize for PendingBridgeAction {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        let PendingBridgeAction {
+            payload,
+            approvals,
+            processor,
+        } = self;
+        serializer.store(payload)?;
+        serializer.store(approvals)?;
+        serializer.store(processor)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for PendingBridgeAction {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(PendingBridgeAction {
+            payload: deserializer.load()?,
+            approvals: deserializer.load()?,
+            processor: deserializer.load()?,
+        })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PendingBridgeEvent {
+    pub event: BridgeEvent,
+    /// Attestations from the listeners
+    pub attestations: BTreeSet<PublicKey>,
+}
+
+impl MerkleSerialize for PendingBridgeEvent {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            event,
+            attestations,
+        } = self;
+        serializer.store_json(event)?;
+        serializer.store(attestations)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for PendingBridgeEvent {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            event: deserializer.load_json()?,
+            attestations: deserializer.load()?,
+        })
+    }
 }
 
 impl MerkleSerialize for ChainConfig {
@@ -178,6 +492,7 @@ impl AssetConfig {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub enum BridgeContract {
     NeededCosmosBridge { code_id: u64 },
+    NeededSolanaBridge { program_id: String },
     Deployed(String),
 }
 
@@ -188,8 +503,12 @@ impl MerkleSerialize for BridgeContract {
                 serializer.store_byte(0);
                 serializer.store(code_id)?;
             }
-            BridgeContract::Deployed(addr) => {
+            BridgeContract::NeededSolanaBridge { program_id } => {
                 serializer.store_byte(1);
+                serializer.store(program_id)?;
+            }
+            BridgeContract::Deployed(addr) => {
+                serializer.store_byte(2);
                 serializer.store(addr)?;
             }
         }
@@ -205,7 +524,10 @@ impl MerkleDeserialize for BridgeContract {
             0 => Ok(Self::NeededCosmosBridge {
                 code_id: deserializer.load()?,
             }),
-            1 => Ok(Self::Deployed(deserializer.load()?)),
+            1 => Ok(Self::NeededSolanaBridge {
+                program_id: deserializer.load()?,
+            }),
+            2 => Ok(Self::Deployed(deserializer.load()?)),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }
@@ -214,23 +536,24 @@ impl MerkleDeserialize for BridgeContract {
 #[derive(serde::Serialize)]
 pub enum GenesisAction {
     InstantiateCosmos {
-        chain: ExternalChain,
+        chain: CosmosChain,
         code_id: u64,
-        processor: PublicKey,
-        listeners: BTreeSet<PublicKey>,
-        needed_listeners: usize,
-        approvers: BTreeSet<PublicKey>,
-        needed_approvers: usize,
+        args: InstantiateArgs,
+    },
+    InstantiateSolana {
+        chain: SolanaChain,
+        program_id: String,
+        args: InstantiateArgs,
     },
 }
 
-pub struct PendingBridgeAction {
-    pub chain: ExternalChain,
-    pub payload: String,
-    pub height: BlockHeight,
-    /// Index of the message within the block
-    pub message: usize,
-    pub action_id: BridgeActionId,
+#[derive(serde::Serialize)]
+pub struct InstantiateArgs {
+    pub processor: PublicKey,
+    pub listeners: BTreeSet<PublicKey>,
+    pub needed_listeners: usize,
+    pub approvers: BTreeSet<PublicKey>,
+    pub needed_approvers: usize,
 }
 
 #[derive(
@@ -319,7 +642,17 @@ impl FromMerkleKey for AccountId {
 }
 
 #[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Copy,
+    Hash,
+    Debug,
+    Default,
 )]
 pub struct AccountNonce(pub u64);
 
@@ -336,6 +669,20 @@ impl AccountNonce {
 impl Display for AccountNonce {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl MerkleSerialize for AccountNonce {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for AccountNonce {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        u64::merkle_deserialize(deserializer).map(Self)
     }
 }
 
@@ -364,10 +711,6 @@ impl BlockHeight {
     pub(crate) fn is_start(&self) -> bool {
         self.0 == 0
     }
-
-    pub(crate) fn try_into_i64(self) -> Result<i64> {
-        self.0.try_into().map_err(anyhow::Error::from)
-    }
 }
 
 impl Display for BlockHeight {
@@ -393,6 +736,24 @@ impl TryFrom<i64> for BlockHeight {
     PartialEq, PartialOrd, Ord, Eq, Clone, Debug, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub struct Wallet(pub String);
+
+impl ToMerkleKey for Wallet {
+    fn to_merkle_key(&self) -> MerkleKey {
+        self.0.to_merkle_key()
+    }
+}
+
+impl FromMerkleKey for Wallet {
+    fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
+        String::from_merkle_key(bytes).map(Self)
+    }
+}
+
+impl Display for Wallet {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 impl MerkleSerialize for Wallet {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
@@ -422,15 +783,35 @@ impl<AppMessage> SignedBlock<AppMessage> {
         anyhow::ensure!(pubkey == self.0.message.as_inner().processor);
         Ok(())
     }
+
+    pub fn hash(&self) -> BlockHash {
+        BlockHash(self.0.message_hash())
+    }
 }
 
 /// The hash of a [Block].
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub Sha256Hash);
 impl BlockHash {
     pub(crate) fn genesis_parent() -> BlockHash {
         static LOCK: OnceLock<BlockHash> = OnceLock::new();
         *LOCK.get_or_init(|| BlockHash(Sha256Hash::hash("genesis parent")))
+    }
+}
+
+impl Display for BlockHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// The hash of a [Transaction].
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TxHash(pub Sha256Hash);
+
+impl Display for TxHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -464,6 +845,13 @@ impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
         let pubkey = self.0.verify_signature()?;
         anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
         Ok(())
+    }
+}
+
+impl<AppMessage> SignedTransaction<AppMessage> {
+    /// Get the hash of the transaction
+    pub fn hash(&self) -> TxHash {
+        TxHash(self.0.message_hash())
     }
 }
 
@@ -511,8 +899,7 @@ pub enum Message<AppMessage> {
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
-        signature: Signature,
-        recovery: RecoveryId,
+        signature: SignatureWithRecovery,
     },
     /// Final approval from the processor to confirm approvals from approvers.
     ProcessorApprove {
@@ -527,25 +914,25 @@ pub enum Message<AppMessage> {
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub enum BridgeEvent {
     /// A bridge was instantiated
     Instantiated { contract: String },
     /// Regular action performed by the user
     Regular {
-        wallet: String,
+        wallet: Wallet,
         funds: Vec<BridgedAssetAmount>,
         keys: Vec<PublicKey>,
     },
     Signed {
-        wallet: String,
+        wallet: Wallet,
         action_id: BridgeActionId,
     },
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct BridgedAssetAmount {
     pub denom: String,
     pub amount: u128,
@@ -556,8 +943,8 @@ pub struct BridgedAssetAmount {
 pub enum AuthMessage {
     AddPublicKey { key: PublicKey },
     RemovePublicKey { key: PublicKey },
-    AddWallet { wallet: String },
-    RemoveWallet { wallet: String },
+    AddWallet { wallet: Wallet },
+    RemoveWallet { wallet: Wallet },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -592,7 +979,7 @@ pub struct GenesisInfo {
     /// How many of the approvers are needed to approve a bridge action?
     pub needed_approvers: usize,
     /// Initial configuration of different chains
-    pub chains: BTreeMap<ExternalChain, ChainConfig>,
+    pub chains: ConfiguredChains,
 }
 
 impl GenesisInfo {
@@ -605,15 +992,118 @@ impl GenesisInfo {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct MessageOutput {
-    pub logs: Vec<String>,
-    pub loads: Vec<BlockDataLoad>,
-    pub actions: Vec<ExecAction>,
+#[derive(PartialEq, Default, Debug, Clone)]
+pub struct ChainStates(MerkleMap<ExternalChain, ChainState>);
+
+impl From<ConfiguredChains> for ChainStates {
+    fn from(c: ConfiguredChains) -> Self {
+        ChainStates(c.0.into_iter().map(|(k, v)| (k, v.into_state())).collect())
+    }
+}
+
+impl MerkleSerialize for ChainStates {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for ChainStates {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
+
+impl ChainStates {
+    pub fn get(&self, chain: ExternalChain) -> Result<&ChainState, CoreStateError> {
+        self.0
+            .get(&chain)
+            .ok_or(CoreStateError::ChainNotSupported { chain })
+    }
+
+    pub fn get_mut(&mut self, chain: ExternalChain) -> Result<&mut ChainState, CoreStateError> {
+        self.0
+            .get_mut(&chain)
+            .ok_or(CoreStateError::ChainNotSupported { chain })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (ExternalChain, &ChainState)> {
+        self.0.iter().map(|(k, v)| (*k, v))
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = ExternalChain> + '_ {
+        self.0.keys().copied()
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Default, Debug, Clone)]
+pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
+
+impl ConfiguredChains {
+    pub fn insert_solana(&mut self, chain: SolanaChain, config: ChainConfig) -> Result<()> {
+        use kolme_solana_bridge_client::pubkey::Pubkey;
+
+        match &config.bridge {
+            BridgeContract::NeededCosmosBridge { .. } => {
+                return Err(anyhow::anyhow!(
+                    "Trying to configure a Cosmos contract as a Solana bridge."
+                ))
+            }
+            BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(program_id)?,
+            BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
+        };
+
+        self.0.insert(chain.into(), config);
+
+        Ok(())
+    }
+
+    pub fn insert_cosmos(&mut self, chain: CosmosChain, config: ChainConfig) -> Result<()> {
+        use cosmos::Address;
+
+        match &config.bridge {
+            BridgeContract::NeededSolanaBridge { .. } => {
+                return Err(anyhow::anyhow!(
+                    "Trying to configure a Solana program as a Cosmos bridge."
+                ))
+            }
+            BridgeContract::NeededCosmosBridge { .. } => (),
+            BridgeContract::Deployed(program_id) => {
+                Address::from_str(program_id)?;
+            }
+        }
+
+        self.0.insert(chain.into(), config);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "pass_through")]
+    pub fn insert_pass_through(&mut self, config: ChainConfig) -> Result<()> {
+        if let BridgeContract::Deployed(_) = config.bridge {
+            if self
+                .0
+                .get(&ExternalChain::PassThrough)
+                .is_some_and(|existing| *existing != config)
+            {
+                Err(anyhow::anyhow!(
+                    "Multiple pass-through bridges are not supported"
+                ))
+            } else {
+                self.0.insert(ExternalChain::PassThrough, config);
+                Ok(())
+            }
+        } else {
+            Err(anyhow::anyhow!(
+                "Pass-through bridge can't require Cosmos or Solana bridge contract"
+            ))
+        }
+    }
 }
 
 /// Input and output for a single data load while processing a block.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct BlockDataLoad {
     /// Description of the request
     pub request: String,
@@ -630,58 +1120,115 @@ pub enum ExecAction {
         funds: Vec<AssetAmount>,
     },
 }
+
 impl ExecAction {
+    /// - Cosmos chains: returns a JSON string of a BridgeActionId and Vec<cosmwasm_std::CosmosMsg>
+    /// - Solana chains: returns a base64 encoded string of a borsh serialized kolme_solana_bridge_client::Payload binary
     pub(crate) fn to_payload(
         &self,
         chain: ExternalChain,
-        configs: &BTreeMap<ExternalChain, ChainConfig>,
+        config: &ChainConfig,
         id: BridgeActionId,
     ) -> Result<String> {
-        match chain {
-            ExternalChain::OsmosisTestnet
-            | ExternalChain::NeutronTestnet
-            | ExternalChain::OsmosisLocal => {
-                #[derive(serde::Serialize)]
-                struct Payload {
-                    id: BridgeActionId,
-                    messages: Vec<cosmwasm_std::CosmosMsg>,
-                }
-                let message = match self {
-                    ExecAction::Transfer {
-                        chain: chain2,
-                        recipient,
-                        funds,
-                    } => {
-                        assert_eq!(&chain, chain2);
+        use base64::Engine;
+
+        #[derive(serde::Serialize)]
+        struct CwPayload {
+            id: BridgeActionId,
+            messages: Vec<cosmwasm_std::CosmosMsg>,
+        }
+
+        match self {
+            Self::Transfer {
+                chain: chain2,
+                recipient,
+                funds,
+            } => {
+                assert_eq!(&chain, chain2);
+
+                match chain.name() {
+                    ChainName::Cosmos => {
                         let mut coins = vec![];
                         for AssetAmount { id, amount } in funds {
-                            let denom = configs
-                                .get(&chain)
-                                .context("Missing chain")?
+                            let denom = config
                                 .assets
                                 .iter()
                                 .find(|(_name, config)| config.asset_id == *id)
                                 .context("Unsupported asset ID")?
                                 .0;
+
                             let denom = denom.0.clone();
                             coins.push(cosmwasm_std::Coin {
                                 denom,
                                 amount: Uint128::new(*amount),
                             });
                         }
-                        cosmwasm_std::CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
+
+                        let message = cosmwasm_std::CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
                             to_address: recipient.0.clone(),
                             amount: coins,
-                        })
-                    }
-                };
+                        });
 
-                let payload = Payload {
-                    id,
-                    messages: vec![message],
-                };
-                let payload = serde_json::to_string(&payload)?;
-                Ok(payload)
+                        let payload = serde_json::to_string(&CwPayload {
+                            id,
+                            messages: vec![message],
+                        })?;
+
+                        Ok(payload)
+                    }
+                    ChainName::Solana => {
+                        let mut coins: Vec<(&str, u128)> = Vec::with_capacity(funds.len());
+                        for coin in funds {
+                            let asset = config
+                                .assets
+                                .iter()
+                                .find(|(_name, config)| config.asset_id == coin.id)
+                                .context("Unsupported asset ID")?;
+
+                            coins.push((&asset.0 .0, coin.amount));
+                        }
+
+                        let program_id = match config.bridge.clone() {
+                            BridgeContract::NeededCosmosBridge { .. } => unreachable!(),
+                            BridgeContract::NeededSolanaBridge { program_id } => program_id,
+                            BridgeContract::Deployed(program_id) => program_id,
+                        };
+
+                        // TODO: Need to support multiple signed messages (https://github.com/fpco/kolme/issues/106)
+                        let mint =
+                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(coins[0].0)?;
+                        let program_id =
+                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(&program_id)?;
+                        let recipient =
+                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(&recipient.0)?;
+                        let amount = u64::try_from(coins[0].1)?;
+
+                        let payload = kolme_solana_bridge_client::transfer_payload(
+                            id.0, program_id, mint, recipient, amount,
+                        );
+
+                        let len = borsh::object_length(&payload).map_err(|x| {
+                            anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
+                        })?;
+
+                        let mut buf = Vec::with_capacity(len);
+                        borsh::BorshSerialize::serialize(&payload, &mut buf).map_err(|x| {
+                            anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
+                        })?;
+
+                        let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
+
+                        Ok(payload)
+                    }
+                    #[cfg(feature = "pass_through")]
+                    ChainName::PassThrough => {
+                        let payload = serde_json::to_string(&pass_through::Transfer {
+                            recipient: recipient.clone(),
+                            funds: funds.clone(),
+                        })?;
+                        Ok(payload)
+                    }
+                }
             }
         }
     }
@@ -711,6 +1258,11 @@ pub enum Notification<AppMessage> {
     /// Broadcast a transaction to be included in the chain.
     Broadcast {
         tx: Arc<SignedTransaction<AppMessage>>,
+    },
+    /// A transaction failed in the processor.
+    FailedTransaction {
+        txhash: TxHash,
+        error: String,
     },
 }
 

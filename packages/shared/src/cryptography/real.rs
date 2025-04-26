@@ -137,10 +137,13 @@ impl SecretKey {
     pub fn sign_recoverable(
         &self,
         msg: impl AsRef<[u8]>,
-    ) -> Result<(Signature, RecoveryId), SecretKeyError> {
+    ) -> Result<SignatureWithRecovery, SecretKeyError> {
         k256::ecdsa::SigningKey::from(&self.0)
             .sign_recoverable(msg.as_ref())
-            .map(|(x, y)| (x.into(), y.into()))
+            .map(|(sig, rec)| SignatureWithRecovery {
+                recid: rec.into(),
+                sig: sig.into(),
+            })
             .map_err(|source| SecretKeyError::SigningFailed { source })
     }
 
@@ -198,9 +201,26 @@ pub use sigerr::SignatureError;
 
 use super::SignatureWithRecovery;
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Signature(k256::ecdsa::Signature);
+
+impl PartialOrd for Signature {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Signature {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.to_bytes().cmp(&other.0.to_bytes())
+    }
+}
+
 impl Signature {
+    pub fn as_bytes(&self) -> impl AsRef<[u8]> {
+        self.0.to_bytes()
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         self.0.to_bytes().to_vec()
     }
@@ -241,7 +261,7 @@ pub enum RecoveryIdError {
     InvalidByte { byte: u8 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RecoveryId(k256::ecdsa::RecoveryId);
 impl RecoveryId {
     pub fn to_byte(&self) -> u8 {

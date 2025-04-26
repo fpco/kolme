@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 
@@ -65,7 +65,7 @@ impl KolmeApp for SampleKolmeApp {
             needed_listeners: 1,
             approvers: set,
             needed_approvers: 1,
-            chains: BTreeMap::new(),
+            chains: ConfiguredChains::default(),
         }
     }
 
@@ -87,7 +87,7 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn sanity() {
-    kolme::init_logger(true, None);
+    kolme::init_logger(false, None);
     let mut set = JoinSet::new();
 
     // We're going to run two logically separate Kolmes, using different databases.
@@ -99,7 +99,9 @@ async fn sanity() {
     let kolme_processor = Kolme::new(
         SampleKolmeApp,
         DUMMY_CODE_VERSION,
-        tempfile_processor.path(),
+        KolmeStore::new_sqlite(tempfile_processor.path())
+            .await
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -107,35 +109,40 @@ async fn sanity() {
     set.spawn(Gossip::new(kolme_processor).await.unwrap().run());
 
     let tempfile_client = tempfile::NamedTempFile::new().unwrap();
-    let kolme_client = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, tempfile_client.path())
-        .await
-        .unwrap();
+    let kolme_client = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(tempfile_client.path())
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap();
     set.spawn(Gossip::new(kolme_client.clone()).await.unwrap().run());
 
-    set.spawn(async move {
+    {
         let secret = SecretKey::random(&mut rand::thread_rng());
-        kolme_client.wait_for_block(BlockHeight::start()).await;
         kolme_client
-            .propose_transaction(
-                kolme_client
-                    .read()
-                    .await
-                    .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
-                    .await
-                    .unwrap(),
-            )
+            .wait_for_block(BlockHeight::start())
+            .await
             .unwrap();
-        kolme_client
-            .wait_for_block(BlockHeight::start().next())
-            .await;
-        Ok(())
-    });
-
-    set.join_next()
+        let tx = kolme_client
+            .read()
+            .await
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+            .await
+            .unwrap();
+        let txhash = tx.hash();
+        kolme_client.propose_transaction(tx).unwrap();
+        let block = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            kolme_client.wait_for_block(BlockHeight::start().next()),
+        )
         .await
-        .expect("Impossible! No task finished")
-        .expect("Unexpected panic")
-        .expect("Unexpected error");
+        .unwrap()
+        .unwrap();
+        assert_eq!(txhash, block.0.message.as_inner().tx.hash());
+    }
 
     // And nothing else should have completed, since all other tasks should run forever.
     assert!(set.try_join_next().is_none());

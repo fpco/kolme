@@ -3,7 +3,9 @@ use crate::*;
 impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
     fn from(tree: TreeContents<K, V>) -> Self {
         assert!(tree.len() <= 16);
-        let mut leaf = LeafContents { values: vec![] };
+        let mut leaf = LeafContents {
+            values: arrayvec::ArrayVec::new(),
+        };
         tree.drain_entries_to(&mut leaf.values);
         leaf
     }
@@ -49,14 +51,10 @@ impl<K, V> LeafContents<K, V> {
         }
     }
 
-    pub(crate) fn get(&self, key_bytes: &MerkleKey) -> Option<&V> {
-        self.values.iter().find_map(|entry| {
-            if &entry.key_bytes == key_bytes {
-                Some(&entry.value)
-            } else {
-                None
-            }
-        })
+    pub(crate) fn get(&self, key_bytes: &MerkleKey) -> Option<&LeafEntry<K, V>> {
+        self.values
+            .iter()
+            .find(|entry| &entry.key_bytes == key_bytes)
     }
 
     pub(crate) fn get_mut(&mut self, key_bytes: &MerkleKey) -> Option<&mut V> {
@@ -98,14 +96,19 @@ impl<K, V> LeafContents<K, V> {
         self.values.len()
     }
 
-    pub(crate) fn drain_entries_to(mut self, entries: &mut Vec<LeafEntry<K, V>>) {
-        entries.append(&mut self.values);
+    pub(crate) fn drain_entries_to(
+        mut self,
+        entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>,
+    ) {
+        entries.extend(&mut self.values.drain(..));
     }
 }
 
 impl<K, V> Default for LeafContents<K, V> {
     fn default() -> Self {
-        Self { values: vec![] }
+        Self {
+            values: arrayvec::ArrayVec::new(),
+        }
     }
 }
 
@@ -130,19 +133,17 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Leaf
             return Err(MerkleSerialError::UnexpectedMagicByte { byte: magic_byte });
         }
         let len = deserializer.load_usize()?;
-        let mut values = Vec::with_capacity(len);
+        if len > 16 {
+            return Err(MerkleSerialError::LeafContentLimitExceeded {
+                limit: 16,
+                actual: len,
+            });
+        }
+        let mut values = arrayvec::ArrayVec::new();
         for _ in 0..len {
             values.push(LeafEntry::merkle_deserialize(deserializer)?);
         }
 
-        Ok(Lockable::new_unlocked(LeafContents { values })) // FIXME
-                                                            // Ok(Lockable::new_locked(
-                                                            //     MerkleContents {
-                                                            //         hash: deserializer.get_hash(),
-                                                            //         payload: deserializer.get_full_payload(),
-                                                            //         children: (),
-                                                            //     },
-                                                            //     LeafContents { values },
-                                                            // ))
+        Ok(Lockable::new_unlocked(LeafContents { values }))
     }
 }

@@ -41,12 +41,12 @@ impl MerkleManager {
         value.merkle_serialize(&mut serializer)?;
         let contents = Arc::new(serializer.finish());
 
-        if !self.cache.read().contains_key(&contents.hash) {
-            self.cache
-                .write()
-                .insert(contents.hash, contents.payload.clone());
+        let exists = self.cache.read().contains_key(&contents.hash);
+        if !exists {
+            let payload = contents.payload.clone();
+            self.cache.write().insert(contents.hash, payload);
         }
-        value.set_merkle_contents(contents.clone());
+        value.set_merkle_contents(&contents);
         Ok(contents)
     }
 
@@ -148,9 +148,9 @@ impl MerkleManager {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<T>, MerkleSerialError> {
-        match self.cache.read().get(&hash) {
-            None => Ok(None),
-            Some(payload) => self.deserialize(hash, payload.clone()).map(Some),
-        }
+        let Some(payload) = self.cache.read().get(&hash).cloned() else {
+            return Ok(None);
+        };
+        self.deserialize(hash, payload).map(Some)
     }
 }

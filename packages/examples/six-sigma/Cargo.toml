@@ -1,0 +1,26 @@
+[package]
+name = "example-six-sigma"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8"
+reqwest = { version = "0.12.15", features = ["json"] }
+tracing = "0.1.41"
+strum = { version = "0.27.1", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
+tokio = { workspace = true }
+clap = { workspace = true }
+kolme = { workspace = true, features = ["pass_through"] }
+rust_decimal = { workspace = true }
+anyhow = { workspace = true }
+cosmos = { workspace = true }
+jiff = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+backon = "1.4.1"
+cosmwasm-std = "2.2.2"
+shared = { workspace = true }
+test-log = { version = "0.2", features = ["trace"] }
+tempfile = "3.19.1"

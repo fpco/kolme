@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::OnceLock,
-};
+use std::{collections::BTreeSet, sync::OnceLock};
 
 use jiff::Timestamp;
 use tokio::task::JoinSet;
@@ -60,7 +57,7 @@ impl KolmeApp for SampleKolmeApp {
             needed_listeners: 1,
             approvers: set,
             needed_approvers: 1,
-            chains: BTreeMap::new(),
+            chains: ConfiguredChains::default(),
         }
     }
 
@@ -79,11 +76,16 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn test_sample_sanity() {
+    init_logger(false, None);
     let tempfile = tempfile::NamedTempFile::new().unwrap();
 
-    let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, tempfile.path())
-        .await
-        .unwrap();
+    let kolme = Kolme::new(
+        SampleKolmeApp,
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_sqlite(tempfile.path()).await.unwrap(),
+    )
+    .await
+    .unwrap();
 
     let mut subscription = kolme.subscribe();
 
@@ -122,6 +124,7 @@ async fn test_sample_sanity() {
                     }
                     Notification::GenesisInstantiation { .. } => (),
                     Notification::Broadcast { .. } => (),
+                    Notification::FailedTransaction { .. } => (),
                 }
             }
         }
@@ -155,7 +158,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -166,7 +169,7 @@ async fn test_sample_sanity() {
         perform(
             signer,
             AuthMessage::AddWallet {
-                wallet: "deadbeef".to_owned(),
+                wallet: Wallet("deadbeef".to_owned()),
             },
         )
         .await
@@ -187,7 +190,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::RemoveWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -195,7 +198,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::RemoveWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -205,7 +208,7 @@ async fn test_sample_sanity() {
     perform(
         &secret1,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -213,7 +216,7 @@ async fn test_sample_sanity() {
     perform(
         &secret1,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -221,7 +224,7 @@ async fn test_sample_sanity() {
     perform(
         &secret3,
         AuthMessage::AddWallet {
-            wallet: "deadbeef".to_owned(),
+            wallet: Wallet("deadbeef".to_owned()),
         },
     )
     .await
@@ -303,16 +306,16 @@ async fn test_sample_sanity() {
         &secret3,
         vec![
             AuthMessage::AddWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::AddWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
         ],
     )
@@ -322,13 +325,13 @@ async fn test_sample_sanity() {
         &secret3,
         vec![
             AuthMessage::AddWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
             AuthMessage::RemoveWallet {
-                wallet: "foobar".to_owned(),
+                wallet: Wallet("foobar".to_owned()),
             },
         ],
     )
