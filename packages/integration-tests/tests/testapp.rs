@@ -3,7 +3,7 @@ use futures_util::future::join_all;
 use futures_util::StreamExt;
 use kolme::{
     AccountId, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext,
-    GenesisInfo, Kolme, KolmeApp, KolmeRead, KolmeStore, MerkleDeserialize, MerkleDeserializer,
+    GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer,
     MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor, Transaction,
 };
 
@@ -11,11 +11,10 @@ use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use shared::cryptography::SecretKey;
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
-use std::ops::DerefMut;
 use std::path::Path;
 use std::time::Duration;
-use std::{collections::BTreeSet, ops::Deref};
 use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
@@ -375,9 +374,6 @@ async fn test_rejected_transaction_insufficient_balance() {
         notification
     );
 
-    let read = kolme.clone().read().await;
-    let account_id = read.get_account_and_next_nonce(secret.public_key()).id;
-
     let tx_withdraw = kolme
         .read()
         .await
@@ -385,7 +381,7 @@ async fn test_rejected_transaction_insufficient_balance() {
             &secret,
             vec![Message::Bank(BankMessage::Transfer {
                 asset: AssetId(1),
-                dest: account_id,
+                dest: AccountId::from(kolme::AccountId(0)),
                 amount: dec!(500),
             })],
         )
@@ -402,11 +398,21 @@ async fn test_rejected_transaction_insufficient_balance() {
     );
 
     // Return an Error due Insufficient balance for account
-    let result = next_message_as_json(&mut ws).await;
+    let result = next_message_as_json(&mut ws).await.unwrap();
 
     assert!(
-        result.is_err(),
-        "Expected an error (transaction should be rejected), but got a successful notification"
+        result["FailedTransaction"].is_object(),
+        "Expected FailedTransaction notification, but got: {:?}",
+        result
+    );
+
+    let error = result["FailedTransaction"]["error"]
+        .as_str()
+        .expect("Expected error message in FailedTransaction");
+    assert!(
+        error.contains("Insufficient balance"),
+        "Expected insufficient balance error, but got: {}",
+        error
     );
 
     let read = kolme.read().await;
@@ -525,11 +531,7 @@ async fn test_concurrent_transactions() {
         let kolme_clone = kolme.clone();
 
         let task = tokio::spawn(async move {
-            let read = kolme_clone.read().await;
-
-            let next_nonce = read
-                .get_account_and_next_nonce(secret.public_key())
-                .next_nonce;
+            let next_nonce = kolme_clone.read().await.get_next_nonce(secret.public_key());
 
             let tx = Transaction {
                 pubkey: secret.public_key(),
