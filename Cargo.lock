@@ -3159,7 +3159,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "tokio-util",
  "tracing",
 ]

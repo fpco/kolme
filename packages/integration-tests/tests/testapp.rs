@@ -2,17 +2,20 @@ use anyhow::Result;
 use futures_util::future::join_all;
 use futures_util::StreamExt;
 use kolme::{
-    AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext, GenesisInfo,
-    Kolme, KolmeApp, Message, Processor, Transaction,
+    AccountId, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext,
+    GenesisInfo, Kolme, KolmeApp, KolmeRead, KolmeStore, MerkleDeserialize, MerkleDeserializer,
+    MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor, Transaction,
 };
+
 use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use shared::cryptography::SecretKey;
-use std::collections::BTreeSet;
 use std::net::SocketAddr;
+use std::ops::DerefMut;
 use std::path::Path;
 use std::time::Duration;
+use std::{collections::BTreeSet, ops::Deref};
 use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
@@ -21,13 +24,27 @@ use tokio_util::task::AbortOnDropHandle;
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 struct TestApp;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct TestState {
     #[serde(default)]
     counter: u32,
+}
+impl MerkleSerialize for TestState {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.counter.merkle_serialize(serializer)
+    }
+}
+
+impl MerkleDeserialize for TestState {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let counter = u32::merkle_deserialize(deserializer)?;
+        Ok(TestState { counter })
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -61,14 +78,6 @@ impl KolmeApp for TestApp {
         Ok(TestState { counter: 0 })
     }
 
-    fn save_state(state: &Self::State) -> Result<String> {
-        serde_json::to_string(state).map_err(anyhow::Error::from)
-    }
-
-    fn load_state(v: &str) -> Result<Self::State> {
-        serde_json::from_str(v).map_err(anyhow::Error::from)
-    }
-
     async fn execute(
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
@@ -93,7 +102,8 @@ async fn setup(
     db_path: &Path,
 ) -> Result<(Kolme<TestApp>, AbortOnDropHandle<Result<()>>, SocketAddr)> {
     let app = TestApp;
-    let kolme = Kolme::new(app, "test_version", db_path).await?;
+    let store = KolmeStore::new_sqlite(db_path).await?;
+    let kolme = Kolme::new(app, "test_version", store).await?;
     let read = kolme.read().await;
     assert_eq!(read.get_next_height(), BlockHeight(0),);
 
@@ -366,11 +376,7 @@ async fn test_rejected_transaction_insufficient_balance() {
     );
 
     let read = kolme.clone().read().await;
-    let account_id = read
-        .get_account_and_next_nonce(secret.public_key())
-        .await
-        .unwrap()
-        .id;
+    let account_id = read.get_account_and_next_nonce(secret.public_key()).id;
 
     let tx_withdraw = kolme
         .read()
@@ -523,8 +529,6 @@ async fn test_concurrent_transactions() {
 
             let next_nonce = read
                 .get_account_and_next_nonce(secret.public_key())
-                .await
-                .unwrap()
                 .next_nonce;
 
             let tx = Transaction {
