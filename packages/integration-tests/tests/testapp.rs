@@ -398,7 +398,7 @@ async fn test_rejected_transaction_insufficient_balance() {
         result
     );
 
-    let error = result["FailedTransaction"]["error"]
+    let error = result["FailedTransaction"]["error"]["Other"]
         .as_str()
         .expect("Expected error message in FailedTransaction");
     assert!(
