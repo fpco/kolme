@@ -1,4 +1,5 @@
 mod accounts;
+mod error;
 
 use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
@@ -8,6 +9,7 @@ use cosmwasm_std::Uint128;
 use crate::*;
 
 pub use accounts::{Account, Accounts, AccountsError};
+pub use error::KolmeError;
 
 pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
 pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -786,6 +788,14 @@ impl<AppMessage> SignedBlock<AppMessage> {
 
     pub fn hash(&self) -> BlockHash {
         BlockHash(self.0.message_hash())
+    }
+
+    pub fn height(&self) -> BlockHeight {
+        self.0.message.as_inner().height
+    }
+
+    pub fn tx(&self) -> &SignedTransaction<AppMessage> {
+        &self.0.message.as_inner().tx
     }
 }
 

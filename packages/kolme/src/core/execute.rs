@@ -35,7 +35,7 @@ pub struct ExecutionResults<App: KolmeApp> {
     pub loads: Vec<BlockDataLoad>,
 }
 
-impl<App: KolmeApp> KolmeInner<App> {
+impl<App: KolmeApp> KolmeRead<App> {
     async fn validate_tx(&self, tx: &SignedTransaction<App::Message>) -> Result<()> {
         // Ensure that the signature is valid
         tx.validate_signature()?;
@@ -63,16 +63,16 @@ impl<App: KolmeApp> KolmeInner<App> {
         self.validate_tx(signed_tx).await?;
         let tx = signed_tx.0.message.as_inner();
 
-        let mut framework_state = self.framework_state.clone();
+        let mut framework_state = self.get_framework_state().clone();
         let sender_account_id = framework_state.accounts.use_nonce(tx.pubkey, tx.nonce)?;
 
         let mut execution_context = ExecutionContext::<App> {
             framework_state,
-            app_state: self.app_state.clone(),
+            app_state: self.get_app_state().clone(),
             validation_data_loads: validation_data_loads.map(Into::into),
             pubkey: tx.pubkey,
             sender: sender_account_id,
-            app: &self.app,
+            app: self.get_app(),
             signing_key: signed_tx.0.message.as_inner().pubkey,
             timestamp,
             logs: vec![],
@@ -81,7 +81,7 @@ impl<App: KolmeApp> KolmeInner<App> {
         for message in &tx.messages {
             execution_context.logs.push(vec![]);
             execution_context
-                .execute_message(&self.app, message)
+                .execute_message(self.get_app(), message)
                 .await?;
         }
 

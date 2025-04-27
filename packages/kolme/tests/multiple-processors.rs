@@ -175,11 +175,9 @@ async fn client(
         };
         let tx = kolme
             .read()
-            .await
-            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])
-            .await?;
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?;
         let txhash = tx.hash();
-        kolme.propose_transaction(tx)?;
+        kolme.propose_and_await_transaction(tx).await?;
 
         {
             let mut guard = all_txhashes.lock();
@@ -215,21 +213,20 @@ async fn checker(
     let highest_block = *highest_block.lock();
     let highest_block = kolmes[0]
         .read()
-        .await
         .get_block(highest_block)
         .await
         .unwrap()
         .unwrap();
-    let next_height = kolmes[0].read().await.get_next_height();
+    let next_height = kolmes[0].read().get_next_height();
     assert_eq!(
         next_height,
         highest_block.0.message.as_inner().height.next()
     );
-    let hash = kolmes[0].read().await.get_current_block_hash();
+    let hash = kolmes[0].read().get_current_block_hash();
     assert_eq!(hash, highest_block.hash());
     let hashes = std::mem::take(&mut *all_txhashes.lock());
     for (kolmeidx, kolme) in kolmes.iter().enumerate() {
-        let kolme = kolme.read().await;
+        let kolme = kolme.read();
         assert_eq!(next_height, kolme.get_next_height());
         assert_eq!(hash, kolme.get_current_block_hash());
         for (txidx, txhash) in hashes.iter().enumerate() {

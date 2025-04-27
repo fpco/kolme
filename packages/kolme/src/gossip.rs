@@ -231,13 +231,13 @@ impl<App: KolmeApp> Gossip<App> {
                     BlockRequest::NextHeight => {
                         if let Err(e) = swarm.behaviour_mut().request_response.send_response(
                             channel,
-                            BlockResponse::Next(self.kolme.read().await.get_next_height()),
+                            BlockResponse::Next(self.kolme.read().get_next_height()),
                         ) {
                             tracing::warn!("Unable to answer Next request: {e:?}");
                         }
                     }
                     BlockRequest::BlockAtHeight(height) => {
-                        let res = match self.kolme.read().await.get_block(height).await? {
+                        let res = match self.kolme.read().get_block(height).await? {
                             None => BlockResponse::HeightNotFound(height),
                             Some(block) => BlockResponse::Block(block),
                         };
@@ -305,7 +305,7 @@ impl<App: KolmeApp> Gossip<App> {
                 .send_request(peer, BlockRequest::NextHeight);
         }
 
-        let next = self.kolme.read().await.get_next_height();
+        let next = self.kolme.read().get_next_height();
         if state.expected_next_block > next {
             if let Some(peer) = state.get_next_peer() {
                 swarm
@@ -317,7 +317,7 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn add_block(&self, block: &SignedBlock<App::Message>) {
-        if block.0.message.as_inner().height == self.kolme.read().await.get_next_height() {
+        if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
             if let Err(e) = self.kolme.add_block(block.clone()).await {
                 tracing::warn!("Unable to add block to chain: {e}")
             }
