@@ -76,13 +76,6 @@ impl KolmeStore {
     }
 }
 
-pub(super) struct LoadStateResult<AppState> {
-    pub(super) framework_state: FrameworkState,
-    pub(super) app_state: AppState,
-    pub(super) next_height: BlockHeight,
-    pub(super) current_block_hash: BlockHash,
-}
-
 impl KolmeStore {
     pub async fn load_latest_block<AppState: MerkleDeserialize>(
         &self,
@@ -122,42 +115,6 @@ impl KolmeStore {
             Err(e) => Err(e.into()),
             Ok(block) => Ok(Some(block)),
         }
-    }
-
-    pub(super) async fn load_state<App: KolmeApp>(
-        &self,
-        genesis: &GenesisInfo,
-        merkle_manager: &MerkleManager,
-    ) -> Result<LoadStateResult<App::State>> {
-        let output = self.load_latest_block(merkle_manager).await?;
-        let res = match output {
-            Some(StorableBlock {
-                height,
-                blockhash,
-                txhash: _,
-                rendered: _,
-                framework_state,
-                app_state,
-                logs: _,
-            }) => {
-                let height = BlockHeight(height);
-                let next_height = height.next();
-                LoadStateResult {
-                    framework_state,
-                    app_state,
-                    next_height,
-                    current_block_hash: BlockHash(blockhash),
-                }
-            }
-            None => LoadStateResult {
-                framework_state: FrameworkState::new(genesis),
-                app_state: App::new_state()?,
-                next_height: BlockHeight::start(),
-                current_block_hash: BlockHash::genesis_parent(),
-            },
-        };
-        res.framework_state.validate()?;
-        Ok(res)
     }
 
     pub(super) async fn get_height_for_tx(&self, txhash: TxHash) -> Result<Option<BlockHeight>> {

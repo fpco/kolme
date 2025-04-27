@@ -21,7 +21,7 @@ impl<App: KolmeApp> Approver<App> {
     }
 
     async fn catch_up_approvals_all(&self) -> Result<()> {
-        let kolme = self.kolme.read().await;
+        let kolme = self.kolme.read();
         for (chain, _) in kolme.get_bridge_contracts().iter() {
             self.catch_up_approvals(&kolme, chain).await?;
         }
@@ -40,8 +40,8 @@ impl<App: KolmeApp> Approver<App> {
         }
 
         let signature = self.secret.sign_recoverable(&action.payload)?;
-        let tx = kolme
-            .create_signed_transaction(
+        self.kolme
+            .sign_propose_await_transaction(
                 &self.secret,
                 vec![Message::Approve {
                     chain,
@@ -50,6 +50,6 @@ impl<App: KolmeApp> Approver<App> {
                 }],
             )
             .await?;
-        self.kolme.propose_transaction(tx)
+        Ok(())
     }
 }

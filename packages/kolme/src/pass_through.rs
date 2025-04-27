@@ -109,7 +109,7 @@ pub async fn listen<App: KolmeApp>(
 ) -> Result<()> {
     tracing::debug!("pass through listen");
     let mut next_bridge_event_id = get_next_bridge_event_id(
-        &kolme.read().await,
+        &kolme.read(),
         secret.public_key(),
         ExternalChain::PassThrough,
     );
@@ -128,13 +128,9 @@ pub async fn listen<App: KolmeApp>(
             next_bridge_event_id,
         );
 
-        let signed = kolme
-            .read()
-            .await
-            .create_signed_transaction(&secret, vec![message])
+        kolme
+            .sign_propose_await_transaction(&secret, vec![message])
             .await?;
-
-        kolme.propose_transaction(signed)?;
 
         next_bridge_event_id = next_bridge_event_id.next();
     }
