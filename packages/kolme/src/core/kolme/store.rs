@@ -118,27 +118,20 @@ impl KolmeStore {
 }
 
 impl KolmeStore {
-    pub async fn load_latest_block<AppState: MerkleDeserialize>(
-        &self,
-        merkle_manager: &MerkleManager,
-    ) -> Result<Option<StorableBlock<FrameworkState, AppState>>> {
+    pub async fn load_latest_block(&self) -> Result<Option<BlockHeight>> {
         Ok(match self {
-            KolmeStore::Sqlite(kolme_store_sqlite) => {
-                kolme_store_sqlite.load_latest_block(merkle_manager).await?
-            }
-            KolmeStore::Postgres(kolme_store_postgres) => {
-                kolme_store_postgres
-                    .load_latest_block(merkle_manager)
-                    .await?
-            }
+            KolmeStore::Sqlite(kolme_store_sqlite) => kolme_store_sqlite
+                .load_latest_block()
+                .await
+                .map(|x| x.map(BlockHeight))?,
+            KolmeStore::Postgres(kolme_store_postgres) => kolme_store_postgres
+                .load_latest_block()
+                .await
+                .map(|x| x.map(BlockHeight))?,
             KolmeStore::InMemory(kolme_store_in_memory) => {
-                kolme_store_in_memory
-                    .load_latest_block(merkle_manager)
-                    .await?
+                kolme_store_in_memory.load_latest_block().await?
             }
-            KolmeStore::Fjall(kolme_store_fjall) => {
-                kolme_store_fjall.load_latest_block(merkle_manager).await?
-            }
+            KolmeStore::Fjall(kolme_store_fjall) => kolme_store_fjall.load_latest_block()?,
         })
     }
 

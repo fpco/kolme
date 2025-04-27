@@ -57,9 +57,12 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
         genesis: &GenesisInfo,
         merkle_manager: &MerkleManager,
     ) -> Result<Self> {
-        let output = store.load_latest_block(merkle_manager).await?;
+        let output = store.load_latest_block().await?;
         let res = match output {
-            Some(storable) => MaybeBlockInfo::Some(storable.try_into()?),
+            Some(height) => {
+                let storable = store.load_block(merkle_manager, height).await?.with_context(|| format!("Latest block height is {height}, but it wasn't found in the data store"))?;
+                MaybeBlockInfo::Some(storable.try_into()?)
+            }
             None => MaybeBlockInfo::None(BlockState {
                 framework_state: FrameworkState::new(genesis),
                 app_state: App::new_state()?,

@@ -33,22 +33,12 @@ impl KolmeStoreInMemory {
         Ok(())
     }
 
-    pub(crate) async fn load_latest_block<AppState: MerkleDeserialize>(
-        &self,
-        merkle_manager: &MerkleManager,
-    ) -> Result<Option<kolme_store::StorableBlock<super::FrameworkState, AppState>>, KolmeStoreError>
-    {
-        let mut guard = self.0.write().await;
-        let Some((_, hash)) = guard.blocks.last_key_value() else {
+    pub(crate) async fn load_latest_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
+        let guard = self.0.read().await;
+        let Some((key, _)) = guard.blocks.last_key_value() else {
             return Ok(None);
         };
-        let hash = *hash;
-
-        merkle_manager
-            .load(&mut guard.merkle, hash)
-            .await
-            .map(Some)
-            .map_err(KolmeStoreError::custom)
+        Ok(Some(*key))
     }
 
     pub(crate) async fn load_block<AppState: MerkleDeserialize>(

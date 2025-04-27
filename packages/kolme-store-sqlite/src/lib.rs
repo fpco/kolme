@@ -20,26 +20,14 @@ impl KolmeStoreSqlite {
         Ok(KolmeStoreSqlite(pool))
     }
 
-    pub async fn load_latest_block<
-        FrameworkState: MerkleDeserialize,
-        AppState: MerkleDeserialize,
-    >(
-        &self,
-        merkle_manager: &MerkleManager,
-    ) -> Result<Option<StorableBlock<FrameworkState, AppState>>, KolmeStoreError> {
-        let height = sqlx::query_scalar!("SELECT height FROM blocks ORDER BY height DESC LIMIT 1")
+    pub async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError> {
+        match sqlx::query_scalar!("SELECT height FROM blocks ORDER BY height DESC LIMIT 1")
             .fetch_optional(&self.0)
             .await
-            .map_err(KolmeStoreError::custom)?;
-        match height {
+            .map_err(KolmeStoreError::custom)?
+        {
             None => Ok(None),
-            Some(height) => self
-                .load_block(
-                    merkle_manager,
-                    height.try_into().map_err(KolmeStoreError::custom)?,
-                )
-                .await
-                .map(Some),
+            Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
         }
     }
 

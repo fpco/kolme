@@ -191,17 +191,20 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Resync with the database.
     pub async fn resync(&self) -> Result<()> {
-        let latest = self
-            .inner
-            .store
-            .load_latest_block::<App::State>(&self.inner.merkle_manager)
-            .await?;
+        let latest = self.inner.store.load_latest_block().await?;
         let Some(latest) = latest else { return Ok(()) };
 
         // Do a read first to avoid creating lock contention.
-        if self.inner.current_block.read().get_next_height().0 > latest.height {
+        if self.inner.current_block.read().get_next_height().0 > latest.0 {
             return Ok(());
         }
+
+        let latest = self
+            .inner
+            .store
+            .load_block(&self.inner.merkle_manager, latest)
+            .await?
+            .with_context(|| format!("resync: expected block {latest} not present"))?;
 
         // Do this before grabbing the write lock to reduce contention
         let latest = BlockInfo::<App>::try_from(latest)?;

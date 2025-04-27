@@ -23,6 +23,8 @@ pub enum KolmeStoreError {
     BlockAlreadyInDb { height: u64 },
     #[error("Transaction is already present in database: {txhash}")]
     TxAlreadyInDb { txhash: Sha256Hash },
+    #[error("{0}")]
+    Other(String),
 }
 
 impl KolmeStoreError {

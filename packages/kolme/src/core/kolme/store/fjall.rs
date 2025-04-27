@@ -23,23 +23,16 @@ impl KolmeStoreFjall {
         })
     }
 
-    pub async fn load_latest_block<
-        FrameworkState: MerkleDeserialize,
-        AppState: MerkleDeserialize,
-    >(
-        &self,
-        merkle_manager: &MerkleManager,
-    ) -> Result<Option<StorableBlock<FrameworkState, AppState>>, KolmeStoreError> {
+    pub fn load_latest_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
         let Some(latest) = self.handle.prefix("block:").next_back() else {
             return Ok(None);
         };
-        let (_key, hash_bytes) = latest.map_err(KolmeStoreError::custom)?;
-        let hash = Sha256Hash::from_hash(&hash_bytes).map_err(KolmeStoreError::custom)?;
-        merkle_manager
-            .load(&mut FjallMerkleStore(&self.handle), hash)
-            .await
-            .map(Some)
-            .map_err(KolmeStoreError::custom)
+        let (key, _hash_bytes) = latest.map_err(KolmeStoreError::custom)?;
+        let key = (*key)
+            .strip_prefix(b"block:")
+            .ok_or_else(|| KolmeStoreError::Other("Fjall key missing block: prefix".to_owned()))?;
+        let height = <[u8; 8]>::try_from(key).map_err(KolmeStoreError::custom)?;
+        Ok(Some(BlockHeight(u64::from_be_bytes(height))))
     }
 
     pub async fn load_block<FrameworkState: MerkleDeserialize, AppState: MerkleDeserialize>(
