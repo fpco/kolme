@@ -13,7 +13,7 @@ pub struct KolmeStorePostgres(sqlx::PgPool);
 impl KolmeStorePostgres {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(20)
+            .max_connections(5)
             .connect(url)
             .await?;
         sqlx::migrate!().run(&pool).await?;
