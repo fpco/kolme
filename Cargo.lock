@@ -3485,8 +3485,6 @@ name = "kolme-store"
 version = "0.1.0"
 dependencies = [
  "merkle-map",
- "serde",
- "serde_json",
  "thiserror 2.0.12",
 ]
 
