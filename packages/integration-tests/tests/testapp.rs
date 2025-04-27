@@ -103,7 +103,7 @@ async fn setup(
     let app = TestApp;
     let store = KolmeStore::new_sqlite(db_path).await?;
     let kolme = Kolme::new(app, "test_version", store).await?;
-    let read = kolme.read().await;
+    let read = kolme.read();
     assert_eq!(read.get_next_height(), BlockHeight(0),);
 
     let addr = SocketAddr::new("127.0.0.1".parse()?, find_free_port().await?);
@@ -161,9 +161,7 @@ async fn test_websocket_notifications() {
 
     let tx = kolme
         .read()
-        .await
         .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-        .await
         .unwrap();
 
     kolme.propose_transaction(tx.clone()).unwrap();
@@ -216,9 +214,7 @@ async fn test_validate_tx_valid_signature() {
 
     let tx = kolme
         .read()
-        .await
         .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-        .await
         .unwrap();
 
     kolme.propose_transaction(tx.clone()).unwrap();
@@ -312,7 +308,7 @@ async fn test_validate_tx_invalid_nonce() {
         notification
     );
 
-    let read = kolme.read().await;
+    let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
         state.counter, 0,
@@ -332,9 +328,7 @@ async fn test_no_subscribers() {
 
     let tx = kolme
         .read()
-        .await
         .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-        .await
         .unwrap();
 
     tracing::info!("Proposing transaction with no subscribers");
@@ -346,7 +340,7 @@ async fn test_no_subscribers() {
     );
     assert_eq!(
         result.unwrap_err().to_string(),
-        "Tried to propose an event, but no one is listening to our notifications"
+        "Tried to propose a transaction, but no one is listening to our notifications"
     );
 }
 
@@ -376,7 +370,6 @@ async fn test_rejected_transaction_insufficient_balance() {
 
     let tx_withdraw = kolme
         .read()
-        .await
         .create_signed_transaction(
             &secret,
             vec![Message::Bank(BankMessage::Transfer {
@@ -385,7 +378,6 @@ async fn test_rejected_transaction_insufficient_balance() {
                 amount: dec!(500),
             })],
         )
-        .await
         .unwrap();
 
     kolme.propose_transaction(tx_withdraw.clone()).unwrap();
@@ -415,7 +407,7 @@ async fn test_rejected_transaction_insufficient_balance() {
         error
     );
 
-    let read = kolme.read().await;
+    let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
         state.counter, 0,
@@ -455,9 +447,7 @@ async fn test_many_transactions() {
     for i in 0..100 {
         let tx = kolme
             .read()
-            .await
             .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-            .await
             .unwrap();
 
         kolme.propose_transaction(tx.clone()).unwrap();
@@ -481,7 +471,7 @@ async fn test_many_transactions() {
         );
     }
 
-    let read = kolme.read().await;
+    let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
         state.counter, 100,
@@ -531,7 +521,7 @@ async fn test_concurrent_transactions() {
         let kolme_clone = kolme.clone();
 
         let task = tokio::spawn(async move {
-            let next_nonce = kolme_clone.read().await.get_next_nonce(secret.public_key());
+            let next_nonce = kolme_clone.read().get_next_nonce(secret.public_key());
 
             let tx = Transaction {
                 pubkey: secret.public_key(),
@@ -572,7 +562,7 @@ async fn test_concurrent_transactions() {
         new_blocks.len()
     );
 
-    let read = kolme.read().await;
+    let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
         state.counter, 100,
