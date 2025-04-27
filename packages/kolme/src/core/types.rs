@@ -1272,7 +1272,7 @@ pub enum Notification<AppMessage> {
     /// A transaction failed in the processor.
     FailedTransaction {
         txhash: TxHash,
-        error: String,
+        error: KolmeError,
     },
 }
 

@@ -129,7 +129,10 @@ impl<App: KolmeApp> Processor<App> {
             tracing::warn!("Giving up on adding transaction {txhash}: {e}");
             self.kolme.notify(Notification::FailedTransaction {
                 txhash,
-                error: e.to_string(),
+                error: match e.downcast_ref::<KolmeError>() {
+                    Some(e) => e.clone(),
+                    None => KolmeError::Other(e.to_string()),
+                },
             });
         }
         res
