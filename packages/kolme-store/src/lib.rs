@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use merkle_map::{MerkleDeserialize, MerkleSerialError, MerkleSerialize, Sha256Hash};
 
 /// Contents of a block to be stored in a database.
@@ -5,10 +7,24 @@ pub struct StorableBlock<FrameworkState, AppState> {
     pub height: u64,
     pub blockhash: Sha256Hash,
     pub txhash: Sha256Hash,
-    pub rendered: String,
-    pub framework_state: FrameworkState,
-    pub app_state: AppState,
-    pub logs: Vec<Vec<String>>,
+    pub rendered: Arc<str>,
+    pub framework_state: Arc<FrameworkState>,
+    pub app_state: Arc<AppState>,
+    pub logs: Arc<[Vec<String>]>,
+}
+
+impl<FrameworkState: Clone, AppState: Clone> Clone for StorableBlock<FrameworkState, AppState> {
+    fn clone(&self) -> Self {
+        Self {
+            height: self.height,
+            blockhash: self.blockhash,
+            txhash: self.txhash,
+            rendered: self.rendered.clone(),
+            framework_state: self.framework_state.clone(),
+            app_state: self.app_state.clone(),
+            logs: self.logs.clone(),
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -70,10 +86,10 @@ impl<FrameworkState: MerkleDeserialize, AppState: MerkleDeserialize> MerkleDeser
             height: deserializer.load()?,
             blockhash: deserializer.load()?,
             txhash: deserializer.load()?,
-            rendered: deserializer.load()?,
+            rendered: deserializer.load().map(|x: String| x.into())?,
             framework_state: deserializer.load()?,
             app_state: deserializer.load()?,
-            logs: deserializer.load()?,
+            logs: deserializer.load().map(|x: Vec<Vec<String>>| x.into())?,
         })
     }
 }

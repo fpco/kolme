@@ -104,7 +104,7 @@ impl KolmeApp for SampleKolmeApp {
 mod tests {
     use super::*;
 
-    async fn test_sample_sanity(store: KolmeStore) {
+    async fn test_sample_sanity(store: KolmeStore<SampleKolmeApp>) {
         let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store)
             .await
             .unwrap();

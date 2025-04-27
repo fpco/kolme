@@ -38,7 +38,7 @@ pub struct Kolme<App: KolmeApp> {
 pub(super) struct KolmeInner<App: KolmeApp> {
     notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
     mempool: Mempool<App::Message>,
-    pub(super) store: store::KolmeStore,
+    pub(super) store: store::KolmeStore<App>,
     pub(super) app: App,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
@@ -249,15 +249,14 @@ impl<App: KolmeApp> Kolme<App> {
             .store
             .add_block(
                 &self.inner.merkle_manager,
-                &StorableBlock {
+                StorableBlock {
                     height: signed_block.height().0,
                     blockhash: signed_block.hash().0,
                     txhash: signed_block.tx().hash().0,
-                    rendered: serde_json::to_string(&signed_block)?,
-                    framework_state,
-                    app_state,
-                    // TODO remove the unnecessary clone
-                    logs: logs.clone(),
+                    rendered: serde_json::to_string(&signed_block)?.into(),
+                    framework_state: Arc::new(framework_state),
+                    app_state: Arc::new(app_state),
+                    logs: logs.into(),
                 },
             )
             .await?;
@@ -287,14 +286,16 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    pub async fn new(app: App, _code_version: impl AsRef<str>, store: KolmeStore) -> Result<Self> {
+    pub async fn new(
+        app: App,
+        _code_version: impl AsRef<str>,
+        store: KolmeStore<App>,
+    ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
         let info = App::genesis_info();
         let merkle_manager = MerkleManager::default();
-        store
-            .validate_genesis_info::<App::State>(&merkle_manager, &info)
-            .await?;
+        store.validate_genesis_info(&merkle_manager, &info).await?;
         let current_block = MaybeBlockInfo::<App>::load(&store, &info, &merkle_manager).await?;
         let inner = KolmeInner {
             store,
@@ -445,7 +446,7 @@ impl<App: KolmeApp> Kolme<App> {
         let storable_block = self
             .inner
             .store
-            .load_block::<App::State>(&self.inner.merkle_manager, height)
+            .load_block(&self.inner.merkle_manager, height)
             .await?;
         Ok(match storable_block {
             Some(storable_block) => serde_json::from_str(&storable_block.rendered)?,

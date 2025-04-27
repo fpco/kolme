@@ -6,17 +6,17 @@ use crate::core::*;
 pub(in crate::core) struct BlockInfo<App: KolmeApp> {
     pub(super) block: Arc<SignedBlock<App::Message>>,
     #[allow(dead_code)]
-    rendered: String,
+    rendered: Arc<str>,
     #[allow(dead_code)]
-    logs: Vec<Vec<String>>,
+    logs: Arc<[Vec<String>]>,
     state: BlockState<App>,
 }
 
 /// Separated from [BlockInfo] since it can also represent initial state before any blocks.
 pub(in crate::core) struct BlockState<App: KolmeApp> {
     blockhash: BlockHash,
-    framework_state: FrameworkState,
-    app_state: App::State,
+    framework_state: Arc<FrameworkState>,
+    app_state: Arc<App::State>,
 }
 
 /// Either the info on a block or initial pre-genesis state.
@@ -53,7 +53,7 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
     }
 
     pub(super) async fn load(
-        store: &KolmeStore,
+        store: &KolmeStore<App>,
         genesis: &GenesisInfo,
         merkle_manager: &MerkleManager,
     ) -> Result<Self> {
@@ -64,8 +64,8 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
                 MaybeBlockInfo::Some(storable.try_into()?)
             }
             None => MaybeBlockInfo::None(BlockState {
-                framework_state: FrameworkState::new(genesis),
-                app_state: App::new_state()?,
+                framework_state: Arc::new(FrameworkState::new(genesis)),
+                app_state: Arc::new(App::new_state()?),
                 blockhash: BlockHash::genesis_parent(),
             }),
         };

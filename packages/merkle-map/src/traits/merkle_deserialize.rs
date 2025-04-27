@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
 
 use shared::{
     cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
@@ -50,6 +53,14 @@ impl MerkleDeserialize for String {
     }
 }
 
+impl MerkleDeserialize for Arc<str> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        String::merkle_deserialize(deserializer).map(Into::into)
+    }
+}
+
 impl<T: MerkleDeserialize> MerkleDeserialize for Option<T> {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
@@ -64,6 +75,30 @@ impl<T: MerkleDeserialize> MerkleDeserialize for Option<T> {
     }
 }
 
+impl<T: MerkleDeserialize> MerkleDeserialize for Box<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        T::merkle_deserialize(deserializer).map(Into::into)
+    }
+}
+
+impl<T: MerkleDeserialize> MerkleDeserialize for Rc<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        T::merkle_deserialize(deserializer).map(Into::into)
+    }
+}
+
+impl<T: MerkleDeserialize> MerkleDeserialize for Arc<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        T::merkle_deserialize(deserializer).map(Into::into)
+    }
+}
+
 impl<T: MerkleDeserialize> MerkleDeserialize for Vec<T> {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
@@ -74,6 +109,14 @@ impl<T: MerkleDeserialize> MerkleDeserialize for Vec<T> {
             v.push(deserializer.load()?);
         }
         Ok(v)
+    }
+}
+
+impl<T: MerkleDeserialize> MerkleDeserialize for Arc<[T]> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Vec::<T>::merkle_deserialize(deserializer).map(Into::into)
     }
 }
 

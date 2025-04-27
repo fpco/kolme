@@ -91,7 +91,7 @@ impl KolmeStorePostgres {
             height,
             blockhash,
             txhash,
-            rendered,
+            rendered: rendered.into(),
             framework_state,
             app_state,
             logs,
@@ -124,6 +124,7 @@ impl KolmeStorePostgres {
         let framework_state_hash = framework_state_hash.as_array().as_slice();
         let app_state_hash = app_state_hash.as_array().as_slice();
         let logs_hash = logs_hash.as_array().as_slice();
+        let rendered = rendered.as_ref();
 
         let res = sqlx::query!(
             r#"
