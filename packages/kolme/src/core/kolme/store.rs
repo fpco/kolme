@@ -1,9 +1,11 @@
+mod fjall;
 mod in_memory;
 
 use std::path::Path;
 
 use crate::core::*;
 
+use fjall::KolmeStoreFjall;
 use in_memory::KolmeStoreInMemory;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use kolme_store_postgresql::{ConstructLock, KolmeStorePostgres};
@@ -13,12 +15,13 @@ use tokio::sync::OwnedSemaphorePermit;
 #[derive(Clone)]
 pub enum KolmeStore {
     Sqlite(KolmeStoreSqlite),
+    Fjall(KolmeStoreFjall),
     Postgres(KolmeStorePostgres),
     InMemory(in_memory::KolmeStoreInMemory),
 }
 
 pub enum KolmeConstructLock {
-    Sqlite,
+    NoLocking,
     Postgres { _lock: ConstructLock },
     InMemory { _permit: OwnedSemaphorePermit },
 }
@@ -36,6 +39,10 @@ impl KolmeStore {
             .await
             .map(KolmeStore::Postgres)
             .map_err(anyhow::Error::from)
+    }
+
+    pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
+        KolmeStoreFjall::new(dir).map(KolmeStore::Fjall)
     }
 
     pub fn new_in_memory() -> Self {
@@ -91,19 +98,21 @@ impl KolmeStore {
             KolmeStore::InMemory(kolme_store_in_memory) => {
                 kolme_store_in_memory.clear_blocks().await
             }
+            KolmeStore::Fjall(kolme_store_fjall) => kolme_store_fjall.clear_blocks(),
         }
     }
 
     pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
         match self {
             // No locking for SQLite
-            KolmeStore::Sqlite(_kolme_store_sqlite) => Ok(KolmeConstructLock::Sqlite),
+            KolmeStore::Sqlite(_kolme_store_sqlite) => Ok(KolmeConstructLock::NoLocking),
             KolmeStore::Postgres(kolme_store_postgres) => Ok(KolmeConstructLock::Postgres {
                 _lock: kolme_store_postgres.take_construct_lock().await?,
             }),
             KolmeStore::InMemory(kolme_store_in_memory) => Ok(KolmeConstructLock::InMemory {
                 _permit: kolme_store_in_memory.take_construct_lock().await,
             }),
+            KolmeStore::Fjall(_kolme_store_fjall) => Ok(KolmeConstructLock::NoLocking),
         }
     }
 }
@@ -126,6 +135,9 @@ impl KolmeStore {
                 kolme_store_in_memory
                     .load_latest_block(merkle_manager)
                     .await?
+            }
+            KolmeStore::Fjall(kolme_store_fjall) => {
+                kolme_store_fjall.load_latest_block(merkle_manager).await?
             }
         })
     }
@@ -151,6 +163,9 @@ impl KolmeStore {
                     .load_block(merkle_manager, height)
                     .await
             }
+            KolmeStore::Fjall(kolme_store_fjall) => {
+                kolme_store_fjall.load_block(merkle_manager, height).await
+            }
         };
         match res {
             Err(KolmeStoreError::BlockNotFound { height: _ }) => Ok(None),
@@ -174,6 +189,7 @@ impl KolmeStore {
             KolmeStore::InMemory(kolme_store_in_memory) => {
                 kolme_store_in_memory.get_height_for_tx(txhash).await
             }
+            KolmeStore::Fjall(kolme_store_fjall) => kolme_store_fjall.get_height_for_tx(txhash),
         }
     }
 
@@ -193,6 +209,9 @@ impl KolmeStore {
                 .map_err(anyhow::Error::from),
             KolmeStore::InMemory(kolme_store_in_memory) => {
                 kolme_store_in_memory.add_block(merkle_manager, block).await
+            }
+            KolmeStore::Fjall(kolme_store_fjall) => {
+                kolme_store_fjall.add_block(merkle_manager, block).await
             }
         }
     }

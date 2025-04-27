@@ -98,6 +98,8 @@ async fn multiple_processors() {
                 .await
                 .unwrap(),
         )
+    } else if block_db_str == "FJALL" {
+        Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
         // Wipe out the database so we have a fresh run
         let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
