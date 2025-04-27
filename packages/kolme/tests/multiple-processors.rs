@@ -99,6 +99,9 @@ async fn multiple_processors() {
                 .unwrap(),
         )
     } else {
+        // Wipe out the database so we have a fresh run
+        let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
+        store.clear_blocks().await.unwrap();
         None
     };
 
@@ -114,7 +117,7 @@ async fn multiple_processors() {
             Some(store) => store.clone(),
             None => KolmeStore::new_postgres(&block_db_str).await.unwrap(),
         };
-        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store.clone())
+        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store)
             .await
             .unwrap();
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
