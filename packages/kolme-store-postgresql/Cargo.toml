@@ -11,3 +11,5 @@ shared.workspace = true
 sqlx = { workspace = true, features = ["migrate", "runtime-tokio", "postgres"] }
 tracing = "0.1.41"
 tokio.workspace = true
+serde_json.workspace = true
+serde = "1.0.219"

@@ -3485,6 +3485,8 @@ name = "kolme-store"
 version = "0.1.0"
 dependencies = [
  "merkle-map",
+ "serde",
+ "serde_json",
  "thiserror 2.0.12",
 ]
 
@@ -3495,6 +3497,8 @@ dependencies = [
  "anyhow",
  "kolme-store",
  "merkle-map",
+ "serde",
+ "serde_json",
  "shared",
  "sqlx",
  "tokio",
@@ -3508,6 +3512,8 @@ dependencies = [
  "anyhow",
  "kolme-store",
  "merkle-map",
+ "serde",
+ "serde_json",
  "shared",
  "sqlx",
 ]

@@ -1,6 +1,6 @@
 mod merkle_db_store;
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_db_store::MerkleDbStore;
@@ -31,11 +31,15 @@ impl KolmeStoreSqlite {
         }
     }
 
-    pub async fn load_block<FrameworkState: MerkleDeserialize, AppState: MerkleDeserialize>(
+    pub async fn load_block<
+        Block: serde::de::DeserializeOwned,
+        FrameworkState: MerkleDeserialize,
+        AppState: MerkleDeserialize,
+    >(
         &self,
         merkle_manager: &MerkleManager,
         height: u64,
-    ) -> Result<StorableBlock<FrameworkState, AppState>, KolmeStoreError> {
+    ) -> Result<StorableBlock<Block, FrameworkState, AppState>, KolmeStoreError> {
         let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
         struct Output {
             blockhash: Vec<u8>,
@@ -88,30 +92,35 @@ impl KolmeStoreSqlite {
             .await?;
         let app_state = merkle_manager.load(&mut store, app_state_hash).await?;
         let logs = merkle_manager.load(&mut store, logs_hash).await?;
+        let block = Arc::new(serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?);
 
         Ok(StorableBlock {
             height,
             blockhash,
             txhash,
-            rendered: rendered.into(),
+            block,
             framework_state,
             app_state,
             logs,
         })
     }
 
-    pub async fn add_block<FrameworkState: MerkleSerialize, AppState: MerkleSerialize>(
+    pub async fn add_block<
+        Block: serde::Serialize,
+        FrameworkState: MerkleSerialize,
+        AppState: MerkleSerialize,
+    >(
         &self,
         merkle_manager: &MerkleManager,
         StorableBlock {
             height,
             blockhash,
             txhash,
-            rendered,
+            block,
             framework_state,
             app_state,
             logs,
-        }: &StorableBlock<FrameworkState, AppState>,
+        }: &StorableBlock<Block, FrameworkState, AppState>,
     ) -> Result<(), KolmeStoreError> {
         let height_i64 = i64::try_from(*height).map_err(KolmeStoreError::custom)?;
 
@@ -126,7 +135,7 @@ impl KolmeStoreSqlite {
         let framework_state_hash = framework_state_hash.as_array().as_slice();
         let app_state_hash = app_state_hash.as_array().as_slice();
         let logs_hash = logs_hash.as_array().as_slice();
-        let rendered = rendered.as_ref();
+        let rendered = serde_json::to_string(block).map_err(KolmeStoreError::custom)?;
 
         let res = sqlx::query!(
             r#"

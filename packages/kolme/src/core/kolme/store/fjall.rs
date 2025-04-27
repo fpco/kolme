@@ -35,11 +35,12 @@ impl KolmeStoreFjall {
         Ok(Some(BlockHeight(u64::from_be_bytes(height))))
     }
 
-    pub async fn load_block<FrameworkState: MerkleDeserialize, AppState: MerkleDeserialize>(
+    pub async fn load_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,
         height: BlockHeight,
-    ) -> Result<StorableBlock<FrameworkState, AppState>, KolmeStoreError> {
+    ) -> Result<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>, KolmeStoreError>
+    {
         let hash_bytes = self
             .handle
             .get(block_key(height))
@@ -52,10 +53,10 @@ impl KolmeStoreFjall {
             .map_err(KolmeStoreError::custom)
     }
 
-    pub async fn add_block<FrameworkState: MerkleSerialize, AppState: MerkleSerialize>(
+    pub async fn add_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,
-        block: &StorableBlock<FrameworkState, AppState>,
+        block: &StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<()> {
         let key = block_key(BlockHeight(block.height));
         if self.handle.contains_key(key)? {

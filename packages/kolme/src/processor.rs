@@ -71,7 +71,7 @@ impl<App: KolmeApp> Processor<App> {
             vec![Message::<App::Message>::Genesis(App::genesis_info())],
         )?;
         let block = self.construct_block(signed).await?;
-        if let Err(e) = self.kolme.add_block(block).await {
+        if let Err(e) = self.kolme.add_block(Arc::new(block)).await {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
                 self.kolme.resync().await?;
             }
@@ -97,7 +97,7 @@ impl<App: KolmeApp> Processor<App> {
                 let _construct_lock = self.kolme.take_construct_lock().await?;
                 self.kolme.resync().await?;
                 let block = self.construct_block(tx.clone()).await?;
-                self.kolme.add_block(block).await
+                self.kolme.add_block(Arc::new(block)).await
             }
             .await;
             match res {

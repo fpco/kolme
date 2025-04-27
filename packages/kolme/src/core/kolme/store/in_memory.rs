@@ -3,8 +3,9 @@ use std::{
     sync::Arc,
 };
 
+use crate::core::*;
+
 use kolme_store::KolmeStoreError;
-use merkle_map::{MerkleDeserialize, MerkleManager, MerkleMemoryStore, Sha256Hash};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::{BlockHeight, TxHash};
@@ -41,12 +42,12 @@ impl KolmeStoreInMemory {
         Ok(Some(*key))
     }
 
-    pub(crate) async fn load_block<AppState: MerkleDeserialize>(
+    pub(crate) async fn load_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,
         height: BlockHeight,
     ) -> Result<
-        kolme_store::StorableBlock<super::FrameworkState, AppState>,
+        kolme_store::StorableBlock<SignedBlock<App::Message>, super::FrameworkState, App::State>,
         kolme_store::KolmeStoreError,
     > {
         let mut guard = self.0.write().await;
@@ -68,10 +69,10 @@ impl KolmeStoreInMemory {
         Ok(self.0.read().await.txhashes.get(&txhash).copied())
     }
 
-    pub(crate) async fn add_block<AppState: merkle_map::MerkleSerialize>(
+    pub(crate) async fn add_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,
-        block: &kolme_store::StorableBlock<super::FrameworkState, AppState>,
+        block: &kolme_store::StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<(), anyhow::Error> {
         let height = BlockHeight(block.height);
         let txhash = TxHash(block.txhash);

@@ -6,8 +6,6 @@ use crate::core::*;
 pub(in crate::core) struct BlockInfo<App: KolmeApp> {
     pub(super) block: Arc<SignedBlock<App::Message>>,
     #[allow(dead_code)]
-    rendered: Arc<str>,
-    #[allow(dead_code)]
     logs: Arc<[Vec<String>]>,
     state: BlockState<App>,
 }
@@ -80,7 +78,9 @@ impl<App: KolmeApp> BlockInfo<App> {
     }
 }
 
-impl<App: KolmeApp> TryFrom<StorableBlock<FrameworkState, App::State>> for BlockInfo<App> {
+impl<App: KolmeApp> TryFrom<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>
+    for BlockInfo<App>
+{
     type Error = anyhow::Error;
 
     fn try_from(
@@ -88,17 +88,15 @@ impl<App: KolmeApp> TryFrom<StorableBlock<FrameworkState, App::State>> for Block
             height,
             blockhash,
             txhash: _,
-            rendered,
+            block,
             framework_state,
             app_state,
             logs,
-        }: StorableBlock<FrameworkState, App::State>,
+        }: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<Self> {
-        let block = serde_json::from_str::<SignedBlock<App::Message>>(&rendered)?;
         anyhow::ensure!(height == block.height().0);
         Ok(Self {
-            block: Arc::new(block),
-            rendered,
+            block,
             logs,
             state: BlockState {
                 blockhash: BlockHash(blockhash),

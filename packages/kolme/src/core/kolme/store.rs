@@ -16,11 +16,12 @@ use tokio::sync::OwnedSemaphorePermit;
 #[derive(Clone)]
 pub struct KolmeStore<App: KolmeApp> {
     inner: KolmeStoreInner,
-    // FIXME consider wrapping things with Arc
-    block_cache: Arc<RwLock<BlockCacheMap<App::State>>>,
+    block_cache: Arc<RwLock<BlockCacheMap<App>>>,
 }
 
-type BlockCacheMap<AppState> = HashMap<BlockHeight, StorableBlock<FrameworkState, AppState>>;
+#[allow(type_alias_bounds)]
+type BlockCacheMap<App: KolmeApp> =
+    HashMap<BlockHeight, StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>;
 
 #[derive(Clone)]
 enum KolmeStoreInner {
@@ -93,18 +94,10 @@ impl<App: KolmeApp> KolmeStore<App> {
         else {
             return Ok(None);
         };
-        let SignedBlock::<()>(signed) = serde_json::from_str(&block.rendered)?;
-        let mut messages = signed
-            .message
-            .into_inner()
-            .tx
-            .0
-            .message
-            .into_inner()
-            .messages;
+        let messages = &block.block.tx().0.message.as_inner().messages;
         anyhow::ensure!(messages.len() == 1);
-        match messages.remove(0) {
-            Message::Genesis(genesis_info) => Ok(Some(genesis_info)),
+        match messages.first().unwrap() {
+            Message::Genesis(genesis_info) => Ok(Some(genesis_info.clone())),
             _ => Err(anyhow::anyhow!("Invalid messages in first block")),
         }
     }
@@ -161,7 +154,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         &self,
         merkle_manager: &MerkleManager,
         height: BlockHeight,
-    ) -> Result<Option<StorableBlock<FrameworkState, App::State>>> {
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>> {
         if let Some(storable) = self.block_cache.read().get(&height) {
             return Ok(Some(storable.clone()));
         }
@@ -178,11 +171,13 @@ impl<App: KolmeApp> KolmeStore<App> {
             }
             KolmeStoreInner::InMemory(kolme_store_in_memory) => {
                 kolme_store_in_memory
-                    .load_block(merkle_manager, height)
+                    .load_block::<App>(merkle_manager, height)
                     .await
             }
             KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                kolme_store_fjall.load_block(merkle_manager, height).await
+                kolme_store_fjall
+                    .load_block::<App>(merkle_manager, height)
+                    .await
             }
         };
         match res {
@@ -216,7 +211,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(super) async fn add_block(
         &self,
         merkle_manager: &MerkleManager,
-        block: StorableBlock<FrameworkState, App::State>,
+        block: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<()> {
         match &self.inner {
             KolmeStoreInner::Sqlite(kolme_store_sqlite) => kolme_store_sqlite
@@ -229,11 +224,13 @@ impl<App: KolmeApp> KolmeStore<App> {
                 .map_err(anyhow::Error::from)?,
             KolmeStoreInner::InMemory(kolme_store_in_memory) => {
                 kolme_store_in_memory
-                    .add_block(merkle_manager, &block)
+                    .add_block::<App>(merkle_manager, &block)
                     .await?
             }
             KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                kolme_store_fjall.add_block(merkle_manager, &block).await?
+                kolme_store_fjall
+                    .add_block::<App>(merkle_manager, &block)
+                    .await?
             }
         }
         let old = self

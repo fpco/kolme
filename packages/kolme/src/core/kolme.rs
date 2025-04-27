@@ -225,8 +225,8 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Validate and append the given block.
-    pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
-        let txhash = signed_block.0.message.as_inner().tx.hash();
+    pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+        let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
         let ExecutionResults {
@@ -253,7 +253,7 @@ impl<App: KolmeApp> Kolme<App> {
                     height: signed_block.height().0,
                     blockhash: signed_block.hash().0,
                     txhash: signed_block.tx().hash().0,
-                    rendered: serde_json::to_string(&signed_block)?.into(),
+                    block: signed_block,
                     framework_state: Arc::new(framework_state),
                     app_state: Arc::new(app_state),
                     logs: logs.into(),
@@ -329,7 +329,7 @@ impl<App: KolmeApp> Kolme<App> {
             let mut recv = self.subscribe();
             // And then check if we're at the requested height.
             if let Some(block) = self.get_block(height).await? {
-                return Ok(Arc::new(block));
+                return Ok(block);
             }
             loop {
                 match recv.recv().await {
@@ -339,7 +339,7 @@ impl<App: KolmeApp> Kolme<App> {
                             Ordering::Equal => return Ok(block),
                             Ordering::Greater => {
                                 let block = self.get_block(height).await?.with_context(|| format!("wait_for_block: received notification that block {} is available, but unable to find {height} in database", block.height()))?;
-                                return Ok(Arc::new(block));
+                                return Ok(block);
                             }
                         },
                         Notification::GenesisInstantiation { .. } => (),
@@ -442,14 +442,14 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn get_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<SignedBlock<App::Message>>> {
+    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
         let storable_block = self
             .inner
             .store
             .load_block(&self.inner.merkle_manager, height)
             .await?;
         Ok(match storable_block {
-            Some(storable_block) => serde_json::from_str(&storable_block.rendered)?,
+            Some(storable_block) => Some(storable_block.block.clone()),
             None => None,
         })
     }
@@ -465,7 +465,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Load the block details from the database
-    pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
+    pub async fn load_block(&self, height: BlockHeight) -> Result<Arc<SignedBlock<App::Message>>> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
