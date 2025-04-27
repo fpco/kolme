@@ -129,10 +129,12 @@ async fn sanity() {
         let tx = kolme_client
             .read()
             .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
-            .await
             .unwrap();
         let txhash = tx.hash();
-        kolme_client.propose_transaction(tx).unwrap();
+        kolme_client
+            .propose_and_await_transaction(tx)
+            .await
+            .unwrap();
         let block = tokio::time::timeout(
             tokio::time::Duration::from_secs(5),
             kolme_client.wait_for_block(BlockHeight::start().next()),

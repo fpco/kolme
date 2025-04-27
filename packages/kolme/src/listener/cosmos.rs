@@ -67,12 +67,9 @@ async fn listen_once<App: KolmeApp>(
             let message =
                 to_kolme_message::<App::Message>(message, chain.into(), *next_bridge_event_id);
 
-            let signed = kolme
-                .read()
-                .create_signed_transaction(secret, vec![message])
+            kolme
+                .sign_propose_await_transaction(secret, vec![message])
                 .await?;
-
-            kolme.propose_transaction(signed)?;
 
             *next_bridge_event_id = next_bridge_event_id.next();
 

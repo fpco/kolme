@@ -123,8 +123,8 @@ impl<App: KolmeApp> Listener<App> {
                         );
                     }
 
-                    let signed = kolme
-                        .create_signed_transaction(
+                    kolme
+                        .sign_propose_await_transaction(
                             &self.secret,
                             vec![Message::Listener {
                                 chain,
@@ -133,7 +133,6 @@ impl<App: KolmeApp> Listener<App> {
                             }],
                         )
                         .await?;
-                    self.kolme.propose_transaction(signed)?;
                 }
             }
         }

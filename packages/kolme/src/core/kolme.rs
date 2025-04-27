@@ -107,7 +107,9 @@ impl<App: KolmeApp> Kolme<App> {
             .map_err(|_| NoNotificationListenersError)
     }
 
-    /// Propose a new event for the processor to add to the chain.
+    /// Propose a new transaction for the processor to add to the chain.
+    ///
+    /// Note that this will not detect any issues if the transaction is rejected.
     pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
         self.notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
             .map_err(|_| {
@@ -115,6 +117,75 @@ impl<App: KolmeApp> Kolme<App> {
                     "Tried to propose a transaction, but no one is listening to our notifications"
                 )
             })
+    }
+
+    /// Propose a new transaction and wait for it to land on chain.
+    ///
+    /// This can be useful for detecting when a transaction was rejected after proposing.
+    pub async fn propose_and_await_transaction(
+        &self,
+        tx: SignedTransaction<App::Message>,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
+        let mut recv = self.subscribe();
+        let txhash_orig = tx.hash();
+        self.propose_transaction(tx)?;
+        loop {
+            let note = recv.recv().await?;
+            match note {
+                Notification::NewBlock(block) => {
+                    if block.tx().hash() == txhash_orig {
+                        break Ok(block);
+                    }
+                }
+                Notification::GenesisInstantiation { .. } => (),
+                Notification::Broadcast { .. } => (),
+                Notification::FailedTransaction { txhash, error } => {
+                    if txhash == txhash_orig {
+                        break Err(anyhow::anyhow!(
+                            "Error when awaiting transaction {txhash}: {error}"
+                        ));
+                    }
+                }
+            }
+
+            // Just in case we jumped some blocks, check if it landed in the interim.
+            if let Some(height) = self.get_tx_height(txhash_orig).await? {
+                return self.wait_for_block(height).await;
+            }
+        }
+    }
+
+    /// Signed and propose a transaction.
+    ///
+    /// Automatically resigns with a new nonce if necessary.
+    pub async fn sign_propose_await_transaction(
+        &self,
+        secret: &SecretKey,
+        messages: Vec<Message<App::Message>>,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
+        loop {
+            let tx = self
+                .read()
+                .create_signed_transaction(secret, messages.clone())?;
+            match self.propose_and_await_transaction(tx).await {
+                Ok(block) => break Ok(block),
+                Err(e) => {
+                    if let Some(KolmeError::InvalidNonce {
+                        pubkey: _,
+                        account_id: _,
+                        expected,
+                        actual,
+                    }) = e.downcast_ref()
+                    {
+                        if actual < expected {
+                            tracing::warn!("Retrying with new nonce: {e}");
+                            continue;
+                        }
+                    }
+                    break Err(e);
+                }
+            }
+        }
     }
 
     /// Resync with the database.
@@ -469,7 +540,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         &self.get_framework_state().accounts
     }
 
-    pub async fn create_signed_transaction(
+    pub fn create_signed_transaction(
         &self,
         secret: &SecretKey,
         messages: Vec<Message<App::Message>>,
