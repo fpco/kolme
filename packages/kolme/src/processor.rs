@@ -66,14 +66,10 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn create_genesis_event(&self) -> Result<()> {
-        let signed = self
-            .kolme
-            .read()
-            .create_signed_transaction(
-                &self.secret,
-                vec![Message::<App::Message>::Genesis(App::genesis_info())],
-            )
-            .await?;
+        let signed = self.kolme.read().create_signed_transaction(
+            &self.secret,
+            vec![Message::<App::Message>::Genesis(App::genesis_info())],
+        )?;
         let block = self.construct_block(signed).await?;
         if let Err(e) = self.kolme.add_block(block).await {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
@@ -213,17 +209,15 @@ impl<App: KolmeApp> Processor<App> {
 
         let processor = self.secret.sign_recoverable(&action.payload)?;
 
-        let tx = kolme
-            .create_signed_transaction(
-                &self.secret,
-                vec![Message::ProcessorApprove {
-                    chain,
-                    action_id,
-                    processor,
-                    approvers,
-                }],
-            )
-            .await?;
+        let tx = kolme.create_signed_transaction(
+            &self.secret,
+            vec![Message::ProcessorApprove {
+                chain,
+                action_id,
+                processor,
+                approvers,
+            }],
+        )?;
 
         std::mem::drop(kolme);
         self.add_transaction(tx).await?;

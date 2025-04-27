@@ -255,7 +255,15 @@ impl Accounts {
         match self.pubkeys.get(&pubkey) {
             Some(account_id) => {
                 let account = self.accounts.get_mut(account_id).unwrap();
-                anyhow::ensure!(account.next_nonce == nonce, "Invalid nonce provided for pubkey {pubkey}, account {account_id}. Expected: {}. Received: {nonce}.", account.next_nonce);
+                if account.next_nonce != nonce {
+                    return Err(KolmeError::InvalidNonce {
+                        pubkey,
+                        account_id: *account_id,
+                        expected: account.next_nonce,
+                        actual: nonce,
+                    }
+                    .into());
+                }
                 account.next_nonce = account.next_nonce.next();
                 Ok(*account_id)
             }

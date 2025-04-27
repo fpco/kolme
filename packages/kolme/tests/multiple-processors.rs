@@ -175,10 +175,9 @@ async fn client(
         };
         let tx = kolme
             .read()
-            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])
-            .await?;
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?;
         let txhash = tx.hash();
-        kolme.propose_transaction(tx)?;
+        kolme.propose_and_await_transaction(tx).await?;
 
         {
             let mut guard = all_txhashes.lock();

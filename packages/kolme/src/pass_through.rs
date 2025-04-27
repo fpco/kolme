@@ -128,12 +128,9 @@ pub async fn listen<App: KolmeApp>(
             next_bridge_event_id,
         );
 
-        let signed = kolme
-            .read()
-            .create_signed_transaction(&secret, vec![message])
+        kolme
+            .sign_propose_await_transaction(&secret, vec![message])
             .await?;
-
-        kolme.propose_transaction(signed)?;
 
         next_bridge_event_id = next_bridge_event_id.next();
     }
