@@ -3140,12 +3140,16 @@ name = "integration-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum 0.8.3",
  "backon",
  "cosmos",
  "cosmwasm-std",
  "example-six-sigma",
+ "futures-util",
+ "jiff",
  "kolme",
  "pretty_assertions",
+ "rand 0.8.5",
  "reqwest 0.12.15",
  "rust_decimal",
  "serde",
@@ -3155,6 +3159,8 @@ dependencies = [
  "tempfile",
  "test-log",
  "tokio",
+ "tokio-tungstenite 0.26.2",
+ "tokio-util",
  "tracing",
 ]
 
@@ -8032,8 +8038,12 @@ checksum = "6b9590b93e6fcc1739458317cccd391ad3955e2bde8913edf6f95f9e65a8f034"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
+ "futures-util",
+ "hashbrown 0.14.5",
  "pin-project-lite",
+ "slab",
  "tokio",
 ]
 
