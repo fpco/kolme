@@ -358,8 +358,7 @@ pub async fn state<C: Config>(db_path: PathBuf) -> Result<State> {
         KolmeStore::new_sqlite(db_path).await?,
     )
     .await?
-    .read()
-    .await;
+    .read();
     Ok(kolme.get_app_state().clone())
 }
 
