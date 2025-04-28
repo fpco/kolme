@@ -9,3 +9,5 @@ merkle-map.workspace = true
 kolme-store.workspace = true
 shared.workspace = true
 sqlx = { workspace = true, features = ["migrate", "runtime-tokio", "sqlite"] }
+serde_json.workspace = true
+serde = "1.0.219"

@@ -43,6 +43,22 @@ pub struct TaggedJson<T> {
     value: T,
 }
 
+impl<T> MerkleSerialize for TaggedJson<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.serialized.merkle_serialize(serializer)
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> MerkleDeserialize for TaggedJson<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let serialized: String = deserializer.load()?;
+        let value = serde_json::from_str(&serialized).map_err(MerkleSerialError::custom)?;
+        Ok(Self { serialized, value })
+    }
+}
+
 /// Wrap up a [TaggedJson] with a signature and recovery information.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(bound(serialize = "", deserialize = "T: serde::de::DeserializeOwned"))]
@@ -50,6 +66,32 @@ pub struct SignedTaggedJson<T> {
     pub message: TaggedJson<T>,
     pub signature: Signature,
     pub recovery_id: RecoveryId,
+}
+
+impl<T> MerkleSerialize for SignedTaggedJson<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            message,
+            signature,
+            recovery_id,
+        } = self;
+        serializer.store(message)?;
+        serializer.store(signature)?;
+        serializer.store(recovery_id)?;
+        Ok(())
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> MerkleDeserialize for SignedTaggedJson<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            message: deserializer.load()?,
+            signature: deserializer.load()?,
+            recovery_id: deserializer.load()?,
+        })
+    }
 }
 
 impl<T> SignedTaggedJson<T> {
