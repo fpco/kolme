@@ -16,7 +16,7 @@ impl<App: KolmeApp> Listener<App> {
     }
 
     pub async fn run(self, name: ChainName) -> Result<()> {
-        let contracts = self.wait_for_contracts(name).await?;
+        let contracts = self.wait_for_contracts(&name).await?;
         let mut set = JoinSet::new();
         tracing::debug!("Listen on {name:?}");
 
@@ -68,7 +68,7 @@ impl<App: KolmeApp> Listener<App> {
         Ok(())
     }
 
-    async fn wait_for_contracts(&self, name: ChainName) -> Result<BTreeMap<ExternalChain, String>> {
+    async fn wait_for_contracts(&self, name: &ChainName) -> Result<BTreeMap<ExternalChain, String>> {
         let mut receiver = self.kolme.subscribe();
         loop {
             if let Some(contracts) = self.get_contracts(name).await {
@@ -76,7 +76,7 @@ impl<App: KolmeApp> Listener<App> {
             }
 
             if let Notification::GenesisInstantiation { chain, contract } = receiver.recv().await? {
-                if chain.name() != name {
+                if chain.name() != *name {
                     continue;
                 }
 
@@ -95,7 +95,7 @@ impl<App: KolmeApp> Listener<App> {
 
                     let res = match ChainKind::from(chain) {
                         ChainKind::Cosmos(chain) => {
-                            let cosmos = kolme.get_cosmos(chain).await?;
+                            let cosmos = kolme.get_cosmos(&chain).await?;
 
                             cosmos::sanity_check_contract(
                                 &cosmos,
@@ -138,7 +138,7 @@ impl<App: KolmeApp> Listener<App> {
         }
     }
 
-    async fn get_contracts(&self, name: ChainName) -> Option<BTreeMap<ExternalChain, String>> {
+    async fn get_contracts(&self, name: &ChainName) -> Option<BTreeMap<ExternalChain, String>> {
         let mut res = BTreeMap::new();
 
         for (chain, state) in self.kolme.read().get_bridge_contracts().iter() {

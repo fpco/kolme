@@ -1,0 +1,42 @@
+services:
+  processor:
+    image: example-six-sigma-image
+    command: serve processor
+    networks:
+      app_net:
+
+  listener:
+    image: example-six-sigma-image
+    command: serve listener
+    networks:
+      app_net:
+
+  submitter:
+    image: example-six-sigma-image
+    command: serve submitter
+    networks:
+      app_net:
+
+  approver:
+    image: example-six-sigma-image
+    command: serve approver
+    networks:
+      app_net:
+
+  api_server:
+    image: example-six-sigma-image
+    command: serve api-server
+    ports:
+      - 3000:3000
+    networks:
+      app_net:
+
+  localosmosis:
+    container_name: localosmosis
+    image: localosmosis
+    networks:
+      app_net:
+
+networks:
+  app_net:
+    driver: bridge

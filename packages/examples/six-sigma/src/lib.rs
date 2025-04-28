@@ -85,8 +85,16 @@ impl Config for SixSigmaCosmos {
         bridges: &mut ConfiguredChains,
         assets: BTreeMap<AssetName, AssetConfig>,
     ) -> Result<()> {
+        // localosmosis network meant to be used with docker-compose.
+        let local_osmosis = cosmos::CosmosNetworkInfo {
+            chain_id: "localosmosis".to_string(),
+            grpc_url: "http://localosmosis:9090".to_string(),
+            gas_coin: "uosmo".to_string(),
+            is_mainnet: false,
+            hrp: "osmo".to_string(),
+        };
         bridges.insert_cosmos(
-            CosmosChain::OsmosisLocal,
+            CosmosChain::CustomNetwork(local_osmosis),
             ChainConfig {
                 assets,
                 bridge: BridgeContract::NeededCosmosBridge {

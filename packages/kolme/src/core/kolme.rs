@@ -391,7 +391,7 @@ impl<App: KolmeApp> Kolme<App> {
             Some(cosmos) => Ok(cosmos.clone()),
             None => {
                 let cosmos = chain.make_client().await?;
-                guard.insert(chain, cosmos.clone());
+                guard.insert(chain.clone(), cosmos.clone());
                 Ok(cosmos)
             }
         }

@@ -1,0 +1,12 @@
+build:
+  SQLX_OFFLINE=true cargo build -p example-six-sigma
+  cp ../../../target/debug/example-six-sigma .
+  docker build -t example-six-sigma-image -f docker/Dockerfile .
+  rm -f example-six-sigma
+  docker build -t localosmosis -f ../../integration-tests/docker-resources/localosmosis/Dockerfile ../../integration-tests/docker-resources/localosmosis
+
+up:
+  docker compose -f docker/docker-compose.yml up --no-attach localosmosis
+
+down:
+  docker compose -f docker/docker-compose.yml down

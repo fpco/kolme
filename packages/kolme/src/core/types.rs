@@ -86,7 +86,6 @@ pub enum SolanaChain {
     PartialOrd,
     Ord,
     Clone,
-    Copy,
     Debug,
     Hash,
     strum::AsRefStr,
@@ -96,9 +95,10 @@ pub enum CosmosChain {
     OsmosisTestnet,
     NeutronTestnet,
     OsmosisLocal,
+    CustomNetwork(cosmos::CosmosNetworkInfo),
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum ChainName {
     Cosmos,
     Solana,
@@ -106,7 +106,7 @@ pub enum ChainName {
     PassThrough,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum ChainKind {
     Cosmos(CosmosChain),
     Solana(SolanaChain),
@@ -119,11 +119,12 @@ impl CosmosChain {
         ChainName::Cosmos
     }
 
-    pub async fn make_client(self) -> Result<cosmos::Cosmos> {
+    pub async fn make_client(&self) -> Result<cosmos::Cosmos> {
         let network = match self {
             Self::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
             Self::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
             Self::OsmosisLocal => cosmos::CosmosNetwork::OsmosisLocal,
+            Self::CustomNetwork(info) => cosmos::CosmosNetwork::CustomNetwork(info.clone()),
         };
 
         Ok(network.builder_with_config().await?.build()?)
@@ -160,7 +161,7 @@ impl SolanaChain {
 }
 
 impl ExternalChain {
-    pub fn name(self) -> ChainName {
+   pub fn name(self) -> ChainName {
         match ChainKind::from(self) {
             ChainKind::Cosmos(_) => CosmosChain::name(),
             ChainKind::Solana(_) => SolanaChain::name(),
@@ -194,6 +195,7 @@ impl From<CosmosChain> for ExternalChain {
             CosmosChain::OsmosisTestnet => ExternalChain::OsmosisTestnet,
             CosmosChain::NeutronTestnet => ExternalChain::NeutronTestnet,
             CosmosChain::OsmosisLocal => ExternalChain::OsmosisLocal,
+            CosmosChain::CustomNetwork(_) => ExternalChain::OsmosisLocal,
         }
     }
 }

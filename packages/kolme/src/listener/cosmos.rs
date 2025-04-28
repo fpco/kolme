@@ -29,7 +29,7 @@ pub async fn listen<App: KolmeApp>(
 ) -> Result<()> {
     let kolme_r = kolme.read();
 
-    let cosmos = kolme_r.get_cosmos(chain).await?;
+    let cosmos = kolme_r.get_cosmos(&chain).await?;
     let contract = cosmos.make_contract(contract.parse()?);
 
     let mut next_bridge_event_id =
@@ -44,7 +44,7 @@ pub async fn listen<App: KolmeApp>(
     // We _should_ be subscribing to events. I tried doing that and failed miserably.
     // So we're trying this polling approach instead.
     loop {
-        listen_once(&kolme, &secret, chain, &contract, &mut next_bridge_event_id).await?;
+        listen_once(&kolme, &secret, chain.clone(), &contract, &mut next_bridge_event_id).await?;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }

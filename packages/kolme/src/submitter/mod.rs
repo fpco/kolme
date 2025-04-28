@@ -138,7 +138,7 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 };
 
-                if self.genesis_created.contains(&chain.into()) {
+                if self.genesis_created.contains(&chain.clone().into()) {
                     return Ok(());
                 }
 
