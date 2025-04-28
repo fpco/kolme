@@ -45,6 +45,11 @@ jobs:
         with:
           tool: sqlx-cli@0.8.2
           locked: false
+      - name: Install hidapi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libusb-1.0-0-dev
+          sudo apt-get install -y libhidapi-dev
       - name: Run tests
         run: just test
       - name: Build
