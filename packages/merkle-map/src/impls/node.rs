@@ -13,7 +13,7 @@ impl<K, V> Clone for Node<K, V> {
 
 impl<K, V> Default for Node<K, V> {
     fn default() -> Self {
-        Node::Leaf(Lockable::new_unlocked(LeafContents::default()))
+        Node::Leaf(MerkleLockable::new(LeafContents::default()))
     }
 }
 
@@ -101,8 +101,10 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Node<K, V> {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         match deserializer.peek_byte()? {
-            42 => Lockable::<LeafContents<K, V>>::merkle_deserialize(deserializer).map(Node::Leaf),
-            43 => Lockable::<TreeContents<K, V>>::merkle_deserialize(deserializer).map(Node::Tree),
+            42 => MerkleLockable::<LeafContents<K, V>>::merkle_deserialize(deserializer)
+                .map(Node::Leaf),
+            43 => MerkleLockable::<TreeContents<K, V>>::merkle_deserialize(deserializer)
+                .map(Node::Tree),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }
