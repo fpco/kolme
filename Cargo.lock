@@ -3493,11 +3493,12 @@ name = "kolme-store-postgresql"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "fjall",
  "kolme-store",
  "merkle-map",
+ "merkle-store-fjall",
  "serde",
  "serde_json",
- "shared",
  "sqlx",
  "tokio",
  "tracing",
@@ -4131,6 +4132,14 @@ dependencies = [
  "thiserror 2.0.12",
  "tinyvec",
  "tokio",
+]
+
+[[package]]
+name = "merkle-store-fjall"
+version = "0.1.0"
+dependencies = [
+ "fjall",
+ "merkle-map",
 ]
 
 [[package]]

@@ -5,9 +5,10 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
+fjall.workspace = true
 merkle-map.workspace = true
+merkle-store-fjall.workspace = true
 kolme-store.workspace = true
-shared.workspace = true
 sqlx = { workspace = true, features = ["migrate", "runtime-tokio", "postgres"] }
 tracing = "0.1.41"
 tokio.workspace = true

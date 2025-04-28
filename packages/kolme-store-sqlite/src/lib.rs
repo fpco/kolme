@@ -105,6 +105,23 @@ impl KolmeStoreSqlite {
         })
     }
 
+    pub async fn load_rendered_block(&self, height: u64) -> Result<String, KolmeStoreError> {
+        let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
+        sqlx::query_scalar!(
+            r#"
+                SELECT rendered
+                FROM blocks
+                WHERE height=$1
+                LIMIT 1
+            "#,
+            height_i64,
+        )
+        .fetch_optional(&self.0)
+        .await
+        .map_err(KolmeStoreError::custom)?
+        .ok_or(KolmeStoreError::BlockNotFound { height })
+    }
+
     pub async fn add_block<
         Block: serde::Serialize,
         FrameworkState: MerkleSerialize,

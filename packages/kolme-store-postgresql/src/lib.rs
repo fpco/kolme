@@ -1,34 +1,48 @@
-mod merkle_db_store;
+use std::{path::Path, sync::Arc};
 
-use std::sync::Arc;
-
+use fjall::PartitionCreateOptions;
 use kolme_store::{KolmeStoreError, StorableBlock};
-use merkle_db_store::MerkleDbStore;
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
+use merkle_store_fjall::MerkleFjallStore;
 use sqlx::postgres::PgAdvisoryLock;
 
 #[derive(Clone)]
-pub struct KolmeStorePostgres(sqlx::PgPool);
+pub struct KolmeStorePostgres {
+    pool: sqlx::PgPool,
+    fjall: MerkleFjallStore,
+    fjall_block: fjall::PartitionHandle,
+}
+
+const LATEST_BLOCK: &[u8] = b"latest";
 
 impl KolmeStorePostgres {
-    pub async fn new(url: &str) -> anyhow::Result<Self> {
+    pub async fn new(url: &str, fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let fjall = MerkleFjallStore::new(fjall_dir)?;
+        let fjall_block = fjall
+            .get_keyspace()
+            .open_partition("kolme", PartitionCreateOptions::default())?;
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(5)
             .connect(url)
             .await?;
         sqlx::migrate!().run(&pool).await?;
-        Ok(Self(pool))
+        Ok(Self {
+            pool,
+            fjall,
+            fjall_block,
+        })
     }
 
     pub async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError> {
-        match sqlx::query_scalar!("SELECT height FROM blocks ORDER BY height DESC LIMIT 1")
-            .fetch_optional(&self.0)
-            .await
-            .map_err(KolmeStoreError::custom)?
-        {
-            None => Ok(None),
-            Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
-        }
+        let latest = self
+            .fjall_block
+            .get(LATEST_BLOCK)
+            .map_err(KolmeStoreError::custom)?;
+        let Some(latest) = latest else {
+            return Ok(None);
+        };
+        let latest = <[u8; 8]>::try_from(&*latest).map_err(KolmeStoreError::custom)?;
+        Ok(Some(u64::from_be_bytes(latest)))
     }
 
     pub async fn load_block<
@@ -61,7 +75,7 @@ impl KolmeStorePostgres {
             "#,
             height_i64,
         )
-        .fetch_optional(&self.0)
+        .fetch_optional(&self.pool)
         .await
         .map_err(KolmeStoreError::custom)?;
         let Some(Output {
@@ -86,12 +100,18 @@ impl KolmeStorePostgres {
         let app_state_hash = to_sha256hash(&app_state_hash)?;
         let logs_hash = to_sha256hash(&logs_hash)?;
 
-        let mut store = MerkleDbStore::Pool(&self.0);
-        let framework_state = merkle_manager
-            .load(&mut store, framework_state_hash)
-            .await?;
-        let app_state = merkle_manager.load(&mut store, app_state_hash).await?;
-        let logs = merkle_manager.load(&mut store, logs_hash).await?;
+        let mut store1 = self.fjall.to_store();
+        let mut store2 = self.fjall.to_store();
+        let mut store3 = self.fjall.to_store();
+
+        let merkle_res = tokio::try_join!(
+            merkle_manager.load(&mut store1, framework_state_hash),
+            merkle_manager.load(&mut store2, app_state_hash),
+            merkle_manager.load(&mut store3, logs_hash),
+        );
+
+        let (framework_state, app_state, logs) = merkle_res?;
+
         let block = serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?;
 
         Ok(StorableBlock {
@@ -103,6 +123,23 @@ impl KolmeStorePostgres {
             logs,
             block: Arc::new(block),
         })
+    }
+
+    pub async fn load_rendered_block(&self, height: u64) -> Result<String, KolmeStoreError> {
+        let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
+        sqlx::query_scalar!(
+            r#"
+                SELECT rendered
+                FROM blocks
+                WHERE height=$1
+                LIMIT 1
+            "#,
+            height_i64,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(KolmeStoreError::custom)?
+        .ok_or(KolmeStoreError::BlockNotFound { height })
     }
 
     pub async fn add_block<
@@ -124,8 +161,7 @@ impl KolmeStorePostgres {
     ) -> Result<(), KolmeStoreError> {
         let height_i64 = i64::try_from(*height).map_err(KolmeStoreError::custom)?;
 
-        let mut trans = self.0.begin().await.map_err(KolmeStoreError::custom)?;
-        let mut store = MerkleDbStore::Conn(&mut trans);
+        let mut store = self.fjall.to_store();
         let framework_state_hash = merkle_manager.save(&mut store, framework_state).await?.hash;
         let app_state_hash = merkle_manager.save(&mut store, app_state).await?.hash;
         let logs_hash = merkle_manager.save(&mut store, logs).await?.hash;
@@ -151,40 +187,46 @@ impl KolmeStorePostgres {
             app_state_hash,
             logs_hash,
         )
-        .execute(&mut *trans)
+        .execute(&self.pool)
         .await;
-        let res = match res {
-            Err(e) => Err(e),
-            Ok(_) => trans.commit().await,
-        };
-        match res {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                // If the block already exists in the database, ignore the error
-                if let Some(db_error) = e.as_database_error() {
-                    if db_error.code().as_deref() == Some("23505") {
-                        let actualhash = sqlx::query_scalar!(
-                            r#"
-                                SELECT blockhash FROM blocks
-                                WHERE height=$1
-                                LIMIT 1
-                            "#,
-                            height_i64,
-                        )
-                        .fetch_optional(&self.0)
-                        .await
-                        .map_err(KolmeStoreError::custom)?;
-                        if let Some(actualhash) = actualhash {
-                            if actualhash == blockhash {
-                                return Ok(());
-                            }
+        if let Err(e) = res {
+            // If the block already exists in the database, ignore the error
+            if let Some(db_error) = e.as_database_error() {
+                if db_error.code().as_deref() == Some("23505") {
+                    let actualhash = sqlx::query_scalar!(
+                        r#"
+                            SELECT blockhash FROM blocks
+                            WHERE height=$1
+                            LIMIT 1
+                        "#,
+                        height_i64,
+                    )
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(KolmeStoreError::custom)?;
+                    if let Some(actualhash) = actualhash {
+                        if actualhash == blockhash {
+                            return Ok(());
                         }
-                        return Err(KolmeStoreError::BlockAlreadyInDb { height: *height });
                     }
+                    return Err(KolmeStoreError::BlockAlreadyInDb { height: *height });
                 }
-                Err(KolmeStoreError::custom(e))
             }
+            return Err(KolmeStoreError::custom(e));
         }
+
+        // Update the latest within Fjall
+        let old = self.load_latest_block().await?;
+        let to_store = match old {
+            None => true,
+            Some(old) => old < *height,
+        };
+        if to_store {
+            self.fjall_block
+                .insert(LATEST_BLOCK, height.to_be_bytes())
+                .map_err(KolmeStoreError::custom)?;
+        }
+        Ok(())
     }
 
     pub async fn get_height_for_tx(
@@ -194,7 +236,7 @@ impl KolmeStorePostgres {
         let txhash = txhash.as_array().as_slice();
         let height =
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
-                .fetch_optional(&self.0)
+                .fetch_optional(&self.pool)
                 .await
                 .map_err(KolmeStoreError::custom)?;
         match height {
@@ -205,7 +247,7 @@ impl KolmeStorePostgres {
 
     pub async fn clear_blocks(&self) -> Result<(), KolmeStoreError> {
         sqlx::query!("DELETE FROM blocks")
-            .execute(&self.0)
+            .execute(&self.pool)
             .await
             .map(|_| ())
             .map_err(KolmeStoreError::custom)
@@ -213,7 +255,7 @@ impl KolmeStorePostgres {
 
     pub async fn take_construct_lock(&self) -> Result<ConstructLock, KolmeStoreError> {
         let (tx_locked, rx_locked) = tokio::sync::oneshot::channel();
-        let conn = self.0.acquire().await.map_err(KolmeStoreError::custom)?;
+        let conn = self.pool.acquire().await.map_err(KolmeStoreError::custom)?;
         let lock = PgAdvisoryLock::new("construct");
         tokio::spawn(async move {
             match lock.acquire(conn).await.map_err(KolmeStoreError::custom) {
