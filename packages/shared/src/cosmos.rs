@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use cosmwasm_std::{Binary, Coin, CosmosMsg};
 
 use crate::{
-    cryptography::{PublicKey, SignatureWithRecovery},
+    cryptography::{PublicKey, SecretKey, SecretKeyError, SignatureWithRecovery},
     types::{BridgeActionId, BridgeEventId},
 };
 
@@ -45,7 +45,7 @@ pub enum ExecuteMsg {
     /// You can attach any native funds to this message to perform a deposit for the sending account.
     Regular {
         /// Any new public keys to associate with the sending wallet's account.
-        keys: Vec<PublicKey>,
+        keys: Vec<KeyRegistration>,
     },
     /// Submit a message signed by the approvers and the processor
     ///
@@ -62,6 +62,12 @@ pub enum ExecuteMsg {
         /// so that the signatures will match.
         payload: String,
     },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct KeyRegistration {
+    pub signature: SignatureWithRecovery,
+    pub key: PublicKey,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -90,4 +96,13 @@ pub enum BridgeEventMessage {
         wallet: String,
         action_id: BridgeActionId,
     },
+}
+
+impl KeyRegistration {
+    pub fn new(address: &str, key: &SecretKey) -> Result<Self, SecretKeyError> {
+        Ok(Self {
+            signature: key.sign_recoverable(address)?,
+            key: key.public_key(),
+        })
+    }
 }

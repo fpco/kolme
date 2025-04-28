@@ -43,8 +43,8 @@ pub enum Error {
     NonApproverKey { key: PublicKey },
     #[error("Duplicate public key provided: {key}.")]
     DuplicateKey { key: PublicKey },
-    #[error("Processor signature had the wrong public key. Expected key {expected}. Actually signed with {actual}.")]
-    NonProcessorKey {
+    #[error("Provided signature had the wrong public key. Expected key {expected}. Actually signed with {actual}.")]
+    PublicKeyRecoveryMismatch {
         expected: Box<PublicKey>,
         actual: Box<PublicKey>,
     },
@@ -121,7 +121,23 @@ fn bridge_event_message_to_response(
     ))
 }
 
-fn regular(deps: DepsMut, info: MessageInfo, keys: Vec<PublicKey>) -> Result<Response> {
+fn regular(deps: DepsMut, info: MessageInfo, keys: Vec<KeyRegistration>) -> Result<Response> {
+    let mut hasher = Sha256::new();
+    hasher.update(info.sender.as_bytes());
+
+    let hash = hasher.finalize();
+
+    for r in &keys {
+        let recovered_key = signing::validate_signature(deps.api, &hash, &r.signature)?;
+
+        if recovered_key != r.key {
+            return Err(Error::PublicKeyRecoveryMismatch {
+                expected: r.key.into(),
+                actual: recovered_key.into(),
+            });
+        }
+    }
+
     let mut state = STATE.load(deps.storage)?;
     let id = state.next_event_id;
     state.next_event_id.increment();
@@ -131,7 +147,7 @@ fn regular(deps: DepsMut, info: MessageInfo, keys: Vec<PublicKey>) -> Result<Res
         &BridgeEventMessage::Regular {
             wallet: info.sender.into_string(),
             funds: info.funds,
-            keys,
+            keys: keys.into_iter().map(|x| x.key).collect(),
         },
         id,
         deps.storage,
@@ -175,7 +191,7 @@ fn signed(
     let processor = signing::validate_signature(deps.api, &hash, &processor)?;
 
     if processor != state.processor {
-        return Err(Error::NonProcessorKey {
+        return Err(Error::PublicKeyRecoveryMismatch {
             expected: state.processor.into(),
             actual: processor.into(),
         });

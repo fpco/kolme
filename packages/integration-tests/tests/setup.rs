@@ -7,11 +7,15 @@ use cosmos::{
 };
 use kolme::*;
 use kolme_solana_bridge_client::{
-    derive_token_holder_acc, keypair::Keypair, pubkey::Pubkey, signer::Signer, RegularMsgIxData,
-    Secp256k1PubkeyCompressed, TokenProgram,
+    derive_token_holder_acc, keypair::Keypair, pubkey::Pubkey, signer::Signer,
+    KeyRegistration as SolanaKeyRegistration, RegularMsgIxData, Secp256k1PubkeyCompressed,
+    Secp256k1Signature, Signature, TokenProgram,
 };
 use rust_decimal::Decimal;
-use shared::{cosmos::ExecuteMsg as CosmosExecute, cryptography::PublicKey};
+use shared::{
+    cosmos::{ExecuteMsg as CosmosExecute, KeyRegistration as CosmosKeyRegistration},
+    cryptography::PublicKey,
+};
 use solana_client::nonblocking::rpc_client::RpcClient as SolanaClient;
 use solana_commitment_config::CommitmentConfig;
 use spl_token_client::{
@@ -219,7 +223,7 @@ pub async fn solana_deposit_and_register(
     sender: &Keypair,
     token: &SolanaToken,
     amount: u64,
-    keys: Vec<Secp256k1PubkeyCompressed>,
+    keys: Vec<SolanaKeyRegistration>,
 ) -> Result<()> {
     let holder = derive_token_holder_acc(&BRIDGE_PUBKEY, token.get_address(), &sender.pubkey());
     let holder_acc = token
@@ -258,7 +262,7 @@ pub async fn cosmos_deposit_and_register(
     contract: &str,
     sender: &Wallet,
     amount: u128,
-    keys: Vec<PublicKey>,
+    keys: Vec<CosmosKeyRegistration>,
 ) -> Result<()> {
     tracing::info!(
         "{} depositing to Cosmos bridge contract.",
@@ -278,6 +282,18 @@ pub async fn cosmos_deposit_and_register(
         .await?;
 
     Ok(())
+}
+
+pub fn solana_key_registration(sender: &Pubkey, key: &SecretKey) -> SolanaKeyRegistration {
+    let signature = key.sign_prehash_recoverable(sender.to_bytes()).unwrap();
+    let signature = Signature {
+        signature: Secp256k1Signature(signature.sig.to_bytes().deref().try_into().unwrap()),
+        recovery_id: signature.recid.to_byte(),
+    };
+
+    let key = solana_pubkey(&key.public_key());
+
+    SolanaKeyRegistration { signature, key }
 }
 
 pub fn solana_pubkey(pubkey: &PublicKey) -> Secp256k1PubkeyCompressed {

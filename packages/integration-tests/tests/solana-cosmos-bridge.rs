@@ -12,8 +12,9 @@ use kolme_solana_bridge_client::{keypair::Keypair, signer::Signer};
 use setup::{
     airdrop, cosmos_deposit_and_register, cosmos_send_osmo, deploy_solana_bridge, kolme_state,
     make_cosmos_client, make_osmo_token, make_solana_client, solana_deposit_and_register,
-    solana_mint_to, solana_pubkey, wait_until, wait_until_init,
+    solana_key_registration, solana_mint_to, wait_until, wait_until_init,
 };
+use shared::cosmos::KeyRegistration as CosmosKeyRegistration;
 
 const DB_PATH: &str = "example-solana-cosmos-bridge.sqlite3";
 const DUMMY_CODE_VERSION: &str = "dummy code version";
@@ -100,13 +101,12 @@ async fn bridge_transfer() {
     let send_amount = mint_amount / 2;
     let send_amount_dec = Decimal::new(send_amount as i64, 6);
 
-    let pubkey = solana_pubkey(&key_solana.public_key());
     solana_deposit_and_register(
         &solana_client,
         &user_solana,
         &osmo,
         send_amount,
-        vec![pubkey],
+        vec![solana_key_registration(&user_solana.pubkey(), &key_solana)],
     )
     .await
     .unwrap();
@@ -165,7 +165,7 @@ async fn bridge_transfer() {
         cosmos_bridge_addr,
         &user_cosmos,
         send_amount as u128,
-        vec![key_cosmos.public_key()],
+        vec![CosmosKeyRegistration::new(&user_cosmos.get_address_string(), &key_cosmos).unwrap()],
     )
     .await
     .unwrap();

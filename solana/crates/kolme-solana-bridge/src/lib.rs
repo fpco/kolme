@@ -64,6 +64,7 @@ pub enum RegularIxError {
     TransferAmountsMismatch = 1,
     CannotHaveCloseAuthorityOrDelegate = 2,
     ProgramIsNotOwner = 3,
+    PubkeySignatureMismatch = 4
 }
 
 #[repr(u32)]
@@ -292,6 +293,19 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         (sender_acc, state_acc, funds)
     };
 
+    // We can pretend that this is a hash because the length matches the SHA-256 digest size,
+    // the pubkey was already cryptographically derived and we don't have to worry about the
+    // "payload" having been tampered with.
+    let hash = Sha256(*sender_acc.key());
+
+    for r in &data.keys {
+        let recovered_key = secp256k1_recover(&hash, r.signature.recovery_id, &r.signature.signature)?;
+
+        if recovered_key.to_sec1_bytes() != r.key {
+            return Err(RegularIxError::PubkeySignatureMismatch.into());
+        }
+    }
+
     let mut state_pda: StatePda = ctx.load_pda(&state_acc, STATE_DERIVATION.seeds)?;
     let id = state_pda.data.next_event_id;
     state_pda.data.next_event_id += 1;
@@ -302,7 +316,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         id,
         wallet: *sender_acc.key(),
         ty: Message::Regular {
-            keys: data.keys,
+            keys: data.keys.into_iter().map(|x| x.key).collect(),
             funds,
         }
     };
