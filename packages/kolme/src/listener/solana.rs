@@ -20,7 +20,7 @@ pub async fn listen<App: KolmeApp>(
 
     let client = chain.make_pubsub_client().await?;
     let mut next_bridge_event_id =
-        get_next_bridge_event_id(&kolme.read().await, secret.public_key(), chain.into());
+        get_next_bridge_event_id(&kolme.read(), secret.public_key(), chain.into());
 
     let filter = RpcTransactionLogsFilter::Mentions(vec![contract.clone()]);
     let config = RpcTransactionLogsConfig {
@@ -76,13 +76,9 @@ pub async fn listen<App: KolmeApp>(
         if let Some(msg) = msg {
             let msg = to_kolme_message::<App::Message>(msg, chain);
 
-            let signed = kolme
-                .read()
-                .await
-                .create_signed_transaction(&secret, vec![msg])
+            kolme
+                .sign_propose_await_transaction(&secret, vec![msg])
                 .await?;
-
-            kolme.propose_transaction(signed)?;
 
             next_bridge_event_id = next_bridge_event_id.next();
         } else {

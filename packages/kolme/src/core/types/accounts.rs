@@ -244,22 +244,6 @@ impl Accounts {
         Ok(())
     }
 
-    pub(crate) fn get_or_add_account_for_pubkey(
-        &mut self,
-        key: PublicKey,
-    ) -> (AccountId, &Account) {
-        match self.pubkeys.get(&key).cloned() {
-            Some(id) => (id, self.accounts.get_mut(&id).unwrap()),
-            None => {
-                let id = AccountId(self.accounts.len().try_into().unwrap());
-                self.pubkeys.insert(key, id);
-                let account = self.accounts.get_or_default(id);
-                account.pubkeys.insert(key);
-                (id, account)
-            }
-        }
-    }
-
     /// Use the nonce for the given public key
     ///
     /// Returns an error if the wrong nonce is provided. Initiates the account if necessary.
@@ -271,7 +255,15 @@ impl Accounts {
         match self.pubkeys.get(&pubkey) {
             Some(account_id) => {
                 let account = self.accounts.get_mut(account_id).unwrap();
-                anyhow::ensure!(account.next_nonce == nonce, "Invalid nonce provided for pubkey {pubkey}, account {account_id}. Expected: {}. Received: {nonce}.", account.next_nonce);
+                if account.next_nonce != nonce {
+                    return Err(KolmeError::InvalidNonce {
+                        pubkey,
+                        account_id: *account_id,
+                        expected: account.next_nonce,
+                        actual: nonce,
+                    }
+                    .into());
+                }
                 account.next_nonce = account.next_nonce.next();
                 Ok(*account_id)
             }

@@ -54,7 +54,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
         balances: BTreeMap<&'a AccountId, &'a BTreeMap<AssetId, Decimal>>,
     }
 
-    let kolme = kolme.read().await;
+    let kolme = kolme.read();
     let basics = Basics {
         next_height: kolme.get_next_height(),
         next_genesis_action: kolme.get_next_genesis_action(),
@@ -76,7 +76,6 @@ async fn broadcast<App: KolmeApp>(
     let txhash = tx.0.message_hash();
     if let Err(e) = kolme
         .read()
-        .await
         .execute_transaction(&tx, Timestamp::now(), None)
         .await
     {
@@ -103,7 +102,7 @@ async fn get_next_nonce<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
     Query(NextNonce { pubkey }): Query<NextNonce>,
 ) -> impl IntoResponse {
-    let nonce = kolme.read().await.get_next_nonce(pubkey);
+    let nonce = kolme.read().get_next_nonce(pubkey);
     Json(serde_json::json!({"next_nonce":nonce})).into_response()
 }
 
