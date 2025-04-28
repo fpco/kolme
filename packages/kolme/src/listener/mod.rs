@@ -142,7 +142,7 @@ impl<App: KolmeApp> Listener<App> {
         let mut res = BTreeMap::new();
 
         for (chain, state) in self.kolme.read().get_bridge_contracts().iter() {
-            if chain.name() != name {
+            if chain.name() != *name {
                 continue;
             }
 

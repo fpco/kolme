@@ -381,7 +381,7 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
+    pub async fn get_cosmos(&self, chain: &CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
         }

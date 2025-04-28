@@ -142,7 +142,7 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 }
 
-                let cosmos = self.kolme.read().get_cosmos(chain).await?;
+                let cosmos = self.kolme.read().get_cosmos(&chain).await?;
 
                 let addr = cosmos::instantiate(&cosmos, seed_phrase, code_id, args).await?;
 
@@ -213,7 +213,7 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 };
 
-                let cosmos = self.kolme.read().get_cosmos(cosmos_chain).await?;
+                let cosmos = self.kolme.read().get_cosmos(&cosmos_chain).await?;
 
                 cosmos::execute(
                     &cosmos,

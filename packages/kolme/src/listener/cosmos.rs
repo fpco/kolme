@@ -33,7 +33,7 @@ pub async fn listen<App: KolmeApp>(
     let contract = cosmos.make_contract(contract.parse()?);
 
     let mut next_bridge_event_id =
-        get_next_bridge_event_id(&kolme_r, secret.public_key(), chain.into());
+        get_next_bridge_event_id(&kolme_r, secret.public_key(), chain.clone().into());
 
     mem::drop(kolme_r);
 
