@@ -46,7 +46,7 @@ jobs:
           tool: sqlx-cli@0.8.2
           locked: false
       - name: Run tests
-        run: just test
+        run: RUST_BACKTRACE=1 just test
       - name: Build
         run: cargo build --workspace
       - name: Cargo fmt
