@@ -3430,7 +3430,6 @@ dependencies = [
  "kolme-solana-bridge-client",
  "kolme-store",
  "kolme-store-postgresql",
- "kolme-store-sqlite",
  "libp2p",
  "merkle-map",
  "parking_lot",
@@ -3502,19 +3501,6 @@ dependencies = [
  "sqlx",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "kolme-store-sqlite"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "kolme-store",
- "merkle-map",
- "serde",
- "serde_json",
- "shared",
- "sqlx",
 ]
 
 [[package]]
@@ -3967,7 +3953,6 @@ version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
- "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -6166,7 +6151,6 @@ dependencies = [
  "k256",
  "rand 0.8.5",
  "serde",
- "sqlx",
  "thiserror 2.0.12",
 ]
 

@@ -7,7 +7,6 @@ members = [
   "packages/kolme",
   "packages/kolme-store",
   "packages/kolme-store-postgresql",
-  "packages/kolme-store-sqlite",
   "packages/merkle-map",
   "packages/merkle-store-fjall",
   "packages/shared",

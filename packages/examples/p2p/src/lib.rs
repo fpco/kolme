@@ -86,12 +86,12 @@ impl KolmeApp for SampleKolmeApp {
 }
 
 pub async fn processor() -> Result<()> {
-    const DB_PATH: &str = "example-p2p-processor.sqlite3";
+    const DB_PATH: &str = "example-p2p-processor.fjall";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(
         SampleKolmeApp,
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(DB_PATH).await?,
+        KolmeStore::new_fjall(DB_PATH)?,
     )
     .await?;
 
@@ -120,12 +120,12 @@ pub async fn processor() -> Result<()> {
 }
 
 pub async fn api_server(bind: SocketAddr) -> Result<()> {
-    const DB_PATH: &str = "example-p2p-api-server.sqlite3";
+    const DB_PATH: &str = "example-p2p-api-server.fjall";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(
         SampleKolmeApp,
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(DB_PATH).await?,
+        KolmeStore::new_fjall(DB_PATH)?,
     )
     .await?;
 

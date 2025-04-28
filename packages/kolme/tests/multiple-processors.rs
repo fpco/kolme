@@ -94,12 +94,6 @@ async fn multiple_processors() {
 
     let store = if block_db_str == "MEMORY" {
         Some(KolmeStore::new_in_memory())
-    } else if block_db_str == "SQLITE" {
-        Some(
-            KolmeStore::new_sqlite("multi-processors.sqlite3")
-                .await
-                .unwrap(),
-        )
     } else if block_db_str == "FJALL" {
         Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
