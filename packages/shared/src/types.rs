@@ -143,6 +143,7 @@ impl serde::Serialize for Sha256Hash {
     }
 }
 
+#[cfg(feature = "realcryptography")]
 impl<'de> serde::Deserialize<'de> for Sha256Hash {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
