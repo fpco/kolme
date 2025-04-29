@@ -21,3 +21,6 @@ target/
 /mdbook/
 /docs/bin/
 /docs/book/
+
+# Generated when running solana-test-validator
+test-ledger/

@@ -9,6 +9,7 @@ authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 pinocchio = "0.8.0"
 pinocchio-system = "0.2.2"
 pinocchio-token = "0.3.0"
+pinocchio-pubkey = "0.2.4"
 bitflags = "2.9.0"
 borsh = { version = "1.5.5", default-features = false }
 smallvec = { version = "1.14.0", default-features = false, features = ["union", "const_generics", "const_new"]}

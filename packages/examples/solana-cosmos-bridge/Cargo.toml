@@ -1,0 +1,15 @@
+[package]
+name = "example-solana-cosmos-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solana-pubkey = { version = "2.2", default-features = false, features = ["std", "serde"] }
+solana-keypair = { version = "2.2" }
+serde = { version = "1.0.219", features = ["derive"] }
+reqwest = { version = "0.12.15", features = ["json"] }
+tokio = { workspace = true }
+kolme = { workspace = true }
+cosmos = { workspace = true }
+anyhow = { workspace = true }
+jiff = { workspace = true }
