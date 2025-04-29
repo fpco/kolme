@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
 
 use shared::{
     cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
@@ -64,7 +67,31 @@ impl<T: MerkleSerialize> MerkleSerialize for Option<T> {
     }
 }
 
+impl<T: MerkleSerialize + ?Sized> MerkleSerialize for Box<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.as_ref().merkle_serialize(serializer)
+    }
+}
+
+impl<T: MerkleSerialize + ?Sized> MerkleSerialize for Rc<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.as_ref().merkle_serialize(serializer)
+    }
+}
+
+impl<T: MerkleSerialize + ?Sized> MerkleSerialize for Arc<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.as_ref().merkle_serialize(serializer)
+    }
+}
+
 impl<T: MerkleSerialize> MerkleSerialize for Vec<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.as_slice().merkle_serialize(serializer)
+    }
+}
+
+impl<T: MerkleSerialize> MerkleSerialize for [T] {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_usize(self.len());
         for x in self {

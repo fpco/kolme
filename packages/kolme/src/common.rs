@@ -40,7 +40,23 @@ pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
 #[derive(Clone)]
 pub struct TaggedJson<T> {
     serialized: String,
+    hash: Sha256Hash,
     value: T,
+}
+
+impl<T> MerkleSerialize for TaggedJson<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.serialized.merkle_serialize(serializer)
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> MerkleDeserialize for TaggedJson<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let serialized: String = deserializer.load()?;
+        Self::try_from_string(serialized).map_err(MerkleSerialError::custom)
+    }
 }
 
 /// Wrap up a [TaggedJson] with a signature and recovery information.
@@ -52,6 +68,32 @@ pub struct SignedTaggedJson<T> {
     pub recovery_id: RecoveryId,
 }
 
+impl<T> MerkleSerialize for SignedTaggedJson<T> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            message,
+            signature,
+            recovery_id,
+        } = self;
+        serializer.store(message)?;
+        serializer.store(signature)?;
+        serializer.store(recovery_id)?;
+        Ok(())
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> MerkleDeserialize for SignedTaggedJson<T> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            message: deserializer.load()?,
+            signature: deserializer.load()?,
+            recovery_id: deserializer.load()?,
+        })
+    }
+}
+
 impl<T> SignedTaggedJson<T> {
     pub fn verify_signature(&self) -> Result<PublicKey> {
         PublicKey::recover_from_msg(self.message.as_bytes(), &self.signature, self.recovery_id)
@@ -59,7 +101,7 @@ impl<T> SignedTaggedJson<T> {
     }
 
     pub(crate) fn message_hash(&self) -> Sha256Hash {
-        Sha256Hash::hash(self.message.as_bytes())
+        self.message.hash
     }
 }
 
@@ -84,8 +126,11 @@ impl<T> std::fmt::Debug for TaggedJson<T> {
 
 impl<T: serde::Serialize> TaggedJson<T> {
     pub fn new(value: T) -> Result<Self> {
+        let serialized = serde_json::to_string(&value)?;
+        let hash = Sha256Hash::hash(&serialized);
         Ok(TaggedJson {
-            serialized: serde_json::to_string(&value)?,
+            serialized,
+            hash,
             value,
         })
     }
@@ -101,9 +146,14 @@ impl<T: serde::Serialize> TaggedJson<T> {
 }
 
 impl<T: serde::de::DeserializeOwned> TaggedJson<T> {
-    pub fn try_from_string(serialized: String) -> Result<Self> {
+    pub fn try_from_string(serialized: String) -> serde_json::Result<Self> {
         let value = serde_json::from_str(&serialized)?;
-        Ok(TaggedJson { value, serialized })
+        let hash = Sha256Hash::hash(&serialized);
+        Ok(TaggedJson {
+            value,
+            serialized,
+            hash,
+        })
     }
 }
 
@@ -112,7 +162,12 @@ impl<T> TaggedJson<T> {
     ///
     /// Note that this function does no checking to confirm that these values match.
     pub fn from_pair(value: T, serialized: String) -> Self {
-        TaggedJson { serialized, value }
+        let hash = Sha256Hash::hash(&serialized);
+        TaggedJson {
+            serialized,
+            value,
+            hash,
+        }
     }
 
     pub fn into_inner(self) -> T {
@@ -149,8 +204,7 @@ impl<'de, T: serde::de::DeserializeOwned> serde::Deserialize<'de> for TaggedJson
         use serde::de::Error;
 
         let serialized = String::deserialize(deserializer)?;
-        let value = serde_json::from_str::<T>(&serialized).map_err(D::Error::custom)?;
-        Ok(TaggedJson { serialized, value })
+        Self::try_from_string(serialized).map_err(D::Error::custom)
     }
 }
 

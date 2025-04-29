@@ -1,53 +1,45 @@
 mod merkle_db_store;
 
+use std::sync::Arc;
+
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_db_store::MerkleDbStore;
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
+use sqlx::postgres::PgAdvisoryLock;
 
 #[derive(Clone)]
 pub struct KolmeStorePostgres(sqlx::PgPool);
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum KeepGoing {
-    Continue,
-    Stop,
-}
-
 impl KolmeStorePostgres {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
-        let pool = sqlx::PgPool::connect(url).await?;
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(url)
+            .await?;
         sqlx::migrate!().run(&pool).await?;
         Ok(Self(pool))
     }
 
-    pub async fn load_latest_block<
+    pub async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError> {
+        match sqlx::query_scalar!("SELECT height FROM blocks ORDER BY height DESC LIMIT 1")
+            .fetch_optional(&self.0)
+            .await
+            .map_err(KolmeStoreError::custom)?
+        {
+            None => Ok(None),
+            Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
+        }
+    }
+
+    pub async fn load_block<
+        Block: serde::de::DeserializeOwned,
         FrameworkState: MerkleDeserialize,
         AppState: MerkleDeserialize,
     >(
         &self,
         merkle_manager: &MerkleManager,
-    ) -> Result<Option<StorableBlock<FrameworkState, AppState>>, KolmeStoreError> {
-        let height = sqlx::query_scalar!("SELECT height FROM blocks ORDER BY height DESC LIMIT 1")
-            .fetch_optional(&self.0)
-            .await
-            .map_err(KolmeStoreError::custom)?;
-        match height {
-            None => Ok(None),
-            Some(height) => self
-                .load_block(
-                    merkle_manager,
-                    height.try_into().map_err(KolmeStoreError::custom)?,
-                )
-                .await
-                .map(Some),
-        }
-    }
-
-    pub async fn load_block<FrameworkState: MerkleDeserialize, AppState: MerkleDeserialize>(
-        &self,
-        merkle_manager: &MerkleManager,
         height: u64,
-    ) -> Result<StorableBlock<FrameworkState, AppState>, KolmeStoreError> {
+    ) -> Result<StorableBlock<Block, FrameworkState, AppState>, KolmeStoreError> {
         let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
         struct Output {
             blockhash: Vec<u8>,
@@ -100,30 +92,35 @@ impl KolmeStorePostgres {
             .await?;
         let app_state = merkle_manager.load(&mut store, app_state_hash).await?;
         let logs = merkle_manager.load(&mut store, logs_hash).await?;
+        let block = serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?;
 
         Ok(StorableBlock {
             height,
             blockhash,
             txhash,
-            rendered,
             framework_state,
             app_state,
             logs,
+            block: Arc::new(block),
         })
     }
 
-    pub async fn add_block<FrameworkState: MerkleSerialize, AppState: MerkleSerialize>(
+    pub async fn add_block<
+        Block: serde::Serialize,
+        FrameworkState: MerkleSerialize,
+        AppState: MerkleSerialize,
+    >(
         &self,
         merkle_manager: &MerkleManager,
         StorableBlock {
             height,
             blockhash,
             txhash,
-            rendered,
             framework_state,
             app_state,
             logs,
-        }: &StorableBlock<FrameworkState, AppState>,
+            block,
+        }: &StorableBlock<Block, FrameworkState, AppState>,
     ) -> Result<(), KolmeStoreError> {
         let height_i64 = i64::try_from(*height).map_err(KolmeStoreError::custom)?;
 
@@ -138,6 +135,7 @@ impl KolmeStorePostgres {
         let framework_state_hash = framework_state_hash.as_array().as_slice();
         let app_state_hash = app_state_hash.as_array().as_slice();
         let logs_hash = logs_hash.as_array().as_slice();
+        let rendered = serde_json::to_string(block).map_err(KolmeStoreError::custom)?;
 
         let res = sqlx::query!(
             r#"
@@ -211,5 +209,46 @@ impl KolmeStorePostgres {
             .await
             .map(|_| ())
             .map_err(KolmeStoreError::custom)
+    }
+
+    pub async fn take_construct_lock(&self) -> Result<ConstructLock, KolmeStoreError> {
+        let (tx_locked, rx_locked) = tokio::sync::oneshot::channel();
+        let conn = self.0.acquire().await.map_err(KolmeStoreError::custom)?;
+        let lock = PgAdvisoryLock::new("construct");
+        tokio::spawn(async move {
+            match lock.acquire(conn).await.map_err(KolmeStoreError::custom) {
+                Ok(guard) => {
+                    let (tx_unlock, rx_unlock) = tokio::sync::oneshot::channel::<()>();
+                    if tx_locked.send(Ok(tx_unlock)).is_ok() {
+                        rx_unlock.await.ok();
+                    }
+                    if let Err(e) = guard.release_now().await {
+                        tracing::error!("Error releasing PostgreSQL construction lock: {e}");
+                    }
+                }
+                Err(e) => {
+                    tx_locked.send(Err(e)).ok();
+                }
+            }
+        });
+        match rx_locked.await {
+            Ok(Ok(tx_unlock)) => Ok(ConstructLock {
+                tx_unlock: Some(tx_unlock),
+            }),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(KolmeStoreError::custom(e)),
+        }
+    }
+}
+
+pub struct ConstructLock {
+    tx_unlock: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl Drop for ConstructLock {
+    fn drop(&mut self) {
+        if self.tx_unlock.take().unwrap().send(()).is_err() {
+            tracing::error!("Error while dropping a PostgreSQL construct lock");
+        }
     }
 }
