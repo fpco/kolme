@@ -33,8 +33,7 @@ The storage mechanism of Kolme is built around optimizing for these properties.
 
 ## MerkleMap
 
-The core data structure we leverage is a `MerkleMap`. This is a Rust data structure with a `BTreeMap`-like API. Internally, it is a base16 tree with aggressive caching, clone-on-write functionality, and various other optimizations. It won't be faster that a `BTreeMap` or `HashMap` for most operations. However, it provides an incredibly cheap `clone` (just an `Arc` clone) and does not require recomputing hashes for unchanged subtrees.
-
+The core data structure we leverage is a `MerkleMap`. This is a Rust data structure with a `BTreeMap`-like API. Internally, it is a base16 tree with aggressive caching, clone-on-write functionality, and various other optimizations. It won't be faster than a `BTreeMap` or `HashMap` for most operations. However, it provides an incredibly cheap `clone` (just an `Arc` clone) and does not require recomputing hashes for unchanged subtrees.
 By using the `merkle-map` package for maintaining framework and app state, a Kolme application gets aggressive data sharing, further reducing the total storage size needed for holding onto state from multiple blocks, without requiring pruning of the data. `MerkleMap` data can also efficiently be transferred over a network, allowing for [fast sync](node-sync.md).
 
 ## Pluggable storage
