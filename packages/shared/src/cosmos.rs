@@ -3,9 +3,12 @@ use std::collections::BTreeSet;
 use cosmwasm_std::{Binary, Coin, CosmosMsg};
 
 use crate::{
-    cryptography::{PublicKey, SecretKey, SecretKeyError, SignatureWithRecovery},
+    cryptography::{PublicKey, SignatureWithRecovery},
     types::{BridgeActionId, BridgeEventId},
 };
+
+#[cfg(feature = "realcryptography")]
+use crate::cryptography::{SecretKey, SecretKeyError};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct State {
@@ -98,6 +101,7 @@ pub enum BridgeEventMessage {
     },
 }
 
+#[cfg(feature = "realcryptography")]
 impl KeyRegistration {
     pub fn new(address: &str, key: &SecretKey) -> Result<Self, SecretKeyError> {
         Ok(Self {
