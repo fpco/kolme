@@ -232,7 +232,15 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let client = self.kolme.read().get_solana_client(solana_chain).await;
 
-                solana::execute(&client, keypair, &contract, *processor, approvals, payload).await?
+                solana::execute(
+                    &client,
+                    keypair,
+                    &contract,
+                    *processor,
+                    approvals,
+                    payload.clone(),
+                )
+                .await?
             }
             #[cfg(feature = "pass_through")]
             ChainArgs::PassThrough { port } => {

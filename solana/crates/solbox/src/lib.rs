@@ -1,6 +1,7 @@
 pub use pinocchio;
 pub use pinocchio_system as system;
 pub use pinocchio_token as token;
+pub use pinocchio_pubkey as pubkey;
 
 use pinocchio::{
     account_info::AccountInfo,
@@ -14,6 +15,12 @@ use bitflags::bitflags;
 use borsh::{BorshDeserialize, BorshSerialize};
 use smallvec::SmallVec;
 use once_cell::unsync::Lazy;
+
+pub mod token2022 {
+    use pinocchio_pubkey::declare_id;
+
+    declare_id!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+}
 
 pub type Result<T> = std::result::Result<T, ProgramError>;
 
@@ -75,6 +82,13 @@ pub fn log_base64(data: &[&[u8]]) {
     unsafe {
         syscalls::sol_log_data(data as *const _ as *const u8, data.len() as u64);
     }
+}
+
+#[inline]
+pub fn log_pubkey(pubkey: &Pubkey) {
+    unsafe {
+        syscalls::sol_log_pubkey(pubkey as *const _ as *const u8)
+    };
 }
 
 #[inline]
@@ -141,7 +155,8 @@ impl<'a> Context<'a> {
 
     #[inline]
     pub fn assert_is_token_program(&self, index: usize) -> Result<()> {
-        if self.accounts[index].key() != &token::ID {
+        let pubkey = self.accounts[index].key();
+        if pubkey != &token::ID && pubkey != &token2022::ID {
             return Err(ProgramError::IllegalOwner);
         }
 

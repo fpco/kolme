@@ -25,6 +25,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          tool-cache: false
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
       - name: Setup rust toolchain
         uses: dtolnay/rust-toolchain@1.81.0
         with:
@@ -45,6 +57,11 @@ jobs:
         with:
           tool: sqlx-cli@0.8.2
           locked: false
+      - name: Install hidapi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libusb-1.0-0-dev
+          sudo apt-get install -y libhidapi-dev
       - name: Run tests
         run: RUST_BACKTRACE=1 just test
       - name: Build
