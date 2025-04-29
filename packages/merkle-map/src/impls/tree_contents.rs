@@ -77,9 +77,9 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         let node = if self.len <= 16 {
             let mut values = arrayvec::ArrayVec::new();
             self.drain_entries_to(&mut values);
-            Node::Leaf(Lockable::new_unlocked(LeafContents { values }))
+            Node::Leaf(MerkleLockable::new(LeafContents { values }))
         } else {
-            Node::Tree(Lockable::new_unlocked(self))
+            Node::Tree(MerkleLockable::new(self))
         };
         (node, v)
     }
@@ -115,7 +115,9 @@ impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for TreeContents<K, V> 
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<TreeContents<K, V>> {
+impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize
+    for MerkleLockable<TreeContents<K, V>>
+{
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -148,6 +150,6 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Tree
             leaf,
             branches,
         };
-        Ok(Lockable::new_unlocked(tree))
+        Ok(MerkleLockable::new(tree))
     }
 }

@@ -531,15 +531,15 @@ impl<App: KolmeApp> KolmeRead<App> {
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.get_framework_state().processor
+        self.get_framework_state().get_config().processor
     }
 
     pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.get_framework_state().approvers
+        &self.get_framework_state().get_config().approvers
     }
 
     pub fn get_needed_approvers(&self) -> usize {
-        self.get_framework_state().needed_approvers
+        self.get_framework_state().get_config().needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &ChainStates {

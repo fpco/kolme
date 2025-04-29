@@ -155,7 +155,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         event: &BridgeEvent,
         event_id: BridgeEventId,
     ) -> Result<()> {
-        anyhow::ensure!(self.framework_state.listeners.contains(&self.pubkey));
+        anyhow::ensure!(self
+            .framework_state
+            .get_config()
+            .listeners
+            .contains(&self.pubkey));
 
         let state = self.framework_state.chains.get_mut(chain)?;
 
@@ -209,11 +213,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             let existing_signatures = pending
                 .attestations
                 .iter()
-                .filter(|key| framework_state.listeners.contains(key))
+                .filter(|key| framework_state.get_config().listeners.contains(key))
                 .count();
 
             // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
-            let was_accepted = existing_signatures >= framework_state.needed_listeners;
+            let was_accepted = existing_signatures >= framework_state.get_config().needed_listeners;
 
             // If this event isn't accepted yet, we simply exit. We never try to
             // process later events while an earlier one is unprocessed.
@@ -314,7 +318,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 format!("Cannot approve missing bridge action ID {action_id} for chain {chain}")
             })?;
         let key = signature.validate(action.payload.as_bytes())?;
-        anyhow::ensure!(self.framework_state.approvers.contains(&key));
+        // Using config.as_ref() instead of framework_state.get_config to work around
+        // a borrow conflict with the mutable borrow above
+        anyhow::ensure!(self
+            .framework_state
+            .config
+            .as_ref()
+            .approvers
+            .contains(&key));
         let old = action.approvals.insert(key, signature);
         assert!(old.is_none(), "Cannot approve bridge action ID {action_id} for chain {chain} with already-used public key {key}");
         Ok(())
@@ -327,7 +338,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         processor: &SignatureWithRecovery,
         approvers: &[SignatureWithRecovery],
     ) -> Result<()> {
-        anyhow::ensure!(approvers.len() >= self.framework_state.needed_approvers);
+        anyhow::ensure!(approvers.len() >= self.framework_state.get_config().needed_approvers);
 
         let action = self
             .framework_state
@@ -341,13 +352,18 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         let payload = action.payload.as_bytes();
         let processor_key = processor.validate(payload)?;
-        anyhow::ensure!(processor_key == self.framework_state.processor);
+        anyhow::ensure!(processor_key == self.framework_state.config.as_ref().processor);
 
         let approvers_checked = approvers
             .iter()
             .map(|sig| {
                 let pubkey = sig.validate(payload)?;
-                anyhow::ensure!(self.framework_state.approvers.contains(&pubkey));
+                anyhow::ensure!(self
+                    .framework_state
+                    .config
+                    .as_ref()
+                    .approvers
+                    .contains(&pubkey));
                 Ok(pubkey)
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
