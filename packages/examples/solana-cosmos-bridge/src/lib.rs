@@ -1,122 +1,112 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
-    str::FromStr,
 };
 
 use anyhow::Result;
-use cosmos::{HasAddressHrp, SeedPhrase};
+use cosmos::SeedPhrase as CosmosSeedPhrase;
+use solana_keypair::Keypair as SolanaKeypair;
+use solana_pubkey::Pubkey as SolanaPubkey;
 
 use kolme::*;
 use tokio::task::JoinSet;
 
 #[derive(Clone, Debug)]
-pub struct CosmosBridgeApp;
+pub struct SolanaCosmosBridgeApp;
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
-pub struct State {
-    #[serde(default)]
-    hi_count: u32,
-}
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Default)]
+pub struct State;
 
 impl MerkleSerialize for State {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        serializer.store(&self.hi_count)?;
+    fn merkle_serialize(&self, _: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         Ok(())
     }
 }
 
 impl MerkleDeserialize for State {
-    fn merkle_deserialize(
-        deserializer: &mut MerkleDeserializer,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(Self {
-            hi_count: deserializer.load()?,
-        })
+    fn merkle_deserialize(_: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+        Ok(State)
     }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum BridgeMessage {
-    SayHi {},
-    /// Generate a random number, for no particular reason at all
-    Random {},
-    /// The address itself tells us whether to send to Osmosis or Neutron
-    /// FIXME: maybe this should be part of the bank module instead. Then our bridge is just a default Kolme app!
-    SendTo {
-        address: cosmos::Address,
+    ToSolana {
+        to: SolanaPubkey,
+        amount: Decimal,
+    },
+    ToCosmos {
+        to: cosmos::Address,
         amount: Decimal,
     },
 }
 
-// Another keypair for client testing:
-// Public key: 02c2b386e42945d4c11712a5bc1d20d085a7da63e57c214e2742a684a97d436599
-// Secret key: 127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02
-
+pub const ASSET_ID: AssetId = AssetId(1);
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
-const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note frequent illegal garden shy across burger clay asthma kitten left august pottery napkin label already purpose best";
 
-const OSMOSIS_TESTNET_CODE_ID: u64 = 12390;
-const NEUTRON_TESTNET_CODE_ID: u64 = 11650;
+const OSMOSIS_CODE_ID: u64 = 1;
 
 fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl KolmeApp for CosmosBridgeApp {
+impl KolmeApp for SolanaCosmosBridgeApp {
     type State = State;
     type Message = BridgeMessage;
 
     fn genesis_info() -> GenesisInfo {
         let my_public_key = my_secret_key().public_key();
+
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
+
         let mut bridges = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
+
         assets.insert(
-            AssetName(
-                "factory/osmo1mgcky4e24969532hee55ly4rrl30z4tkzgfvq7/kolmeoutgoing".to_owned(),
-            ),
+            AssetName("uosmo".into()),
             AssetConfig {
                 decimals: 6,
-                asset_id: AssetId(1),
+                asset_id: ASSET_ID,
             },
         );
+
         bridges
             .insert_cosmos(
-                CosmosChain::OsmosisTestnet,
+                CosmosChain::OsmosisLocal,
                 ChainConfig {
                     assets,
                     bridge: BridgeContract::NeededCosmosBridge {
-                        code_id: OSMOSIS_TESTNET_CODE_ID,
+                        code_id: OSMOSIS_CODE_ID,
                     },
                 },
             )
             .unwrap();
+
         let mut assets = BTreeMap::new();
         assets.insert(
-            AssetName(
-                "factory/neutron1mgcky4e24969532hee55ly4rrl30z4tkwvn7vt/kolmeincoming".to_owned(),
-            ),
+            AssetName("osmof7hTFAuNjwMCcxVNThBDDftMNjiLR2cidDQzvwQ".into()),
             AssetConfig {
                 decimals: 6,
-                asset_id: AssetId(1),
+                asset_id: ASSET_ID,
             },
         );
+
         bridges
-            .insert_cosmos(
-                CosmosChain::NeutronTestnet,
+            .insert_solana(
+                SolanaChain::Local,
                 ChainConfig {
                     assets,
-                    bridge: BridgeContract::NeededCosmosBridge {
-                        code_id: NEUTRON_TESTNET_CODE_ID,
+                    bridge: BridgeContract::NeededSolanaBridge {
+                        program_id: "7Y2ftN9nSf4ubzRDiUvcENMeV4S695JEFpYtqdt836pW".into(),
                     },
                 },
             )
             .unwrap();
+
         GenesisInfo {
-            kolme_ident: "Cosmos bridge example".to_owned(),
+            kolme_ident: "Solana<->Cosmos bridge example".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
             needed_listeners: 1,
@@ -127,7 +117,7 @@ impl KolmeApp for CosmosBridgeApp {
     }
 
     fn new_state() -> Result<Self::State> {
-        Ok(State { hi_count: 0 })
+        Ok(State)
     }
 
     async fn execute(
@@ -136,60 +126,56 @@ impl KolmeApp for CosmosBridgeApp {
         msg: &Self::Message,
     ) -> Result<()> {
         match msg {
-            BridgeMessage::SayHi {} => ctx.state_mut().hi_count += 1,
-            BridgeMessage::SendTo { address, amount } => {
-                let chain = match address.get_address_hrp().as_str() {
-                    "osmo" => ExternalChain::OsmosisTestnet,
-                    "neutron" => ExternalChain::NeutronTestnet,
-                    _ => anyhow::bail!("Unsupported wallet address: {address}"),
-                };
+            BridgeMessage::ToSolana { to, amount } => {
                 ctx.withdraw_asset(
-                    AssetId(1),
-                    chain,
+                    ASSET_ID,
+                    ExternalChain::SolanaLocal,
                     ctx.get_sender_id(),
-                    &Wallet(address.to_string()),
+                    &Wallet(to.to_string()),
                     *amount,
                 )?;
             }
-            BridgeMessage::Random {} => {
-                let value = ctx.load_data(RandomU32).await?;
-                ctx.log(format!("Calculated a random number: {value}"));
+            BridgeMessage::ToCosmos { to, amount } => {
+                ctx.withdraw_asset(
+                    ASSET_ID,
+                    ExternalChain::OsmosisLocal,
+                    ctx.get_sender_id(),
+                    &Wallet(to.to_string()),
+                    *amount,
+                )?;
             }
         }
+
         Ok(())
     }
 }
 
-#[derive(PartialEq, serde::Serialize, serde::Deserialize)]
-struct RandomU32;
-
-impl<App> KolmeDataRequest<App> for RandomU32 {
-    type Response = u32;
-
-    async fn load(self, _: &App) -> Result<Self::Response> {
-        Ok(rand::random())
-    }
-
-    async fn validate(self, _: &App, _: &Self::Response) -> Result<()> {
-        // No validation possible
-        Ok(())
-    }
-}
-
-pub async fn serve(kolme: Kolme<CosmosBridgeApp>, bind: SocketAddr) -> Result<()> {
+pub async fn serve(
+    kolme: Kolme<SolanaCosmosBridgeApp>,
+    solana_submitter: SolanaKeypair,
+    cosmos_submitter: CosmosSeedPhrase,
+    bind: SocketAddr,
+) -> Result<()> {
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
+
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run(ChainName::Cosmos));
+
+    let listener = Listener::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(listener.run(ChainName::Solana));
+
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
-    let submitter = Submitter::new_cosmos(
-        kolme.clone(),
-        SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap(),
-    );
+
+    let submitter = Submitter::new_cosmos(kolme.clone(), cosmos_submitter);
     set.spawn(submitter.run());
+
+    let submitter = Submitter::new_solana(kolme.clone(), solana_submitter);
+    set.spawn(submitter.run());
+
     let api_server = ApiServer::new(kolme);
     set.spawn(api_server.run(bind));
 
@@ -210,19 +196,21 @@ pub async fn serve(kolme: Kolme<CosmosBridgeApp>, bind: SocketAddr) -> Result<()
     Ok(())
 }
 
-pub async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
-    let message = serde_json::from_str::<BridgeMessage>(&message)?;
-    let secret = SecretKey::from_hex(&secret)?;
+pub async fn broadcast(
+    message: BridgeMessage,
+    secret: SecretKey,
+    host: &str,
+) -> Result<Sha256Hash> {
     let public = secret.public_key();
     let client = reqwest::Client::new();
 
     println!("Public sec1: {public}");
-    println!("Public serialized: {}", serde_json::to_string(&public)?);
 
     #[derive(serde::Deserialize)]
     struct NonceResp {
         next_nonce: AccountNonce,
     }
+
     let NonceResp { next_nonce: nonce } = client
         .get(format!("{host}/get-next-nonce"))
         .query(&[("pubkey", public)])
@@ -239,10 +227,12 @@ pub async fn broadcast(message: String, secret: String, host: String) -> Result<
         messages: vec![Message::App(message)],
     }
     .sign(&secret)?;
+
     #[derive(serde::Deserialize)]
     struct Res {
         txhash: Sha256Hash,
     }
+
     let res = client
         .put(format!("{host}/broadcast"))
         .json(&signed)
@@ -255,6 +245,6 @@ pub async fn broadcast(message: String, secret: String, host: String) -> Result<
     }
 
     let Res { txhash } = res.json().await?;
-    println!("txhash: {txhash}");
-    Ok(())
+
+    Ok(txhash)
 }

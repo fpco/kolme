@@ -9,13 +9,19 @@ use solana_transaction::Transaction;
 use spl_associated_token_account_client as spl_client;
 
 use crate::{
-    InitializeIxData, InstructionAccount, Payload, SignedMsgIxData, SignerAccount, INITIALIZE_IX,
-    SIGNED_IX, TOKEN_HOLDER_SEED,
+    InitializeIxData, InstructionAccount, Payload, RegularMsgIxData, SignedMsgIxData,
+    SignerAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
 };
 
 const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
 const TOKEN: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-// const TOKEN_2022: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+const TOKEN_2022: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+#[derive(Clone, Copy, PartialEq, Hash, Debug)]
+pub enum TokenProgram {
+    Legacy,
+    Token2022,
+}
 
 pub fn init_tx(
     program_id: Pubkey,
@@ -77,7 +83,7 @@ pub fn signed_ix(
 ) -> borsh::io::Result<Message> {
     let mut bytes = Vec::with_capacity(1 + borsh::object_length(data)?);
     bytes.push(SIGNED_IX);
-    data.serialize(&mut bytes).unwrap();
+    data.serialize(&mut bytes)?;
 
     let state_pda = derive_state_pda(&program_id);
     let mut accounts = vec![
@@ -86,6 +92,84 @@ pub fn signed_ix(
     ];
 
     accounts.extend_from_slice(additional);
+
+    Ok(Message::new_with_blockhash(
+        &[Instruction {
+            program_id,
+            accounts,
+            data: bytes,
+        }],
+        Some(&sender),
+        blockhash,
+    ))
+}
+
+pub fn regular_tx(
+    program_id: Pubkey,
+    token_program: TokenProgram,
+    blockhash: Hash,
+    sender: &Keypair,
+    data: &RegularMsgIxData,
+    token_mints: &[Pubkey],
+) -> borsh::io::Result<Transaction> {
+    let msg = regular_ix(
+        program_id,
+        token_program,
+        &blockhash,
+        sender.pubkey(),
+        data,
+        token_mints,
+    )?;
+
+    Ok(Transaction::new(&[sender], msg, blockhash))
+}
+
+pub fn regular_ix(
+    program_id: Pubkey,
+    token_program: TokenProgram,
+    blockhash: &Hash,
+    sender: Pubkey,
+    data: &RegularMsgIxData,
+    token_mints: &[Pubkey],
+) -> borsh::io::Result<Message> {
+    let mut bytes = Vec::with_capacity(1 + borsh::object_length(data)?);
+    bytes.push(REGULAR_IX);
+    data.serialize(&mut bytes)?;
+
+    let accounts = if token_mints.is_empty() {
+        vec![AccountMeta::new(sender, true)]
+    } else {
+        let token_program = token_program.program_id();
+
+        let mut accounts = Vec::with_capacity(4 + token_mints.len() * 4);
+        accounts.push(AccountMeta::new(sender, true));
+        accounts.push(AccountMeta::new(derive_state_pda(&program_id), false));
+        accounts.push(AccountMeta::new(SYSTEM, false));
+        accounts.push(AccountMeta::new(TOKEN, false));
+
+        for mint in token_mints {
+            accounts.push(AccountMeta::new_readonly(*mint, false));
+
+            let sender_ata = spl_client::address::get_associated_token_address_with_program_id(
+                &sender,
+                mint,
+                &token_program,
+            );
+            accounts.push(AccountMeta::new(sender_ata, false));
+
+            let holder = derive_token_holder_acc(&program_id, mint, &sender);
+            accounts.push(AccountMeta::new(holder, false));
+
+            let holder_ata = spl_client::address::get_associated_token_address_with_program_id(
+                &holder,
+                mint,
+                &token_program,
+            );
+            accounts.push(AccountMeta::new(holder_ata, false));
+        }
+
+        accounts
+    };
 
     Ok(Message::new_with_blockhash(
         &[Instruction {
@@ -114,6 +198,7 @@ pub fn derive_token_holder_acc(program_id: &Pubkey, mint: &Pubkey, user: &Pubkey
 pub fn transfer_payload(
     id: u64,
     program_id: Pubkey,
+    token_program: TokenProgram,
     mint: Pubkey,
     to: Pubkey,
     amount: u64,
@@ -128,8 +213,17 @@ pub fn transfer_payload(
         Vec::from(&[bump]),
     ];
 
-    let from_ata = spl_client::address::get_associated_token_address(&authority, &mint);
-    let to_ata = spl_client::address::get_associated_token_address(&to, &mint);
+    let token_program = token_program.program_id();
+    let from_ata = spl_client::address::get_associated_token_address_with_program_id(
+        &authority,
+        &mint,
+        &token_program,
+    );
+    let to_ata = spl_client::address::get_associated_token_address_with_program_id(
+        &to,
+        &mint,
+        &token_program,
+    );
 
     let accounts = vec![
         InstructionAccount {
@@ -169,4 +263,14 @@ fn token_holder_seeds<'a>(mint: &'a Pubkey, user: &'a Pubkey) -> [&'a [u8]; 3] {
         mint.as_array().as_slice(),
         user.as_array().as_slice(),
     ]
+}
+
+impl TokenProgram {
+    #[inline]
+    pub fn program_id(&self) -> Pubkey {
+        match self {
+            Self::Legacy => TOKEN,
+            Self::Token2022 => TOKEN_2022,
+        }
+    }
 }
