@@ -7,7 +7,7 @@
 Each block in a Kolme action is made up of essentially five parts:
 
 1. Metadata about the block: timestamp, signature, block height, previous block hash, etc.
-2. The transaction itself: a request from a client to perform some state transformation. This includes messages (individual actions to take, which may be standard Kolme messages or app-specific messages), a submission timestamp, and signature information.
+2. The transaction itself: a request from a client to perform some state transformation. This includes messages (individual actions to take, which may be standard Kolme messages or app-specific messages), a submission timestamp, and signature information. (Note: in Kolme, each block always contains exactly one transaction.)
 3. Any data loads required to reexecute the messages in the transaction.
 4. Logs generating when running messages.
 5. The new state of the blockchain. More on this below.
