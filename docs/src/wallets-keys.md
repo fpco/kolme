@@ -2,8 +2,7 @@
 
 Kolme keeps an internal concept of accounts. Accounts are able to receive and send funds and perform other actions. Each account is either a [multisig account](./multisig-accounts.md) or a regular account, equivalent to Externally Owned Accounts (EOAs) from other chains.
 
-Each regular account has 0 or more *wallets* and *public keys* associated with it, and must at all times hve at least 1 wallet or 1 public key. Public keys are the only authentication mechanism supported within Kolme, meaning every transaction you send to the chain must be signed with a public/private keypair.
-
+Each regular account has 0 or more *wallets* and *public keys* associated with it, and must at all times have at least 1 wallet or 1 public key. Public keys are the only authentication mechanism supported within Kolme, meaning every transaction you send to the chain must be signed with a public/private keypair.
 Wallets, on the other hand, represent a wallet on an external blockchain. Since many blockchains uses the same wallet addresses (e.g., all EVM chains use identical representations), we internally track wallet addresses as simple strings, not tied to a specific chain.
 
 Wallet addresses can only be used for controlling an account through the bridge contract.  It's easiest to understand the workflow by following how a user will normally initiate and use an account.
