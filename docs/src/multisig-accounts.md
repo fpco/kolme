@@ -1,7 +1,6 @@
 # Multisig accounts
 
-Kolme supports two different account types: regular accounts controlled by [external wallets and public keys](./wallets-keys.md), and multisig accounts. (**NOTE** at time of writing, multisig accounts have no yet been implemented.) Multisig accounts allow for a quorum of users to control actions from an account, a common desire for more secure management.
-
+Kolme supports two different account types: regular accounts controlled by [external wallets and public keys](./wallets-keys.md), and multisig accounts. (**NOTE** at time of writing, multisig accounts have not yet been implemented.) Multisig accounts allow for a quorum of users to control actions from an account, a common desire for more secure management.
 The basic workflow of multisig accounts is:
 
 * Create the account. This is done by using a normal account to send a "create multisig account" transaction. Any account can perform this action, and the new account will be created with the given set of keys and quorum rules, with no connection to the original account.
