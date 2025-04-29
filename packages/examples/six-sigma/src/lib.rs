@@ -479,7 +479,7 @@ mod tests {
         let passthrough =
             tokio::task::spawn(passthrough.run(SocketAddr::from_str("[::]:12345").unwrap()));
         assert!(!passthrough.is_finished());
-        let db_file = NamedTempFile::new().unwrap();
+        let db_file = tempfile::tempdir().unwrap();
         let log_file = NamedTempFile::new().unwrap();
         let db_path = db_file.path().to_path_buf();
         let app = tokio::task::spawn(serve::<SixSigmaPassThrough>(
