@@ -19,8 +19,7 @@ In this approach, we transfer just the block data itself over the network. Each 
 
 This may be lighter on bandwidth usage, since it doesn't require transferring the full state. However, it does require transferring all missing blocks, which may be significant.
 
-Side note: we have plans to provide for optimized, bulk downloads of large numbers of blocks. We may do the same thing for fast sync with occassional compressed state files being made available.
-
+Side note: we have plans to provide for optimized, bulk downloads of large numbers of blocks. We may do the same thing for fast sync with occasional compressed state files being made available.
 This also improves on the trust model, by verifying the results of each block execution.
 
 ## Validated blocks (slow sync)
