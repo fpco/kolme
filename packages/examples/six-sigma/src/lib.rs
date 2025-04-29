@@ -282,7 +282,7 @@ pub async fn serve<C: Config>(
     let kolme = Kolme::new(
         SixSigmaApp::<C>::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(db_path).await?,
+        KolmeStore::new_fjall(db_path)?,
     )
     .await?;
 
@@ -355,7 +355,7 @@ pub async fn state<C: Config>(db_path: PathBuf) -> Result<State> {
     let kolme = Kolme::new(
         SixSigmaApp::<C>::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(db_path).await?,
+        KolmeStore::new_fjall(db_path)?,
     )
     .await?
     .read();
@@ -479,7 +479,7 @@ mod tests {
         let passthrough =
             tokio::task::spawn(passthrough.run(SocketAddr::from_str("[::]:12345").unwrap()));
         assert!(!passthrough.is_finished());
-        let db_file = NamedTempFile::new().unwrap();
+        let db_file = tempfile::tempdir().unwrap();
         let log_file = NamedTempFile::new().unwrap();
         let db_path = db_file.path().to_path_buf();
         let app = tokio::task::spawn(serve::<SixSigmaPassThrough>(

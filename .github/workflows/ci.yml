@@ -63,7 +63,7 @@ jobs:
           sudo apt-get install -y libudev-dev libusb-1.0-0-dev
           sudo apt-get install -y libhidapi-dev
       - name: Run tests
-        run: just test
+        run: RUST_BACKTRACE=1 just test
       - name: Build
         run: cargo build --workspace
       - name: Cargo fmt

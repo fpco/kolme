@@ -39,7 +39,7 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-client" }
 tokio-tungstenite = { version = "0.26.2", optional = true }
 futures-util = {version = "0.3", optional = true }
-fjall = "2.9.0"
+fjall.workspace = true
 
 [dev-dependencies]
 tempfile = "3.18.0"
