@@ -5,6 +5,7 @@ mod store;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
+use store::KolmeConstructLock;
 pub use store::KolmeStore;
 
 #[cfg(feature = "pass_through")]
@@ -37,7 +38,7 @@ pub struct Kolme<App: KolmeApp> {
 pub(super) struct KolmeInner<App: KolmeApp> {
     notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
     mempool: Mempool<App::Message>,
-    pub(super) store: store::KolmeStore,
+    pub(super) store: store::KolmeStore<App>,
     pub(super) app: App,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
@@ -190,17 +191,20 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Resync with the database.
     pub async fn resync(&self) -> Result<()> {
-        let latest = self
-            .inner
-            .store
-            .load_latest_block::<App::State>(&self.inner.merkle_manager)
-            .await?;
+        let latest = self.inner.store.load_latest_block().await?;
         let Some(latest) = latest else { return Ok(()) };
 
         // Do a read first to avoid creating lock contention.
-        if self.inner.current_block.read().get_next_height().0 > latest.height {
+        if self.inner.current_block.read().get_next_height().0 > latest.0 {
             return Ok(());
         }
+
+        let latest = self
+            .inner
+            .store
+            .load_block(&self.inner.merkle_manager, latest)
+            .await?
+            .with_context(|| format!("resync: expected block {latest} not present"))?;
 
         // Do this before grabbing the write lock to reduce contention
         let latest = BlockInfo::<App>::try_from(latest)?;
@@ -221,8 +225,8 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Validate and append the given block.
-    pub async fn add_block(&self, signed_block: SignedBlock<App::Message>) -> Result<()> {
-        let txhash = signed_block.0.message.as_inner().tx.hash();
+    pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+        let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
         let ExecutionResults {
@@ -245,15 +249,14 @@ impl<App: KolmeApp> Kolme<App> {
             .store
             .add_block(
                 &self.inner.merkle_manager,
-                &StorableBlock {
+                StorableBlock {
                     height: signed_block.height().0,
                     blockhash: signed_block.hash().0,
                     txhash: signed_block.tx().hash().0,
-                    rendered: serde_json::to_string(&signed_block)?,
-                    framework_state,
-                    app_state,
-                    // TODO remove the unnecessary clone
-                    logs: logs.clone(),
+                    block: signed_block,
+                    framework_state: Arc::new(framework_state),
+                    app_state: Arc::new(app_state),
+                    logs: logs.into(),
                 },
             )
             .await?;
@@ -283,14 +286,16 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    pub async fn new(app: App, _code_version: impl AsRef<str>, store: KolmeStore) -> Result<Self> {
+    pub async fn new(
+        app: App,
+        _code_version: impl AsRef<str>,
+        store: KolmeStore<App>,
+    ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
         let info = App::genesis_info();
         let merkle_manager = MerkleManager::default();
-        store
-            .validate_genesis_info::<App::State>(&merkle_manager, &info)
-            .await?;
+        store.validate_genesis_info(&merkle_manager, &info).await?;
         let current_block = MaybeBlockInfo::<App>::load(&store, &info, &merkle_manager).await?;
         let inner = KolmeInner {
             store,
@@ -324,7 +329,7 @@ impl<App: KolmeApp> Kolme<App> {
             let mut recv = self.subscribe();
             // And then check if we're at the requested height.
             if let Some(block) = self.get_block(height).await? {
-                return Ok(Arc::new(block));
+                return Ok(block);
             }
             loop {
                 match recv.recv().await {
@@ -334,7 +339,7 @@ impl<App: KolmeApp> Kolme<App> {
                             Ordering::Equal => return Ok(block),
                             Ordering::Greater => {
                                 let block = self.get_block(height).await?.with_context(|| format!("wait_for_block: received notification that block {} is available, but unable to find {height} in database", block.height()))?;
-                                return Ok(Arc::new(block));
+                                return Ok(block);
                             }
                         },
                         Notification::GenesisInstantiation { .. } => (),
@@ -425,6 +430,11 @@ impl<App: KolmeApp> Kolme<App> {
     pub fn get_app(&self) -> &App {
         &self.inner.app
     }
+
+    /// Take a lock on constructing new blocks.
+    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
+        self.inner.store.take_construct_lock().await
+    }
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -432,14 +442,14 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn get_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<SignedBlock<App::Message>>> {
+    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
         let storable_block = self
             .inner
             .store
-            .load_block::<App::State>(&self.inner.merkle_manager, height)
+            .load_block(&self.inner.merkle_manager, height)
             .await?;
         Ok(match storable_block {
-            Some(storable_block) => serde_json::from_str(&storable_block.rendered)?,
+            Some(storable_block) => Some(storable_block.block.clone()),
             None => None,
         })
     }
@@ -455,7 +465,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Load the block details from the database
-    pub async fn load_block(&self, height: BlockHeight) -> Result<SignedBlock<App::Message>> {
+    pub async fn load_block(&self, height: BlockHeight) -> Result<Arc<SignedBlock<App::Message>>> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
@@ -521,15 +531,15 @@ impl<App: KolmeApp> KolmeRead<App> {
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.get_framework_state().processor
+        self.get_framework_state().get_config().processor
     }
 
     pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.get_framework_state().approvers
+        &self.get_framework_state().get_config().approvers
     }
 
     pub fn get_needed_approvers(&self) -> usize {
-        self.get_framework_state().needed_approvers
+        self.get_framework_state().get_config().needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &ChainStates {

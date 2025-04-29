@@ -799,6 +799,20 @@ impl<AppMessage> SignedBlock<AppMessage> {
     }
 }
 
+impl<AppMessage> MerkleSerialize for SignedBlock<AppMessage> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl<AppMessage: serde::de::DeserializeOwned> MerkleDeserialize for SignedBlock<AppMessage> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        MerkleDeserialize::merkle_deserialize(deserializer).map(SignedBlock)
+    }
+}
+
 /// The hash of a [Block].
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub Sha256Hash);
