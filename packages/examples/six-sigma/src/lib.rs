@@ -282,7 +282,7 @@ pub async fn serve<C: Config>(
     let kolme = Kolme::new(
         SixSigmaApp::<C>::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(db_path).await?,
+        KolmeStore::new_fjall(db_path).await?,
     )
     .await?;
 
@@ -355,7 +355,7 @@ pub async fn state<C: Config>(db_path: PathBuf) -> Result<State> {
     let kolme = Kolme::new(
         SixSigmaApp::<C>::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(db_path).await?,
+        KolmeStore::new_fjall(db_path).await?,
     )
     .await?
     .read();
