@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::*;
 pub use key_bytes::MerkleKey;
 
-pub(crate) use crate::impls::Lockable;
+pub(crate) use crate::impls::MerkleLockable;
 
 /// A base16 tree supporting sharing of subtrees and cheap hashing.
 ///
@@ -26,8 +26,8 @@ pub(crate) struct LeafEntry<K, V> {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Node<K, V> {
-    Leaf(Lockable<LeafContents<K, V>>),
-    Tree(Lockable<TreeContents<K, V>>),
+    Leaf(MerkleLockable<LeafContents<K, V>>),
+    Tree(MerkleLockable<TreeContents<K, V>>),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
