@@ -7,7 +7,9 @@ use kolme::*;
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone)]
-pub struct SampleKolmeApp;
+pub struct SampleKolmeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {}
@@ -45,11 +47,8 @@ const NEUTRON_TESTNET_CODE_ID: u64 = 456; // FIXME still need to actually write 
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for SampleKolmeApp {
+    fn default() -> Self {
         let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
@@ -76,7 +75,8 @@ impl KolmeApp for SampleKolmeApp {
                 },
             )
             .unwrap();
-        GenesisInfo {
+
+        let genesis = GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -84,7 +84,18 @@ impl KolmeApp for SampleKolmeApp {
             approvers: set,
             needed_approvers: 1,
             chains: bridges,
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for SampleKolmeApp {
+    type State = SampleState;
+    type Message = SampleMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> anyhow::Result<Self::State> {
@@ -105,7 +116,7 @@ mod tests {
     use super::*;
 
     async fn test_sample_sanity(store: KolmeStore<SampleKolmeApp>) {
-        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store)
+        let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
             .await
             .unwrap();
 

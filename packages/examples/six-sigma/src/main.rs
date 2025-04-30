@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
-use example_six_sigma::{broadcast, serve, state, AppComponent, SixSigmaCosmos};
+use example_six_sigma::{broadcast, serve, state, AppComponent, SixSigmaApp};
 use kolme::SecretKey;
 
 #[derive(clap::Parser)]
@@ -52,7 +52,14 @@ async fn main_inner() -> Result<()> {
             component,
         } => {
             kolme::init_logger(true, None);
-            serve::<SixSigmaCosmos>(bind, db_path, tx_log_path, component).await
+            serve(
+                SixSigmaApp::new_cosmos(),
+                bind,
+                db_path,
+                tx_log_path,
+                component,
+            )
+            .await
         }
         Cmd::GenPair {} => {
             let mut rng = rand::thread_rng();
@@ -68,7 +75,7 @@ async fn main_inner() -> Result<()> {
             host,
         } => broadcast(message, secret, host).await,
         Cmd::State {} => {
-            let state = state::<SixSigmaCosmos>(db_path).await?;
+            let state = state(SixSigmaApp::new_cosmos(), db_path).await?;
             println!("{}", serde_json::to_string(&state)?);
             Ok(())
         }

@@ -51,7 +51,7 @@ async fn main_inner() -> Result<()> {
 
             kolme::init_logger(true, None);
             let kolme = Kolme::new(
-                CosmosBridgeApp,
+                CosmosBridgeApp::default(),
                 DUMMY_CODE_VERSION,
                 KolmeStore::new_sqlite(DB_PATH).await?,
             )

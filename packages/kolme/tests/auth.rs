@@ -7,7 +7,9 @@ use kolme::*;
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
-pub struct SampleKolmeApp;
+pub struct SampleKolmeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SampleState {}
@@ -42,15 +44,12 @@ pub fn get_sample_secret_key() -> &'static SecretKey {
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for SampleKolmeApp {
+    fn default() -> Self {
         let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        GenesisInfo {
+        let genesis = GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -58,7 +57,18 @@ impl KolmeApp for SampleKolmeApp {
             approvers: set,
             needed_approvers: 1,
             chains: ConfiguredChains::default(),
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for SampleKolmeApp {
+    type State = SampleState;
+    type Message = SampleMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> anyhow::Result<Self::State> {
@@ -80,7 +90,7 @@ async fn test_sample_sanity() {
     let tempfile = tempfile::NamedTempFile::new().unwrap();
 
     let kolme = Kolme::new(
-        SampleKolmeApp,
+        SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
         KolmeStore::new_sqlite(tempfile.path()).await.unwrap(),
     )
