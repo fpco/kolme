@@ -11,7 +11,7 @@ use backon::{ExponentialBuilder, Retryable};
 use cosmos::{AddressHrp, Coin, Contract, Cosmos, HasAddress, SeedPhrase};
 use pretty_assertions::assert_eq;
 use rust_decimal::{dec, Decimal};
-use shared::cosmos::ExecuteMsg;
+use shared::cosmos::{ExecuteMsg, KeyRegistration};
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
@@ -264,7 +264,7 @@ async fn state() -> Result<SixSigmaState> {
 async fn register_funder_account(client: &reqwest::Client, contract: &Contract) -> Result<()> {
     const SR_BALANCE: Decimal = dec!(123_456);
     let wallet = sr_wallet()?;
-    let public_key = PublicKey::from_str(FUNDER_PUBLIC_KEY)?;
+    let public_key = SecretKey::from_str(FUNDER_SECRET_KEY)?;
     send_funds_with_key_and_find_account(client, contract, &wallet, &public_key, SR_BALANCE)
         .await?;
     Ok(())
@@ -272,12 +272,10 @@ async fn register_funder_account(client: &reqwest::Client, contract: &Contract) 
 
 const ADMIN_SECRET_KEY: &str = "127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02";
 
-const FUNDER_PUBLIC_KEY: &str =
-    "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";
+//const FUNDER_PUBLIC_KEY: &str = "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";
 const FUNDER_SECRET_KEY: &str = "2bb0119bcf9ac0d9a8883b2832f3309217d350033ba944193352f034f197b96a";
 
-const BETTOR_PUBLIC_KEY: &str =
-    "03e92af83772943d5a83c40dd35dcf813644655deb6fddb300b1cd6f146a53a4d3";
+// const BETTOR_PUBLIC_KEY: &str = "03e92af83772943d5a83c40dd35dcf813644655deb6fddb300b1cd6f146a53a4d3";
 const BETTOR_SECRET_KEY: &str = "6075334f2d4f254147fe37cb87c962112f9dad565720dd128b37b4ed07431690";
 
 async fn create_and_regsiter_bettor_account(
@@ -285,7 +283,7 @@ async fn create_and_regsiter_bettor_account(
     client: &reqwest::Client,
     contract: &Contract,
 ) -> Result<(cosmos::Wallet, AccountId)> {
-    create_wallet_and_regsiter_account(cosmos, client, contract, BETTOR_PUBLIC_KEY, dec!(345_678))
+    create_wallet_and_regsiter_account(cosmos, client, contract, BETTOR_SECRET_KEY, dec!(345_678))
         .await
 }
 
@@ -293,7 +291,7 @@ async fn create_wallet_and_regsiter_account(
     cosmos: &Cosmos,
     client: &reqwest::Client,
     contract: &Contract,
-    public_key: &str,
+    secret_key: &str,
     marker_amount: Decimal,
 ) -> Result<(cosmos::Wallet, AccountId)> {
     let cosmos_balance = marker_amount + dec!(1.0); // extra coins for feees
@@ -302,12 +300,12 @@ async fn create_wallet_and_regsiter_account(
     wallet
         .send_coins(cosmos, new_wallet.get_address(), vec![coin(cosmos_balance)])
         .await?;
-    let public_key = PublicKey::from_str(public_key)?;
+    let secret_key = SecretKey::from_str(secret_key)?;
     let account_id = send_funds_with_key_and_find_account(
         client,
         contract,
         &new_wallet,
-        &public_key,
+        &secret_key,
         marker_amount,
     )
     .await?;
@@ -330,7 +328,7 @@ async fn send_funds_with_key_and_find_account(
     client: &reqwest::Client,
     contract: &Contract,
     wallet: &cosmos::Wallet,
-    public_key: &PublicKey,
+    secret_key: &SecretKey,
     to_send: Decimal,
 ) -> Result<AccountId> {
     let resp = contract
@@ -338,7 +336,10 @@ async fn send_funds_with_key_and_find_account(
             wallet,
             vec![coin(to_send)],
             ExecuteMsg::Regular {
-                keys: vec![*public_key],
+                keys: vec![KeyRegistration::new(
+                    &wallet.get_address_string(),
+                    secret_key,
+                )?],
             },
         )
         .await?;

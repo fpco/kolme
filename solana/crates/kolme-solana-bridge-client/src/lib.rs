@@ -44,7 +44,7 @@ pub struct InitializeIxData {
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct RegularMsgIxData {
-    pub keys: Vec<Secp256k1PubkeyCompressed>,
+    pub keys: Vec<KeyRegistration>,
     pub transfer_amounts: Vec<u64>,
 }
 
@@ -62,6 +62,12 @@ pub struct SignedMsgIxData {
 pub struct Signature {
     pub signature: Secp256k1Signature,
     pub recovery_id: u8,
+}
+
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct KeyRegistration {
+    pub signature: Signature,
+    pub key: Secp256k1PubkeyCompressed,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
