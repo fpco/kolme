@@ -138,7 +138,10 @@ mod tests {
             return;
         }
 
-        let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let store = KolmeStore::new_postgres(&block_db_str, tempdir.path())
+            .await
+            .unwrap();
         store.clear_blocks().await.unwrap();
         test_sample_sanity(store).await
     }

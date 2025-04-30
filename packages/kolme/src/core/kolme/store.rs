@@ -54,8 +54,8 @@ impl<App: KolmeApp> KolmeStore<App> {
             .map_err(anyhow::Error::from)
     }
 
-    pub async fn new_postgres(url: &str) -> Result<Self> {
-        KolmeStorePostgres::new(url)
+    pub async fn new_postgres(url: &str, fjall_dir: impl AsRef<Path>) -> Result<Self> {
+        KolmeStorePostgres::new(url, fjall_dir)
             .await
             .map(|x| KolmeStoreInner::Postgres(x).into())
             .map_err(anyhow::Error::from)
@@ -89,12 +89,12 @@ impl<App: KolmeApp> KolmeStore<App> {
         merkle_manager: &MerkleManager,
     ) -> Result<Option<GenesisInfo>> {
         let Some(block) = self
-            .load_block(merkle_manager, BlockHeight::start())
+            .load_signed_block(merkle_manager, BlockHeight::start())
             .await?
         else {
             return Ok(None);
         };
-        let messages = &block.block.tx().0.message.as_inner().messages;
+        let messages = &block.tx().0.message.as_inner().messages;
         anyhow::ensure!(messages.len() == 1);
         match messages.first().unwrap() {
             Message::Genesis(genesis_info) => Ok(Some(genesis_info.clone())),
@@ -179,6 +179,47 @@ impl<App: KolmeApp> KolmeStore<App> {
                     .load_block::<App>(merkle_manager, height)
                     .await
             }
+        };
+        match res {
+            Err(KolmeStoreError::BlockNotFound { height: _ }) => Ok(None),
+            Err(e) => Err(e.into()),
+            Ok(block) => Ok(Some(block)),
+        }
+    }
+
+    pub async fn load_signed_block(
+        &self,
+        merkle_manager: &MerkleManager,
+        height: BlockHeight,
+    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
+        if let Some(storable) = self.block_cache.read().get(&height) {
+            return Ok(Some(storable.block.clone()));
+        }
+        let res = match &self.inner {
+            KolmeStoreInner::Sqlite(kolme_store_sqlite) => kolme_store_sqlite
+                .load_rendered_block(height.0)
+                .await
+                .and_then(|s| {
+                    serde_json::from_str(&s)
+                        .map_err(KolmeStoreError::custom)
+                        .map(Arc::new)
+                }),
+            KolmeStoreInner::Postgres(kolme_store_postgres) => kolme_store_postgres
+                .load_rendered_block(height.0)
+                .await
+                .and_then(|s| {
+                    serde_json::from_str(&s)
+                        .map_err(KolmeStoreError::custom)
+                        .map(Arc::new)
+                }),
+            KolmeStoreInner::InMemory(kolme_store_in_memory) => kolme_store_in_memory
+                .load_block::<App>(merkle_manager, height)
+                .await
+                .map(|x| x.block),
+            KolmeStoreInner::Fjall(kolme_store_fjall) => kolme_store_fjall
+                .load_block::<App>(merkle_manager, height)
+                .await
+                .map(|x| x.block),
         };
         match res {
             Err(KolmeStoreError::BlockNotFound { height: _ }) => Ok(None),

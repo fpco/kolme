@@ -1,0 +1,8 @@
+[package]
+name = "merkle-store-fjall"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fjall.workspace = true
+merkle-map.workspace = true
