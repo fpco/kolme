@@ -29,13 +29,7 @@ impl<App: KolmeApp> ApiServer<App> {
             .allow_origin(Any)
             .allow_headers([CONTENT_TYPE]);
 
-        let app = axum::Router::new()
-            .route("/", get(basics))
-            .route("/broadcast", put(broadcast))
-            .route("/get-next-nonce", get(get_next_nonce))
-            .route("/notifications", get(ws_handler::<App>))
-            .layer(cors)
-            .with_state(self.kolme);
+        let app = base_api_router().layer(cors).with_state(self.kolme);
 
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         tracing::info!("Starting API server on {:?}", listener.local_addr()?);
@@ -43,6 +37,14 @@ impl<App: KolmeApp> ApiServer<App> {
             .await
             .map_err(anyhow::Error::from)
     }
+}
+
+pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
+    axum::Router::new()
+        .route("/", get(basics))
+        .route("/broadcast", put(broadcast))
+        .route("/get-next-nonce", get(get_next_nonce))
+        .route("/notifications", get(ws_handler::<App>))
 }
 
 async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResponse {
