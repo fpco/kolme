@@ -117,8 +117,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     async fn execute_message(&mut self, app: &App, message: &Message<App::Message>) -> Result<()> {
         match message {
             Message::Genesis(actual) => {
-                let expected = App::genesis_info();
-                anyhow::ensure!(&expected == actual);
+                let expected = app.genesis_info();
+                anyhow::ensure!(expected == actual);
             }
             Message::App(msg) => {
                 app.execute(self, msg).await?;
@@ -379,6 +379,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .accounts
             .get_or_add_account_for_wallet(wallet)
             .0
+    }
+
+    pub fn app(&self) -> &App {
+        self.app
     }
 
     pub fn state_mut(&mut self) -> &mut App::State {

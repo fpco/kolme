@@ -22,8 +22,10 @@ use tokio_util::task::AbortOnDropHandle;
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
-#[derive(Clone, Debug, Copy)]
-struct TestApp;
+#[derive(Clone, Debug)]
+struct TestApp {
+    genesis: GenesisInfo,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct TestState {
@@ -51,17 +53,14 @@ enum TestMessage {
     Increment,
 }
 
-impl KolmeApp for TestApp {
-    type State = TestState;
-    type Message = TestMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for TestApp {
+    fn default() -> Self {
         let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
         let my_public_key = secret.public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
 
-        GenesisInfo {
+        let genesis = GenesisInfo {
             kolme_ident: "Test framework".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -69,7 +68,18 @@ impl KolmeApp for TestApp {
             approvers: set,
             needed_approvers: 1,
             chains: Default::default(),
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for TestApp {
+    type State = TestState;
+    type Message = TestMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -99,7 +109,7 @@ async fn find_free_port() -> Result<u16> {
 async fn setup(
     db_path: &Path,
 ) -> Result<(Kolme<TestApp>, AbortOnDropHandle<Result<()>>, SocketAddr)> {
-    let app = TestApp;
+    let app = TestApp::default();
     let store = KolmeStore::new_fjall(db_path)?;
     let kolme = Kolme::new(app, "test_version", store).await?;
     let read = kolme.read();
