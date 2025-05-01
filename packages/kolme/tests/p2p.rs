@@ -105,26 +105,22 @@ async fn sanity() {
     // Our goal is that when we propose transactions via the client,
     // the processor picks them up, creates a new block, and that new block
     // is picked up by the client.
-    let tempfile_processor = tempfile::NamedTempFile::new().unwrap();
+    let tempfile_processor = tempfile::tempdir().unwrap();
     let kolme_processor = Kolme::new(
         SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(tempfile_processor.path())
-            .await
-            .unwrap(),
+        KolmeStore::new_fjall(tempfile_processor.path()).unwrap(),
     )
     .await
     .unwrap();
     set.spawn(Processor::new(kolme_processor.clone(), my_secret_key().clone()).run());
     set.spawn(Gossip::new(kolme_processor).await.unwrap().run());
 
-    let tempfile_client = tempfile::NamedTempFile::new().unwrap();
+    let tempfile_client = tempfile::tempdir().unwrap();
     let kolme_client = Kolme::new(
         SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(tempfile_client.path())
-            .await
-            .unwrap(),
+        KolmeStore::new_fjall(tempfile_client.path()).unwrap(),
     )
     .await
     .unwrap();

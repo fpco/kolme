@@ -15,7 +15,6 @@ use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite};
@@ -111,7 +110,7 @@ async fn setup(
     db_path: &Path,
 ) -> Result<(Kolme<TestApp>, AbortOnDropHandle<Result<()>>, SocketAddr)> {
     let app = TestApp::default();
-    let store = KolmeStore::new_sqlite(db_path).await?;
+    let store = KolmeStore::new_fjall(db_path)?;
     let kolme = Kolme::new(app, "test_version", store).await?;
     let read = kolme.read();
     assert_eq!(read.get_next_height(), BlockHeight(0),);
@@ -145,7 +144,7 @@ where
 
 #[test_log::test(tokio::test)]
 async fn test_websocket_notifications() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -198,7 +197,7 @@ async fn test_websocket_notifications() {
 
 #[test_log::test(tokio::test)]
 async fn test_validate_tx_valid_signature() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -251,7 +250,7 @@ async fn test_validate_tx_valid_signature() {
 
 #[test_log::test(tokio::test)]
 async fn test_execute_transaction_genesis() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -276,7 +275,7 @@ async fn test_execute_transaction_genesis() {
 
 #[test_log::test(tokio::test)]
 async fn test_validate_tx_invalid_nonce() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -332,7 +331,7 @@ async fn test_validate_tx_invalid_nonce() {
 
 #[test_log::test(tokio::test)]
 async fn test_no_subscribers() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, _) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
@@ -356,7 +355,7 @@ async fn test_no_subscribers() {
 
 #[test_log::test(tokio::test)]
 async fn test_rejected_transaction_insufficient_balance() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -431,7 +430,7 @@ async fn test_rejected_transaction_insufficient_balance() {
 
 #[test_log::test(tokio::test)]
 async fn test_many_transactions() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -495,7 +494,7 @@ async fn test_many_transactions() {
 
 #[test_log::test(tokio::test)]
 async fn test_concurrent_transactions() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());

@@ -46,14 +46,14 @@ async fn main() -> Result<()> {
 async fn main_inner() -> Result<()> {
     match Opt::parse().cmd {
         Cmd::Serve { bind } => {
-            const DB_PATH: &str = "example-cosmos-bridge.sqlite3";
+            const DB_PATH: &str = "example-cosmos-bridge.fjall";
             const DUMMY_CODE_VERSION: &str = "dummy code version";
 
             kolme::init_logger(true, None);
             let kolme = Kolme::new(
                 CosmosBridgeApp::default(),
                 DUMMY_CODE_VERSION,
-                KolmeStore::new_sqlite(DB_PATH).await?,
+                KolmeStore::new_fjall(DB_PATH)?,
             )
             .await?;
 

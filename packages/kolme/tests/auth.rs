@@ -87,12 +87,12 @@ impl KolmeApp for SampleKolmeApp {
 #[tokio::test]
 async fn test_sample_sanity() {
     init_logger(false, None);
-    let tempfile = tempfile::NamedTempFile::new().unwrap();
+    let tempfile = tempfile::tempdir().unwrap();
 
     let kolme = Kolme::new(
         SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(tempfile.path()).await.unwrap(),
+        KolmeStore::new_fjall(tempfile.path()).unwrap(),
     )
     .await
     .unwrap();

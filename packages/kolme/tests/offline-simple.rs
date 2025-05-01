@@ -133,8 +133,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sample_sanity_sqlite() {
-        let tempfile = tempfile::NamedTempFile::new().unwrap();
-        test_sample_sanity(KolmeStore::new_sqlite(tempfile.path()).await.unwrap()).await
+        let tempfile = tempfile::tempdir().unwrap();
+        test_sample_sanity(KolmeStore::new_fjall(tempfile.path()).unwrap()).await
     }
 
     #[tokio::test]
