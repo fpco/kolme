@@ -101,15 +101,19 @@ impl<App: KolmeApp> Listener<App> {
                                 &cosmos,
                                 &contract,
                                 expected_code_id,
-                                &App::genesis_info(),
+                                self.kolme.get_app().genesis_info(),
                             )
                             .await
                         }
                         ChainKind::Solana(chain) => {
                             let client = kolme.get_solana_client(chain).await;
 
-                            solana::sanity_check_contract(&client, &contract, &App::genesis_info())
-                                .await
+                            solana::sanity_check_contract(
+                                &client,
+                                &contract,
+                                self.kolme.get_app().genesis_info(),
+                            )
+                            .await
                         }
                         #[cfg(feature = "pass_through")]
                         ChainKind::PassThrough => {
