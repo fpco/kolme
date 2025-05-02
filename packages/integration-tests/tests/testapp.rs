@@ -128,7 +128,7 @@ async fn setup(
     Ok((kolme, server_handle, addr))
 }
 
-async fn next_message_as_json<S>(mut ws_stream: S) -> Result<Value>
+async fn next_message_as_json<S>(ws_stream: &mut S) -> Result<Value>
 where
     S: StreamExt<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
 {
