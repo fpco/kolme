@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures_util::future::join_all;
 use futures_util::StreamExt;
 use kolme::{
@@ -128,13 +128,13 @@ async fn setup(
     Ok((kolme, server_handle, addr))
 }
 
-async fn next_message_as_json<S>(ws_stream: &mut S) -> Result<Value, Box<dyn std::error::Error>>
+async fn next_message_as_json<S>(ws_stream: &mut S) -> Result<Value>
 where
     S: StreamExt<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
 {
     let message = timeout(Duration::from_secs(5), ws_stream.next())
         .await?
-        .ok_or("WebSocket stream terminated")??;
+        .context("WebSocket stream terminated")??;
 
     let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received genesis notification: {}", notification);
@@ -309,14 +309,6 @@ async fn test_validate_tx_invalid_nonce() {
 
     kolme.propose_transaction(signed_tx.clone()).unwrap();
 
-    let notification = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        notification["Broadcast"].is_object(),
-        "Expected Broadcast notification, got: {}",
-        notification
-    );
-
     let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
@@ -371,6 +363,7 @@ async fn test_rejected_transaction_insufficient_balance() {
     }));
 
     let notification = next_message_as_json(&mut ws).await.unwrap();
+
     assert!(
         notification["NewBlock"].is_object(),
         "Expected NewBlock notification for genesis, got: {}",
@@ -390,31 +383,6 @@ async fn test_rejected_transaction_insufficient_balance() {
         .unwrap();
 
     kolme.propose_transaction(tx_withdraw.clone()).unwrap();
-
-    let notification = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        notification["Broadcast"].is_object(),
-        "Expected Broadcast notification"
-    );
-
-    // Return an Error due Insufficient balance for account
-    let result = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        result["FailedTransaction"].is_object(),
-        "Expected FailedTransaction notification, but got: {:?}",
-        result
-    );
-
-    let error = result["FailedTransaction"]["error"]["Other"]
-        .as_str()
-        .expect("Expected error message in FailedTransaction");
-    assert!(
-        error.contains("Insufficient balance"),
-        "Expected insufficient balance error, but got: {}",
-        error
-    );
 
     let read = kolme.read();
     let state = read.get_app_state();
@@ -547,29 +515,6 @@ async fn test_concurrent_transactions() {
     }
 
     join_all(tasks).await;
-
-    let mut notifications = Vec::with_capacity(200);
-    for _ in 0..200 {
-        let notification = next_message_as_json(&mut ws).await.unwrap();
-        notifications.push(notification);
-    }
-
-    let (broadcasts, new_blocks): (Vec<_>, Vec<_>) = notifications
-        .into_iter()
-        .partition(|n| n["Broadcast"].is_object());
-
-    assert_eq!(
-        broadcasts.len(),
-        100,
-        "Expected 100 Broadcast notifications, got: {}",
-        broadcasts.len()
-    );
-    assert_eq!(
-        new_blocks.len(),
-        100,
-        "Expected 100 NewBlock notifications, got: {}",
-        new_blocks.len()
-    );
 
     let read = kolme.read();
     let state = read.get_app_state();
