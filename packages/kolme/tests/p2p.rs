@@ -3,7 +3,10 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 
 use kolme::*;
-use tokio::task::JoinSet;
+use tokio::{
+    task::JoinSet,
+    time::{timeout, Duration},
+};
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
@@ -128,19 +131,25 @@ async fn sanity() {
 
     {
         let secret = SecretKey::random(&mut rand::thread_rng());
-        kolme_client
-            .wait_for_block(BlockHeight::start())
-            .await
-            .unwrap();
+        timeout(
+            Duration::from_secs(30),
+            kolme_client.wait_for_block(BlockHeight::start()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let tx = kolme_client
             .read()
             .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .unwrap();
         let txhash = tx.hash();
-        kolme_client
-            .propose_and_await_transaction(tx)
-            .await
-            .unwrap();
+        timeout(
+            Duration::from_secs(5),
+            kolme_client.propose_and_await_transaction(tx),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let block = tokio::time::timeout(
             tokio::time::Duration::from_secs(5),
             kolme_client.wait_for_block(BlockHeight::start().next()),
