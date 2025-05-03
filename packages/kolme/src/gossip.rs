@@ -221,7 +221,11 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
-                libp2p::request_response::Event::Message { peer: _, message },
+                libp2p::request_response::Event::Message {
+                    peer: _,
+                    connection_id: _,
+                    message,
+                },
             )) => match message {
                 libp2p::request_response::Message::Request {
                     request_id: _,

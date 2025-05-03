@@ -20,7 +20,7 @@ base64 = "0.22.1"
 jiff = { workspace = true }
 kolme-store.workspace = true
 kolme-store-postgresql.workspace = true
-libp2p = { version = "0.53", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
+libp2p = { version = "0.55", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
 merkle-map = { workspace = true }
 parking_lot = "0.12.3"
 rand = "0.8"
