@@ -16,7 +16,7 @@ use setup::{
 };
 use shared::cosmos::KeyRegistration as CosmosKeyRegistration;
 
-const DB_PATH: &str = "example-solana-cosmos-bridge.sqlite3";
+const DB_PATH: &str = "example-solana-cosmos-bridge.fjall";
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 const COSMOS_SUBMITTER_SEED: &str = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
 
@@ -54,8 +54,8 @@ async fn bridge_transfer() {
         },
     );
 
-    let store = KolmeStore::new_sqlite(DB_PATH).await.unwrap();
-    let kolme = Kolme::new(SolanaCosmosBridgeApp, DUMMY_CODE_VERSION, store)
+    let store = KolmeStore::new_fjall(DB_PATH).unwrap();
+    let kolme = Kolme::new(SolanaCosmosBridgeApp::default(), DUMMY_CODE_VERSION, store)
         .await
         .unwrap();
 

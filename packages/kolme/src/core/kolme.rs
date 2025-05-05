@@ -296,8 +296,8 @@ impl<App: KolmeApp> Kolme<App> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
         let merkle_manager = MerkleManager::default();
-        let info = App::genesis_info();
-        let current_block = MaybeBlockInfo::<App>::load(&store, &info, &merkle_manager).await?;
+        let current_block =
+            MaybeBlockInfo::<App>::load(&store, app.genesis_info(), &merkle_manager).await?;
         let inner = KolmeInner {
             store,
             app,
@@ -310,15 +310,18 @@ impl<App: KolmeApp> Kolme<App> {
             mempool: Mempool::new(),
             current_block: RwLock::new(Arc::new(current_block)),
         };
+
         let kolme = Kolme {
             inner: Arc::new(inner),
         };
+
         kolme.resync().await?;
         kolme
             .inner
             .store
-            .validate_genesis_info(&kolme.inner.merkle_manager, &info)
+            .validate_genesis_info(&kolme.inner.merkle_manager, kolme.get_app().genesis_info())
             .await?;
+
         Ok(kolme)
     }
 
@@ -556,6 +559,13 @@ impl<App: KolmeApp> KolmeRead<App> {
 
     pub fn get_balances(&self) -> &Accounts {
         &self.get_framework_state().accounts
+    }
+
+    pub fn get_account_balances(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<&BTreeMap<AssetId, Decimal>> {
+        self.get_framework_state().accounts.get_assets(account_id)
     }
 
     pub fn create_signed_transaction(

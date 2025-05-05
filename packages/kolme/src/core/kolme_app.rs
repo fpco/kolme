@@ -15,7 +15,7 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
         + 'static;
 
     /// Initial chain information.
-    fn genesis_info() -> GenesisInfo;
+    fn genesis_info(&self) -> &GenesisInfo;
 
     /// Generate a blank state.
     fn new_state() -> Result<Self::State>;

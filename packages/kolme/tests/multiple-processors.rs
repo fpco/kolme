@@ -10,7 +10,9 @@ use rand::seq::SliceRandom;
 use tokio::task::JoinSet;
 
 #[derive(Clone)]
-pub struct SampleKolmeApp;
+pub struct SampleKolmeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {}
@@ -45,15 +47,12 @@ pub fn get_sample_secret_key() -> &'static SecretKey {
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for SampleKolmeApp {
+    fn default() -> Self {
         let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        GenesisInfo {
+        let genesis = GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -61,7 +60,18 @@ impl KolmeApp for SampleKolmeApp {
             approvers: set,
             needed_approvers: 1,
             chains: ConfiguredChains::default(),
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for SampleKolmeApp {
+    type State = SampleState;
+    type Message = SampleMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -94,12 +104,6 @@ async fn multiple_processors() {
 
     let store = if block_db_str == "MEMORY" {
         Some(KolmeStore::new_in_memory())
-    } else if block_db_str == "SQLITE" {
-        Some(
-            KolmeStore::new_sqlite("multi-processors.sqlite3")
-                .await
-                .unwrap(),
-        )
     } else if block_db_str == "FJALL" {
         Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
@@ -128,7 +132,7 @@ async fn multiple_processors() {
                 KolmeStore::new_postgres(&block_db_str, dir).await.unwrap()
             }
         };
-        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store)
+        let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
             .await
             .unwrap();
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());

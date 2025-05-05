@@ -3,11 +3,16 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 
 use kolme::*;
-use tokio::task::JoinSet;
+use tokio::{
+    task::JoinSet,
+    time::{timeout, Duration},
+};
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
-pub struct SampleKolmeApp;
+pub struct SampleKolmeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {
@@ -50,15 +55,12 @@ fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for SampleKolmeApp {
+    fn default() -> Self {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        GenesisInfo {
+        let genesis = GenesisInfo {
             kolme_ident: "p2p example".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -66,7 +68,18 @@ impl KolmeApp for SampleKolmeApp {
             approvers: set,
             needed_approvers: 1,
             chains: ConfiguredChains::default(),
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for SampleKolmeApp {
+    type State = SampleState;
+    type Message = SampleMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -95,26 +108,22 @@ async fn sanity() {
     // Our goal is that when we propose transactions via the client,
     // the processor picks them up, creates a new block, and that new block
     // is picked up by the client.
-    let tempfile_processor = tempfile::NamedTempFile::new().unwrap();
+    let tempfile_processor = tempfile::tempdir().unwrap();
     let kolme_processor = Kolme::new(
-        SampleKolmeApp,
+        SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(tempfile_processor.path())
-            .await
-            .unwrap(),
+        KolmeStore::new_fjall(tempfile_processor.path()).unwrap(),
     )
     .await
     .unwrap();
     set.spawn(Processor::new(kolme_processor.clone(), my_secret_key().clone()).run());
     set.spawn(Gossip::new(kolme_processor).await.unwrap().run());
 
-    let tempfile_client = tempfile::NamedTempFile::new().unwrap();
+    let tempfile_client = tempfile::tempdir().unwrap();
     let kolme_client = Kolme::new(
-        SampleKolmeApp,
+        SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(tempfile_client.path())
-            .await
-            .unwrap(),
+        KolmeStore::new_fjall(tempfile_client.path()).unwrap(),
     )
     .await
     .unwrap();
@@ -122,19 +131,25 @@ async fn sanity() {
 
     {
         let secret = SecretKey::random(&mut rand::thread_rng());
-        kolme_client
-            .wait_for_block(BlockHeight::start())
-            .await
-            .unwrap();
+        timeout(
+            Duration::from_secs(30),
+            kolme_client.wait_for_block(BlockHeight::start()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let tx = kolme_client
             .read()
             .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .unwrap();
         let txhash = tx.hash();
-        kolme_client
-            .propose_and_await_transaction(tx)
-            .await
-            .unwrap();
+        timeout(
+            Duration::from_secs(5),
+            kolme_client.propose_and_await_transaction(tx),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let block = tokio::time::timeout(
             tokio::time::Duration::from_secs(5),
             kolme_client.wait_for_block(BlockHeight::start().next()),

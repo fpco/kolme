@@ -12,7 +12,9 @@ use kolme::*;
 use tokio::task::JoinSet;
 
 #[derive(Clone, Debug)]
-pub struct SolanaCosmosBridgeApp;
+pub struct SolanaCosmosBridgeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Default)]
 pub struct State;
@@ -51,11 +53,8 @@ fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl KolmeApp for SolanaCosmosBridgeApp {
-    type State = State;
-    type Message = BridgeMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for SolanaCosmosBridgeApp {
+    fn default() -> Self {
         let my_public_key = my_secret_key().public_key();
 
         let mut set = BTreeSet::new();
@@ -105,7 +104,7 @@ impl KolmeApp for SolanaCosmosBridgeApp {
             )
             .unwrap();
 
-        GenesisInfo {
+        let genesis = GenesisInfo {
             kolme_ident: "Solana<->Cosmos bridge example".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -113,7 +112,18 @@ impl KolmeApp for SolanaCosmosBridgeApp {
             approvers: set,
             needed_approvers: 1,
             chains: bridges,
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for SolanaCosmosBridgeApp {
+    type State = State;
+    type Message = BridgeMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
