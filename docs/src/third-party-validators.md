@@ -23,7 +23,7 @@ You'll need a machine that will fulfill the following specs:
 
 ## Setup
 
-1. Download the kolme app binary from Github (TODO with link)
+1. Download the six-sigma app binary from Github (TODO with link)
 
 2. TODO How to join the network
 
@@ -42,7 +42,7 @@ them to the Kolme chain.
 
 2. Start the listener service:
    ```bash
-   ./target/release/kolme run-listener --config config.toml
+   $ ./six-sigma-app run-listener --config config.toml
    ```
 
 ## Running an approver service
@@ -56,7 +56,7 @@ contracts.
 
 2. Start the approver service:
    ```bash
-   ./target/release/kolme run-approver --config config.toml
+   $ ./six-sigma-app run-approver --config config.toml
    ```
 
 ## Troubleshooting Common Issues
