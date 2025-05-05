@@ -1,7 +1,7 @@
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
-        State, WebSocketUpgrade,
+        Path, State, WebSocketUpgrade,
     },
     response::IntoResponse,
     routing::{get, post},
@@ -24,7 +24,7 @@ type Broadcast = tokio::sync::broadcast::Sender<BridgeEventMessage>;
 #[derive(Clone)]
 pub struct PassThrough {
     notify: Broadcast,
-    actions: Arc<RwLock<Vec<Action>>>,
+    actions: Arc<RwLock<BTreeMap<BridgeActionId, Action>>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -36,6 +36,7 @@ pub struct Msg {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Transfer {
+    pub bridge_action_id: BridgeActionId,
     pub recipient: Wallet,
     pub funds: Vec<AssetAmount>,
 }
@@ -74,7 +75,7 @@ impl PassThrough {
     pub fn new() -> Self {
         Self {
             notify: tokio::sync::broadcast::channel(100).0,
-            actions: Arc::new(RwLock::new(vec![])),
+            actions: Arc::new(RwLock::new(BTreeMap::new())),
         }
     }
 
@@ -88,6 +89,7 @@ impl PassThrough {
             .route("/msg", post(msg))
             .route("/notifications", get(ws_handler))
             .route("/actions", get(actions).post(new_action))
+            .route("/actions/{bridge_action_id}", get(action))
             .layer(cors)
             .with_state(self);
 
@@ -183,11 +185,25 @@ async fn new_action(
     Json(action): Json<Action>,
 ) -> impl IntoResponse {
     tracing::debug!("new action to pass-through bridge: {action:?}");
+    let Transfer {
+        bridge_action_id, ..
+    } = serde_json::from_str(&action.payload)
+        .expect("payload is expected to contain Transfer serialized as JSON");
     let mut guard = state.actions.write().await;
-    guard.push(action);
+    guard.insert(bridge_action_id, action);
 }
 
 async fn actions(State(state): State<PassThrough>) -> impl IntoResponse {
     let actions = state.actions.read().await.clone();
     Json(actions)
+}
+
+async fn action(
+    State(state): State<PassThrough>,
+    Path(bridge_action_id): Path<BridgeActionId>,
+) -> impl IntoResponse {
+    tracing::debug!("got request for action {bridge_action_id}");
+    let actions = state.actions.read().await.clone();
+    let action = actions.get(&bridge_action_id).cloned();
+    Json(action)
 }

@@ -73,7 +73,10 @@ async fn main_inner() -> Result<()> {
             message,
             secret,
             host,
-        } => broadcast(message, secret, host).await,
+        } => {
+            let _ = broadcast(message, secret, host).await?;
+            Ok(())
+        }
         Cmd::State {} => {
             let state = state(SixSigmaApp::new_cosmos(), db_path).await?;
             println!("{}", serde_json::to_string(&state)?);

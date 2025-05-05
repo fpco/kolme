@@ -465,6 +465,19 @@ impl<App: KolmeApp> Kolme<App> {
         })
     }
 
+    /// Returns the logs of the given block, if available.
+    pub async fn get_block_logs(&self, height: BlockHeight) -> Result<Option<Arc<[Vec<String>]>>> {
+        let storable_block = self
+            .inner
+            .store
+            .load_block(&self.inner.merkle_manager, height)
+            .await?;
+        Ok(match storable_block {
+            Some(storable_block) => Some(storable_block.logs.clone()),
+            None => None,
+        })
+    }
+
     /// Get the block height for the given transaction, if present.
     pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>> {
         self.inner.store.get_height_for_tx(tx).await

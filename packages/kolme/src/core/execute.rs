@@ -415,7 +415,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state.accounts.get_assets(account_id)
     }
 
-    fn add_action(&mut self, chain: ExternalChain, action: ExecAction) -> Result<()> {
+    fn add_action(&mut self, chain: ExternalChain, action: ExecAction) -> Result<BridgeActionId> {
         let state = self.framework_state.chains.get_mut(chain)?;
         let id = state.next_action_id;
         let payload = action.to_payload(chain, &state.config, id)?;
@@ -428,7 +428,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             },
         );
         state.next_action_id = state.next_action_id.next();
-        Ok(())
+        Ok(id)
     }
 
     /// Withdraw an asset to an external chain.
@@ -439,7 +439,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         source: AccountId,
         wallet: &Wallet,
         amount: Decimal,
-    ) -> Result<()> {
+    ) -> Result<BridgeActionId> {
         let config = self.framework_state.get_asset_config(chain, asset_id)?;
         let (amount_dec, amount_u128) = config.to_u128(amount)?;
         self.framework_state
@@ -456,8 +456,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     amount: amount_u128,
                 }],
             },
-        )?;
-        Ok(())
+        )
     }
 
     /// Transfer an asset to another account.
@@ -534,7 +533,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 chain,
                 dest,
                 amount,
-            } => self.withdraw_asset(*asset, *chain, self.sender, dest, *amount)?,
+            } => {
+                let _bridge_action_id =
+                    self.withdraw_asset(*asset, *chain, self.sender, dest, *amount)?;
+            }
             BankMessage::Transfer {
                 asset,
                 dest,
