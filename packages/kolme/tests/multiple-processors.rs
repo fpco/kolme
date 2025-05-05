@@ -10,7 +10,9 @@ use rand::seq::SliceRandom;
 use tokio::task::JoinSet;
 
 #[derive(Clone)]
-pub struct SampleKolmeApp;
+pub struct SampleKolmeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {}
@@ -45,15 +47,12 @@ pub fn get_sample_secret_key() -> &'static SecretKey {
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for SampleKolmeApp {
+    fn default() -> Self {
         let my_public_key = get_sample_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        GenesisInfo {
+        let genesis = GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -61,7 +60,18 @@ impl KolmeApp for SampleKolmeApp {
             approvers: set,
             needed_approvers: 1,
             chains: ConfiguredChains::default(),
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for SampleKolmeApp {
+    type State = SampleState;
+    type Message = SampleMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -90,19 +100,16 @@ async fn multiple_processors() {
         return;
     }
 
+    let tempdir = tempfile::tempdir().unwrap();
+
     let store = if block_db_str == "MEMORY" {
         Some(KolmeStore::new_in_memory())
-    } else if block_db_str == "SQLITE" {
-        Some(
-            KolmeStore::new_sqlite("multi-processors.sqlite3")
-                .await
-                .unwrap(),
-        )
     } else if block_db_str == "FJALL" {
         Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
         // Wipe out the database so we have a fresh run
-        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+        let temp = tempfile::TempDir::new().unwrap();
+        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str, temp.path())
             .await
             .unwrap();
         store.clear_blocks().await.unwrap();
@@ -116,12 +123,16 @@ async fn multiple_processors() {
     const PROCESSOR_COUNT: usize = 10;
     const CLIENT_COUNT: usize = 100;
 
-    for _ in 0..PROCESSOR_COUNT {
+    for i in 0..PROCESSOR_COUNT {
         let store = match &store {
             Some(store) => store.clone(),
-            None => KolmeStore::new_postgres(&block_db_str).await.unwrap(),
+            None => {
+                let mut dir = tempdir.path().to_owned();
+                dir.push(i.to_string());
+                KolmeStore::new_postgres(&block_db_str, dir).await.unwrap()
+            }
         };
-        let kolme = Kolme::new(SampleKolmeApp, DUMMY_CODE_VERSION, store)
+        let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
             .await
             .unwrap();
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
@@ -196,6 +207,11 @@ async fn client(
         {
             let mut guard = all_txhashes.lock();
             guard.insert(txhash);
+            let count = guard.len();
+            std::mem::drop(guard);
+            if count % 50 == 0 {
+                println!("In client, total transactions logged: {count}");
+            }
         }
 
         let res = tokio::time::timeout(
@@ -220,11 +236,13 @@ async fn checker(
     all_txhashes: Arc<Mutex<HashSet<TxHash>>>,
     highest_block: Arc<Mutex<BlockHeight>>,
 ) -> Result<()> {
+    let highest_block = *highest_block.lock();
+
     // Resynchronize all the Kolmes so they have the most up to date state from the database.
     for kolme in &*kolmes {
         kolme.resync().await.unwrap();
+        assert_eq!(kolme.read().get_next_height(), highest_block.next());
     }
-    let highest_block = *highest_block.lock();
     let highest_block = kolmes[0]
         .read()
         .get_block(highest_block)

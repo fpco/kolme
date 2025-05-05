@@ -39,13 +39,20 @@ impl MerkleManager {
 
         let mut serializer = MerkleSerializer::new(self.clone());
         value.merkle_serialize(&mut serializer)?;
-        let contents = Arc::new(serializer.finish());
-
-        let exists = self.cache.read().contains_key(&contents.hash);
-        if !exists {
-            let payload = contents.payload.clone();
-            self.cache.write().insert(contents.hash, payload);
+        let mut contents = serializer.finish();
+        let existing_payload = self.cache.read().get(&contents.hash).cloned();
+        match existing_payload {
+            Some(payload) => {
+                // Reuse existing memory
+                contents.payload = payload.clone();
+            }
+            None => {
+                let payload = contents.payload.clone();
+                self.cache.write().insert(contents.hash, payload);
+            }
         }
+
+        let contents = Arc::new(contents);
         value.set_merkle_contents(&contents);
         Ok(contents)
     }

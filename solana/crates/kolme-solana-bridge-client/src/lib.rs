@@ -11,6 +11,9 @@ pub use solana_pubkey as pubkey;
 pub use solana_keypair as keypair;
 
 #[cfg(feature = "client")]
+pub use solana_signer as signer;
+
+#[cfg(feature = "client")]
 pub use solana_instruction as instruction;
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -41,7 +44,7 @@ pub struct InitializeIxData {
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct RegularMsgIxData {
-    pub keys: Vec<Secp256k1PubkeyCompressed>,
+    pub keys: Vec<KeyRegistration>,
     pub transfer_amounts: Vec<u64>,
 }
 
@@ -52,13 +55,19 @@ pub struct SignedMsgIxData {
     /// Signatures from the executors
     pub executors: Vec<Signature>,
     /// The raw payload to execute
-    pub payload: Vec<u8>,
+    pub payload: String,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct Signature {
     pub signature: Secp256k1Signature,
     pub recovery_id: u8,
+}
+
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct KeyRegistration {
+    pub signature: Signature,
+    pub key: Secp256k1PubkeyCompressed,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]

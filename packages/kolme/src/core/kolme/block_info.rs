@@ -6,15 +6,15 @@ use crate::core::*;
 pub(in crate::core) struct BlockInfo<App: KolmeApp> {
     pub(super) block: Arc<SignedBlock<App::Message>>,
     #[allow(dead_code)]
-    logs: Arc<[Vec<String>]>,
-    state: BlockState<App>,
+    pub(super) logs: Arc<[Vec<String>]>,
+    pub(super) state: BlockState<App>,
 }
 
 /// Separated from [BlockInfo] since it can also represent initial state before any blocks.
 pub(in crate::core) struct BlockState<App: KolmeApp> {
-    blockhash: BlockHash,
-    framework_state: Arc<FrameworkState>,
-    app_state: Arc<App::State>,
+    pub(super) blockhash: BlockHash,
+    pub(super) framework_state: Arc<FrameworkState>,
+    pub(super) app_state: Arc<App::State>,
 }
 
 /// Either the info on a block or initial pre-genesis state.
@@ -69,12 +69,6 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
         };
         res.get_framework_state().validate()?;
         Ok(res)
-    }
-}
-
-impl<App: KolmeApp> BlockInfo<App> {
-    pub(super) fn get_height(&self) -> BlockHeight {
-        self.block.height()
     }
 }
 

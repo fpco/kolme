@@ -2,6 +2,7 @@ mod block_info;
 mod mempool;
 mod store;
 
+use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
@@ -191,37 +192,18 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Resync with the database.
     pub async fn resync(&self) -> Result<()> {
-        let latest = self.inner.store.load_latest_block().await?;
-        let Some(latest) = latest else { return Ok(()) };
-
-        // Do a read first to avoid creating lock contention.
-        if self.inner.current_block.read().get_next_height().0 > latest.0 {
-            return Ok(());
+        loop {
+            let next = self.inner.current_block.read().get_next_height();
+            let Some(block) = self
+                .inner
+                .store
+                .load_signed_block(self.get_merkle_manager(), next)
+                .await?
+            else {
+                break Ok(());
+            };
+            self.add_block(block).await?;
         }
-
-        let latest = self
-            .inner
-            .store
-            .load_block(&self.inner.merkle_manager, latest)
-            .await?
-            .with_context(|| format!("resync: expected block {latest} not present"))?;
-
-        // Do this before grabbing the write lock to reduce contention
-        let latest = BlockInfo::<App>::try_from(latest)?;
-
-        // Now do the write lock
-        let mut guard = self.inner.current_block.write();
-
-        if guard.get_next_height() > latest.get_height() {
-            return Ok(());
-        }
-
-        let block = latest.block.clone();
-        *guard = Arc::new(MaybeBlockInfo::Some(latest));
-        std::mem::drop(guard);
-
-        self.notify(Notification::NewBlock(block));
-        Ok(())
     }
 
     /// Validate and append the given block.
@@ -245,6 +227,10 @@ impl<App: KolmeApp> Kolme<App> {
 
         anyhow::ensure!(loads == block.loads);
 
+        let framework_state = Arc::new(framework_state);
+        let app_state = Arc::new(app_state);
+        let logs: Arc<[_]> = logs.into();
+
         self.inner
             .store
             .add_block(
@@ -253,19 +239,35 @@ impl<App: KolmeApp> Kolme<App> {
                     height: signed_block.height().0,
                     blockhash: signed_block.hash().0,
                     txhash: signed_block.tx().hash().0,
-                    block: signed_block,
-                    framework_state: Arc::new(framework_state),
-                    app_state: Arc::new(app_state),
-                    logs: logs.into(),
+                    block: signed_block.clone(),
+                    framework_state: framework_state.clone(),
+                    app_state: app_state.clone(),
+                    logs: logs.clone(),
                 },
             )
             .await?;
 
         self.inner.mempool.drop_tx(txhash);
 
-        // TODO check if this is inefficient and, if so, write an optimized version
-        // here that uses the already loaded data
-        self.resync().await?;
+        // Now do the write lock
+        let mut guard = self.inner.current_block.write();
+
+        if guard.get_next_height() > signed_block.height() {
+            return Ok(());
+        }
+
+        *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
+            block: signed_block.clone(),
+            logs,
+            state: BlockState {
+                blockhash: signed_block.hash(),
+                framework_state,
+                app_state,
+            },
+        }));
+        std::mem::drop(guard);
+
+        self.notify(Notification::NewBlock(signed_block));
 
         Ok(())
     }
@@ -293,10 +295,9 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
-        let info = App::genesis_info();
         let merkle_manager = MerkleManager::default();
-        store.validate_genesis_info(&merkle_manager, &info).await?;
-        let current_block = MaybeBlockInfo::<App>::load(&store, &info, &merkle_manager).await?;
+        let current_block =
+            MaybeBlockInfo::<App>::load(&store, app.genesis_info(), &merkle_manager).await?;
         let inner = KolmeInner {
             store,
             app,
@@ -309,9 +310,19 @@ impl<App: KolmeApp> Kolme<App> {
             mempool: Mempool::new(),
             current_block: RwLock::new(Arc::new(current_block)),
         };
-        Ok(Kolme {
+
+        let kolme = Kolme {
             inner: Arc::new(inner),
-        })
+        };
+
+        kolme.resync().await?;
+        kolme
+            .inner
+            .store
+            .validate_genesis_info(&kolme.inner.merkle_manager, kolme.get_app().genesis_info())
+            .await?;
+
+        Ok(kolme)
     }
 
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App::Message>> {
@@ -531,15 +542,15 @@ impl<App: KolmeApp> KolmeRead<App> {
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.get_framework_state().processor
+        self.get_framework_state().get_config().processor
     }
 
     pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.get_framework_state().approvers
+        &self.get_framework_state().get_config().approvers
     }
 
     pub fn get_needed_approvers(&self) -> usize {
-        self.get_framework_state().needed_approvers
+        self.get_framework_state().get_config().needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &ChainStates {
@@ -548,6 +559,13 @@ impl<App: KolmeApp> KolmeRead<App> {
 
     pub fn get_balances(&self) -> &Accounts {
         &self.get_framework_state().accounts
+    }
+
+    pub fn get_account_balances(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<&BTreeMap<AssetId, Decimal>> {
+        self.get_framework_state().accounts.get_assets(account_id)
     }
 
     pub fn create_signed_transaction(

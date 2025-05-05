@@ -101,13 +101,14 @@ pub async fn sanity_check_contract(
 
     let acc = client.get_account(&state_acc).await?;
 
-    if acc.owner != program_id || acc.data.is_empty() {
+    if acc.owner != program_id || acc.data.len() < 2 {
         return Err(anyhow::anyhow!(
             "Bridge program {program} hasn't been initialized yet."
         ));
     }
 
-    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data)
+    // Skip the first two bytes which are the discriminator byte and the bump seed respectively.
+    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..])
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
 
     anyhow::ensure!(info.processor.as_bytes().deref() == state.processor.0.as_slice());

@@ -7,7 +7,9 @@ use tokio::task::JoinSet;
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
-pub struct SampleKolmeApp;
+pub struct SampleKolmeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct SampleState {
@@ -43,22 +45,19 @@ pub enum SampleMessage {
 // Secret key: 127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
-
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for SampleKolmeApp {
+    fn default() -> Self {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
-        GenesisInfo {
+
+        let genesis = GenesisInfo {
             kolme_ident: "p2p example".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -66,7 +65,18 @@ impl KolmeApp for SampleKolmeApp {
             approvers: set,
             needed_approvers: 1,
             chains: ConfiguredChains::default(),
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for SampleKolmeApp {
+    type State = SampleState;
+    type Message = SampleMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -86,12 +96,12 @@ impl KolmeApp for SampleKolmeApp {
 }
 
 pub async fn processor() -> Result<()> {
-    const DB_PATH: &str = "example-p2p-processor.sqlite3";
+    const DB_PATH: &str = "example-p2p-processor.fjall";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(
-        SampleKolmeApp,
+        SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(DB_PATH).await?,
+        KolmeStore::new_fjall(DB_PATH)?,
     )
     .await?;
 
@@ -120,12 +130,12 @@ pub async fn processor() -> Result<()> {
 }
 
 pub async fn api_server(bind: SocketAddr) -> Result<()> {
-    const DB_PATH: &str = "example-p2p-api-server.sqlite3";
+    const DB_PATH: &str = "example-p2p-api-server.fjall";
     kolme::init_logger(true, None);
     let kolme = Kolme::new(
-        SampleKolmeApp,
+        SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(DB_PATH).await?,
+        KolmeStore::new_fjall(DB_PATH)?,
     )
     .await?;
 

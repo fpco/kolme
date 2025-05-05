@@ -9,6 +9,7 @@ mod merkle_serializer;
 mod traits;
 mod types;
 
+pub use impls::MerkleLockable;
 pub use manager::*;
 pub use memory_store::*;
 pub use merkle_deserializer::*;

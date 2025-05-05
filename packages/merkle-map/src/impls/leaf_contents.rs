@@ -30,7 +30,7 @@ impl<K, V> LeafContents<K, V> {
             if old_entry.key_bytes == entry.key_bytes {
                 std::mem::swap(old_entry, &mut entry);
                 return (
-                    Node::Leaf(Lockable::new_unlocked(self)),
+                    Node::Leaf(MerkleLockable::new(self)),
                     Some((entry.key, entry.value)),
                 );
             }
@@ -39,7 +39,7 @@ impl<K, V> LeafContents<K, V> {
         if self.values.len() < 16 {
             self.values.push(entry);
             self.sort();
-            (Node::Leaf(Lockable::new_unlocked(self)), None)
+            (Node::Leaf(MerkleLockable::new(self)), None)
         } else {
             let mut tree = TreeContents::new();
             tree.insert(depth, entry);
@@ -47,7 +47,7 @@ impl<K, V> LeafContents<K, V> {
                 let old = tree.insert(depth, entry);
                 assert!(old.is_none());
             });
-            (Node::Tree(Lockable::new_unlocked(tree)), None)
+            (Node::Tree(MerkleLockable::new(tree)), None)
         }
     }
 
@@ -81,10 +81,10 @@ impl<K, V> LeafContents<K, V> {
                     key,
                     value,
                 } = self.values.remove(idx);
-                let node = Node::Leaf(Lockable::new_unlocked(self));
+                let node = Node::Leaf(MerkleLockable::new(self));
                 (node, Some((key, value)))
             }
-            None => (Node::Leaf(Lockable::new_unlocked(self)), None),
+            None => (Node::Leaf(MerkleLockable::new(self)), None),
         }
     }
 
@@ -124,7 +124,9 @@ impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<LeafContents<K, V>> {
+impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize
+    for MerkleLockable<LeafContents<K, V>>
+{
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -144,6 +146,6 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for Lockable<Leaf
             values.push(LeafEntry::merkle_deserialize(deserializer)?);
         }
 
-        Ok(Lockable::new_unlocked(LeafContents { values }))
+        Ok(MerkleLockable::new(LeafContents { values }))
     }
 }
