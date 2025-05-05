@@ -196,7 +196,7 @@ impl<App: KolmeApp> Gossip<App> {
                                     state.observe_next_block_height(
                                         block.0.message.as_inner().height.next(),
                                     );
-                                    self.add_block(block).await;
+                                    self.add_block(block.clone()).await;
                                 }
                                 Notification::GenesisInstantiation { .. } => (),
                                 Notification::Broadcast { .. } => (),
@@ -221,7 +221,11 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
-                libp2p::request_response::Event::Message { peer: _, message },
+                libp2p::request_response::Event::Message {
+                    peer: _,
+                    connection_id: _,
+                    message,
+                },
             )) => match message {
                 libp2p::request_response::Message::Request {
                     request_id: _,
@@ -239,7 +243,7 @@ impl<App: KolmeApp> Gossip<App> {
                     BlockRequest::BlockAtHeight(height) => {
                         let res = match self.kolme.read().get_block(height).await? {
                             None => BlockResponse::HeightNotFound(height),
-                            Some(block) => BlockResponse::Block(block),
+                            Some(block) => BlockResponse::Block(Arc::unwrap_or_clone(block)),
                         };
                         if let Err(e) = swarm
                             .behaviour_mut()
@@ -268,7 +272,7 @@ impl<App: KolmeApp> Gossip<App> {
                         }
                     }
                     BlockResponse::Block(block) => {
-                        self.add_block(&block).await;
+                        self.add_block(Arc::new(block)).await;
                     }
                     BlockResponse::HeightNotFound(height) => {
                         tracing::warn!(
@@ -316,9 +320,9 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
-    async fn add_block(&self, block: &SignedBlock<App::Message>) {
+    async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
         if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
-            if let Err(e) = self.kolme.add_block(block.clone()).await {
+            if let Err(e) = self.kolme.add_block(block).await {
                 tracing::warn!("Unable to add block to chain: {e}")
             }
         }

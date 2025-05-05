@@ -10,24 +10,25 @@ use cosmos::{HasAddressHrp, SeedPhrase};
 use kolme::*;
 use tokio::task::JoinSet;
 
-/// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
-pub struct SampleKolmeApp;
+pub struct CosmosBridgeApp {
+    pub genesis: GenesisInfo,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
-pub struct SampleState {
+pub struct State {
     #[serde(default)]
     hi_count: u32,
 }
 
-impl MerkleSerialize for SampleState {
+impl MerkleSerialize for State {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store(&self.hi_count)?;
         Ok(())
     }
 }
 
-impl MerkleDeserialize for SampleState {
+impl MerkleDeserialize for State {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -39,7 +40,7 @@ impl MerkleDeserialize for SampleState {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum SampleMessage {
+pub enum BridgeMessage {
     SayHi {},
     /// Generate a random number, for no particular reason at all
     Random {},
@@ -61,17 +62,12 @@ const SUBMITTER_SEED_PHRASE: &str = "blind frown harbor wet inform wing note fre
 const OSMOSIS_TESTNET_CODE_ID: u64 = 12390;
 const NEUTRON_TESTNET_CODE_ID: u64 = 11650;
 
-const DUMMY_CODE_VERSION: &str = "dummy code version";
-
 fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for CosmosBridgeApp {
+    fn default() -> Self {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
@@ -118,7 +114,8 @@ impl KolmeApp for SampleKolmeApp {
                 },
             )
             .unwrap();
-        GenesisInfo {
+
+        let genesis = GenesisInfo {
             kolme_ident: "Cosmos bridge example".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -126,11 +123,22 @@ impl KolmeApp for SampleKolmeApp {
             approvers: set,
             needed_approvers: 1,
             chains: bridges,
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for CosmosBridgeApp {
+    type State = State;
+    type Message = BridgeMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
-        Ok(SampleState { hi_count: 0 })
+        Ok(State { hi_count: 0 })
     }
 
     async fn execute(
@@ -139,8 +147,8 @@ impl KolmeApp for SampleKolmeApp {
         msg: &Self::Message,
     ) -> Result<()> {
         match msg {
-            SampleMessage::SayHi {} => ctx.state_mut().hi_count += 1,
-            SampleMessage::SendTo { address, amount } => {
+            BridgeMessage::SayHi {} => ctx.state_mut().hi_count += 1,
+            BridgeMessage::SendTo { address, amount } => {
                 let chain = match address.get_address_hrp().as_str() {
                     "osmo" => ExternalChain::OsmosisTestnet,
                     "neutron" => ExternalChain::NeutronTestnet,
@@ -154,7 +162,7 @@ impl KolmeApp for SampleKolmeApp {
                     *amount,
                 )?;
             }
-            SampleMessage::Random {} => {
+            BridgeMessage::Random {} => {
                 let value = ctx.load_data(RandomU32).await?;
                 ctx.log(format!("Calculated a random number: {value}"));
             }
@@ -179,16 +187,7 @@ impl<App> KolmeDataRequest<App> for RandomU32 {
     }
 }
 
-pub async fn serve(bind: SocketAddr) -> Result<()> {
-    const DB_PATH: &str = "example-cosmos-bridge.sqlite3";
-    kolme::init_logger(true, None);
-    let kolme = Kolme::new(
-        SampleKolmeApp,
-        DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(DB_PATH).await?,
-    )
-    .await?;
-
+pub async fn serve(kolme: Kolme<CosmosBridgeApp>, bind: SocketAddr) -> Result<()> {
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
@@ -223,7 +222,7 @@ pub async fn serve(bind: SocketAddr) -> Result<()> {
 }
 
 pub async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
-    let message = serde_json::from_str::<SampleMessage>(&message)?;
+    let message = serde_json::from_str::<BridgeMessage>(&message)?;
     let secret = SecretKey::from_hex(&secret)?;
     let public = secret.public_key();
     let client = reqwest::Client::new();

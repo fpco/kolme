@@ -1,6 +1,3 @@
-#[cfg(feature = "sqlx")]
-mod sqlx_impls;
-
 use std::{fmt::Display, num::TryFromIntError};
 
 /// Monotonically increasing identifier for actions sent to a bridge contract.
@@ -143,5 +140,18 @@ impl serde::Serialize for Sha256Hash {
         S: serde::Serializer,
     {
         serializer.serialize_str(&hex::encode(self.0.as_slice()))
+    }
+}
+
+#[cfg(feature = "realcryptography")]
+impl<'de> serde::Deserialize<'de> for Sha256Hash {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        let s = String::deserialize(deserializer)?;
+        let bytes = hex::decode(&s).map_err(D::Error::custom)?;
+        Sha256Hash::from_hash(&bytes).map_err(D::Error::custom)
     }
 }

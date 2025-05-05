@@ -5,7 +5,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::Write,
-    marker::PhantomData,
     net::SocketAddr,
     path::PathBuf,
     str::FromStr,
@@ -13,6 +12,9 @@ use std::{
 
 use anyhow::Result;
 use cosmos::SeedPhrase;
+
+#[allow(unused_imports)] // It's not unused...
+use shared::cosmos::KeyRegistration;
 
 use kolme::*;
 use rust_decimal::{dec, Decimal};
@@ -22,16 +24,10 @@ pub use state::*;
 pub use types::*;
 
 #[derive(Clone, Debug)]
-pub struct SixSigmaApp<C: Config> {
-    _phantom: PhantomData<C>,
-}
-
-impl<C: Config> Default for SixSigmaApp<C> {
-    fn default() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
-    }
+pub struct SixSigmaApp {
+    pub genesis: GenesisInfo,
+    pub chain: ExternalChain,
+    make_submitter: MakeSubmitterFn,
 }
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
@@ -44,6 +40,8 @@ const ADMIN_SECRET_KEY_HEX: &str =
 const LOCALOSMOSIS_CODE_ID: u64 = 1;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
+
+type MakeSubmitterFn = fn(Kolme<SixSigmaApp>) -> Submitter<SixSigmaApp>;
 
 fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
@@ -67,84 +65,10 @@ pub enum BalanceChange {
     },
 }
 
-pub trait Config: Clone + Send + Sync + 'static {
-    fn insert_bridge(
-        bridges: &mut ConfiguredChains,
-        assets: BTreeMap<AssetName, AssetConfig>,
-    ) -> Result<()>;
-    fn chain_name() -> ChainName;
-    fn external_chain() -> ExternalChain;
-    fn new_submitter(kolme: Kolme<SixSigmaApp<Self>>) -> Submitter<SixSigmaApp<Self>>;
-}
+impl SixSigmaApp {
+    pub fn new_cosmos() -> Self {
+        let mut chains = ConfiguredChains::default();
 
-#[derive(Clone)]
-pub struct SixSigmaCosmos;
-
-impl Config for SixSigmaCosmos {
-    fn insert_bridge(
-        bridges: &mut ConfiguredChains,
-        assets: BTreeMap<AssetName, AssetConfig>,
-    ) -> Result<()> {
-        bridges.insert_cosmos(
-            CosmosChain::OsmosisLocal,
-            ChainConfig {
-                assets,
-                bridge: BridgeContract::NeededCosmosBridge {
-                    code_id: LOCALOSMOSIS_CODE_ID,
-                },
-            },
-        )
-    }
-
-    fn chain_name() -> ChainName {
-        ChainName::Cosmos
-    }
-
-    fn external_chain() -> ExternalChain {
-        ExternalChain::OsmosisLocal
-    }
-
-    fn new_submitter(kolme: Kolme<SixSigmaApp<Self>>) -> Submitter<SixSigmaApp<Self>> {
-        Submitter::new_cosmos(kolme, SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap())
-    }
-}
-
-#[derive(Clone)]
-pub struct SixSigmaPassThrough;
-
-impl Config for SixSigmaPassThrough {
-    fn insert_bridge(
-        bridges: &mut ConfiguredChains,
-        assets: BTreeMap<AssetName, AssetConfig>,
-    ) -> Result<()> {
-        bridges.insert_pass_through(ChainConfig {
-            assets,
-            bridge: BridgeContract::Deployed("12345".to_string()),
-        })
-    }
-
-    fn chain_name() -> ChainName {
-        ChainName::PassThrough
-    }
-
-    fn external_chain() -> ExternalChain {
-        ExternalChain::PassThrough
-    }
-
-    fn new_submitter(kolme: Kolme<SixSigmaApp<Self>>) -> Submitter<SixSigmaApp<Self>> {
-        Submitter::new_pass_through(kolme.clone(), 12345)
-    }
-}
-
-impl<C: Config> KolmeApp for SixSigmaApp<C> {
-    type State = State;
-    type Message = AppMessage;
-
-    fn genesis_info() -> GenesisInfo {
-        let my_public_key = my_secret_key().public_key();
-        let mut set = BTreeSet::new();
-        set.insert(my_public_key);
-        let mut bridges = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
         assets.insert(
             AssetName("uosmo".to_owned()),
@@ -153,16 +77,84 @@ impl<C: Config> KolmeApp for SixSigmaApp<C> {
                 asset_id: AssetId(1),
             },
         );
-        C::insert_bridge(&mut bridges, assets).unwrap();
-        GenesisInfo {
+
+        chains
+            .insert_cosmos(
+                CosmosChain::OsmosisLocal,
+                ChainConfig {
+                    assets,
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: LOCALOSMOSIS_CODE_ID,
+                    },
+                },
+            )
+            .unwrap();
+
+        let make_submitter = |kolme: Kolme<SixSigmaApp>| {
+            Submitter::new_cosmos(kolme, SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap())
+        };
+
+        Self::new(chains, ExternalChain::OsmosisLocal, make_submitter)
+    }
+
+    pub fn new_passthrough() -> Self {
+        let mut chains = ConfiguredChains::default();
+
+        let mut assets = BTreeMap::new();
+        assets.insert(
+            AssetName("uosmo".to_owned()),
+            AssetConfig {
+                decimals: 6,
+                asset_id: AssetId(1),
+            },
+        );
+
+        chains
+            .insert_pass_through(ChainConfig {
+                assets,
+                bridge: BridgeContract::Deployed("12345".to_string()),
+            })
+            .unwrap();
+
+        let make_submitter =
+            |kolme: Kolme<SixSigmaApp>| Submitter::new_pass_through(kolme.clone(), 12345);
+
+        Self::new(chains, ExternalChain::PassThrough, make_submitter)
+    }
+
+    fn new(
+        chains: ConfiguredChains,
+        chain: ExternalChain,
+        make_submitter: MakeSubmitterFn,
+    ) -> Self {
+        let my_public_key = my_secret_key().public_key();
+        let mut set = BTreeSet::new();
+        set.insert(my_public_key);
+
+        let genesis = GenesisInfo {
             kolme_ident: "Six sigma example".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
             needed_listeners: 1,
             approvers: set,
             needed_approvers: 1,
-            chains: bridges,
+            chains,
+        };
+
+        Self {
+            genesis,
+            chain,
+            make_submitter,
         }
+    }
+}
+
+impl KolmeApp for SixSigmaApp {
+    type State = State;
+    type Message = AppMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -223,8 +215,8 @@ impl<C: Config> KolmeApp for SixSigmaApp<C> {
     }
 }
 
-fn change_balance<C: Config>(
-    ctx: &mut ExecutionContext<'_, SixSigmaApp<C>>,
+fn change_balance(
+    ctx: &mut ExecutionContext<'_, SixSigmaApp>,
     change: &BalanceChange,
 ) -> Result<()> {
     match change {
@@ -235,14 +227,9 @@ fn change_balance<C: Config>(
             withdraw_wallet,
         } => {
             tracing::debug!("withdraw");
+            let chain = ctx.app().chain;
             ctx.mint_asset(*asset_id, *account, *amount)?;
-            ctx.withdraw_asset(
-                *asset_id,
-                C::external_chain(),
-                *account,
-                withdraw_wallet,
-                *amount,
-            )
+            ctx.withdraw_asset(*asset_id, chain, *account, withdraw_wallet, *amount)
         }
         BalanceChange::Burn {
             asset_id,
@@ -272,19 +259,17 @@ impl<App> KolmeDataRequest<App> for OddsSource {
     }
 }
 
-pub async fn serve<C: Config>(
+pub async fn serve(
+    app: SixSigmaApp,
     bind: SocketAddr,
     db_path: PathBuf,
     tx_log_path: Option<PathBuf>,
     component: Option<AppComponent>,
 ) -> Result<()> {
     tracing::info!("starting");
-    let kolme = Kolme::new(
-        SixSigmaApp::<C>::default(),
-        DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(db_path).await?,
-    )
-    .await?;
+    let chain_name = app.chain.name();
+    let make_submitter = app.make_submitter;
+    let kolme = Kolme::new(app, DUMMY_CODE_VERSION, KolmeStore::new_fjall(db_path)?).await?;
 
     let mut set = JoinSet::new();
 
@@ -302,7 +287,7 @@ pub async fn serve<C: Config>(
         Some(AppComponent::Listener) => {
             tracing::info!("Running listener ...");
             let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(listener.run(C::chain_name()));
+            set.spawn(listener.run(chain_name));
         }
         Some(AppComponent::Approver) => {
             tracing::info!("Running approver ...");
@@ -311,7 +296,7 @@ pub async fn serve<C: Config>(
         }
         Some(AppComponent::Submitter) => {
             tracing::info!("Running submitter ...");
-            let submitter = C::new_submitter(kolme.clone());
+            let submitter = (make_submitter)(kolme.clone());
             set.spawn(submitter.run());
         }
         Some(AppComponent::ApiServer) => {
@@ -324,10 +309,10 @@ pub async fn serve<C: Config>(
             let processor = Processor::new(kolme.clone(), my_secret_key().clone());
             set.spawn(processor.run());
             let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(listener.run(C::chain_name()));
+            set.spawn(listener.run(chain_name));
             let approver = Approver::new(kolme.clone(), my_secret_key().clone());
             set.spawn(approver.run());
-            let submitter = C::new_submitter(kolme.clone());
+            let submitter = (make_submitter)(kolme.clone());
             set.spawn(submitter.run());
             let api_server = ApiServer::new(kolme);
             set.spawn(api_server.run(bind));
@@ -351,24 +336,20 @@ pub async fn serve<C: Config>(
     Ok(())
 }
 
-pub async fn state<C: Config>(db_path: PathBuf) -> Result<State> {
-    let kolme = Kolme::new(
-        SixSigmaApp::<C>::default(),
-        DUMMY_CODE_VERSION,
-        KolmeStore::new_sqlite(db_path).await?,
-    )
-    .await?
-    .read();
+pub async fn state(app: SixSigmaApp, db_path: PathBuf) -> Result<State> {
+    let kolme = Kolme::new(app, DUMMY_CODE_VERSION, KolmeStore::new_fjall(db_path)?)
+        .await?
+        .read();
     Ok(kolme.get_app_state().clone())
 }
 
-struct TxLogger<C: Config> {
-    kolme: Kolme<SixSigmaApp<C>>,
+struct TxLogger {
+    kolme: Kolme<SixSigmaApp>,
     path: PathBuf,
 }
 
-impl<C: Config> TxLogger<C> {
-    fn new(kolme: Kolme<SixSigmaApp<C>>, path: PathBuf) -> Self {
+impl TxLogger {
+    fn new(kolme: Kolme<SixSigmaApp>, path: PathBuf) -> Self {
         Self { kolme, path }
     }
 
@@ -479,10 +460,11 @@ mod tests {
         let passthrough =
             tokio::task::spawn(passthrough.run(SocketAddr::from_str("[::]:12345").unwrap()));
         assert!(!passthrough.is_finished());
-        let db_file = NamedTempFile::new().unwrap();
+        let db_file = tempfile::tempdir().unwrap();
         let log_file = NamedTempFile::new().unwrap();
         let db_path = db_file.path().to_path_buf();
-        let app = tokio::task::spawn(serve::<SixSigmaPassThrough>(
+        let app = tokio::task::spawn(serve(
+            SixSigmaApp::new_passthrough(),
             SocketAddr::from_str("[::]:3001").unwrap(),
             db_path.clone(),
             Some(log_file.path().to_path_buf()),
@@ -503,7 +485,8 @@ mod tests {
         assert!(!passthrough.is_finished());
         register_funder_account(&client).await.unwrap();
         tracing::debug!("Sending initial funds for the application");
-        broadcast_check_state::<SixSigmaPassThrough>(
+        broadcast_check_state(
+            SixSigmaApp::new_passthrough(),
             FUNDER_SECRET_KEY,
             &db_path,
             AppMessage::SendFunds {
@@ -522,7 +505,8 @@ mod tests {
         .unwrap();
 
         tracing::debug!("Initializing the contract");
-        broadcast_check_state::<SixSigmaPassThrough>(
+        broadcast_check_state(
+            SixSigmaApp::new_passthrough(),
             ADMIN_SECRET_KEY,
             &db_path,
             AppMessage::Init,
@@ -535,7 +519,8 @@ mod tests {
         .unwrap();
 
         tracing::debug!("Creating a market");
-        broadcast_check_state::<SixSigmaPassThrough>(
+        broadcast_check_state(
+            SixSigmaApp::new_passthrough(),
             ADMIN_SECRET_KEY,
             &db_path,
             AppMessage::AddMarket {
@@ -598,7 +583,8 @@ mod tests {
         let (bettor_wallet, _bettor_account) =
             create_and_regsiter_bettor_account(&client).await.unwrap();
         tracing::debug!("Placing a bet");
-        broadcast_check_state::<SixSigmaPassThrough>(
+        broadcast_check_state(
+            SixSigmaApp::new_passthrough(),
             BETTOR_SECRET_KEY,
             &db_path,
             AppMessage::PlaceBet {
@@ -620,7 +606,8 @@ mod tests {
         .unwrap();
 
         tracing::debug!("Settling the market");
-        broadcast_check_state::<SixSigmaPassThrough>(
+        broadcast_check_state(
+            SixSigmaApp::new_passthrough(),
             ADMIN_SECRET_KEY,
             &db_path,
             AppMessage::SettleMarket {
@@ -673,24 +660,24 @@ mod tests {
     const ADMIN_SECRET_KEY: &str =
         "127831b9459b538eab9a338b1e96fc34249a5154c96180106dd87d39117e8e02";
 
-    const FUNDER_PUBLIC_KEY: &str =
-        "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";
+    // const FUNDER_PUBLIC_KEY: &str = "032caf3bb79f995e0a26d8e08aa54c794660d8398cfcb39855ded310492be8815b";
     const FUNDER_SECRET_KEY: &str =
         "2bb0119bcf9ac0d9a8883b2832f3309217d350033ba944193352f034f197b96a";
 
-    const BETTOR_PUBLIC_KEY: &str =
-        "03e92af83772943d5a83c40dd35dcf813644655deb6fddb300b1cd6f146a53a4d3";
+    // const BETTOR_PUBLIC_KEY: &str = "03e92af83772943d5a83c40dd35dcf813644655deb6fddb300b1cd6f146a53a4d3";
     const BETTOR_SECRET_KEY: &str =
         "6075334f2d4f254147fe37cb87c962112f9dad565720dd128b37b4ed07431690";
 
     async fn register_funder_account(client: &reqwest::Client) -> Result<()> {
         const SR_BALANCE: Decimal = dec!(123_456);
         let wallet = sr_wallet()?;
-        let public_key = PublicKey::from_str(FUNDER_PUBLIC_KEY)?;
+        let secret_key = SecretKey::from_str(FUNDER_SECRET_KEY)?;
+        let registration = KeyRegistration::new(&wallet.get_address_string(), &secret_key)?;
+
         send_funds_with_key_and_find_account_pass_through(
             client,
             wallet.to_string(),
-            &public_key,
+            registration,
             SR_BALANCE,
         )
         .await?;
@@ -713,30 +700,33 @@ mod tests {
     async fn create_and_regsiter_bettor_account(
         client: &reqwest::Client,
     ) -> Result<(cosmos::Wallet, AccountId)> {
-        create_wallet_and_regsiter_account(client, BETTOR_PUBLIC_KEY, dec!(345_678)).await
+        create_wallet_and_regsiter_account(client, BETTOR_SECRET_KEY, dec!(345_678)).await
     }
 
     async fn create_wallet_and_regsiter_account(
         client: &reqwest::Client,
-        public_key: &str,
+        secret_key: &str,
         marker_amount: Decimal,
     ) -> Result<(cosmos::Wallet, AccountId)> {
         let new_wallet = wallet_from_seed(SeedPhrase::random())?;
-        let public_key = PublicKey::from_str(public_key)?;
+        let secret_key = SecretKey::from_str(secret_key)?;
+        let registration = KeyRegistration::new(&new_wallet.get_address_string(), &secret_key)?;
+
         let account_id = send_funds_with_key_and_find_account_pass_through(
             client,
             new_wallet.to_string(),
-            &public_key,
+            registration,
             marker_amount,
         )
         .await?;
+
         Ok((new_wallet, account_id))
     }
 
     async fn send_funds_with_key_and_find_account_pass_through(
         client: &reqwest::Client,
         wallet: String,
-        public_key: &PublicKey,
+        registration: KeyRegistration,
         to_send: Decimal,
     ) -> Result<AccountId> {
         let resp = client
@@ -745,7 +735,7 @@ mod tests {
                 wallet,
                 coins: vec![std_coin(to_send)],
                 msg: ExecuteMsg::Regular {
-                    keys: vec![*public_key],
+                    keys: vec![registration],
                 },
             })
             .send()
@@ -795,7 +785,8 @@ mod tests {
         }
     }
 
-    async fn broadcast_check_state<C: Config>(
+    async fn broadcast_check_state(
+        app: SixSigmaApp,
         secret: &str,
         db_path: &Path,
         msg: AppMessage,
@@ -808,7 +799,7 @@ mod tests {
         )
         .await?;
         (|| async {
-            let state = state::<C>(db_path.to_path_buf()).await?;
+            let state = state(app.clone(), db_path.to_path_buf()).await?;
             check(state)
         })
         .retry(

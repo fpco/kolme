@@ -9,25 +9,32 @@ authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [dev-dependencies]
 example-six-sigma = { path = "../examples/six-sigma" }
+example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
 test-log = { version = "0.2", features = ["trace"] }
 anyhow = { workspace = true }
 reqwest = { version = "0.12.15", features = ["json"] }
 strum = { version = "0.27.1", features = ["derive"] }
 tokio = { workspace = true }
 tokio-util = { version = "0.7", features = ["full"] }
+futures = "0.3.31"
 tracing = "0.1.41"
 backon = "1.4.1"
 kolme = { workspace = true, features = ["pass_through"] }
 serde = "1.0.219"
 cosmos = { workspace = true }
-shared = { workspace = true, features = ["cosmwasm"] }
+shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
+hex = { workspace = true }
 cosmwasm-std = "2.2.2"
 serde_json = { workspace = true }
 rust_decimal = { workspace = true }
 tempfile = "3.19.1"
 pretty_assertions = "1.4.1"
+kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-client" }
+spl-token-client = "0.14.0"
+solana-client = "2.2.7"
+solana-commitment-config = "2.2.1"
+rand = "0.8"
 axum = { version = "0.8.3", features = ["ws"] }
 futures-util = "0.3.31"
 tokio-tungstenite = "0.26.2"
 jiff = "0.2.5"
-rand = "0.8"

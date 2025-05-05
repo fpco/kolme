@@ -17,10 +17,10 @@ anyhow = { workspace = true }
 cosmos = { workspace = true }
 jiff = { workspace = true }
 serde_json = { workspace = true }
+shared = { workspace = true }
 
 [dev-dependencies]
 backon = "1.4.1"
 cosmwasm-std = "2.2.2"
-shared = { workspace = true }
 test-log = { version = "0.2", features = ["trace"] }
 tempfile = "3.19.1"

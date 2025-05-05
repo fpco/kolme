@@ -535,7 +535,7 @@ impl MerkleDeserialize for BridgeContract {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum GenesisAction {
     InstantiateCosmos {
         chain: CosmosChain,
@@ -549,7 +549,7 @@ pub enum GenesisAction {
     },
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct InstantiateArgs {
     pub processor: PublicKey,
     pub listeners: BTreeSet<PublicKey>,
@@ -796,6 +796,20 @@ impl<AppMessage> SignedBlock<AppMessage> {
 
     pub fn tx(&self) -> &SignedTransaction<AppMessage> {
         &self.0.message.as_inner().tx
+    }
+}
+
+impl<AppMessage> MerkleSerialize for SignedBlock<AppMessage> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+
+impl<AppMessage: serde::de::DeserializeOwned> MerkleDeserialize for SignedBlock<AppMessage> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        MerkleDeserialize::merkle_deserialize(deserializer).map(SignedBlock)
     }
 }
 
@@ -1141,6 +1155,7 @@ impl ExecAction {
         id: BridgeActionId,
     ) -> Result<String> {
         use base64::Engine;
+        use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
 
         #[derive(serde::Serialize)]
         struct CwPayload {
@@ -1205,16 +1220,19 @@ impl ExecAction {
                         };
 
                         // TODO: Need to support multiple signed messages (https://github.com/fpco/kolme/issues/106)
-                        let mint =
-                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(coins[0].0)?;
-                        let program_id =
-                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(&program_id)?;
-                        let recipient =
-                            kolme_solana_bridge_client::pubkey::Pubkey::from_str(&recipient.0)?;
+                        let mint = SolanaPubkey::from_str(coins[0].0)?;
+                        let program_id = SolanaPubkey::from_str(&program_id)?;
+                        let recipient = SolanaPubkey::from_str(&recipient.0)?;
                         let amount = u64::try_from(coins[0].1)?;
 
                         let payload = kolme_solana_bridge_client::transfer_payload(
-                            id.0, program_id, mint, recipient, amount,
+                            id.0,
+                            program_id,
+                            // TODO: Determine the type of token being sent (https://github.com/fpco/kolme/issues/105)
+                            TokenProgram::Legacy,
+                            mint,
+                            recipient,
+                            amount,
                         );
 
                         let len = borsh::object_length(&payload).map_err(|x| {

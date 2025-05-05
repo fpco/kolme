@@ -6,17 +6,15 @@ use crate::core::*;
 pub(in crate::core) struct BlockInfo<App: KolmeApp> {
     pub(super) block: Arc<SignedBlock<App::Message>>,
     #[allow(dead_code)]
-    rendered: String,
-    #[allow(dead_code)]
-    logs: Vec<Vec<String>>,
-    state: BlockState<App>,
+    pub(super) logs: Arc<[Vec<String>]>,
+    pub(super) state: BlockState<App>,
 }
 
 /// Separated from [BlockInfo] since it can also represent initial state before any blocks.
 pub(in crate::core) struct BlockState<App: KolmeApp> {
-    blockhash: BlockHash,
-    framework_state: FrameworkState,
-    app_state: App::State,
+    pub(super) blockhash: BlockHash,
+    pub(super) framework_state: Arc<FrameworkState>,
+    pub(super) app_state: Arc<App::State>,
 }
 
 /// Either the info on a block or initial pre-genesis state.
@@ -53,16 +51,19 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
     }
 
     pub(super) async fn load(
-        store: &KolmeStore,
+        store: &KolmeStore<App>,
         genesis: &GenesisInfo,
         merkle_manager: &MerkleManager,
     ) -> Result<Self> {
-        let output = store.load_latest_block(merkle_manager).await?;
+        let output = store.load_latest_block().await?;
         let res = match output {
-            Some(storable) => MaybeBlockInfo::Some(storable.try_into()?),
+            Some(height) => {
+                let storable = store.load_block(merkle_manager, height).await?.with_context(|| format!("Latest block height is {height}, but it wasn't found in the data store"))?;
+                MaybeBlockInfo::Some(storable.try_into()?)
+            }
             None => MaybeBlockInfo::None(BlockState {
-                framework_state: FrameworkState::new(genesis),
-                app_state: App::new_state()?,
+                framework_state: Arc::new(FrameworkState::new(genesis)),
+                app_state: Arc::new(App::new_state()?),
                 blockhash: BlockHash::genesis_parent(),
             }),
         };
@@ -71,13 +72,9 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
     }
 }
 
-impl<App: KolmeApp> BlockInfo<App> {
-    pub(super) fn get_height(&self) -> BlockHeight {
-        self.block.height()
-    }
-}
-
-impl<App: KolmeApp> TryFrom<StorableBlock<FrameworkState, App::State>> for BlockInfo<App> {
+impl<App: KolmeApp> TryFrom<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>
+    for BlockInfo<App>
+{
     type Error = anyhow::Error;
 
     fn try_from(
@@ -85,17 +82,15 @@ impl<App: KolmeApp> TryFrom<StorableBlock<FrameworkState, App::State>> for Block
             height,
             blockhash,
             txhash: _,
-            rendered,
+            block,
             framework_state,
             app_state,
             logs,
-        }: StorableBlock<FrameworkState, App::State>,
+        }: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<Self> {
-        let block = serde_json::from_str::<SignedBlock<App::Message>>(&rendered)?;
         anyhow::ensure!(height == block.height().0);
         Ok(Self {
-            block: Arc::new(block),
-            rendered,
+            block,
             logs,
             state: BlockState {
                 blockhash: BlockHash(blockhash),

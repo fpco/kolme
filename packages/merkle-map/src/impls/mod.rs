@@ -6,4 +6,4 @@ mod merkle_map;
 mod node;
 mod tree_contents;
 
-pub(crate) use lockable::Lockable;
+pub use lockable::MerkleLockable;

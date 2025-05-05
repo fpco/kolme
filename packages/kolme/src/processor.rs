@@ -66,12 +66,14 @@ impl<App: KolmeApp> Processor<App> {
     }
 
     pub async fn create_genesis_event(&self) -> Result<()> {
+        let info = self.kolme.get_app().genesis_info().clone();
         let signed = self.kolme.read().create_signed_transaction(
             &self.secret,
-            vec![Message::<App::Message>::Genesis(App::genesis_info())],
+            vec![Message::<App::Message>::Genesis(info)],
         )?;
+
         let block = self.construct_block(signed).await?;
-        if let Err(e) = self.kolme.add_block(block).await {
+        if let Err(e) = self.kolme.add_block(Arc::new(block)).await {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
                 self.kolme.resync().await?;
             }
@@ -94,8 +96,10 @@ impl<App: KolmeApp> Processor<App> {
             }
             attempts += 1;
             let res = async {
+                let _construct_lock = self.kolme.take_construct_lock().await?;
+                self.kolme.resync().await?;
                 let block = self.construct_block(tx.clone()).await?;
-                self.kolme.add_block(block).await
+                self.kolme.add_block(Arc::new(block)).await
             }
             .await;
             match res {

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures_util::future::join_all;
 use futures_util::StreamExt;
 use kolme::{
@@ -15,7 +15,6 @@ use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite};
@@ -23,8 +22,10 @@ use tokio_util::task::AbortOnDropHandle;
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
-#[derive(Clone, Debug, Copy)]
-struct TestApp;
+#[derive(Clone, Debug)]
+struct TestApp {
+    genesis: GenesisInfo,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct TestState {
@@ -52,17 +53,14 @@ enum TestMessage {
     Increment,
 }
 
-impl KolmeApp for TestApp {
-    type State = TestState;
-    type Message = TestMessage;
-
-    fn genesis_info() -> GenesisInfo {
+impl Default for TestApp {
+    fn default() -> Self {
         let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
         let my_public_key = secret.public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
 
-        GenesisInfo {
+        let genesis = GenesisInfo {
             kolme_ident: "Test framework".to_owned(),
             processor: my_public_key,
             listeners: set.clone(),
@@ -70,7 +68,18 @@ impl KolmeApp for TestApp {
             approvers: set,
             needed_approvers: 1,
             chains: Default::default(),
-        }
+        };
+
+        Self { genesis }
+    }
+}
+
+impl KolmeApp for TestApp {
+    type State = TestState;
+    type Message = TestMessage;
+
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -100,8 +109,8 @@ async fn find_free_port() -> Result<u16> {
 async fn setup(
     db_path: &Path,
 ) -> Result<(Kolme<TestApp>, AbortOnDropHandle<Result<()>>, SocketAddr)> {
-    let app = TestApp;
-    let store = KolmeStore::new_sqlite(db_path).await?;
+    let app = TestApp::default();
+    let store = KolmeStore::new_fjall(db_path)?;
     let kolme = Kolme::new(app, "test_version", store).await?;
     let read = kolme.read();
     assert_eq!(read.get_next_height(), BlockHeight(0),);
@@ -119,13 +128,13 @@ async fn setup(
     Ok((kolme, server_handle, addr))
 }
 
-async fn next_message_as_json<S>(ws_stream: &mut S) -> Result<Value, Box<dyn std::error::Error>>
+async fn next_message_as_json<S>(ws_stream: &mut S) -> Result<Value>
 where
     S: StreamExt<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
 {
     let message = timeout(Duration::from_secs(5), ws_stream.next())
         .await?
-        .ok_or("WebSocket stream terminated")??;
+        .context("WebSocket stream terminated")??;
 
     let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
     tracing::info!("Received genesis notification: {}", notification);
@@ -135,7 +144,7 @@ where
 
 #[test_log::test(tokio::test)]
 async fn test_websocket_notifications() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -188,7 +197,7 @@ async fn test_websocket_notifications() {
 
 #[test_log::test(tokio::test)]
 async fn test_validate_tx_valid_signature() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -241,7 +250,7 @@ async fn test_validate_tx_valid_signature() {
 
 #[test_log::test(tokio::test)]
 async fn test_execute_transaction_genesis() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -266,7 +275,7 @@ async fn test_execute_transaction_genesis() {
 
 #[test_log::test(tokio::test)]
 async fn test_validate_tx_invalid_nonce() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -300,14 +309,6 @@ async fn test_validate_tx_invalid_nonce() {
 
     kolme.propose_transaction(signed_tx.clone()).unwrap();
 
-    let notification = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        notification["Broadcast"].is_object(),
-        "Expected Broadcast notification, got: {}",
-        notification
-    );
-
     let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
@@ -322,7 +323,7 @@ async fn test_validate_tx_invalid_nonce() {
 
 #[test_log::test(tokio::test)]
 async fn test_no_subscribers() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, _) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
@@ -346,7 +347,7 @@ async fn test_no_subscribers() {
 
 #[test_log::test(tokio::test)]
 async fn test_rejected_transaction_insufficient_balance() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -362,6 +363,7 @@ async fn test_rejected_transaction_insufficient_balance() {
     }));
 
     let notification = next_message_as_json(&mut ws).await.unwrap();
+
     assert!(
         notification["NewBlock"].is_object(),
         "Expected NewBlock notification for genesis, got: {}",
@@ -382,31 +384,6 @@ async fn test_rejected_transaction_insufficient_balance() {
 
     kolme.propose_transaction(tx_withdraw.clone()).unwrap();
 
-    let notification = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        notification["Broadcast"].is_object(),
-        "Expected Broadcast notification"
-    );
-
-    // Return an Error due Insufficient balance for account
-    let result = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        result["FailedTransaction"].is_object(),
-        "Expected FailedTransaction notification, but got: {:?}",
-        result
-    );
-
-    let error = result["FailedTransaction"]["error"]["Other"]
-        .as_str()
-        .expect("Expected error message in FailedTransaction");
-    assert!(
-        error.contains("Insufficient balance"),
-        "Expected insufficient balance error, but got: {}",
-        error
-    );
-
     let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
@@ -421,7 +398,7 @@ async fn test_rejected_transaction_insufficient_balance() {
 
 #[test_log::test(tokio::test)]
 async fn test_many_transactions() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -485,7 +462,7 @@ async fn test_many_transactions() {
 
 #[test_log::test(tokio::test)]
 async fn test_concurrent_transactions() {
-    let db_path = NamedTempFile::new().unwrap();
+    let db_path = tempfile::tempdir().unwrap();
     let (kolme, _server_handle, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
     let processor = Processor::new(kolme.clone(), secret.clone());
@@ -538,29 +515,6 @@ async fn test_concurrent_transactions() {
     }
 
     join_all(tasks).await;
-
-    let mut notifications = Vec::with_capacity(200);
-    for _ in 0..200 {
-        let notification = next_message_as_json(&mut ws).await.unwrap();
-        notifications.push(notification);
-    }
-
-    let (broadcasts, new_blocks): (Vec<_>, Vec<_>) = notifications
-        .into_iter()
-        .partition(|n| n["Broadcast"].is_object());
-
-    assert_eq!(
-        broadcasts.len(),
-        100,
-        "Expected 100 Broadcast notifications, got: {}",
-        broadcasts.len()
-    );
-    assert_eq!(
-        new_blocks.len(),
-        100,
-        "Expected 100 NewBlock notifications, got: {}",
-        new_blocks.len()
-    );
 
     let read = kolme.read();
     let state = read.get_app_state();

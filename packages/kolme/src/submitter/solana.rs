@@ -44,9 +44,9 @@ pub async fn execute(
     program_id: &str,
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
-    payload: &str,
+    payload_b64: String,
 ) -> Result<String> {
-    let payload_bytes = base64::engine::general_purpose::STANDARD.decode(payload)?;
+    let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
     let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
 
@@ -81,14 +81,22 @@ pub async fn execute(
             recovery_id: processor.recid.to_byte(),
         },
         executors,
-        payload: payload_bytes,
+        payload: payload_b64,
     };
 
     let blockhash = client.get_latest_blockhash().await?;
     let tx =
         signed_tx(program_id, blockhash, keypair, &data, &metas).map_err(|x| anyhow::anyhow!(x))?;
 
-    let sig = client.send_and_confirm_transaction(&tx).await?;
+    match client.send_and_confirm_transaction(&tx).await {
+        Ok(sig) => Ok(sig.to_string()),
+        Err(e) => {
+            tracing::error!(
+                "Solana submitter failed to execute signed transaction: {}",
+                e
+            );
 
-    Ok(sig.to_string())
+            Err(anyhow::anyhow!(e))
+        }
+    }
 }

@@ -20,8 +20,7 @@ base64 = "0.22.1"
 jiff = { workspace = true }
 kolme-store.workspace = true
 kolme-store-postgresql.workspace = true
-kolme-store-sqlite.workspace = true
-libp2p = { version = "0.53", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
+libp2p = { version = "0.55", features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor"] }
 merkle-map = { workspace = true }
 parking_lot = "0.12.3"
 rand = "0.8"
@@ -29,7 +28,7 @@ reqwest = { version = "0.12.12", default-features = false, features = ["rustls-t
 rust_decimal = { workspace = true, features = ["macros"] }
 serde = { version = "1.0.218", features = ["derive", "rc"] }
 serde_json = { workspace = true }
-shared = { workspace = true, features = ["cosmwasm", "realcryptography", "sqlx"] }
+shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
 strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { workspace = true }
@@ -39,6 +38,7 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-client" }
 tokio-tungstenite = { version = "0.26.2", optional = true }
 futures-util = {version = "0.3", optional = true }
+fjall.workspace = true
 
 [dev-dependencies]
 tempfile = "3.18.0"

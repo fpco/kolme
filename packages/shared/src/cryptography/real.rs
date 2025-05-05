@@ -147,6 +147,20 @@ impl SecretKey {
             .map_err(|source| SecretKeyError::SigningFailed { source })
     }
 
+    /// Sign a payload that was already hashed beforehand.
+    pub fn sign_prehash_recoverable(
+        &self,
+        msg: impl AsRef<[u8]>,
+    ) -> Result<SignatureWithRecovery, SecretKeyError> {
+        k256::ecdsa::SigningKey::from(&self.0)
+            .sign_prehash_recoverable(msg.as_ref())
+            .map(|(sig, rec)| SignatureWithRecovery {
+                recid: rec.into(),
+                sig: sig.into(),
+            })
+            .map_err(|source| SecretKeyError::SigningFailed { source })
+    }
+
     pub fn random(rng: &mut rand::rngs::ThreadRng) -> Self {
         SecretKey(k256::SecretKey::random(rng))
     }

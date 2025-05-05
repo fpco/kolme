@@ -9,7 +9,7 @@ pub mod pass_through;
 mod processor;
 mod submitter;
 
-pub use api_server::ApiServer;
+pub use api_server::{base_api_router, ApiServer};
 pub use approver::Approver;
 pub use common::*;
 pub use core::*;
@@ -18,6 +18,7 @@ pub use listener::Listener;
 pub use merkle_map::*;
 pub use processor::Processor;
 pub use rust_decimal::Decimal;
+pub use shared::debug::*;
 pub use shared::{cryptography::*, types::*};
 pub use submitter::Submitter;
 

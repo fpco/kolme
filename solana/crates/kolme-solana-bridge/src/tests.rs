@@ -17,11 +17,12 @@ use spl_associated_token_account_client as spl_client;
 use borsh::BorshSerialize;
 use k256::{ecdsa, elliptic_curve::rand_core::OsRng};
 use sha_256::Sha256;
+use base64::Engine;
 
 use kolme_solana_bridge_client::{
     InitializeIxData, RegularMsgIxData, SignedMsgIxData, Payload,
     Secp256k1Signature, Secp256k1PubkeyCompressed, Signature,
-    transfer_payload, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
+    transfer_payload, TokenProgram, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
 };
 
 use crate::{SignedIxError, TOKEN_HOLDER_SEED};
@@ -190,8 +191,10 @@ impl Program {
         let mut bytes = Vec::with_capacity(borsh::object_length(payload).unwrap());
         payload.serialize(&mut bytes).unwrap();
 
+        let bytes = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
         let mut sha256 = Sha256::new();
-        let hash = sha256.digest(&bytes);
+        let hash = sha256.digest(bytes.as_bytes());
 
         let (sig, rec) = self.keys[PROCESSOR_KEY].sign_prehash_recoverable(&hash).unwrap();
         assert!(sig.normalize_s().is_none());
@@ -253,7 +256,7 @@ impl Program {
     }
 
     fn transfer_payload(&self, id: u64, to: Pubkey, amount: u64) -> Payload {
-        transfer_payload(id, crate::ID.into(), self.token, to, amount)
+        transfer_payload(id, crate::ID.into(), TokenProgram::Legacy, self.token, to, amount)
     }
 }
 

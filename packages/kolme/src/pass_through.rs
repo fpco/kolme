@@ -142,7 +142,7 @@ async fn msg(State(state): State<PassThrough>, Json(msg): Json<Msg>) -> impl Int
         ExecuteMsg::Regular { keys } => BridgeEventMessage::Regular {
             wallet: msg.wallet,
             funds: msg.coins,
-            keys,
+            keys: keys.into_iter().map(|x| x.key).collect(),
         },
         ExecuteMsg::Signed {
             processor: _,

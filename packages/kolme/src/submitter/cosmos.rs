@@ -58,13 +58,23 @@ pub async fn execute(
     };
 
     let contract = cosmos.make_contract(contract.parse()?);
-    let tx = contract
+    let res = contract
         .execute(
             &seed_phrase.with_hrp(contract.get_address_hrp())?,
             vec![],
             msg,
         )
-        .await?;
+        .await;
 
-    Ok(tx.txhash)
+    match res {
+        Ok(tx) => Ok(tx.txhash),
+        Err(e) => {
+            tracing::error!(
+                "Cosmos submitter failed to execute signed transaction: {}",
+                e
+            );
+
+            Err(anyhow::anyhow!(e))
+        }
+    }
 }
