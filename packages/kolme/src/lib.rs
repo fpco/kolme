@@ -9,7 +9,7 @@ pub mod pass_through;
 mod processor;
 mod submitter;
 
-pub use api_server::ApiServer;
+pub use api_server::{base_api_router, ApiServer};
 pub use approver::Approver;
 pub use common::*;
 pub use core::*;

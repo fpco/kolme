@@ -561,6 +561,13 @@ impl<App: KolmeApp> KolmeRead<App> {
         &self.get_framework_state().accounts
     }
 
+    pub fn get_account_balances(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<&BTreeMap<AssetId, Decimal>> {
+        self.get_framework_state().accounts.get_assets(account_id)
+    }
+
     pub fn create_signed_transaction(
         &self,
         secret: &SecretKey,
