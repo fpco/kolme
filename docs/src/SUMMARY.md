@@ -17,3 +17,4 @@
     - [Wallets and keys](./wallets-keys.md)
     - [Gossip](./gossip.md)
     - [Storage](./storage.md)
+ - [Third-party validators](./third-party-validators.md)
