@@ -4,10 +4,10 @@ use std::{
 };
 
 use anyhow::Result;
+use kolme::testtasks::TestTasks;
 use kolme::*;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
-use tokio::task::JoinSet;
 
 #[derive(Clone)]
 pub struct SampleKolmeApp {
@@ -88,7 +88,7 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 100)]
+#[tokio::test]
 async fn multiple_processors() {
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
     let block_db_str = match std::env::var(ENVVAR) {
@@ -100,6 +100,19 @@ async fn multiple_processors() {
         return;
     }
 
+    let (x, y, z) = TestTasks::start(multiple_processors_inner, block_db_str).await;
+    println!("Finished checking results of all clients, moving on to checker");
+    checker(x, y, z).await.unwrap();
+}
+
+async fn multiple_processors_inner(
+    mut test_tasks: TestTasks,
+    block_db_str: String,
+) -> (
+    Arc<[Kolme<SampleKolmeApp>]>,
+    Arc<Mutex<HashSet<TxHash>>>,
+    Arc<Mutex<BlockHeight>>,
+) {
     let tempdir = tempfile::tempdir().unwrap();
 
     let store = if block_db_str == "MEMORY" {
@@ -117,8 +130,6 @@ async fn multiple_processors() {
     };
 
     kolme::init_logger(false, None);
-    let mut processor_set = JoinSet::new();
-    let mut set = JoinSet::new();
     let mut kolmes = vec![];
     const PROCESSOR_COUNT: usize = 10;
     const CLIENT_COUNT: usize = 100;
@@ -136,8 +147,8 @@ async fn multiple_processors() {
             .await
             .unwrap();
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
-        processor_set.spawn(processor.run());
-        processor_set.spawn(check_failed_txs(kolme.clone()));
+        test_tasks.try_spawn_persistent(processor.run());
+        test_tasks.try_spawn_persistent(check_failed_txs(kolme.clone()));
         kolmes.push(kolme);
     }
 
@@ -146,30 +157,14 @@ async fn multiple_processors() {
     let highest_block = Arc::new(Mutex::new(BlockHeight::start()));
 
     for _ in 0..CLIENT_COUNT {
-        set.spawn(client(
+        test_tasks.try_spawn(client(
             kolmes.clone(),
             all_txhashes.clone(),
             highest_block.clone(),
         ));
     }
 
-    while let Some(res) = set.join_next().await {
-        // Often times an error in a check is _actually_ a bug in the processor.
-        // So check if one of those has crashed to get more useful errors.
-        while let Some(res) = processor_set.try_join_next() {
-            res.unwrap().unwrap();
-            println!("Unexpected processor exit")
-        }
-        res.unwrap().unwrap();
-    }
-
-    println!("Finished checking results of all clients, moving on to checker");
-    checker(kolmes, all_txhashes, highest_block).await.unwrap();
-
-    // And finally, make sure all the processors are still running
-    if let Some(res) = processor_set.try_join_next() {
-        panic!("A processor stopped: {res:?}");
-    }
+    (kolmes, all_txhashes, highest_block)
 }
 
 async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
