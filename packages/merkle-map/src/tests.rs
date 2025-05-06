@@ -733,6 +733,7 @@ macro_rules! serializing_idempotency_for_type {
 }
 
 serializing_idempotency_for_type!(String, serializing_is_idempotent_for_string);
+serializing_idempotency_for_type!(usize, serializing_is_idempotent_for_usize);
 serializing_idempotency_for_type!(u8, serializing_is_idempotent_for_u8);
 serializing_idempotency_for_type!(u32, serializing_is_idempotent_for_u32);
 serializing_idempotency_for_type!(u64, serializing_is_idempotent_for_u64);
