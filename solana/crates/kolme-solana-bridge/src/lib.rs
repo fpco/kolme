@@ -41,6 +41,7 @@ mod ata_program {
 use solbox::pinocchio::entrypoint;
 
 #[cfg(not(feature = "no-entrypoint"))]
+#[cfg(target_arch = "bpf")]
 entrypoint!(process_instruction);
 
 // PDAs

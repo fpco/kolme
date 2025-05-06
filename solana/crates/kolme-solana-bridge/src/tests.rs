@@ -25,7 +25,7 @@ use kolme_solana_bridge_client::{
     transfer_payload, TokenProgram, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
 };
 
-use crate::{SignedIxError, TOKEN_HOLDER_SEED};
+use crate::{SignedIxError, InitIxError, TOKEN_HOLDER_SEED};
 
 const KEYS_LEN: usize = 5;
 const PROCESSOR_KEY: usize = 0;
@@ -559,14 +559,15 @@ fn invalid_payload_rejected() {
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
     p.init_default(&sender).unwrap();
 
-    let mut payload = Payload {
+    let payload = Payload {
         id: 0,
         program_id: TOKEN.to_bytes(),
         accounts: vec![],
         instruction_data: vec![255, 255],
+        signer: None,
     };
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
-    let metas = [AccountMeta::new(sender.pubkey(), true)]; // Mismatched metas
+
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let result = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
@@ -604,13 +605,14 @@ fn max_executors_works() {
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR2_KEY, EXECUTOR3_KEY, EXECUTOR4_KEY]);
+    let receiver = Keypair::new();
+    let payload = p.transfer_payload(0, receiver.pubkey(), 1000);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR2_KEY, EXECUTOR3_KEY, EXECUTOR4_KEY]);
 
     let result = p.signed(&sender, &data, &metas);
     assert!(result.is_ok());
 
-    let receiver_balance = p.svm.get_balance(&Keypair::new().pubkey()).unwrap();
+    let receiver_balance = p.svm.get_balance(&receiver.pubkey()).unwrap();
     assert_eq!(receiver_balance, 1000);
 }
 
@@ -621,13 +623,14 @@ fn duplicate_executor_signatures_rejected() {
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
-    let mut data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR1_KEY]);
+    let receiver = Keypair::new();
+    let payload = p.transfer_payload(0, receiver.pubkey(), 1000);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR1_KEY]);
 
     let result = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::DuplicateSignature as u32))
+        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::DuplicateExecutorKey as u32))
     );
 }
 
@@ -640,8 +643,8 @@ fn lamport_transfer_works() {
     p.init_default(&sender).unwrap();
 
     let amount = 500000000;
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), amount);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let payload = p.transfer_payload(0, receiver.pubkey(), amount);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let pre_sender_balance = p.svm.get_balance(&sender.pubkey()).unwrap();
     let pre_receiver_balance = p.svm.get_balance(&receiver.pubkey()).unwrap();
@@ -662,15 +665,16 @@ fn replay_signed_tx_rejected() {
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let receiver = Keypair::new();
+    let payload = p.transfer_payload(0, receiver.pubkey(), 1000);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     p.signed(&sender, &data, &metas).unwrap();
     let result = p.signed(&sender, &data, &metas).unwrap_err();
 
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::AlreadyProcessed as u32))
+        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::IncorrectOutgoingId as u32))
     );
 }
 
@@ -716,7 +720,7 @@ fn insufficient_token_balance_rejected() {
     let result = p.regular(&sender, &data, &[p.token]).unwrap_err();
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::InsufficientFunds as u32))
+        TransactionError::InstructionError(0, InstructionError::InsufficientFunds)
     );
 }
 
@@ -728,21 +732,21 @@ fn init_with_duplicate_executors_rejected() {
 
     let mut executors = Vec::with_capacity(KEYS_LEN - 1);
     for i in 1..KEYS_LEN {
-        executors.push(Secp256k1Pubkey(p.keys[i].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()));
+        executors.push(Secp256k1PubkeyCompressed(p.keys[i].verifying_key().to_sec1_bytes().deref().try_into().unwrap()));
     }
 
-    executors[1] = executors[0];
+    executors[1] = executors[0].clone();
 
     let data = InitializeIxData {
         needed_executors: ((KEYS_LEN - 1) / 2) as u8,
-        processor: Secp256k1Pubkey(p.keys[PROCESSOR_KEY].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()),
+        processor: Secp256k1PubkeyCompressed(p.keys[PROCESSOR_KEY].verifying_key().to_sec1_bytes().deref().try_into().unwrap()),
         executors,
     };
 
     let result = p.init(&sender, &data).unwrap_err();
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::DuplicateSignature as u32))
+        TransactionError::InstructionError(0, InstructionError::Custom(InitIxError::TooManyExecutors as u32))
     );
 }
 
@@ -759,8 +763,8 @@ fn transfer_to_uninitialized_ata() {
     p.mint(&sender_ata, mint_amount);
 
     let receiver_ata = spl_client::address::get_associated_token_address(&receiver.pubkey(), &p.token);
-    let (payload, metas) = transfer_payload(0, sender_ata, receiver_ata, sender.pubkey(), mint_amount / 2);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let payload = p.transfer_payload(0, receiver_ata, mint_amount / 2);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let result = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
@@ -781,14 +785,16 @@ fn max_accounts_in_signed_instruction() {
         additional_metas.push(AccountMeta::new_readonly(Keypair::new().pubkey(), false));
     }
 
-    let (payload, mut metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
+    let receiver = Keypair::new();
+    let payload = p.transfer_payload(0, receiver.pubkey(), 1000);
+    let (data, metas_base) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let mut metas = metas_base;
     metas.extend(additional_metas);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let result = p.signed(&sender, &data, &metas[..]).unwrap_err();
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::ComputationalBudgetExceeded)
+        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::AccountMetaAndPassedAccountsMismatch as u32))
     );
 }
 
@@ -801,8 +807,8 @@ fn insufficient_lamports_rejected() {
     p.init_default(&sender).unwrap();
 
     let amount = 2000000;
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), receiver.pubkey(), sender.pubkey(), amount);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let payload = p.transfer_payload(0, receiver.pubkey(), amount);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let result = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
@@ -851,13 +857,14 @@ fn processor_as_executor_rejected() {
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
-    let mut data = p.make_signed_msg(&payload, &[PROCESSOR_KEY, EXECUTOR3_KEY]);
+    let receiver = Keypair::new();
+    let payload = p.transfer_payload(0, receiver.pubkey(), 1000);
+    let (data, metas) = p.make_signed_msg(&payload, &[PROCESSOR_KEY, EXECUTOR3_KEY]);
 
     let result = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::ProcessorAsExecutor as u32))
+        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::NonExecutorKey as u32))
     );
 }
 
@@ -868,16 +875,17 @@ fn tampered_payload_rejected() {
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
     p.init_default(&sender).unwrap();
 
-    let (payload, metas) = transfer_payload(0, sender.pubkey(), Keypair::new().pubkey(), sender.pubkey(), 1000);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let receiver = Keypair::new();
+    let payload = p.transfer_payload(0, receiver.pubkey(), 1000);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
-    let mut tampered_data = data;
-    tampered_data.payload[0] = 99;
+    let tampered_payload = base64::engine::general_purpose::STANDARD.encode("tampered");
+    data.payload = tampered_payload;
 
-    let result = p.signed(&sender, &tampered_data, &metas).unwrap_err();
+    let result = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::SignatureMismatch as u32))
+        TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::InvalidBase64Payload as u32))
     );
 }
 
@@ -889,31 +897,31 @@ fn invalid_needed_executors_rejected() {
 
     let mut executors = Vec::with_capacity(KEYS_LEN - 1);
     for i in 1..KEYS_LEN {
-        executors.push(Secp256k1Pubkey(p.keys[i].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()));
+        executors.push(Secp256k1PubkeyCompressed(p.keys[i].verifying_key().to_sec1_bytes().deref().try_into().unwrap()));
     }
 
     let data = InitializeIxData {
         needed_executors: (KEYS_LEN - 1 + 1) as u8,
-        processor: Secp256k1Pubkey(p.keys[PROCESSOR_KEY].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()),
+        processor: Secp256k1PubkeyCompressed(p.keys[PROCESSOR_KEY].verifying_key().to_sec1_bytes().deref().try_into().unwrap()),
         executors,
     };
 
     let result = p.init(&sender, &data).unwrap_err();
     assert_eq!(
         result.err,
-        TransactionError::InstructionError(0, InstructionError::InvalidArgument)
+        TransactionError::InstructionError(0, InstructionError::Custom(InitIxError::InsufficientExecutors as u32))
     );
 
     let data_zero = InitializeIxData {
         needed_executors: 0,
-        processor: Secp256k1Pubkey(p.keys[PROCESSOR_KEY].verifying_key().to_encoded_point(false).as_bytes()[1..].try_into().unwrap()),
+        processor: Secp256k1PubkeyCompressed(p.keys[PROCESSOR_KEY].verifying_key().to_sec1_bytes().deref().try_into().unwrap()),
         executors: vec![],
     };
 
     let result_zero = p.init(&sender, &data_zero).unwrap_err();
     assert_eq!(
         result_zero.err,
-        TransactionError::InstructionError(0, InstructionError::InvalidArgument)
+        TransactionError::InstructionError(0, InstructionError::Custom(InitIxError::NoExecutorsProvided as u32))
     );
 }
 
@@ -928,8 +936,8 @@ fn self_transfer_works() {
     let mint_amount = 10_00000000;
     p.mint(&sender_ata, mint_amount);
 
-    let (payload, metas) = transfer_payload(0, sender_ata, sender_ata, sender.pubkey(), mint_amount / 2);
-    let data = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let payload = p.transfer_payload(0, sender_ata, mint_amount / 2);
+    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
 
     let result = p.signed(&sender, &data, &metas);
     assert!(result.is_ok());
