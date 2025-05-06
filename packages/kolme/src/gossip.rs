@@ -60,6 +60,11 @@ enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
 pub struct GossipBuilder {
     keypair: Option<Keypair>,
     bootstrap: Vec<(PeerId, Multiaddr)>,
+    disable_quic: bool,
+    disable_tcp: bool,
+    disable_ip4: bool,
+    disable_ip6: bool,
+    listen_ports: Vec<u16>,
 }
 
 impl GossipBuilder {
@@ -74,6 +79,34 @@ impl GossipBuilder {
 
     pub fn set_keypair(mut self, keypair: Keypair) -> Self {
         self.keypair = Some(keypair);
+        self
+    }
+
+    pub fn disable_quic(mut self) -> Self {
+        self.disable_quic = true;
+        self
+    }
+
+    pub fn disable_tcp(mut self) -> Self {
+        self.disable_tcp = true;
+        self
+    }
+
+    pub fn disable_ip4(mut self) -> Self {
+        self.disable_ip4 = true;
+        self
+    }
+
+    pub fn disable_ip6(mut self) -> Self {
+        self.disable_ip6 = true;
+        self
+    }
+
+    /// Add a listen port
+    ///
+    /// If none are provided, a random port is selected per interface
+    pub fn add_listen_port(mut self, port: u16) -> Self {
+        self.listen_ports.push(port);
         self
     }
 
@@ -158,11 +191,48 @@ impl GossipBuilder {
         swarm.behaviour_mut().gossipsub.subscribe(&notifications)?;
         swarm.behaviour_mut().gossipsub.subscribe(&find_peers)?;
 
-        // Listen on all interfaces and whatever port the OS assigns
-        swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
-        swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-        swarm.listen_on("/ip6/::/udp/0/quic-v1".parse()?)?;
-        swarm.listen_on("/ip6/::/tcp/0".parse()?)?;
+        // Begin listening based on the config
+        fn add_listen<AppMessage: serde::de::DeserializeOwned + Send>(
+            swarm: &mut Swarm<KolmeBehaviour<AppMessage>>,
+            is_quic: bool,
+            is_ip6: bool,
+            port: u16,
+        ) -> Result<()> {
+            swarm.listen_on(
+                format!(
+                    "{}/{}/{port}{}",
+                    if is_ip6 { "/ip6/::" } else { "/ip4/0.0.0.0" },
+                    if is_quic { "udp" } else { "tcp" },
+                    if is_quic { "/quic-v1" } else { "" }
+                )
+                .parse()?,
+            )?;
+            Ok(())
+        }
+        let add_port = |swarm: &mut Swarm<KolmeBehaviour<App::Message>>, port: u16| -> Result<()> {
+            // Listen on all interfaces and whatever port the OS assigns
+            if !self.disable_quic && !self.disable_ip4 {
+                add_listen(swarm, true, false, port)?;
+            }
+            if !self.disable_tcp && !self.disable_ip4 {
+                add_listen(swarm, false, false, port)?;
+            }
+            if !self.disable_quic && !self.disable_ip6 {
+                add_listen(swarm, true, true, port)?;
+            }
+            if !self.disable_tcp && !self.disable_ip6 {
+                add_listen(swarm, false, true, port)?;
+            }
+            Ok(())
+        };
+
+        if self.listen_ports.is_empty() {
+            add_port(&mut swarm, 0)?;
+        } else {
+            for port in &self.listen_ports {
+                add_port(&mut swarm, *port)?;
+            }
+        }
 
         let (last_seen_watch, _) = tokio::sync::watch::channel(None);
 
