@@ -118,7 +118,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(
         Processor::new(kolme_processor.clone(), my_secret_key().clone()).run(),
     );
-    testtasks.try_spawn_persistent(Gossip::new(kolme_processor).await.unwrap().run());
+    testtasks.try_spawn_persistent(Gossip::new(kolme_processor, &[]).await.unwrap().run());
 
     let tempfile_client = tempfile::tempdir().unwrap();
     let kolme_client = Kolme::new(
@@ -128,7 +128,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.try_spawn_persistent(Gossip::new(kolme_client.clone()).await.unwrap().run());
+    testtasks.try_spawn_persistent(Gossip::new(kolme_client.clone(), &[]).await.unwrap().run());
 
     let secret = SecretKey::random(&mut rand::thread_rng());
     timeout(

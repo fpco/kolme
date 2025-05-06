@@ -12,7 +12,7 @@ use libp2p::{
     mdns, noise,
     request_response::ProtocolSupport,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, PeerId, StreamProtocol, Swarm,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm,
 };
 use tokio::sync::Mutex;
 
@@ -32,6 +32,7 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + 'static> 
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
     mdns: mdns::tokio::Behaviour,
+    kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
@@ -55,7 +56,7 @@ enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
 }
 
 impl<App: KolmeApp> Gossip<App> {
-    pub async fn new(kolme: Kolme<App>) -> Result<Self> {
+    pub async fn new(kolme: Kolme<App>, bootstrap_addrs: &[(PeerId, Multiaddr)]) -> Result<Self> {
         let mut swarm = libp2p::SwarmBuilder::with_new_identity()
             .with_tokio()
             .with_tcp(
@@ -98,10 +99,24 @@ impl<App: KolmeApp> Gossip<App> {
                     )],
                     libp2p::request_response::Config::default(),
                 );
+
+                // Kademlia
+                let kademlia_config = libp2p::kad::Config::default();
+                let store = libp2p::kad::store::MemoryStore::new(key.public().to_peer_id());
+                let mut kademlia = libp2p::kad::Behaviour::with_config(
+                    key.public().to_peer_id(),
+                    store,
+                    kademlia_config,
+                );
+                for (peer, address) in bootstrap_addrs {
+                    kademlia.add_address(peer, address.clone());
+                }
+
                 Ok(KolmeBehaviour {
                     gossipsub,
                     mdns,
                     request_response,
+                    kademlia,
                 })
             })?
             .build();
@@ -176,10 +191,33 @@ impl<App: KolmeApp> Gossip<App> {
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
-            } => tracing::debug!("New listener {listener_id} on {address}"),
+            } => {
+                tracing::debug!("New listener {listener_id} on {address}");
+                let peer = *swarm.local_peer_id();
+                swarm.behaviour_mut().kademlia.add_address(&peer, address);
+            }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
-                for (peer, _) in peers {
+                for (peer, address) in peers {
                     state.add_peer(peer);
+                    swarm.behaviour_mut().kademlia.add_address(&peer, address);
+                }
+            }
+            SwarmEvent::Behaviour(KolmeBehaviourEvent::Kademlia(event)) => {
+                match event {
+                    libp2p::kad::Event::OutboundQueryProgressed { id: _, result, .. } => {
+                        // Handle query results (e.g., found peers)
+                        if let libp2p::kad::QueryResult::GetClosestPeers(Ok(peers)) = result {
+                            for peer in peers.peers {
+                                state.add_peer(peer.peer_id);
+                            }
+                        }
+                    }
+                    libp2p::kad::Event::RoutablePeer { peer, address } => {
+                        tracing::debug!("Routable peer: {} at {}", peer, address);
+                        state.add_peer(peer);
+                        swarm.dial(peer).ok();
+                    }
+                    _ => tracing::debug!("Kademlia event: {:?}", event),
                 }
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(gossipsub::Event::Message {
@@ -301,6 +339,10 @@ impl<App: KolmeApp> Gossip<App> {
         {
             tracing::warn!("Error when trying to request peers: {e}")
         }
+
+        // Kademlia: Start a query to find closest peers
+        let peer_id = *swarm.local_peer_id();
+        swarm.behaviour_mut().kademlia.get_closest_peers(peer_id);
 
         if let Some(peer) = state.get_next_peer() {
             swarm
