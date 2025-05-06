@@ -4840,6 +4840,7 @@ dependencies = [
  "arrayvec",
  "parameterized",
  "parking_lot",
+ "paste",
  "quickcheck",
  "rust_decimal",
  "serde",
