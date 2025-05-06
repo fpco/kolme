@@ -13,6 +13,7 @@ use std::{
 use anyhow::Result;
 use cosmos::SeedPhrase;
 
+use serde::{Deserialize, Serialize};
 #[allow(unused_imports)] // It's not unused...
 use shared::cosmos::KeyRegistration;
 
@@ -229,7 +230,12 @@ fn change_balance(
             tracing::debug!("withdraw");
             let chain = ctx.app().chain;
             ctx.mint_asset(*asset_id, *account, *amount)?;
-            ctx.withdraw_asset(*asset_id, chain, *account, withdraw_wallet, *amount)
+            let bridge_action_id =
+                ctx.withdraw_asset(*asset_id, chain, *account, withdraw_wallet, *amount)?;
+            ctx.log(serde_json::to_string(&Event::Withdrawal {
+                bridge_action_id,
+            })?);
+            Ok(())
         }
         BalanceChange::Burn {
             asset_id,
@@ -237,6 +243,11 @@ fn change_balance(
             account,
         } => ctx.burn_asset(*asset_id, *account, *amount),
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+enum Event {
+    Withdrawal { bridge_action_id: BridgeActionId },
 }
 
 pub const OUTCOME_COUNT: u8 = 3;
@@ -357,7 +368,8 @@ impl TxLogger {
         let mut file = File::create(self.path)?;
         let mut receiver = self.kolme.subscribe();
         loop {
-            let output = match receiver.recv().await? {
+            let notification = receiver.recv().await?;
+            let output = match notification.clone() {
                 Notification::Broadcast { .. } => {
                     // we skip initial tx broadcast, only tx as a part of a block
                     continue;
@@ -383,12 +395,12 @@ impl TxLogger {
             serde_json::to_writer(&file, &output)?;
             writeln!(file)?;
             file.flush()?;
-            tracing::info!("Log output: {output:?}");
+            tracing::info!("Log output: {notification:?}");
         }
     }
 }
 
-pub async fn broadcast(message: String, secret: String, host: String) -> Result<()> {
+pub async fn broadcast(message: String, secret: String, host: String) -> Result<Sha256Hash> {
     let message = serde_json::from_str::<AppMessage>(&message)?;
     let secret = SecretKey::from_hex(&secret)?;
     let public = secret.public_key();
@@ -433,7 +445,7 @@ pub async fn broadcast(message: String, secret: String, host: String) -> Result<
 
     let Res { txhash } = res.json().await?;
     println!("txhash: {txhash}");
-    Ok(())
+    Ok(txhash)
 }
 
 #[cfg(test)]
@@ -443,12 +455,15 @@ mod tests {
         path::Path,
     };
 
-    use anyhow::ensure;
+    use anyhow::{ensure, Context};
     use backon::{ExponentialBuilder, Retryable};
     use cosmos::{AddressHrp, HasAddress};
+    use futures_util::StreamExt;
     use pass_through::PassThrough;
     use shared::cosmos::ExecuteMsg;
     use tempfile::NamedTempFile;
+    use tokio::time::{Duration, Instant};
+    use tokio_tungstenite::connect_async;
 
     use super::*;
 
@@ -606,38 +621,33 @@ mod tests {
         .unwrap();
 
         tracing::debug!("Settling the market");
-        broadcast_check_state(
-            SixSigmaApp::new_passthrough(),
+        let (block, logs) = broadcast_wait_tx(
             ADMIN_SECRET_KEY,
-            &db_path,
             AppMessage::SettleMarket {
                 market_id: 1,
                 outcome: 0,
             },
-            |state| {
-                ensure!(state
-                    .markets
-                    .iter()
-                    .next()
-                    .is_some_and(|(_, market)| market.state == MarketState::Settled));
-                Ok(())
-            },
         )
         .await
         .unwrap();
+        tracing::info!("Landed as tx: {}", block.tx.hash());
+        let [log] = logs.as_slice() else {
+            panic!("Expected exactly one log line with withdrawal")
+        };
+        let Event::Withdrawal { bridge_action_id } =
+            serde_json::from_str(log).expect("log line should contain event JSON");
+        tracing::info!("Bridge action id: {}", bridge_action_id);
 
-        tracing::debug!("Checking if award was received");
+        tracing::debug!("Checking executed transfer action with the award");
         (|| async {
             let resp = client
-                .get("http://localhost:12345/actions")
+                .get(format!("http://localhost:12345/actions/{bridge_action_id}"))
                 .send()
                 .await
                 .unwrap();
             let resp = resp.error_for_status().unwrap();
-            let actions = resp.json::<Vec<pass_through::Action>>().await.unwrap();
-            ensure!(actions.len() == 1);
-            let transfer =
-                serde_json::from_str::<pass_through::Transfer>(&actions[0].payload).unwrap();
+            let action = resp.json::<pass_through::Action>().await.unwrap();
+            let transfer = serde_json::from_str::<pass_through::Transfer>(&action.payload).unwrap();
             ensure!(transfer.recipient.0 == bettor_wallet.get_address_string());
             ensure!(transfer.funds[0].amount == 180000);
             Ok(())
@@ -808,5 +818,34 @@ mod tests {
                 .with_max_times(10),
         )
         .await
+    }
+
+    async fn broadcast_wait_tx(
+        secret: &str,
+        msg: AppMessage,
+    ) -> Result<(Block<AppMessage>, Vec<String>)> {
+        let ws_url = format!("ws://localhost:{}/notifications", 3001);
+        let (mut ws, _) = connect_async(&ws_url).await.unwrap();
+        let txhash = broadcast(
+            serde_json::to_string(&msg).unwrap(),
+            secret.to_string(),
+            "http://localhost:3001".to_string(),
+        )
+        .await?;
+        let timeout_at = Instant::now() + Duration::from_secs(2);
+        loop {
+            let message = tokio::time::timeout_at(timeout_at, ws.next())
+                .await?
+                .context("WebSocket stream terminated")??;
+            let notification =
+                serde_json::from_slice::<ApiNotification<AppMessage>>(&message.into_data())?;
+            if let ApiNotification::NewBlock { block, logs } = notification {
+                if block.tx().hash().0 == txhash {
+                    let block = block.0.message.as_inner().clone();
+                    let logs = logs.iter().flatten().cloned().collect();
+                    return Ok((block, logs));
+                }
+            }
+        }
     }
 }

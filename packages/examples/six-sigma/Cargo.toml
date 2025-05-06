@@ -24,3 +24,5 @@ backon = "1.4.1"
 cosmwasm-std = "2.2.2"
 test-log = { version = "0.2", features = ["trace"] }
 tempfile = "3.19.1"
+tokio-tungstenite = "0.26.2"
+futures-util = "0.3.31"

@@ -114,20 +114,48 @@ async fn ws_handler<App: KolmeApp>(
 ) -> impl IntoResponse {
     tracing::info!("New WebSocket connection established");
     let rx = kolme.subscribe();
-    ws.on_upgrade(move |socket| handle_websocket::<App>(socket, rx))
+    ws.on_upgrade(move |socket| handle_websocket::<App>(kolme, socket, rx))
 }
 
 async fn handle_websocket<App: KolmeApp>(
+    kolme: Kolme<App>,
     mut socket: WebSocket,
     mut rx: broadcast::Receiver<Notification<App::Message>>,
 ) {
     tracing::debug!("WebSocket subscribed to Kolme notifications");
 
     while let Ok(notification) = rx.recv().await {
+        let notification = match notification {
+            Notification::NewBlock(block) => {
+                let height = block.height();
+                let logs = match kolme.get_block_logs(height).await {
+                    Ok(Some(logs)) => logs,
+                    Ok(None) => {
+                        tracing::error!(
+                            "No information about logs for the awaited block at {height}"
+                        );
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to get logs for block: {}", e);
+                        break;
+                    }
+                };
+                ApiNotification::NewBlock { block, logs }
+            }
+            Notification::GenesisInstantiation { chain, contract } => {
+                ApiNotification::GenesisInstantiation { chain, contract }
+            }
+            Notification::Broadcast { tx } => ApiNotification::Broadcast { tx },
+            Notification::FailedTransaction { txhash, error } => {
+                ApiNotification::FailedTransaction { txhash, error }
+            }
+        };
         let msg = match serde_json::to_string(&notification) {
-            Ok(json) => json,
+            Ok(msg) => msg,
             Err(e) => {
-                format!("Failed to serialize notification to JSON: {}", e)
+                tracing::error!("Failed to serialize notification to JSON: {}", e);
+                break;
             }
         };
 
@@ -137,4 +165,27 @@ async fn handle_websocket<App: KolmeApp>(
         }
         tracing::debug!("Notification sent to WebSocket client.");
     }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound(
+    serialize = "",
+    deserialize = "AppMessage: serde::de::DeserializeOwned"
+))]
+pub enum ApiNotification<AppMessage> {
+    NewBlock {
+        block: Arc<SignedBlock<AppMessage>>,
+        logs: Arc<[Vec<String>]>,
+    },
+    /// A claim by a submitter that it has instantiated a bridge contract.
+    GenesisInstantiation {
+        chain: ExternalChain,
+        contract: String,
+    },
+    /// Broadcast a transaction to be included in the chain.
+    Broadcast {
+        tx: Arc<SignedTransaction<AppMessage>>,
+    },
+    /// A transaction failed in the processor.
+    FailedTransaction { txhash: TxHash, error: KolmeError },
 }
