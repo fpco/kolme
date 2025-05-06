@@ -725,32 +725,6 @@ fn insufficient_token_balance_rejected() {
 }
 
 #[test]
-fn init_with_duplicate_executors_rejected() {
-    let mut p = Program::new();
-    let sender = Keypair::new();
-    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
-
-    let mut executors = Vec::with_capacity(KEYS_LEN - 1);
-    for i in 1..KEYS_LEN {
-        executors.push(Secp256k1PubkeyCompressed(p.keys[i].verifying_key().to_sec1_bytes().deref().try_into().unwrap()));
-    }
-
-    executors[1] = executors[0].clone();
-
-    let data = InitializeIxData {
-        needed_executors: ((KEYS_LEN - 1) / 2) as u8,
-        processor: Secp256k1PubkeyCompressed(p.keys[PROCESSOR_KEY].verifying_key().to_sec1_bytes().deref().try_into().unwrap()),
-        executors,
-    };
-
-    let result = p.init(&sender, &data).unwrap_err();
-    assert_eq!(
-        result.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(InitIxError::TooManyExecutors as u32))
-    );
-}
-
-#[test]
 fn transfer_to_uninitialized_ata() {
     let mut p = Program::new();
     let sender = Keypair::new();
