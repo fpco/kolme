@@ -715,3 +715,24 @@ fn range_sample() {
     assert_eq!(expected.len(), actual.len());
     assert_eq!(expected, actual);
 }
+
+macro_rules! serializing_idempotency_for_type {
+    ($value_type: ty, $test_name: ident) => {
+        quickcheck! {
+            fn $test_name(value: $value_type) -> quickcheck::TestResult {
+                let manager = MerkleManager::default();
+                let serialized = manager.serialize(&value).unwrap();
+                let deserialized = manager
+                    .deserialize::<$value_type>(serialized.hash, serialized.payload.clone())
+                    .unwrap();
+
+                quickcheck::TestResult::from_bool(value == deserialized)
+            }
+        }
+    };
+}
+
+serializing_idempotency_for_type!(String, serializing_is_idempotent_for_string);
+serializing_idempotency_for_type!(u8, serializing_is_idempotent_for_u8);
+serializing_idempotency_for_type!(u32, serializing_is_idempotent_for_u32);
+serializing_idempotency_for_type!(u64, serializing_is_idempotent_for_u64);
