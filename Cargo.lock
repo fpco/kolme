@@ -4059,13 +4059,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.5.37",
- "cosmos",
- "jiff",
  "kolme",
  "libp2p",
  "rand 0.8.5",
  "serde",
- "serde_json",
  "tokio",
 ]
 
