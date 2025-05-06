@@ -91,6 +91,11 @@ impl GossipBuilder {
             )?
             .with_quic()
             .with_behaviour(|key| {
+                tracing::info!(
+                    "Creating new gossip, running as peer ID: {}",
+                    key.public().to_peer_id()
+                );
+
                 // To content-address message, we can take the hash of message and use it as an ID.
                 let message_id_fn = |message: &gossipsub::Message| {
                     let mut s = DefaultHasher::new();
