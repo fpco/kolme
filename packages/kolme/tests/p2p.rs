@@ -2,11 +2,8 @@ use std::collections::BTreeSet;
 
 use anyhow::Result;
 
-use kolme::*;
-use tokio::{
-    task::JoinSet,
-    time::{timeout, Duration},
-};
+use kolme::{testtasks::TestTasks, *};
+use tokio::time::{timeout, Duration};
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
@@ -101,8 +98,10 @@ impl KolmeApp for SampleKolmeApp {
 #[tokio::test]
 async fn sanity() {
     kolme::init_logger(false, None);
-    let mut set = JoinSet::new();
+    TestTasks::start(sanity_inner, ()).await;
+}
 
+async fn sanity_inner(testtasks: TestTasks, (): ()) {
     // We're going to run two logically separate Kolmes, using different databases.
     // The first will be the processor, the second will be a client.
     // Our goal is that when we propose transactions via the client,
@@ -116,8 +115,10 @@ async fn sanity() {
     )
     .await
     .unwrap();
-    set.spawn(Processor::new(kolme_processor.clone(), my_secret_key().clone()).run());
-    set.spawn(Gossip::new(kolme_processor).await.unwrap().run());
+    testtasks.try_spawn_persistent(
+        Processor::new(kolme_processor.clone(), my_secret_key().clone()).run(),
+    );
+    testtasks.try_spawn_persistent(Gossip::new(kolme_processor).await.unwrap().run());
 
     let tempfile_client = tempfile::tempdir().unwrap();
     let kolme_client = Kolme::new(
@@ -127,39 +128,34 @@ async fn sanity() {
     )
     .await
     .unwrap();
-    set.spawn(Gossip::new(kolme_client.clone()).await.unwrap().run());
+    testtasks.try_spawn_persistent(Gossip::new(kolme_client.clone()).await.unwrap().run());
 
-    {
-        let secret = SecretKey::random(&mut rand::thread_rng());
-        timeout(
-            Duration::from_secs(30),
-            kolme_client.wait_for_block(BlockHeight::start()),
-        )
-        .await
-        .unwrap()
+    let secret = SecretKey::random(&mut rand::thread_rng());
+    timeout(
+        Duration::from_secs(30),
+        kolme_client.wait_for_block(BlockHeight::start()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let tx = kolme_client
+        .read()
+        .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
         .unwrap();
-        let tx = kolme_client
-            .read()
-            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
-            .unwrap();
-        let txhash = tx.hash();
-        timeout(
-            Duration::from_secs(5),
-            kolme_client.propose_and_await_transaction(tx),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        let block = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            kolme_client.wait_for_block(BlockHeight::start().next()),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(txhash, block.0.message.as_inner().tx.hash());
-    }
-
-    // And nothing else should have completed, since all other tasks should run forever.
-    assert!(set.try_join_next().is_none());
+    let txhash = tx.hash();
+    timeout(
+        Duration::from_secs(5),
+        kolme_client.propose_and_await_transaction(tx),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let block = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        kolme_client.wait_for_block(BlockHeight::start().next()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(txhash, block.0.message.as_inner().tx.hash());
 }
