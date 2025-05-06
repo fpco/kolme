@@ -1,4 +1,5 @@
 use parameterized::parameterized;
+use quickcheck::quickcheck;
 use std::{collections::BTreeMap, ops::Bound};
 
 use crate::*;
@@ -196,7 +197,7 @@ fn just_a() {
     }
 }
 
-quickcheck::quickcheck! {
+quickcheck! {
     fn test_store_usize(x: usize) -> bool {
         test_store_usize_inner(x)
     }
@@ -284,7 +285,7 @@ fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
     assert_eq!(person, person2);
 }
 
-quickcheck::quickcheck! {
+quickcheck! {
     fn store_load(name:String,age:u32, inventory:BTreeMap<String,u32>) -> bool {
         store_load_helper(name,age,inventory);
         true
@@ -364,7 +365,7 @@ fn rev_iter_prop_helper(pairs: Vec<(String, u32)>) -> bool {
     true
 }
 
-quickcheck::quickcheck! {
+quickcheck! {
     fn rev_iter_prop(pairs: Vec<(String, u32)>) -> bool {
         rev_iter_prop_helper(pairs)
     }
@@ -488,7 +489,7 @@ fn range_helper(
     true
 }
 
-quickcheck::quickcheck! {
+quickcheck! {
     fn range(pairs: Vec<(String, u32)>, asc: bool, start: Bound<String>, stop: Bound<String>) -> bool {
         range_helper(pairs, asc, start, stop)
     }
@@ -714,3 +715,24 @@ fn range_sample() {
     assert_eq!(expected.len(), actual.len());
     assert_eq!(expected, actual);
 }
+
+macro_rules! serializing_idempotency_for_type {
+    ($value_type: ty, $test_name: ident) => {
+        quickcheck! {
+            fn $test_name(value: $value_type) -> quickcheck::TestResult {
+                let manager = MerkleManager::default();
+                let serialized = manager.serialize(&value).unwrap();
+                let deserialized = manager
+                    .deserialize::<$value_type>(serialized.hash, serialized.payload.clone())
+                    .unwrap();
+
+                quickcheck::TestResult::from_bool(value == deserialized)
+            }
+        }
+    };
+}
+
+serializing_idempotency_for_type!(String, serializing_is_idempotent_for_string);
+serializing_idempotency_for_type!(u8, serializing_is_idempotent_for_u8);
+serializing_idempotency_for_type!(u32, serializing_is_idempotent_for_u32);
+serializing_idempotency_for_type!(u64, serializing_is_idempotent_for_u64);

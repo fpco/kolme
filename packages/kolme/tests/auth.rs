@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::OnceLock};
 
 use jiff::Timestamp;
-use tokio::task::JoinSet;
+use testtasks::TestTasks;
 
 use kolme::*;
 
@@ -86,6 +86,10 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn test_sample_sanity() {
+    TestTasks::start(test_sample_sanity_inner, ()).await;
+}
+
+async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
     init_logger(false, None);
     let tempfile = tempfile::tempdir().unwrap();
 
@@ -99,14 +103,18 @@ async fn test_sample_sanity() {
 
     let mut subscription = kolme.subscribe();
 
-    let mut set = JoinSet::new();
-    set.spawn(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
+    testtasks
+        .try_spawn_persistent(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
     subscription.recv().await.unwrap();
 
-    let mut rng = rand::thread_rng();
-    let secret1 = SecretKey::random(&mut rng);
-    let secret2 = SecretKey::random(&mut rng);
-    let secret3 = SecretKey::random(&mut rng);
+    let (secret1, secret2, secret3) = {
+        let mut rng = rand::thread_rng();
+        (
+            SecretKey::random(&mut rng),
+            SecretKey::random(&mut rng),
+            SecretKey::random(&mut rng),
+        )
+    };
 
     let perform_many = |signer: &SecretKey, msgs: Vec<AuthMessage>| {
         let signer = signer.clone();

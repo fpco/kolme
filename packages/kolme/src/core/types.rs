@@ -1251,6 +1251,7 @@ impl ExecAction {
                     #[cfg(feature = "pass_through")]
                     ChainName::PassThrough => {
                         let payload = serde_json::to_string(&pass_through::Transfer {
+                            bridge_action_id: id,
                             recipient: recipient.clone(),
                             funds: funds.clone(),
                         })?;
