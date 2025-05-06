@@ -106,7 +106,7 @@ async fn multiple_processors() {
 }
 
 async fn multiple_processors_inner(
-    mut test_tasks: TestTasks,
+    test_tasks: TestTasks,
     block_db_str: String,
 ) -> (
     Arc<[Kolme<SampleKolmeApp>]>,

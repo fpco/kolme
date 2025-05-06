@@ -22,7 +22,7 @@ impl TestTasks {
         let (send_error, mut recv_error) = tokio::sync::mpsc::channel(16);
         let (send_keep_running, mut recv_keep_running) = tokio::sync::watch::channel(true);
         let running_count = Arc::new(AtomicUsize::new(0));
-        let mut test_tasks = TestTasks {
+        let test_tasks = TestTasks {
             send_keep_running,
             send_error,
             running_count,
@@ -46,7 +46,7 @@ impl TestTasks {
         rx_final.try_recv().unwrap()
     }
 
-    pub fn spawn_persistent<F>(&mut self, task: F)
+    pub fn spawn_persistent<F>(&self, task: F)
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
@@ -55,7 +55,7 @@ impl TestTasks {
             anyhow::Ok(())
         });
     }
-    pub fn try_spawn_persistent<F, E>(&mut self, task: F)
+    pub fn try_spawn_persistent<F, E>(&self, task: F)
     where
         F: std::future::Future<Output = Result<(), E>> + Send + 'static,
         anyhow::Error: From<E>,
@@ -63,7 +63,7 @@ impl TestTasks {
         self.spawn_helper(true, task)
     }
 
-    pub fn spawn<F>(&mut self, task: F)
+    pub fn spawn<F>(&self, task: F)
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
@@ -73,7 +73,7 @@ impl TestTasks {
         })
     }
 
-    pub fn try_spawn<F, E>(&mut self, task: F)
+    pub fn try_spawn<F, E>(&self, task: F)
     where
         F: std::future::Future<Output = Result<(), E>> + Send + 'static,
         anyhow::Error: From<E>,
