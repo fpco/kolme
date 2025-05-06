@@ -9,10 +9,11 @@ use crate::*;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
+    identity::Keypair,
     mdns, noise,
     request_response::ProtocolSupport,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder,
 };
 use tokio::sync::Mutex;
 
@@ -55,9 +56,33 @@ enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     HeightNotFound(BlockHeight),
 }
 
-impl<App: KolmeApp> Gossip<App> {
-    pub async fn new(kolme: Kolme<App>, bootstrap_addrs: &[(PeerId, Multiaddr)]) -> Result<Self> {
-        let mut swarm = libp2p::SwarmBuilder::with_new_identity()
+#[derive(Default)]
+pub struct GossipBuilder {
+    keypair: Option<Keypair>,
+    bootstrap: Vec<(PeerId, Multiaddr)>,
+}
+
+impl GossipBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_bootstrap(mut self, peer: PeerId, address: Multiaddr) -> Self {
+        self.bootstrap.push((peer, address));
+        self
+    }
+
+    pub fn set_keypair(mut self, keypair: Keypair) -> Self {
+        self.keypair = Some(keypair);
+        self
+    }
+
+    pub async fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>> {
+        let builder = match self.keypair {
+            Some(keypair) => SwarmBuilder::with_existing_identity(keypair),
+            None => SwarmBuilder::with_new_identity(),
+        };
+        let mut swarm = builder
             .with_tokio()
             .with_tcp(
                 tcp::Config::default(),
@@ -108,8 +133,8 @@ impl<App: KolmeApp> Gossip<App> {
                     store,
                     kademlia_config,
                 );
-                for (peer, address) in bootstrap_addrs {
-                    kademlia.add_address(peer, address.clone());
+                for (peer, address) in self.bootstrap {
+                    kademlia.add_address(&peer, address);
                 }
 
                 Ok(KolmeBehaviour {
@@ -136,7 +161,7 @@ impl<App: KolmeApp> Gossip<App> {
 
         let (last_seen_watch, _) = tokio::sync::watch::channel(None);
 
-        Ok(Self {
+        Ok(Gossip {
             kolme,
             last_seen_watch,
             swarm: Mutex::new(swarm),
@@ -144,7 +169,9 @@ impl<App: KolmeApp> Gossip<App> {
             find_peers,
         })
     }
+}
 
+impl<App: KolmeApp> Gossip<App> {
     pub fn subscribe_last_seen(&self) -> tokio::sync::watch::Receiver<Option<BlockHeight>> {
         self.last_seen_watch.subscribe()
     }

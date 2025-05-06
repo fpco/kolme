@@ -109,7 +109,7 @@ pub async fn processor() -> Result<()> {
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
-    let gossip = Gossip::new(kolme, &[]).await?;
+    let gossip = GossipBuilder::new().build(kolme).await?;
     set.spawn(gossip.run());
 
     while let Some(res) = set.join_next().await {
@@ -141,7 +141,7 @@ pub async fn api_server(bind: SocketAddr) -> Result<()> {
 
     let mut set = JoinSet::new();
 
-    let gossip = Gossip::new(kolme.clone(), &[]).await?;
+    let gossip = GossipBuilder::new().build(kolme.clone()).await?;
     set.spawn(gossip.run());
     let api_server = ApiServer::new(kolme);
     set.spawn(api_server.run(bind));
