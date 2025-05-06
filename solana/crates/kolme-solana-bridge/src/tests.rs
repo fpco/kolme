@@ -580,11 +580,11 @@ fn invalid_payload_rejected() {
 fn zero_amount_transfer() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.svm.airdrop(&sender.pubkey(), 1_000_000_000).unwrap();
     p.init_default(&sender).unwrap();
 
     let sender_ata = p.make_ata(&sender);
-    p.mint(&sender_ata, 10_00000000);
+    p.mint(&sender_ata, 1_000_000_000);
 
     let data = RegularMsgIxData {
         keys: vec![],
