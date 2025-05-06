@@ -74,7 +74,7 @@ async fn main_inner() -> Result<()> {
             secret,
             host,
         } => {
-            let _ = broadcast(message, secret, host).await?;
+            broadcast(message, secret, host).await?;
             Ok(())
         }
         Cmd::State {} => {
