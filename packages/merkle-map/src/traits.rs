@@ -1,6 +1,8 @@
 mod from_merkle_key;
 mod merkle_deserialize;
 mod merkle_serialize;
+#[cfg(test)]
+pub mod quickcheck_arbitrary;
 mod to_merkle_key;
 
 use std::sync::Arc;

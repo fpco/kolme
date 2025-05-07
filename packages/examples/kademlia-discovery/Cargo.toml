@@ -1,0 +1,13 @@
+[package]
+name = "kademlia-discovery"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.219", features = ["derive"] }
+rand = "0.8"
+tokio = { workspace = true }
+clap = { workspace = true }
+kolme = { workspace = true }
+libp2p = { workspace = true, features = ["rsa"] }
+anyhow = { workspace = true }
