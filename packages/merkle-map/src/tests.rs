@@ -1,6 +1,12 @@
 use parameterized::parameterized;
+use paste::paste;
 use quickcheck::quickcheck;
-use std::{collections::BTreeMap, ops::Bound};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Bound,
+};
+
+use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice};
 
 use crate::*;
 
@@ -729,10 +735,73 @@ macro_rules! serializing_idempotency_for_type {
                 quickcheck::TestResult::from_bool(value == deserialized)
             }
         }
+
+        paste! {
+            // tests for Option<T>
+            quickcheck!{
+                fn [<$test_name _option>] (value: Option<$value_type>) -> quickcheck::TestResult {
+                    let manager = MerkleManager::default();
+                    let serialized = manager.serialize(&value).unwrap();
+                    let deserialized = manager
+                        .deserialize::<Option<$value_type>>(serialized.hash, serialized.payload.clone())
+                        .unwrap();
+
+                    quickcheck::TestResult::from_bool(value == deserialized)
+                }
+            }
+
+            // tests for [T]
+            quickcheck!{
+                fn [<$test_name _slice>] (value: SerializableSlice<'static, $value_type>) -> quickcheck::TestResult {
+                    let manager = MerkleManager::default();
+                    let serialized = manager.serialize(value.0).unwrap();
+                    let deserialized = manager
+                        .deserialize::<Vec<$value_type>>(serialized.hash, serialized.payload.clone())
+                        .unwrap();
+
+                    quickcheck::TestResult::from_bool(value.0 == deserialized)
+                }
+            }
+
+            // tests for BTreeSet<T>
+            quickcheck!{
+                fn [<$test_name _btreeset>] (value: BTreeSet<$value_type>) -> quickcheck::TestResult {
+                    let manager = MerkleManager::default();
+                    let serialized = manager.serialize(&value).unwrap();
+                    let deserialized = manager
+                        .deserialize::<BTreeSet<$value_type>>(serialized.hash, serialized.payload.clone())
+                        .unwrap();
+
+                    quickcheck::TestResult::from_bool(value == deserialized)
+                }
+            }
+        }
     };
 }
 
 serializing_idempotency_for_type!(String, serializing_is_idempotent_for_string);
+serializing_idempotency_for_type!(usize, serializing_is_idempotent_for_usize);
 serializing_idempotency_for_type!(u8, serializing_is_idempotent_for_u8);
 serializing_idempotency_for_type!(u32, serializing_is_idempotent_for_u32);
 serializing_idempotency_for_type!(u64, serializing_is_idempotent_for_u64);
+
+quickcheck! {
+    fn serializing_is_idempotent_for_btreemap_string_u64(value: BTreeMap<String, u64>) -> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value).unwrap();
+        let deserialized = manager
+            .deserialize::<BTreeMap<String, u64>>(serialized.hash, serialized.payload.clone())
+            .unwrap();
+
+        quickcheck::TestResult::from_bool(value == deserialized)
+    }
+    fn serializing_is_idempotent_for_merklemap_string_u64 (value: SerializableMerkleMap<String, u64>) -> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value.0).unwrap();
+        let deserialized = manager
+            .deserialize::<MerkleMap<String, u64>>(serialized.hash, serialized.payload.clone())
+            .unwrap();
+
+        quickcheck::TestResult::from_bool(value == SerializableMerkleMap(deserialized))
+    }
+}

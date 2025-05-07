@@ -15,5 +15,6 @@ thiserror = "2.0.12"
 tinyvec = { version = "1.9.0", features = ["alloc"] }
 
 [dev-dependencies]
+paste = "1.0.15"
 quickcheck = "1.0.3"
 tokio = { version = "1.43.0", features = ["full"] }
