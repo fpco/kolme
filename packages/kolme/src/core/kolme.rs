@@ -288,6 +288,11 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Remove a transaction from the mempool, if present.
+    pub fn remove_from_mempool(&self, hash: TxHash) {
+        self.inner.mempool.drop_tx(hash);
+    }
+
     pub async fn new(
         app: App,
         _code_version: impl AsRef<str>,
