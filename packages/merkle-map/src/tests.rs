@@ -6,7 +6,7 @@ use std::{
     ops::Bound,
 };
 
-use crate::quickcheck_newtypes::SerializableMerkleMap;
+use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice};
 
 use crate::*;
 
@@ -747,6 +747,19 @@ macro_rules! serializing_idempotency_for_type {
                         .unwrap();
 
                     quickcheck::TestResult::from_bool(value == deserialized)
+                }
+            }
+
+            // tests for [T]
+            quickcheck!{
+                fn [<$test_name _slice>] (value: SerializableSlice<'static, $value_type>) -> quickcheck::TestResult {
+                    let manager = MerkleManager::default();
+                    let serialized = manager.serialize(value.0).unwrap();
+                    let deserialized = manager
+                        .deserialize::<Vec<$value_type>>(serialized.hash, serialized.payload.clone())
+                        .unwrap();
+
+                    quickcheck::TestResult::from_bool(value.0 == deserialized)
                 }
             }
 
