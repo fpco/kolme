@@ -1,5 +1,5 @@
 drop-db:
-    rm -f six-sigma-app.sqlite3
+    rm -rf six-sigma-app.fjall
 
 run-tests:
     RUST_LOG=info,kolme=debug,six_sigma=debug cargo t -- --ignored --nocapture

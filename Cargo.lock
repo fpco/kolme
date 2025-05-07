@@ -520,6 +520,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "asn1_der"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "155a5a185e42c6b77ac7b88a15143d930a9e9727a5b7b77eed417404ab15c247"
+
+[[package]]
 name = "assert_matches"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4050,6 +4056,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kademlia-discovery"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.5.37",
+ "kolme",
+ "libp2p",
+ "rand 0.8.5",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "keccak"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4164,9 +4183,9 @@ checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 
 [[package]]
 name = "libm"
-version = "0.2.13"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9627da5196e5d8ed0b0495e61e518847578da83483c37288316d9b2e03a7f72"
+checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "libp2p"
@@ -4303,12 +4322,14 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "257b5621d159b32282eac446bed6670c39c7dc68a200a992d8f056afa0066f6d"
 dependencies = [
+ "asn1_der",
  "bs58",
  "ed25519-dalek 2.1.1",
  "hkdf",
  "multihash",
  "quick-protobuf",
  "rand 0.8.5",
+ "ring",
  "sha2 0.10.8",
  "thiserror 1.0.69",
  "tracing",
@@ -4819,6 +4840,7 @@ dependencies = [
  "arrayvec",
  "parameterized",
  "parking_lot",
+ "paste",
  "quickcheck",
  "rust_decimal",
  "serde",
@@ -10911,9 +10933,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.8",
  "sqlx-core",
- "sqlx-mysql",
  "sqlx-postgres",
- "sqlx-sqlite",
  "syn 2.0.101",
  "tempfile",
  "tokio",
@@ -10951,7 +10971,6 @@ dependencies = [
  "percent-encoding",
  "rand 0.8.5",
  "rsa",
- "serde",
  "sha1",
  "sha2 0.10.8",
  "smallvec",
@@ -11015,7 +11034,6 @@ dependencies = [
  "libsqlite3-sys",
  "log",
  "percent-encoding",
- "serde",
  "serde_urlencoded",
  "sqlx-core",
  "thiserror 2.0.12",

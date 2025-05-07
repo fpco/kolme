@@ -26,9 +26,8 @@ rust_decimal = "1.37.1"
 kolme = { path = "packages/kolme" }
 kolme-store = { path = "packages/kolme-store" }
 kolme-store-postgresql = { path = "packages/kolme-store-postgresql" }
-kolme-store-sqlite = { path = "packages/kolme-store-sqlite" }
+libp2p = { version = "0.55" }
 merkle-map = { path = "packages/merkle-map" }
 merkle-store-fjall = { path = "packages/merkle-store-fjall" }
 shared = { path = "packages/shared" }
-sqlx = { version = "0.8.3" }
 thiserror = "2.0.12"

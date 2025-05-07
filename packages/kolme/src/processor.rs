@@ -43,6 +43,11 @@ impl<App: KolmeApp> Processor<App> {
             let txhash = tx.hash();
             let tx = Arc::unwrap_or_clone(tx);
 
+            // Remove the transaction from the mempool. Either it will succeed, in
+            // which case it's been added, or it will fail, in which case we want
+            // to give up.
+            self.kolme.remove_from_mempool(txhash);
+
             match self.add_transaction(tx).await {
                 Ok(()) => {
                     // TODO See https://github.com/fpco/kolme/issues/122

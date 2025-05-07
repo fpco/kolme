@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
     main_inner().await
 }
 
-const DB_PATH: &str = "six-sigma-app.sqlite3";
+const DB_PATH: &str = "six-sigma-app.fjall";
 
 async fn main_inner() -> Result<()> {
     let opt = Opt::parse();

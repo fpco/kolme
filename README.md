@@ -20,16 +20,16 @@ cargo install sqlx-cli
 
 2. **Run the setup and tests**
 
-The project uses SQLx with compile-time checks, so the SQLite database and schema must exist before building. You can use the `just` command to set things up:
+The project uses SQLx with compile-time checks, so the PostgreSQL database and schema must exist before building. You can use the `just` command to set things up:
 
 ```sh
-just test
+just sqlx-prepare
 ```
 
 This will:
-- Create `local-test.sqlite3` if it doesn’t exist
-- Run the SQL migrations
-- Build and test the project
+- Launch PostgreSQL inside a Docker container
+- Apply schema migrations to that database
+- Use the `cargo sqlx prepare` to generate cached query information
 
 
 ## License

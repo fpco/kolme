@@ -9,10 +9,11 @@ use crate::*;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
+    identity::Keypair,
     mdns, noise,
     request_response::ProtocolSupport,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, PeerId, StreamProtocol, Swarm,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder,
 };
 use tokio::sync::Mutex;
 
@@ -32,6 +33,7 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + 'static> 
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
     mdns: mdns::tokio::Behaviour,
+    kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
@@ -54,9 +56,66 @@ enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     HeightNotFound(BlockHeight),
 }
 
-impl<App: KolmeApp> Gossip<App> {
-    pub async fn new(kolme: Kolme<App>) -> Result<Self> {
-        let mut swarm = libp2p::SwarmBuilder::with_new_identity()
+#[derive(Default)]
+pub struct GossipBuilder {
+    keypair: Option<Keypair>,
+    bootstrap: Vec<(PeerId, Multiaddr)>,
+    disable_quic: bool,
+    disable_tcp: bool,
+    disable_ip4: bool,
+    disable_ip6: bool,
+    listen_ports: Vec<u16>,
+}
+
+impl GossipBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_bootstrap(mut self, peer: PeerId, address: Multiaddr) -> Self {
+        self.bootstrap.push((peer, address));
+        self
+    }
+
+    pub fn set_keypair(mut self, keypair: Keypair) -> Self {
+        self.keypair = Some(keypair);
+        self
+    }
+
+    pub fn disable_quic(mut self) -> Self {
+        self.disable_quic = true;
+        self
+    }
+
+    pub fn disable_tcp(mut self) -> Self {
+        self.disable_tcp = true;
+        self
+    }
+
+    pub fn disable_ip4(mut self) -> Self {
+        self.disable_ip4 = true;
+        self
+    }
+
+    pub fn disable_ip6(mut self) -> Self {
+        self.disable_ip6 = true;
+        self
+    }
+
+    /// Add a listen port
+    ///
+    /// If none are provided, a random port is selected per interface
+    pub fn add_listen_port(mut self, port: u16) -> Self {
+        self.listen_ports.push(port);
+        self
+    }
+
+    pub async fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>> {
+        let builder = match self.keypair {
+            Some(keypair) => SwarmBuilder::with_existing_identity(keypair),
+            None => SwarmBuilder::with_new_identity(),
+        };
+        let mut swarm = builder
             .with_tokio()
             .with_tcp(
                 tcp::Config::default(),
@@ -65,6 +124,11 @@ impl<App: KolmeApp> Gossip<App> {
             )?
             .with_quic()
             .with_behaviour(|key| {
+                tracing::info!(
+                    "Creating new gossip, running as peer ID: {}",
+                    key.public().to_peer_id()
+                );
+
                 // To content-address message, we can take the hash of message and use it as an ID.
                 let message_id_fn = |message: &gossipsub::Message| {
                     let mut s = DefaultHasher::new();
@@ -98,10 +162,24 @@ impl<App: KolmeApp> Gossip<App> {
                     )],
                     libp2p::request_response::Config::default(),
                 );
+
+                // Kademlia
+                let kademlia_config = libp2p::kad::Config::default();
+                let store = libp2p::kad::store::MemoryStore::new(key.public().to_peer_id());
+                let mut kademlia = libp2p::kad::Behaviour::with_config(
+                    key.public().to_peer_id(),
+                    store,
+                    kademlia_config,
+                );
+                for (peer, address) in self.bootstrap {
+                    kademlia.add_address(&peer, address);
+                }
+
                 Ok(KolmeBehaviour {
                     gossipsub,
                     mdns,
                     request_response,
+                    kademlia,
                 })
             })?
             .build();
@@ -113,15 +191,52 @@ impl<App: KolmeApp> Gossip<App> {
         swarm.behaviour_mut().gossipsub.subscribe(&notifications)?;
         swarm.behaviour_mut().gossipsub.subscribe(&find_peers)?;
 
-        // Listen on all interfaces and whatever port the OS assigns
-        swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
-        swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-        swarm.listen_on("/ip6/::/udp/0/quic-v1".parse()?)?;
-        swarm.listen_on("/ip6/::/tcp/0".parse()?)?;
+        // Begin listening based on the config
+        fn add_listen<AppMessage: serde::de::DeserializeOwned + Send>(
+            swarm: &mut Swarm<KolmeBehaviour<AppMessage>>,
+            is_quic: bool,
+            is_ip6: bool,
+            port: u16,
+        ) -> Result<()> {
+            swarm.listen_on(
+                format!(
+                    "{}/{}/{port}{}",
+                    if is_ip6 { "/ip6/::" } else { "/ip4/0.0.0.0" },
+                    if is_quic { "udp" } else { "tcp" },
+                    if is_quic { "/quic-v1" } else { "" }
+                )
+                .parse()?,
+            )?;
+            Ok(())
+        }
+        let add_port = |swarm: &mut Swarm<KolmeBehaviour<App::Message>>, port: u16| -> Result<()> {
+            // Listen on all interfaces and whatever port the OS assigns
+            if !self.disable_quic && !self.disable_ip4 {
+                add_listen(swarm, true, false, port)?;
+            }
+            if !self.disable_tcp && !self.disable_ip4 {
+                add_listen(swarm, false, false, port)?;
+            }
+            if !self.disable_quic && !self.disable_ip6 {
+                add_listen(swarm, true, true, port)?;
+            }
+            if !self.disable_tcp && !self.disable_ip6 {
+                add_listen(swarm, false, true, port)?;
+            }
+            Ok(())
+        };
+
+        if self.listen_ports.is_empty() {
+            add_port(&mut swarm, 0)?;
+        } else {
+            for port in &self.listen_ports {
+                add_port(&mut swarm, *port)?;
+            }
+        }
 
         let (last_seen_watch, _) = tokio::sync::watch::channel(None);
 
-        Ok(Self {
+        Ok(Gossip {
             kolme,
             last_seen_watch,
             swarm: Mutex::new(swarm),
@@ -129,7 +244,9 @@ impl<App: KolmeApp> Gossip<App> {
             find_peers,
         })
     }
+}
 
+impl<App: KolmeApp> Gossip<App> {
     pub fn subscribe_last_seen(&self) -> tokio::sync::watch::Receiver<Option<BlockHeight>> {
         self.last_seen_watch.subscribe()
     }
@@ -176,10 +293,33 @@ impl<App: KolmeApp> Gossip<App> {
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
-            } => tracing::debug!("New listener {listener_id} on {address}"),
+            } => {
+                tracing::debug!("New listener {listener_id} on {address}");
+                let peer = *swarm.local_peer_id();
+                swarm.behaviour_mut().kademlia.add_address(&peer, address);
+            }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
-                for (peer, _) in peers {
+                for (peer, address) in peers {
                     state.add_peer(peer);
+                    swarm.behaviour_mut().kademlia.add_address(&peer, address);
+                }
+            }
+            SwarmEvent::Behaviour(KolmeBehaviourEvent::Kademlia(event)) => {
+                match event {
+                    libp2p::kad::Event::OutboundQueryProgressed { id: _, result, .. } => {
+                        // Handle query results (e.g., found peers)
+                        if let libp2p::kad::QueryResult::GetClosestPeers(Ok(peers)) = result {
+                            for peer in peers.peers {
+                                state.add_peer(peer.peer_id);
+                            }
+                        }
+                    }
+                    libp2p::kad::Event::RoutablePeer { peer, address } => {
+                        tracing::debug!("Routable peer: {} at {}", peer, address);
+                        state.add_peer(peer);
+                        swarm.dial(peer).ok();
+                    }
+                    _ => tracing::debug!("Kademlia event: {:?}", event),
                 }
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(gossipsub::Event::Message {
@@ -301,6 +441,10 @@ impl<App: KolmeApp> Gossip<App> {
         {
             tracing::warn!("Error when trying to request peers: {e}")
         }
+
+        // Kademlia: Start a query to find closest peers
+        let peer_id = *swarm.local_peer_id();
+        swarm.behaviour_mut().kademlia.get_closest_peers(peer_id);
 
         if let Some(peer) = state.get_next_peer() {
             swarm
