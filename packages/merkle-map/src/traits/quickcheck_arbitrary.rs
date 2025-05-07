@@ -20,4 +20,17 @@ impl<K: Arbitrary + ToMerkleKey + FromMerkleKey + Ord, V: Arbitrary> Arbitrary
         let mmap: MerkleMap<K, V> = MerkleMap::from_iter(tree_map);
         Self(mmap)
     }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        let as_btreemap: BTreeMap<K, V> = BTreeMap::from_iter(
+            self.0
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        Box::new(
+            as_btreemap
+                .shrink()
+                .map(|shrunk_btreemap| Self(MerkleMap::from_iter(shrunk_btreemap))),
+        )
+    }
 }
