@@ -1,7 +1,10 @@
 use parameterized::parameterized;
 use paste::paste;
 use quickcheck::quickcheck;
-use std::{collections::BTreeMap, ops::Bound};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Bound,
+};
 
 use crate::*;
 
@@ -732,12 +735,26 @@ macro_rules! serializing_idempotency_for_type {
         }
 
         paste! {
+            // tests for Option<T>
             quickcheck!{
                 fn [<$test_name _option>] (value: Option<$value_type>) -> quickcheck::TestResult {
                     let manager = MerkleManager::default();
                     let serialized = manager.serialize(&value).unwrap();
                     let deserialized = manager
                         .deserialize::<Option<$value_type>>(serialized.hash, serialized.payload.clone())
+                        .unwrap();
+
+                    quickcheck::TestResult::from_bool(value == deserialized)
+                }
+            }
+
+            // tests for BTreeSet<T>
+            quickcheck!{
+                fn [<$test_name _btreeset>] (value: BTreeSet<$value_type>) -> quickcheck::TestResult {
+                    let manager = MerkleManager::default();
+                    let serialized = manager.serialize(&value).unwrap();
+                    let deserialized = manager
+                        .deserialize::<BTreeSet<$value_type>>(serialized.hash, serialized.payload.clone())
                         .unwrap();
 
                     quickcheck::TestResult::from_bool(value == deserialized)
