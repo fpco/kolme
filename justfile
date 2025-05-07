@@ -13,7 +13,7 @@ postgres:
     docker compose -f ./packages/integration-tests/docker-compose.yml down
     docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
 
-test: postgres
+test: postgres kademlia-test
     PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
 
 sqlx-prepare: sqlx-prepare-sqlite sqlx-prepare-postgres
@@ -38,3 +38,7 @@ build-contracts:
       --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
       --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
       ghcr.io/fpco/kolme/cosmwasm-optimizer:1.84
+
+[working-directory: "packages/examples/kademlia-discovery"]
+kademlia-test:
+    ./test.sh
