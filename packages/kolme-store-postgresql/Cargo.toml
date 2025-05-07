@@ -9,7 +9,9 @@ fjall.workspace = true
 merkle-map.workspace = true
 merkle-store-fjall.workspace = true
 kolme-store.workspace = true
-sqlx = { workspace = true, features = ["migrate", "runtime-tokio", "postgres"] }
+sqlx = { version = "0.8.5", features = ["macros", "migrate", "runtime-tokio", "postgres"], default-features = false }
+sqlx-core = { version = "0.8.5", features = ["migrate"] }
+sqlx-postgres = { version = "0.8.5", features = ["migrate"] }
 tracing = "0.1.41"
 tokio.workspace = true
 serde_json.workspace = true
