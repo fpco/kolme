@@ -289,6 +289,11 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Remove a transaction from the mempool, if present.
+    /// 
+    /// If the transaction identified by `hash` is not present in the mempool,
+    /// this function will silently do nothing. This behavior is intentional
+    /// and ensures that calling this function is safe even if the transaction
+    /// has already been removed or was never added.
     pub fn remove_from_mempool(&self, hash: TxHash) {
         self.inner.mempool.drop_tx(hash);
     }
