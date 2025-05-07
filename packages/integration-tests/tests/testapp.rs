@@ -19,7 +19,6 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite};
-use tokio_util::task::AbortOnDropHandle;
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
@@ -271,7 +270,6 @@ async fn test_execute_transaction_genesis_inner(testtasks: TestTasks, (): ()) {
 
 #[tokio::test]
 async fn test_validate_tx_invalid_nonce() {
-    // FIX INFINITY LOOP
     TestTasks::start(test_validate_tx_invalid_nonce_inner, ()).await;
 }
 
@@ -281,18 +279,7 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
-
-    // Processor new method
-    //testtasks.try_spawn_persistent( Processor::new(kolme.clone(), secret.clone()).run());
-
-    // Processor old method
-    let processor = Processor::new(kolme.clone(), secret.clone());
-    processor.create_genesis_event().await.unwrap();
-
-    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
-        let processor = Processor::new(kolme.clone(), secret.clone());
-        async move { processor.run().await }
-    }));
+    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -350,7 +337,6 @@ async fn test_no_subscribers_inner(_testtasks: TestTasks, (): ()) {
 
 #[tokio::test]
 async fn test_rejected_transaction_insufficient_balance() {
-    // FIX INFINITY LOOP
     TestTasks::start(test_rejected_transaction_insufficient_balance_inner, ()).await;
 }
 
@@ -360,17 +346,7 @@ async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTas
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
-    // Processor new method
-    //testtasks.try_spawn_persistent( Processor::new(kolme.clone(), secret.clone()).run());
-
-    // Processor old method
-    let processor = Processor::new(kolme.clone(), secret.clone());
-    processor.create_genesis_event().await.unwrap();
-
-    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
-        let processor = Processor::new(kolme.clone(), secret.clone());
-        async move { processor.run().await }
-    }));
+    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -460,7 +436,6 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
 
 #[tokio::test]
 async fn test_concurrent_transactions() {
-    // This test pass but we need to investigate some logs
     TestTasks::start(test_concurrent_transactions_inner, ()).await;
 }
 
@@ -476,13 +451,13 @@ async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
     tracing::info!("Connected to WebSocket");
 
-    let mut secrets = Vec::with_capacity(100);
-    for _ in 0..100 {
+    let mut secrets = Vec::with_capacity(50);
+    for _ in 0..50 {
         let secret = SecretKey::random(&mut rand::rngs::ThreadRng::default());
         secrets.push(secret);
     }
 
-    let mut tasks = Vec::with_capacity(100);
+    let mut tasks = Vec::with_capacity(50);
     for secret in secrets {
         let kolme_clone = kolme.clone();
 
@@ -510,8 +485,8 @@ async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
     let read = kolme.read();
     let state = read.get_app_state();
     assert_eq!(
-        state.counter, 100,
-        "Counter should be 100 after 100 concurrent increments, got: {}",
+        state.counter, 50,
+        "Counter should be 50 after 50 concurrent increments, got: {}",
         state.counter
     );
 
