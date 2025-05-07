@@ -12,4 +12,4 @@ echo "Shutting down solana-test-validator"
 kill $SOL_VALIDATOR_PID
 
 rm -rf test-ledger/
-rm example-solana-cosmos-bridge.sqlite3
+rm example-solana-cosmos-bridge.fjall

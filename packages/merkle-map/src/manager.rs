@@ -29,7 +29,7 @@ impl std::fmt::Debug for MerkleContents {
 
 impl MerkleManager {
     /// Serialize a value into a [MerkleContents] for later storage.
-    pub fn serialize<T: MerkleSerialize>(
+    pub fn serialize<T: MerkleSerialize + ?Sized>(
         &self,
         value: &T,
     ) -> Result<Arc<MerkleContents>, MerkleSerialError> {

@@ -1,4 +1,6 @@
 mod key_bytes;
+#[cfg(test)]
+pub mod quickcheck_newtypes;
 
 use std::collections::HashSet;
 

@@ -16,16 +16,8 @@ postgres:
 test: postgres kademlia-test
     PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
 
-sqlx-prepare: sqlx-prepare-sqlite sqlx-prepare-postgres
-
-[working-directory: "packages/kolme-store-sqlite"]
-sqlx-prepare-sqlite $DATABASE_URL="sqlite:///tmp/kolme-prepare-db.sqlite3":
-    cargo sqlx database reset -y
-    cargo sqlx migrate run
-    cargo sqlx prepare
-
 [working-directory: "packages/kolme-store-postgresql"]
-sqlx-prepare-postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
+sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
     cargo sqlx database reset -y
     cargo sqlx migrate run
     cargo sqlx prepare
