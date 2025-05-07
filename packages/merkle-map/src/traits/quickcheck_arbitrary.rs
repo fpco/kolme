@@ -10,6 +10,12 @@ impl<T: Arbitrary> Arbitrary for SerializableSlice<'static, T> {
         let vectorized = <Vec<T>>::arbitrary(g);
         Self(vectorized.leak())
     }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        let as_vector: Vec<T> = self.0.to_vec();
+
+        Box::new(as_vector.shrink().map(|shrunk_vec| Self(shrunk_vec.leak())))
+    }
 }
 
 impl<K: Arbitrary + ToMerkleKey + FromMerkleKey + Ord, V: Arbitrary> Arbitrary
