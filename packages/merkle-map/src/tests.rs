@@ -785,36 +785,23 @@ serializing_idempotency_for_type!(u8, serializing_is_idempotent_for_u8);
 serializing_idempotency_for_type!(u32, serializing_is_idempotent_for_u32);
 serializing_idempotency_for_type!(u64, serializing_is_idempotent_for_u64);
 
-macro_rules! serializing_idempotency_for_map_type {
-    ($key_type: ty, $value_type: ty, $test_name_suffix: ident) => {
-        paste! {
-            // tests for BTreeMap<K, V>
-            quickcheck!{
-                fn [<serializing_is_idempotent_for_btreemap_ $test_name_suffix>] (value: BTreeMap<$key_type, $value_type>) -> quickcheck::TestResult {
-                    let manager = MerkleManager::default();
-                    let serialized = manager.serialize(&value).unwrap();
-                    let deserialized = manager
-                        .deserialize::<BTreeMap<$key_type, $value_type>>(serialized.hash, serialized.payload.clone())
-                        .unwrap();
+quickcheck! {
+    fn serializing_is_idempotent_for_btreemap_string_u64(value: BTreeMap<String, u64>) -> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value).unwrap();
+        let deserialized = manager
+            .deserialize::<BTreeMap<String, u64>>(serialized.hash, serialized.payload.clone())
+            .unwrap();
 
-                    quickcheck::TestResult::from_bool(value == deserialized)
-                }
-            }
+        quickcheck::TestResult::from_bool(value == deserialized)
+    }
+    fn serializing_is_idempotent_for_merklemap_string_u64 (value: SerializableMerkleMap<String, u64>) -> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value.0).unwrap();
+        let deserialized = manager
+            .deserialize::<MerkleMap<String, u64>>(serialized.hash, serialized.payload.clone())
+            .unwrap();
 
-            // tests for MerkleMap<K, V>
-            quickcheck!{
-                fn [<serializing_is_idempotent_for_merklemap_ $test_name_suffix>] (value: SerializableMerkleMap<$key_type, $value_type>) -> quickcheck::TestResult {
-                    let manager = MerkleManager::default();
-                    let serialized = manager.serialize(&value.0).unwrap();
-                    let deserialized = manager
-                        .deserialize::<MerkleMap<$key_type, $value_type>>(serialized.hash, serialized.payload.clone())
-                        .unwrap();
-
-                    quickcheck::TestResult::from_bool(value == SerializableMerkleMap(deserialized))
-                }
-            }
-        }
+        quickcheck::TestResult::from_bool(value == SerializableMerkleMap(deserialized))
     }
 }
-
-serializing_idempotency_for_map_type!(String, u64, string_u64);
