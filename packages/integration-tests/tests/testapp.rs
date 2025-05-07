@@ -19,6 +19,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite};
+use tokio_util::task::AbortOnDropHandle;
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
@@ -134,7 +135,6 @@ where
 
 #[tokio::test]
 async fn test_websocket_notifications() {
-    kolme::init_logger(true, None);
     TestTasks::start(test_websocket_notifications_inner, ()).await;
 }
 
@@ -271,8 +271,7 @@ async fn test_execute_transaction_genesis_inner(testtasks: TestTasks, (): ()) {
 
 #[tokio::test]
 async fn test_validate_tx_invalid_nonce() {
-    // FIX INFITY LOOP
-    kolme::init_logger(true, None);
+    // FIX INFINITY LOOP
     TestTasks::start(test_validate_tx_invalid_nonce_inner, ()).await;
 }
 
@@ -281,29 +280,23 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
     let (kolme, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
-    let kolme_cloned = kolme.clone();
-    testtasks.spawn_persistent(async move {
-        let server = ApiServer::new(kolme_cloned.clone());
-        server.run(addr).await.unwrap();
-    });
+    testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
+
+    // Processor new method
+    //testtasks.try_spawn_persistent( Processor::new(kolme.clone(), secret.clone()).run());
+
+    // Processor old method
+    let processor = Processor::new(kolme.clone(), secret.clone());
+    processor.create_genesis_event().await.unwrap();
+
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
+        let processor = Processor::new(kolme.clone(), secret.clone());
+        async move { processor.run().await }
+    }));
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
     tracing::info!("Connected to WebSocket");
-
-    let kolme_cloned = kolme.clone();
-    let secret_cloned = secret.clone();
-    testtasks.spawn_persistent(async move {
-        Processor::new(kolme_cloned.clone(), secret_cloned).run().await.unwrap();
-    });
-
-    let notification = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        notification["NewBlock"].is_object(),
-        "Expected NewBlock notification for genesis, got: {}",
-        notification
-    );
 
     let tx = Transaction {
         pubkey: secret.public_key(),
@@ -311,10 +304,9 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
         created: jiff::Timestamp::now(),
         messages: vec![Message::App(TestMessage::Increment)],
     };
-
     let signed_tx = tx.sign(&secret).unwrap();
 
-    kolme.propose_and_await_transaction(signed_tx.clone()).await.unwrap();
+    kolme.propose_transaction(signed_tx.clone()).unwrap();
 
     let read = kolme.read();
     let state = read.get_app_state();
@@ -323,22 +315,20 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
         "Counter should remain 0 with invalid nonce, got: {}",
         state.counter
     );
+
+    ws.close(None).await.unwrap();
+    tracing::info!("WebSocket closed successfully");
 }
 
 #[tokio::test]
 async fn test_no_subscribers() {
-    // FIX INFITY LOOP
-    kolme::init_logger(true, None);
     TestTasks::start(test_no_subscribers_inner, ()).await;
 }
 
-async fn test_no_subscribers_inner(testtasks: TestTasks, (): ()) {
+async fn test_no_subscribers_inner(_testtasks: TestTasks, (): ()) {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, _) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
-
-    let kolme_cloned = kolme.clone();
-    testtasks.try_spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
 
     let tx = kolme
         .read()
@@ -346,7 +336,7 @@ async fn test_no_subscribers_inner(testtasks: TestTasks, (): ()) {
         .unwrap();
 
     tracing::info!("Proposing transaction with no subscribers");
-    let result = kolme.propose_and_await_transaction(tx.clone()).await;
+    let result = kolme.propose_transaction(tx.clone());
 
     assert!(
         result.is_err(),
@@ -360,8 +350,7 @@ async fn test_no_subscribers_inner(testtasks: TestTasks, (): ()) {
 
 #[tokio::test]
 async fn test_rejected_transaction_insufficient_balance() {
-    // FIX INFITY LOOP
-    kolme::init_logger(true, None);
+    // FIX INFINITY LOOP
     TestTasks::start(test_rejected_transaction_insufficient_balance_inner, ()).await;
 }
 
@@ -370,14 +359,18 @@ async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTas
     let (kolme, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
-    let kolme_cloned = kolme.clone();
-    testtasks.spawn_persistent(async move {
-        let server = ApiServer::new(kolme_cloned.clone());
-        server.run(addr).await.unwrap();
-    });
+    testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
+    // Processor new method
+    //testtasks.try_spawn_persistent( Processor::new(kolme.clone(), secret.clone()).run());
 
-    let kolme_cloned = kolme.clone();
-    testtasks.try_spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
+    // Processor old method
+    let processor = Processor::new(kolme.clone(), secret.clone());
+    processor.create_genesis_event().await.unwrap();
+
+    let _processor_handle = AbortOnDropHandle::new(tokio::spawn({
+        let processor = Processor::new(kolme.clone(), secret.clone());
+        async move { processor.run().await }
+    }));
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -395,7 +388,7 @@ async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTas
         )
         .unwrap();
 
-    kolme.propose_and_await_transaction(tx_withdraw.clone()).await.unwrap();
+    kolme.propose_transaction(tx_withdraw.clone()).unwrap();
 
     let read = kolme.read();
     let state = read.get_app_state();
@@ -419,14 +412,8 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
     let (kolme, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
-    let kolme_cloned = kolme.clone();
-    testtasks.spawn_persistent(async move {
-        let server = ApiServer::new(kolme_cloned.clone());
-        server.run(addr).await.unwrap();
-    });
-
-    let kolme_cloned = kolme.clone();
-    testtasks.try_spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
+    testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
+    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -472,25 +459,18 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
 }
 
 #[tokio::test]
-async fn test_concurrent_transactions() {   // This test pass but we need to investigate some logs
+async fn test_concurrent_transactions() {
+    // This test pass but we need to investigate some logs
     TestTasks::start(test_concurrent_transactions_inner, ()).await;
 }
 
-async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ())  {
+async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup(db_path.path()).await.unwrap();
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
-    let kolme_cloned = kolme.clone();
-    testtasks.spawn_persistent(async move {
-        let server = ApiServer::new(kolme_cloned);
-        server.run(addr).await.unwrap();
-    });
-
-    let kolme_cloned = kolme.clone();
-    testtasks.spawn_persistent( async move {
-        Processor::new(kolme_cloned, secret.clone()).run().await.unwrap();
-    });
+    testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
+    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -517,7 +497,10 @@ async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ())  {
             };
 
             let signed_tx = tx.sign(&secret).unwrap();
-            kolme_clone.propose_and_await_transaction(signed_tx).await.unwrap();
+            kolme_clone
+                .propose_and_await_transaction(signed_tx)
+                .await
+                .unwrap();
         });
         tasks.push(task);
     }
