@@ -934,6 +934,7 @@ pub enum Message<AppMessage> {
     },
     Auth(AuthMessage),
     Bank(BankMessage),
+    KeyRotation(KeyRotationMessage),
     // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
 }
 
@@ -986,6 +987,42 @@ pub enum BankMessage {
         amount: Decimal,
     },
 }
+
+/// Messages for handling key rotation.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyRotationMessage {
+    /// The sending key is replacing itself with a new key.
+    SelfReplace {
+        validator_type: ValidatorType,
+        replacement: PublicKey,
+    },
+    /// Replace the complete validator set.
+    ///
+    /// Must be proposed by one of the members of an existing set.
+    NewSet {
+        processor: PublicKey,
+        listeners: BTreeSet<PublicKey>,
+        needed_listeners: usize,
+        approvers: BTreeSet<PublicKey>,
+        needed_approvers: usize,
+    },
+    /// Vote to approve a proposed set change.
+    Approve { change_set_id: ChangeSetId },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidatorType {
+    Listener,
+    Processor,
+    Approver,
+}
+/// Monotonically increasing identifier for proposed validator set changes.
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
+)]
+pub struct ChangeSetId(pub u64);
 
 /// Information defining the initial state of an app.
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]

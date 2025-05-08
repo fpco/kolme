@@ -112,13 +112,15 @@ impl<App: KolmeApp> Kolme<App> {
     /// Propose a new transaction for the processor to add to the chain.
     ///
     /// Note that this will not detect any issues if the transaction is rejected.
-    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
-        self.notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "Tried to propose a transaction, but no one is listening to our notifications"
+    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) {
+        if self
+            .notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
+            .is_err()
+        {
+            tracing::debug!(
+                    "Tried to propose a transaction, but no one is listening to our notifications. Ignoring, the tx is still in the mempool"
                 )
-            })
+        }
     }
 
     /// Propose a new transaction and wait for it to land on chain.
@@ -130,7 +132,7 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut recv = self.subscribe();
         let txhash_orig = tx.hash();
-        self.propose_transaction(tx)?;
+        self.propose_transaction(tx);
         loop {
             let note = recv.recv().await?;
             match note {
@@ -208,6 +210,19 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+        // Make sure we're at the right height for this and the correct processor is signing this.
+        let kolme = self.read();
+        if kolme.get_next_height() != signed_block.height() {
+            anyhow::bail!(
+                "Tried to add block with height {}, but next expected height is {}",
+                signed_block.height(),
+                kolme.get_next_height()
+            );
+        }
+        let expected_processor = kolme.get_framework_state().get_config().processor;
+        let actual_processor = signed_block.0.message.as_inner().processor;
+        anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+
         let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
@@ -286,6 +301,13 @@ impl<App: KolmeApp> Kolme<App> {
                 }
             }
         }
+    }
+
+    /// Wait for the mempool to be empty.
+    ///
+    /// This is mostly intended for writing tests.
+    pub async fn wait_on_empty_mempool(&self) {
+        self.inner.mempool.wait_for_pool_size(0).await;
     }
 
     /// Remove a transaction from the mempool, if present.

@@ -24,12 +24,12 @@ pub struct FrameworkState {
 /// Importantly, this data rarely changes, so storing it as its own Merkle hash
 /// bypasses a lot of serialization overhead.
 #[derive(Clone, Debug)]
-pub(super) struct FrameworkConfig {
-    pub(super) processor: PublicKey,
-    pub(super) listeners: BTreeSet<PublicKey>,
-    pub(super) needed_listeners: usize,
-    pub(super) approvers: BTreeSet<PublicKey>,
-    pub(super) needed_approvers: usize,
+pub struct FrameworkConfig {
+    pub processor: PublicKey,
+    pub listeners: BTreeSet<PublicKey>,
+    pub needed_listeners: usize,
+    pub approvers: BTreeSet<PublicKey>,
+    pub needed_approvers: usize,
 }
 
 impl MerkleSerialize for FrameworkState {
@@ -115,7 +115,7 @@ impl FrameworkState {
         }
     }
 
-    pub(super) fn get_config(&self) -> &FrameworkConfig {
+    pub fn get_config(&self) -> &FrameworkConfig {
         self.config.as_ref()
     }
 

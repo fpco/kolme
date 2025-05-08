@@ -145,6 +145,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(auth) => self.auth(auth).await?,
+            Message::KeyRotation(key_rotation) => self.key_rotation(key_rotation).await?,
         }
         Ok(())
     }
@@ -575,6 +576,61 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .accounts
                     .remove_wallet_from_account(self.get_sender_id(), wallet)?;
             }
+        }
+        Ok(())
+    }
+
+    async fn key_rotation(&mut self, key_rotation: &KeyRotationMessage) -> Result<()> {
+        match key_rotation {
+            KeyRotationMessage::SelfReplace {
+                validator_type,
+                replacement,
+            } => {
+                fn set_helper(
+                    config: &mut FrameworkConfig,
+                    is_approver: bool,
+                    sender: PublicKey,
+                    replacement: PublicKey,
+                ) -> Result<()> {
+                    let set = if is_approver {
+                        &mut config.approvers
+                    } else {
+                        &mut config.listeners
+                    };
+                    if !set.remove(&sender) {
+                        anyhow::bail!("Signing public key {} is not a member of the {} set and cannot self-replace", sender, if is_approver {"approver"}else{"listener"});
+                    }
+                    set.insert(replacement);
+                    Ok(())
+                }
+
+                let config = self.framework_state.config.as_mut();
+                match validator_type {
+                    ValidatorType::Processor => {
+                        if config.processor == self.pubkey {
+                            config.processor = *replacement;
+                        } else {
+                            anyhow::bail!("Signing public key {} is not the current processor and cannot self-replace", self.pubkey);
+                        }
+                    }
+                    ValidatorType::Listener => {
+                        set_helper(config, false, self.pubkey, *replacement)?;
+                    }
+                    ValidatorType::Approver => {
+                        set_helper(config, true, self.pubkey, *replacement)?;
+                    }
+                }
+
+                // FIXME emit action to update bridge contracts
+            }
+            KeyRotationMessage::NewSet {
+                processor,
+                listeners,
+                needed_listeners,
+                approvers,
+                needed_approvers,
+            } => todo!(),
+            KeyRotationMessage::Approve { change_set_id } => todo!(),
         }
         Ok(())
     }
