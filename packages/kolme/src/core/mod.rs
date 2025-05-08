@@ -2,6 +2,7 @@ mod execute;
 mod kolme;
 mod kolme_app;
 mod state;
+mod traits;
 mod types;
 
 pub use execute::*;
