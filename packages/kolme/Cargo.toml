@@ -41,4 +41,5 @@ futures-util = {version = "0.3", optional = true }
 fjall.workspace = true
 
 [dev-dependencies]
+quickcheck = { workspace = true }
 tempfile = "3.18.0"
