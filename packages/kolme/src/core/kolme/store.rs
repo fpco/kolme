@@ -1,7 +1,7 @@
 mod fjall;
 mod in_memory;
 
-use std::{collections::HashMap, path::Path};
+use std::{num::NonZeroUsize, path::Path};
 
 use crate::core::*;
 
@@ -9,8 +9,11 @@ use fjall::KolmeStoreFjall;
 use in_memory::KolmeStoreInMemory;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use kolme_store_postgresql::{ConstructLock, KolmeStorePostgres};
+use lru::LruCache;
 use parking_lot::RwLock;
 use tokio::sync::OwnedSemaphorePermit;
+
+const BLOCK_CACHE_SIZE: usize = 60;
 
 #[derive(Clone)]
 pub struct KolmeStore<App: KolmeApp> {
@@ -20,7 +23,7 @@ pub struct KolmeStore<App: KolmeApp> {
 
 #[allow(type_alias_bounds)]
 type BlockCacheMap<App: KolmeApp> =
-    HashMap<BlockHeight, StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>;
+    LruCache<BlockHeight, StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>;
 
 #[derive(Clone)]
 enum KolmeStoreInner {
@@ -31,9 +34,11 @@ enum KolmeStoreInner {
 
 impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
     fn from(inner: KolmeStoreInner) -> Self {
+        let cache = BlockCacheMap::<App>::new(NonZeroUsize::new(BLOCK_CACHE_SIZE).unwrap());
+
         Self {
             inner,
-            block_cache: Default::default(),
+            block_cache: Arc::new(RwLock::new(cache)),
         }
     }
 }
@@ -139,9 +144,10 @@ impl<App: KolmeApp> KolmeStore<App> {
         merkle_manager: &MerkleManager,
         height: BlockHeight,
     ) -> Result<Option<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>> {
-        if let Some(storable) = self.block_cache.read().get(&height) {
+        if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.clone()));
         }
+
         let res = match &self.inner {
             KolmeStoreInner::Postgres(kolme_store_postgres) => {
                 kolme_store_postgres
@@ -171,7 +177,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         merkle_manager: &MerkleManager,
         height: BlockHeight,
     ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
-        if let Some(storable) = self.block_cache.read().get(&height) {
+        if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.block.clone()));
         }
         let res = match &self.inner {
@@ -239,7 +245,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         let old = self
             .block_cache
             .write()
-            .insert(BlockHeight(block.height), block);
+            .put(BlockHeight(block.height), block);
         debug_assert!(old.is_none());
         Ok(())
     }
