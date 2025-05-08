@@ -383,7 +383,9 @@ impl<App: KolmeApp> Gossip<App> {
                     BlockRequest::BlockAtHeight(height) => {
                         let res = match self.kolme.read().get_block(height).await? {
                             None => BlockResponse::HeightNotFound(height),
-                            Some(block) => BlockResponse::Block(Arc::unwrap_or_clone(block)),
+                            Some(storable_block) => {
+                                BlockResponse::Block(Arc::unwrap_or_clone(storable_block.block))
+                            }
                         };
                         if let Err(e) = swarm
                             .behaviour_mut()

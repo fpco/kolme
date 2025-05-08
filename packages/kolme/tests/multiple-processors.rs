@@ -243,7 +243,9 @@ async fn checker(
         .get_block(highest_block)
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .block;
+
     let next_height = kolmes[0].read().get_next_height();
     assert_eq!(
         next_height,
