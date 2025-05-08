@@ -1,7 +1,8 @@
 use crate::core::types::{
-    AccountId, AccountNonce, AssetConfig, AssetId, AssetName, BridgeContract, Wallet,
+    AccountId, AccountNonce, AssetConfig, AssetId, AssetName, BridgeContract, ChainConfig, Wallet,
 };
 use quickcheck::{Arbitrary, Gen};
+use std::collections::BTreeMap;
 
 macro_rules! arbitrary_for_wrapper_type {
     ($wrapper_type: ty, $wrapped_type: ty) => {
@@ -41,6 +42,15 @@ impl Arbitrary for AssetConfig {
         Self {
             decimals: <u8>::arbitrary(g),
             asset_id: <AssetId>::arbitrary(g),
+        }
+    }
+}
+
+impl Arbitrary for ChainConfig {
+    fn arbitrary(g: &mut Gen) -> Self {
+        Self {
+            assets: <BTreeMap<AssetName, AssetConfig>>::arbitrary(g),
+            bridge: <BridgeContract>::arbitrary(g),
         }
     }
 }
