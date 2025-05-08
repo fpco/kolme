@@ -44,7 +44,7 @@ pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
         .route("/", get(basics))
         .route("/broadcast", put(broadcast))
         .route("/get-next-nonce", get(get_next_nonce))
-        .route("/block/:height", get(get_block))
+        .route("/block/{height}", get(get_block))
         .route("/notifications", get(ws_handler::<App>))
 }
 
