@@ -1385,6 +1385,7 @@ mod tests {
             }
         };
     }
+    serializing_idempotency_for!(AssetConfig, serialization_is_idempotent_for_assetconfig);
     serializing_idempotency_for!(AssetId, serialization_is_idempotent_for_assetid);
     serializing_idempotency_for!(AssetName, serialization_is_idempotent_for_assetname);
     serializing_idempotency_for!(AccountId, serialization_is_idempotent_for_accountid);

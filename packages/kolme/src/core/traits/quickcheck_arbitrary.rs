@@ -1,4 +1,6 @@
-use crate::core::types::{AccountId, AccountNonce, AssetId, AssetName, BridgeContract, Wallet};
+use crate::core::types::{
+    AccountId, AccountNonce, AssetConfig, AssetId, AssetName, BridgeContract, Wallet,
+};
 use quickcheck::{Arbitrary, Gen};
 
 macro_rules! arbitrary_for_wrapper_type {
@@ -32,5 +34,13 @@ impl Arbitrary for BridgeContract {
             BridgeContract::Deployed(<String>::arbitrary(g)),
         ];
         g.choose(&values).unwrap().clone()
+    }
+}
+impl Arbitrary for AssetConfig {
+    fn arbitrary(g: &mut Gen) -> Self {
+        Self {
+            decimals: <u8>::arbitrary(g),
+            asset_id: <AssetId>::arbitrary(g),
+        }
     }
 }
