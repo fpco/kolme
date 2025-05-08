@@ -386,7 +386,7 @@ impl TxLogger {
                         .messages
                         .iter()
                         .cloned()
-                        .map(LogMessage::from)
+                        .map(LoggedMessage::from)
                         .collect();
                     LogOutput::NewBlock { height, messages }
                 }
@@ -453,17 +453,18 @@ mod tests {
     use std::{
         io::{self, BufRead},
         path::Path,
+        sync::Arc,
     };
 
     use anyhow::{ensure, Context};
     use backon::{ExponentialBuilder, Retryable};
     use cosmos::{AddressHrp, HasAddress};
     use futures_util::StreamExt;
-    use pass_through::PassThrough;
+    use pass_through::{MsgResponse, PassThrough};
     use shared::cosmos::ExecuteMsg;
     use tempfile::NamedTempFile;
     use tokio::time::{Duration, Instant};
-    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
     use super::*;
 
@@ -560,7 +561,7 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        fn block_at(height: u64, msg: LogMessage) -> LogOutput {
+        fn block_at(height: u64, msg: LoggedMessage) -> LogOutput {
             LogOutput::NewBlock {
                 height: BlockHeight(height),
                 messages: vec![msg],
@@ -572,21 +573,21 @@ mod tests {
         assert_eq!(
             log_lines,
             vec![
-                block_at(0, LogMessage::Genesis),
+                block_at(0, LoggedMessage::Genesis),
                 // no genesis for pass-through
                 // registering account and transferring funds into it for funder
-                block_at(1, LogMessage::Listener(LogBridgeEvent::Regular)),
+                block_at(1, LoggedMessage::Listener(LoggedBridgeEvent::Regular)),
                 block_at(
                     2,
-                    LogMessage::App(AppMessage::SendFunds {
+                    LoggedMessage::App(AppMessage::SendFunds {
                         asset_id: AssetId(1),
                         amount: dec!(100_000)
                     })
                 ),
-                block_at(3, LogMessage::App(AppMessage::Init)),
+                block_at(3, LoggedMessage::App(AppMessage::Init)),
                 block_at(
                     4,
-                    LogMessage::App(AppMessage::AddMarket {
+                    LoggedMessage::App(AppMessage::AddMarket {
                         id: 1,
                         asset_id: AssetId(1),
                         name: "sample market".to_string()
@@ -739,6 +740,7 @@ mod tests {
         registration: KeyRegistration,
         to_send: Decimal,
     ) -> Result<AccountId> {
+        let ws = connect_ws_notifications().await;
         let resp = client
             .post("http://localhost:12345/msg")
             .json(&kolme::pass_through::Msg {
@@ -750,42 +752,28 @@ mod tests {
             })
             .send()
             .await?;
-        resp.error_for_status()?;
-        (|| async {
-        tracing::debug!("checking if account was created");
-        let state = server_state(client).await?;
-        let acc = state
-            .balances
-            .iter()
-            .find_map(|(acc_id, assets)| {
-                // we don't create any other assets for this app
-                assets
-                    .get(&AssetId(1))
-                    .is_some_and(|balance| *balance == to_send)
-                    .then_some(*acc_id)
+        ensure!(resp.status().is_success());
+        let MsgResponse { bridge_event_id } = resp.json().await?;
+        wait_tx(ws, |_block, logs| {
+            logs.iter().flatten().find_map(|log| {
+                serde_json::from_str::<LogEvent>(log)
+                    .ok()
+                    .and_then(|log_event| match log_event {
+                        LogEvent::ProcessedBridgeEvent(LogBridgeEvent::Regular {
+                            bridge_event_id: event_id,
+                            account_id,
+                        }) => (event_id == bridge_event_id).then_some(account_id),
+                    })
             })
-            .ok_or(anyhow::anyhow!(
-                "account with the corresponding balance {to_send} should exist, last seen server state: {state:?}"
-            ))?;
-            Ok(acc)
         })
-        .retry(
-            ExponentialBuilder::default()
-                .with_min_delay(std::time::Duration::from_millis(50))
-                .with_max_times(8),
-        )
         .await
     }
 
-    async fn server_state(client: &reqwest::Client) -> Result<ServerState> {
+    async fn server_state(client: &reqwest::Client) -> Result<()> {
         let resp = client.get("http://localhost:3001").send().await?;
         ensure!(resp.status().is_success());
-        resp.json::<ServerState>().await.map_err(Into::into)
-    }
-
-    #[derive(serde::Deserialize, Debug)]
-    struct ServerState {
-        balances: BTreeMap<AccountId, BTreeMap<AssetId, Decimal>>,
+        ensure!(resp.json::<serde_json::Value>().await.is_ok());
+        Ok(())
     }
 
     fn std_coin(amount: Decimal) -> cosmwasm_std::Coin {
@@ -820,18 +808,17 @@ mod tests {
         .await
     }
 
-    async fn broadcast_wait_tx(
-        secret: &str,
-        msg: AppMessage,
-    ) -> Result<(Block<AppMessage>, Vec<String>)> {
+    type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+
+    async fn connect_ws_notifications() -> WsStream {
         let ws_url = format!("ws://localhost:{}/notifications", 3001);
-        let (mut ws, _) = connect_async(&ws_url).await.unwrap();
-        let txhash = broadcast(
-            serde_json::to_string(&msg).unwrap(),
-            secret.to_string(),
-            "http://localhost:3001".to_string(),
-        )
-        .await?;
+        connect_async(&ws_url).await.unwrap().0
+    }
+
+    async fn wait_tx<F, R>(mut ws: WsStream, check_result: F) -> Result<R>
+    where
+        F: Fn(Arc<SignedBlock<AppMessage>>, Arc<[Vec<String>]>) -> Option<R>,
+    {
         let timeout_at = Instant::now() + Duration::from_secs(2);
         loop {
             let message = tokio::time::timeout_at(timeout_at, ws.next())
@@ -840,12 +827,33 @@ mod tests {
             let notification =
                 serde_json::from_slice::<ApiNotification<AppMessage>>(&message.into_data())?;
             if let ApiNotification::NewBlock { block, logs } = notification {
-                if block.tx().hash().0 == txhash {
-                    let block = block.0.message.as_inner().clone();
-                    let logs = logs.iter().flatten().cloned().collect();
-                    return Ok((block, logs));
+                if let Some(result) = check_result(block, logs) {
+                    return Ok(result);
                 }
             }
         }
+    }
+
+    async fn broadcast_wait_tx(
+        secret: &str,
+        msg: AppMessage,
+    ) -> Result<(Block<AppMessage>, Vec<String>)> {
+        let ws = connect_ws_notifications().await;
+        let txhash = broadcast(
+            serde_json::to_string(&msg).unwrap(),
+            secret.to_string(),
+            "http://localhost:3001".to_string(),
+        )
+        .await?;
+        wait_tx(ws, |block, logs| {
+            if block.tx().hash().0 == txhash {
+                let block = block.0.message.as_inner().clone();
+                let logs = logs.iter().flatten().cloned().collect();
+                Some((block, logs))
+            } else {
+                None
+            }
+        })
+        .await
     }
 }

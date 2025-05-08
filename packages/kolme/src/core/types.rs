@@ -1295,6 +1295,20 @@ pub enum Notification<AppMessage> {
     },
 }
 
+/// Represents distinct occurrences in the core of Kolme that could be relevant to users.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum LogEvent {
+    ProcessedBridgeEvent(LogBridgeEvent),
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum LogBridgeEvent {
+    Regular {
+        bridge_event_id: BridgeEventId,
+        account_id: AccountId,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

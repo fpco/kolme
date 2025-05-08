@@ -13,7 +13,7 @@ use listener::cosmos::get_next_bridge_event_id;
 use reqwest::{header::CONTENT_TYPE, Method};
 use serde::{Deserialize, Serialize};
 use shared::cosmos::{BridgeEventMessage, ExecuteMsg};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio_tungstenite::connect_async;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -23,6 +23,7 @@ type Broadcast = tokio::sync::broadcast::Sender<BridgeEventMessage>;
 
 #[derive(Clone)]
 pub struct PassThrough {
+    next_event_id: Arc<Mutex<BridgeEventId>>,
     notify: Broadcast,
     actions: Arc<RwLock<BTreeMap<BridgeActionId, Action>>>,
 }
@@ -74,6 +75,7 @@ impl PassThrough {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
+            next_event_id: Arc::new(Mutex::new(BridgeEventId::start())),
             notify: tokio::sync::broadcast::channel(100).0,
             actions: Arc::new(RwLock::new(BTreeMap::new())),
         }
@@ -138,8 +140,15 @@ pub async fn listen<App: KolmeApp>(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MsgResponse {
+    pub bridge_event_id: BridgeEventId,
+}
+
 async fn msg(State(state): State<PassThrough>, Json(msg): Json<Msg>) -> impl IntoResponse {
     tracing::debug!("sending to kolme {msg:?}");
+
+    let mut guard = state.next_event_id.lock().await;
     let message = match msg.msg {
         ExecuteMsg::Regular { keys } => BridgeEventMessage::Regular {
             wallet: msg.wallet,
@@ -153,6 +162,9 @@ async fn msg(State(state): State<PassThrough>, Json(msg): Json<Msg>) -> impl Int
         } => todo!(),
     };
     state.notify.send(message).unwrap();
+    let bridge_event_id = *guard;
+    *guard = guard.next();
+    Json(MsgResponse { bridge_event_id })
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<PassThrough>) -> impl IntoResponse {
