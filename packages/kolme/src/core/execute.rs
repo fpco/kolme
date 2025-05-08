@@ -280,6 +280,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                             asset_config.to_decimal(*amount)?,
                         )?;
                     }
+                    self.log_event(LogEvent::ProcessedBridgeEvent(LogBridgeEvent::Regular {
+                        bridge_event_id: event_id,
+                        account_id,
+                    }))?;
                 }
                 BridgeEvent::Signed {
                     wallet: _,
@@ -577,5 +581,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
     pub fn log(&mut self, msg: impl Into<String>) {
         self.logs.last_mut().unwrap().push(msg.into());
+    }
+
+    fn log_event(&mut self, event: LogEvent) -> Result<()> {
+        let json = serde_json::to_string(&event)?;
+        self.log(json);
+        Ok(())
     }
 }
