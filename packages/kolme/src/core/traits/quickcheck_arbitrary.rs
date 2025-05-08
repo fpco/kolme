@@ -1,5 +1,6 @@
 use crate::core::types::{
-    AccountId, AccountNonce, AssetConfig, AssetId, AssetName, BridgeContract, ChainConfig, Wallet,
+    AccountId, AccountNonce, AssetConfig, AssetId, AssetName, BridgeContract, ChainConfig,
+    ExternalChain, Wallet,
 };
 use quickcheck::{Arbitrary, Gen};
 use std::collections::BTreeMap;
@@ -52,5 +53,22 @@ impl Arbitrary for ChainConfig {
             assets: <BTreeMap<AssetName, AssetConfig>>::arbitrary(g),
             bridge: <BridgeContract>::arbitrary(g),
         }
+    }
+}
+
+impl Arbitrary for ExternalChain {
+    fn arbitrary(g: &mut Gen) -> Self {
+        let values = [
+            ExternalChain::OsmosisTestnet,
+            ExternalChain::NeutronTestnet,
+            ExternalChain::OsmosisLocal,
+            ExternalChain::SolanaMainnet,
+            ExternalChain::SolanaTestnet,
+            ExternalChain::SolanaDevnet,
+            ExternalChain::SolanaLocal,
+            #[cfg(feature = "pass_through")]
+            ExternalChain::PassThrough,
+        ];
+        *g.choose(&values).unwrap()
     }
 }

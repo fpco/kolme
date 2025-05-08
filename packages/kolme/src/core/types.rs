@@ -1395,5 +1395,6 @@ mod tests {
         serialization_is_idempotent_for_bridgecontract
     );
     serializing_idempotency_for!(ChainConfig, serialization_is_idempotent_for_chainconfig);
+    serializing_idempotency_for!(ExternalChain, serialization_is_idempotent_for_externalchain);
     serializing_idempotency_for!(Wallet, serialization_is_idempotent_for_wallet);
 }
