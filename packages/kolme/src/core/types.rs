@@ -1312,6 +1312,7 @@ pub enum LogBridgeEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quickcheck::quickcheck;
     use rust_decimal::dec;
 
     #[test]
@@ -1383,4 +1384,31 @@ mod tests {
             (dec!(12.3456789), 1234567890)
         );
     }
+    macro_rules! serializing_idempotency_for {
+        ($value_type: ty, $test_name: ident) => {
+            quickcheck! {
+                fn $test_name(value: $value_type) -> quickcheck::TestResult {
+                    let manager = MerkleManager::default();
+                    let serialized = manager.serialize(&value).unwrap();
+                    let deserialized = manager
+                        .deserialize::<$value_type>(serialized.hash, serialized.payload.clone())
+                        .unwrap();
+
+                    quickcheck::TestResult::from_bool(value == deserialized)
+                }
+            }
+        };
+    }
+    serializing_idempotency_for!(AssetConfig, serialization_is_idempotent_for_assetconfig);
+    serializing_idempotency_for!(AssetId, serialization_is_idempotent_for_assetid);
+    serializing_idempotency_for!(AssetName, serialization_is_idempotent_for_assetname);
+    serializing_idempotency_for!(AccountId, serialization_is_idempotent_for_accountid);
+    serializing_idempotency_for!(AccountNonce, serialization_is_idempotent_for_accountnonce);
+    serializing_idempotency_for!(
+        BridgeContract,
+        serialization_is_idempotent_for_bridgecontract
+    );
+    serializing_idempotency_for!(ChainConfig, serialization_is_idempotent_for_chainconfig);
+    serializing_idempotency_for!(ExternalChain, serialization_is_idempotent_for_externalchain);
+    serializing_idempotency_for!(Wallet, serialization_is_idempotent_for_wallet);
 }

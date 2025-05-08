@@ -29,5 +29,6 @@ kolme-store-postgresql = { path = "packages/kolme-store-postgresql" }
 libp2p = { version = "0.55" }
 merkle-map = { path = "packages/merkle-map" }
 merkle-store-fjall = { path = "packages/merkle-store-fjall" }
+quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
 thiserror = "2.0.12"
