@@ -1389,5 +1389,9 @@ mod tests {
     serializing_idempotency_for!(AssetName, serialization_is_idempotent_for_assetname);
     serializing_idempotency_for!(AccountId, serialization_is_idempotent_for_accountid);
     serializing_idempotency_for!(AccountNonce, serialization_is_idempotent_for_accountnonce);
+    serializing_idempotency_for!(
+        BridgeContract,
+        serialization_is_idempotent_for_bridgecontract
+    );
     serializing_idempotency_for!(Wallet, serialization_is_idempotent_for_wallet);
 }
