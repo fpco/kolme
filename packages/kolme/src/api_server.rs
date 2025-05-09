@@ -1,7 +1,7 @@
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
-        Query, State, WebSocketUpgrade,
+        Path, Query, State, WebSocketUpgrade,
     },
     http::header::CONTENT_TYPE,
     response::IntoResponse,
@@ -44,6 +44,7 @@ pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
         .route("/", get(basics))
         .route("/broadcast", put(broadcast))
         .route("/get-next-nonce", get(get_next_nonce))
+        .route("/block/{height}", get(get_block))
         .route("/notifications", get(ws_handler::<App>))
 }
 
@@ -108,6 +109,39 @@ async fn get_next_nonce<App: KolmeApp>(
     Json(serde_json::json!({"next_nonce":nonce})).into_response()
 }
 
+async fn get_block<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Path(height): Path<BlockHeight>,
+) -> impl IntoResponse {
+    #[derive(serde::Serialize)]
+    struct Response<'a, App: KolmeApp> {
+        blockhash: Sha256Hash,
+        txhash: Sha256Hash,
+        block: &'a SignedBlock<App::Message>,
+        logs: &'a [Vec<String>],
+    }
+
+    match kolme.get_block(height).await {
+        Ok(Some(block)) => {
+            let resp: Response<'_, App> = Response {
+                blockhash: block.blockhash,
+                txhash: block.txhash,
+                block: &block.block,
+                logs: &block.logs,
+            };
+
+            Json(resp).into_response()
+        }
+        Ok(None) => Json(serde_json::json!(null)).into_response(),
+        Err(e) => {
+            let mut res = e.to_string().into_response();
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+
+            res
+        }
+    }
+}
+
 async fn ws_handler<App: KolmeApp>(
     ws: WebSocketUpgrade,
     State(kolme): State<Kolme<App>>,
@@ -128,8 +162,8 @@ async fn handle_websocket<App: KolmeApp>(
         let notification = match notification {
             Notification::NewBlock(block) => {
                 let height = block.height();
-                let logs = match kolme.get_block_logs(height).await {
-                    Ok(Some(logs)) => logs,
+                let logs = match kolme.get_block(height).await {
+                    Ok(Some(block)) => block.logs.clone(),
                     Ok(None) => {
                         tracing::error!(
                             "No information about logs for the awaited block at {height}"

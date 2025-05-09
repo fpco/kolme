@@ -349,8 +349,8 @@ impl<App: KolmeApp> Kolme<App> {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             // And then check if we're at the requested height.
-            if let Some(block) = self.get_block(height).await? {
-                return Ok(block);
+            if let Some(storable_block) = self.get_block(height).await? {
+                return Ok(storable_block.block);
             }
             loop {
                 match recv.recv().await {
@@ -359,8 +359,8 @@ impl<App: KolmeApp> Kolme<App> {
                             Ordering::Less => (),
                             Ordering::Equal => return Ok(block),
                             Ordering::Greater => {
-                                let block = self.get_block(height).await?.with_context(|| format!("wait_for_block: received notification that block {} is available, but unable to find {height} in database", block.height()))?;
-                                return Ok(block);
+                                let storable_block = self.get_block(height).await?.with_context(|| format!("wait_for_block: received notification that block {} is available, but unable to find {height} in database", block.height()))?;
+                                return Ok(storable_block.block);
                             }
                         },
                         Notification::GenesisInstantiation { .. } => (),
@@ -463,29 +463,11 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn get_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
-        let storable_block = self
-            .inner
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>> {
+        self.inner
             .store
             .load_block(&self.inner.merkle_manager, height)
-            .await?;
-        Ok(match storable_block {
-            Some(storable_block) => Some(storable_block.block.clone()),
-            None => None,
-        })
-    }
-
-    /// Returns the logs of the given block, if available.
-    pub async fn get_block_logs(&self, height: BlockHeight) -> Result<Option<Arc<[Vec<String>]>>> {
-        let storable_block = self
-            .inner
-            .store
-            .load_block(&self.inner.merkle_manager, height)
-            .await?;
-        Ok(match storable_block {
-            Some(storable_block) => Some(storable_block.logs.clone()),
-            None => None,
-        })
+            .await
     }
 
     /// Get the block height for the given transaction, if present.
@@ -499,7 +481,10 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Load the block details from the database
-    pub async fn load_block(&self, height: BlockHeight) -> Result<Arc<SignedBlock<App::Message>>> {
+    pub async fn load_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
