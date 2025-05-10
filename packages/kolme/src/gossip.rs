@@ -350,10 +350,13 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                 } else if message.topic == self.find_peers.hash() {
                     if message.data == FIND_PEER_REQUEST {
-                        swarm
+                        if let Err(err) = swarm
                             .behaviour_mut()
                             .gossipsub
-                            .publish(self.find_peers.clone(), FIND_PEER_RESPONSE)?;
+                            .publish(self.find_peers.clone(), FIND_PEER_RESPONSE)
+                        {
+                            tracing::warn!("Couldn't send find_peer response: {err:#}")
+                        }
                     } else if message.data == FIND_PEER_RESPONSE {
                         // FIXME send these back via request/response instead
                         state.add_peer(propagation_source);
