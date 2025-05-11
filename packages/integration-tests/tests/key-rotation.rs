@@ -98,12 +98,18 @@ impl KolmeApp for SampleKolmeApp {
 }
 
 #[tokio::test]
-async fn test_cosmos_contract_update() {
+async fn test_cosmos_contract_update_self() {
     init_logger(false, None);
-    TestTasks::start(test_cosmos_contract_update_inner, ()).await;
+    TestTasks::start(test_cosmos_contract_update_inner, true).await;
 }
 
-async fn test_cosmos_contract_update_inner(testtasks: TestTasks, (): ()) {
+#[tokio::test]
+async fn test_cosmos_contract_update_set() {
+    init_logger(false, None);
+    TestTasks::start(test_cosmos_contract_update_inner, false).await;
+}
+
+async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: bool) {
     let orig_processor = SecretKey::random(&mut rand::thread_rng());
     let new_processor = SecretKey::random(&mut rand::thread_rng());
     let listener = SecretKey::random(&mut rand::thread_rng());
@@ -239,38 +245,51 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, (): ()) {
     assert_eq!(get_balance().await, 1_000_000);
 
     // OK, fund transfers are working fine. Now let's try changing the processor and do it again.
-    kolme
-        .sign_propose_await_transaction(
-            &listener,
-            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
-                validator_set: ValidatorSet {
-                    processor: new_processor.public_key(),
-                    listeners: std::iter::once(listener.public_key()).collect(),
-                    needed_listeners: 1,
-                    approvers: std::iter::once(approver.public_key()).collect(),
-                    needed_approvers: 1,
-                },
-            })],
-        )
-        .await
-        .unwrap();
-    let change_set_id = *kolme
-        .read()
-        .get_framework_state()
-        .get_key_rotation_state()
-        .change_sets
-        .first_key_value()
-        .unwrap()
-        .0;
-    kolme
-        .sign_propose_await_transaction(
-            &approver,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id,
-            })],
-        )
-        .await
-        .unwrap();
+    if self_replace {
+        kolme
+            .sign_propose_await_transaction(
+                &orig_processor,
+                vec![Message::KeyRotation(KeyRotationMessage::SelfReplace {
+                    validator_type: ValidatorType::Processor,
+                    replacement: new_processor.public_key(),
+                })],
+            )
+            .await
+            .unwrap();
+    } else {
+        kolme
+            .sign_propose_await_transaction(
+                &listener,
+                vec![Message::KeyRotation(KeyRotationMessage::NewSet {
+                    validator_set: ValidatorSet {
+                        processor: new_processor.public_key(),
+                        listeners: std::iter::once(listener.public_key()).collect(),
+                        needed_listeners: 1,
+                        approvers: std::iter::once(approver.public_key()).collect(),
+                        needed_approvers: 1,
+                    },
+                })],
+            )
+            .await
+            .unwrap();
+        let change_set_id = *kolme
+            .read()
+            .get_framework_state()
+            .get_key_rotation_state()
+            .change_sets
+            .first_key_value()
+            .unwrap()
+            .0;
+        kolme
+            .sign_propose_await_transaction(
+                &approver,
+                vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                    change_set_id,
+                })],
+            )
+            .await
+            .unwrap();
+    }
 
     // Now start a new processor with the new key
     let kolme = Kolme::new(
