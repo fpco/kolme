@@ -984,16 +984,39 @@ pub enum BankMessage {
 #[serde(rename_all = "snake_case")]
 pub enum KeyRotationMessage {
     /// The sending key is replacing itself with a new key.
-    SelfReplace {
-        validator_type: ValidatorType,
-        replacement: PublicKey,
-    },
+    SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
     /// Replace the complete validator set.
     ///
     /// Must be proposed by one of the members of an existing set.
     NewSet { validator_set: ValidatorSet },
     /// Vote to approve a proposed set change.
     Approve { change_set_id: ChangeSetId },
+}
+
+impl KeyRotationMessage {
+    pub fn self_replace(
+        validator_type: ValidatorType,
+        replacement: PublicKey,
+        current: &SecretKey,
+    ) -> Result<Self> {
+        let self_replace = SelfReplace {
+            validator_type,
+            replacement,
+        };
+        let json = TaggedJson::new(self_replace)?;
+        let signed = json.sign(current)?;
+        Ok(KeyRotationMessage::SelfReplace(Box::new(signed)))
+    }
+}
+
+/// The payload for self-replacing.
+///
+/// We separate this to its own type so that we can
+/// pass along this message with its signature to the contracts.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct SelfReplace {
+    pub validator_type: ValidatorType,
+    pub replacement: PublicKey,
 }
 
 /// Definition of the validator set for a chain.
@@ -1243,13 +1266,15 @@ pub struct BlockDataLoad {
 }
 
 /// A specific action to be taken as a result of an execution.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum ExecAction {
     Transfer {
         chain: ExternalChain,
         recipient: Wallet,
         funds: Vec<AssetAmount>,
     },
+    /// Replace a single validator using a self-replacement.
+    SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
 }
 
 impl ExecAction {
@@ -1366,6 +1391,14 @@ impl ExecAction {
                     }
                 }
             }
+            ExecAction::SelfReplace(self_replace) => match chain.name() {
+                ChainName::Cosmos => {
+                    todo!("Need to update the Cosmos contract API, it should take either CosmosMsgs or control messages: {self_replace:?}")
+                }
+                ChainName::Solana => todo!(),
+                #[cfg(feature = "pass_through")]
+                ChainName::PassThrough => todo!(),
+            },
         }
     }
 }

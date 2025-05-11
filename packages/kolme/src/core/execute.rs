@@ -439,6 +439,16 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(id)
     }
 
+    /// Add an action on all chains
+    fn add_action_all_chains(&mut self, action: ExecAction) -> Result<()> {
+        let chains = self.framework_state.chains.keys().collect::<Vec<_>>();
+        for chain in chains {
+            self.add_action(chain, action.clone())?;
+        }
+
+        Ok(())
+    }
+
     /// Withdraw an asset to an external chain.
     pub fn withdraw_asset(
         &mut self,
@@ -585,10 +595,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
     async fn key_rotation(&mut self, key_rotation: &KeyRotationMessage) -> Result<()> {
         match key_rotation {
-            KeyRotationMessage::SelfReplace {
-                validator_type,
-                replacement,
-            } => {
+            KeyRotationMessage::SelfReplace(self_replace) => {
+                let signer = self_replace.verify_signature()?;
+                anyhow::ensure!(signer == self.pubkey);
                 fn set_helper(
                     validator_set: &mut ValidatorSet,
                     is_approver: bool,
@@ -608,23 +617,24 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 }
 
                 let config = self.framework_state.validator_set.as_mut();
-                match validator_type {
+                let replacement = self_replace.message.as_inner().replacement;
+                match self_replace.message.as_inner().validator_type {
                     ValidatorType::Processor => {
-                        if config.processor == self.pubkey {
-                            config.processor = *replacement;
+                        if config.processor == signer {
+                            config.processor = replacement;
                         } else {
                             anyhow::bail!("Signing public key {} is not the current processor and cannot self-replace", self.pubkey);
                         }
                     }
                     ValidatorType::Listener => {
-                        set_helper(config, false, self.pubkey, *replacement)?;
+                        set_helper(config, false, signer, replacement)?;
                     }
                     ValidatorType::Approver => {
-                        set_helper(config, true, self.pubkey, *replacement)?;
+                        set_helper(config, true, signer, replacement)?;
                     }
                 }
 
-                // FIXME emit action to update bridge contracts
+                self.add_action_all_chains(ExecAction::SelfReplace(self_replace.clone()))?;
             }
             KeyRotationMessage::NewSet { validator_set } => {
                 self.framework_state

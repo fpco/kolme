@@ -117,10 +117,14 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &secret1,
-            vec![Message::KeyRotation(KeyRotationMessage::SelfReplace {
-                validator_type: ValidatorType::Listener,
-                replacement: fake_validator.public_key(),
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::self_replace(
+                    ValidatorType::Listener,
+                    fake_validator.public_key(),
+                    &secret1,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap();
@@ -144,10 +148,14 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &secret1,
-            vec![Message::KeyRotation(KeyRotationMessage::SelfReplace {
-                validator_type: ValidatorType::Processor,
-                replacement: secret2.public_key(),
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::self_replace(
+                    ValidatorType::Processor,
+                    secret2.public_key(),
+                    &secret1,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap();

@@ -249,10 +249,14 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         kolme
             .sign_propose_await_transaction(
                 &orig_processor,
-                vec![Message::KeyRotation(KeyRotationMessage::SelfReplace {
-                    validator_type: ValidatorType::Processor,
-                    replacement: new_processor.public_key(),
-                })],
+                vec![Message::KeyRotation(
+                    KeyRotationMessage::self_replace(
+                        ValidatorType::Processor,
+                        new_processor.public_key(),
+                        &orig_processor,
+                    )
+                    .unwrap(),
+                )],
             )
             .await
             .unwrap();
