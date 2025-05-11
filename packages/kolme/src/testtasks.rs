@@ -143,6 +143,7 @@ impl TestTasks {
 
             if let Some(err) = err {
                 tasks.send_error.send(err).await.ok();
+                tasks.send_keep_running.send(false).ok();
             }
 
             if !persistent {

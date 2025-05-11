@@ -145,9 +145,7 @@ impl<App: KolmeApp> Kolme<App> {
                 Notification::Broadcast { .. } => (),
                 Notification::FailedTransaction { txhash, error } => {
                     if txhash == txhash_orig {
-                        break Err(anyhow::anyhow!(
-                            "Error when awaiting transaction {txhash}: {error}"
-                        ));
+                        break Err(error.into());
                     }
                 }
             }
