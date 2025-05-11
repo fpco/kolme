@@ -132,7 +132,7 @@ impl<App: KolmeApp> Submitter<App> {
             GenesisAction::InstantiateCosmos {
                 chain,
                 code_id,
-                args,
+                validator_set: args,
             } => {
                 let ChainArgs::Cosmos { seed_phrase } = &self.args else {
                     return Ok(());
@@ -151,7 +151,7 @@ impl<App: KolmeApp> Submitter<App> {
             GenesisAction::InstantiateSolana {
                 chain,
                 program_id,
-                args,
+                validator_set: args,
             } => {
                 let ChainArgs::Solana { keypair } = &self.args else {
                     return Ok(());

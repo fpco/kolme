@@ -158,7 +158,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     ) -> Result<()> {
         anyhow::ensure!(self
             .framework_state
-            .get_config()
+            .get_validator_set()
             .listeners
             .contains(&self.pubkey));
 
@@ -214,11 +214,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             let existing_signatures = pending
                 .attestations
                 .iter()
-                .filter(|key| framework_state.get_config().listeners.contains(key))
+                .filter(|key| framework_state.get_validator_set().listeners.contains(key))
                 .count();
 
             // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
-            let was_accepted = existing_signatures >= framework_state.get_config().needed_listeners;
+            let was_accepted =
+                existing_signatures >= framework_state.get_validator_set().needed_listeners;
 
             // If this event isn't accepted yet, we simply exit. We never try to
             // process later events while an earlier one is unprocessed.
@@ -327,7 +328,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         // a borrow conflict with the mutable borrow above
         anyhow::ensure!(self
             .framework_state
-            .config
+            .validator_set
             .as_ref()
             .approvers
             .contains(&key));
@@ -343,7 +344,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         processor: &SignatureWithRecovery,
         approvers: &[SignatureWithRecovery],
     ) -> Result<()> {
-        anyhow::ensure!(approvers.len() >= self.framework_state.get_config().needed_approvers);
+        anyhow::ensure!(
+            approvers.len() >= self.framework_state.get_validator_set().needed_approvers
+        );
 
         let action = self
             .framework_state
@@ -357,7 +360,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         let payload = action.payload.as_bytes();
         let processor_key = processor.validate(payload)?;
-        anyhow::ensure!(processor_key == self.framework_state.config.as_ref().processor);
+        anyhow::ensure!(processor_key == self.framework_state.validator_set.as_ref().processor);
 
         let approvers_checked = approvers
             .iter()
@@ -365,7 +368,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 let pubkey = sig.validate(payload)?;
                 anyhow::ensure!(self
                     .framework_state
-                    .config
+                    .validator_set
                     .as_ref()
                     .approvers
                     .contains(&pubkey));
@@ -587,15 +590,15 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 replacement,
             } => {
                 fn set_helper(
-                    config: &mut FrameworkConfig,
+                    validator_set: &mut ValidatorSet,
                     is_approver: bool,
                     sender: PublicKey,
                     replacement: PublicKey,
                 ) -> Result<()> {
                     let set = if is_approver {
-                        &mut config.approvers
+                        &mut validator_set.approvers
                     } else {
-                        &mut config.listeners
+                        &mut validator_set.listeners
                     };
                     if !set.remove(&sender) {
                         anyhow::bail!("Signing public key {} is not a member of the {} set and cannot self-replace", sender, if is_approver {"approver"}else{"listener"});
@@ -604,7 +607,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     Ok(())
                 }
 
-                let config = self.framework_state.config.as_mut();
+                let config = self.framework_state.validator_set.as_mut();
                 match validator_type {
                     ValidatorType::Processor => {
                         if config.processor == self.pubkey {

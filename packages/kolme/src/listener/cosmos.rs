@@ -101,9 +101,9 @@ pub async fn sanity_check_contract(
         next_action_id: _,
     } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
 
-    anyhow::ensure!(info.processor == processor);
-    anyhow::ensure!(approvers == info.approvers);
-    anyhow::ensure!(usize::from(needed_approvers) == info.needed_approvers);
+    anyhow::ensure!(info.validator_set.processor == processor);
+    anyhow::ensure!(approvers == info.validator_set.approvers);
+    anyhow::ensure!(usize::from(needed_approvers) == info.validator_set.needed_approvers);
 
     Ok(())
 }

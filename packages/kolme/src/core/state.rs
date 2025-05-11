@@ -14,34 +14,24 @@ pub enum CoreStateError {
 /// Raw framework state that can be serialized to the database.
 #[derive(Clone, Debug)]
 pub struct FrameworkState {
-    pub(super) config: MerkleLockable<FrameworkConfig>,
+    pub(super) validator_set: MerkleLockable<ValidatorSet>,
     pub(super) chains: ChainStates,
     pub(super) accounts: Accounts,
-}
-
-/// Framework config data.
-///
-/// Importantly, this data rarely changes, so storing it as its own Merkle hash
-/// bypasses a lot of serialization overhead.
-#[derive(Clone, Debug)]
-pub struct FrameworkConfig {
-    pub processor: PublicKey,
-    pub listeners: BTreeSet<PublicKey>,
-    pub needed_listeners: usize,
-    pub approvers: BTreeSet<PublicKey>,
-    pub needed_approvers: usize,
+    pub(super) key_rotation_state: MerkleLockable<KeyRotationState>,
 }
 
 impl MerkleSerialize for FrameworkState {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let FrameworkState {
-            config,
+            validator_set: config,
             chains,
             accounts,
+            key_rotation_state,
         } = self;
         serializer.store(config)?;
         serializer.store(chains)?;
         serializer.store(accounts)?;
+        serializer.store(key_rotation_state)?;
         Ok(())
     }
 }
@@ -51,41 +41,97 @@ impl MerkleDeserialize for FrameworkState {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(FrameworkState {
-            config: deserializer.load()?,
+            validator_set: deserializer.load()?,
             chains: deserializer.load()?,
             accounts: deserializer.load()?,
+            key_rotation_state: deserializer.load()?,
         })
     }
 }
 
-impl MerkleSerialize for FrameworkConfig {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        let Self {
-            processor,
-            listeners,
-            needed_listeners,
-            approvers,
-            needed_approvers,
-        } = self;
-        serializer.store(processor)?;
-        serializer.store(listeners)?;
-        serializer.store(needed_listeners)?;
-        serializer.store(approvers)?;
-        serializer.store(needed_approvers)?;
-        Ok(())
+/// Manages the state of key rotation activities.
+#[derive(Default, Clone, Debug)]
+pub struct KeyRotationState {
+    /// Next change set ID to be issued.
+    pub next_change_set_id: ChangeSetId,
+    /// Currently in-flight proposals
+    pub change_sets: BTreeMap<ChangeSetId, PendingChangeSet>,
+}
+
+/// Status of an in-flight key rotation.
+#[derive(Clone, Debug)]
+pub struct PendingChangeSet {
+    pub validator_set: ValidatorSet,
+    pub approvals: BTreeSet<PublicKey>,
+}
+impl PendingChangeSet {
+    /// Do we have enough approvals to meet the current validator set rules?
+    pub(crate) fn has_sufficient_approvals(&self, validator_set: &ValidatorSet) -> bool {
+        let mut group_approvals = 0;
+        if self.approvals.contains(&validator_set.processor) {
+            group_approvals += 1;
+        }
+        if self.fulfills_groups(&validator_set.listeners, validator_set.needed_listeners) {
+            group_approvals += 1;
+        }
+        if self.fulfills_groups(&validator_set.approvers, validator_set.needed_approvers) {
+            group_approvals += 1;
+        }
+
+        group_approvals >= 2
+    }
+
+    fn fulfills_groups(&self, group: &BTreeSet<PublicKey>, needed: usize) -> bool {
+        let mut approvals = 0;
+        for member in group {
+            if self.approvals.contains(member) {
+                approvals += 1;
+            }
+        }
+        approvals >= needed
     }
 }
 
-impl MerkleDeserialize for FrameworkConfig {
+impl MerkleSerialize for KeyRotationState {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            next_change_set_id,
+            change_sets,
+        } = self;
+        serializer.store(next_change_set_id)?;
+        serializer.store(change_sets)?;
+        Ok(())
+    }
+}
+impl MerkleDeserialize for KeyRotationState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
-            processor: deserializer.load()?,
-            listeners: deserializer.load()?,
-            needed_listeners: deserializer.load()?,
-            approvers: deserializer.load()?,
-            needed_approvers: deserializer.load()?,
+            next_change_set_id: deserializer.load()?,
+            change_sets: deserializer.load()?,
+        })
+    }
+}
+
+impl MerkleSerialize for PendingChangeSet {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            validator_set,
+            approvals,
+        } = self;
+        serializer.store(validator_set)?;
+        serializer.store(approvals)?;
+        Ok(())
+    }
+}
+impl MerkleDeserialize for PendingChangeSet {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            validator_set: deserializer.load()?,
+            approvals: deserializer.load()?,
         })
     }
 }
@@ -94,33 +140,28 @@ impl FrameworkState {
     pub(super) fn new(
         GenesisInfo {
             kolme_ident: _,
-            processor,
-            listeners,
-            needed_listeners,
-            approvers,
-            needed_approvers,
+            validator_set,
             chains,
         }: &GenesisInfo,
     ) -> Self {
         FrameworkState {
-            config: MerkleLockable::new(FrameworkConfig {
-                processor: *processor,
-                listeners: listeners.clone(),
-                needed_listeners: *needed_listeners,
-                approvers: approvers.clone(),
-                needed_approvers: *needed_approvers,
-            }),
+            validator_set: MerkleLockable::new(validator_set.clone()),
             chains: ChainStates::from(chains.clone()),
             accounts: Accounts::default(),
+            key_rotation_state: MerkleLockable::new(KeyRotationState::default()),
         }
     }
 
-    pub fn get_config(&self) -> &FrameworkConfig {
-        self.config.as_ref()
+    pub fn get_validator_set(&self) -> &ValidatorSet {
+        self.validator_set.as_ref()
+    }
+
+    pub fn get_key_rotation_state(&self) -> &KeyRotationState {
+        self.key_rotation_state.as_ref()
     }
 
     pub(super) fn validate(&self) -> Result<()> {
-        self.get_config().validate()
+        self.get_validator_set().validate()
     }
 
     pub(super) fn get_asset_config(
@@ -135,29 +176,5 @@ impl FrameworkState {
             .values()
             .find(|config| config.asset_id == asset_id)
             .ok_or(CoreStateError::AssetNotSupported { chain, asset_id })
-    }
-
-    pub(super) fn instantiate_args(&self) -> InstantiateArgs {
-        self.get_config().instantiate_args()
-    }
-}
-
-impl FrameworkConfig {
-    fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
-        anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
-        anyhow::ensure!(self.needed_approvers > 0);
-        Ok(())
-    }
-
-    fn instantiate_args(&self) -> InstantiateArgs {
-        InstantiateArgs {
-            processor: self.processor,
-            listeners: self.listeners.clone(),
-            needed_listeners: self.needed_listeners,
-            approvers: self.approvers.clone(),
-            needed_approvers: self.needed_approvers,
-        }
     }
 }

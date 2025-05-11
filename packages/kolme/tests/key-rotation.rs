@@ -49,11 +49,13 @@ impl SampleKolmeApp {
 
         let genesis = GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
-            processor: validator,
-            listeners: set.clone(),
-            needed_listeners: 1,
-            approvers: set,
-            needed_approvers: 1,
+            validator_set: ValidatorSet {
+                processor: validator,
+                listeners: set.clone(),
+                needed_listeners: 1,
+                approvers: set,
+                needed_approvers: 1,
+            },
             chains: ConfiguredChains::default(),
         };
 
@@ -126,7 +128,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     // Check that the new genesis info is updated correctly
     {
         let kolme = kolme.read();
-        let config = kolme.get_framework_state().get_config();
+        let config = kolme.get_framework_state().get_validator_set();
         assert_eq!(config.processor, secret1.public_key());
         assert_eq!(
             vec![secret1.public_key()],
@@ -151,7 +153,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
         .unwrap();
     {
         let kolme = kolme.read();
-        let config = kolme.get_framework_state().get_config();
+        let config = kolme.get_framework_state().get_validator_set();
         assert_eq!(config.processor, secret2.public_key());
         assert_eq!(
             vec![secret1.public_key()],

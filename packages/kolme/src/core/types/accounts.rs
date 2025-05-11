@@ -257,7 +257,7 @@ impl Accounts {
                 let account = self.accounts.get_mut(account_id).unwrap();
                 if account.next_nonce != nonce {
                     return Err(KolmeError::InvalidNonce {
-                        pubkey,
+                        pubkey: Box::new(pubkey),
                         account_id: *account_id,
                         expected: account.next_nonce,
                         actual: nonce,

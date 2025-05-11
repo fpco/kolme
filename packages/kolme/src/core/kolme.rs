@@ -219,7 +219,7 @@ impl<App: KolmeApp> Kolme<App> {
                 kolme.get_next_height()
             );
         }
-        let expected_processor = kolme.get_framework_state().get_config().processor;
+        let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
         anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
 
@@ -532,14 +532,14 @@ impl<App: KolmeApp> KolmeRead<App> {
                     return Some(GenesisAction::InstantiateCosmos {
                         chain: chain.to_cosmos_chain().unwrap(),
                         code_id: *code_id,
-                        args: self.get_framework_state().instantiate_args(),
+                        validator_set: self.get_framework_state().get_validator_set().clone(),
                     })
                 }
                 BridgeContract::NeededSolanaBridge { program_id } => {
                     return Some(GenesisAction::InstantiateSolana {
                         chain: chain.to_solana_chain().unwrap(),
                         program_id: program_id.clone(),
-                        args: self.get_framework_state().instantiate_args(),
+                        validator_set: self.get_framework_state().get_validator_set().clone(),
                     })
                 }
                 BridgeContract::Deployed(_) => (),
@@ -572,15 +572,17 @@ impl<App: KolmeApp> KolmeRead<App> {
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.get_framework_state().get_config().processor
+        self.get_framework_state().get_validator_set().processor
     }
 
     pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.get_framework_state().get_config().approvers
+        &self.get_framework_state().get_validator_set().approvers
     }
 
     pub fn get_needed_approvers(&self) -> usize {
-        self.get_framework_state().get_config().needed_approvers
+        self.get_framework_state()
+            .get_validator_set()
+            .needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &ChainStates {

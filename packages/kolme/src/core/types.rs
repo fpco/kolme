@@ -540,22 +540,13 @@ pub enum GenesisAction {
     InstantiateCosmos {
         chain: CosmosChain,
         code_id: u64,
-        args: InstantiateArgs,
+        validator_set: ValidatorSet,
     },
     InstantiateSolana {
         chain: SolanaChain,
         program_id: String,
-        args: InstantiateArgs,
+        validator_set: ValidatorSet,
     },
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct InstantiateArgs {
-    pub processor: PublicKey,
-    pub listeners: BTreeSet<PublicKey>,
-    pub needed_listeners: usize,
-    pub approvers: BTreeSet<PublicKey>,
-    pub needed_approvers: usize,
 }
 
 #[derive(
@@ -1000,15 +991,70 @@ pub enum KeyRotationMessage {
     /// Replace the complete validator set.
     ///
     /// Must be proposed by one of the members of an existing set.
-    NewSet {
-        processor: PublicKey,
-        listeners: BTreeSet<PublicKey>,
-        needed_listeners: usize,
-        approvers: BTreeSet<PublicKey>,
-        needed_approvers: usize,
-    },
+    NewSet { validator_set: ValidatorSet },
     /// Vote to approve a proposed set change.
     Approve { change_set_id: ChangeSetId },
+}
+
+/// Definition of the validator set for a chain.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorSet {
+    pub processor: PublicKey,
+    pub listeners: BTreeSet<PublicKey>,
+    pub needed_listeners: usize,
+    pub approvers: BTreeSet<PublicKey>,
+    pub needed_approvers: usize,
+}
+
+impl MerkleSerialize for ValidatorSet {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            processor,
+            listeners,
+            needed_listeners,
+            approvers,
+            needed_approvers,
+        } = self;
+        serializer.store(processor)?;
+        serializer.store(listeners)?;
+        serializer.store(needed_listeners)?;
+        serializer.store(approvers)?;
+        serializer.store(needed_approvers)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for ValidatorSet {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            processor: deserializer.load()?,
+            listeners: deserializer.load()?,
+            needed_listeners: deserializer.load()?,
+            approvers: deserializer.load()?,
+            needed_approvers: deserializer.load()?,
+        })
+    }
+}
+
+impl ValidatorSet {
+    pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
+        anyhow::ensure!(self.needed_listeners > 0);
+        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
+        anyhow::ensure!(self.needed_approvers > 0);
+        Ok(())
+    }
+
+    /// Ensure that the given public key is a member of one of the validator sets.
+    pub fn ensure_is_validator(&self, key: PublicKey) -> Result<(), KolmeError> {
+        if key == self.processor || self.listeners.contains(&key) || self.approvers.contains(&key) {
+            Ok(())
+        } else {
+            Err(KolmeError::NotAValidator { key })
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
@@ -1020,35 +1066,59 @@ pub enum ValidatorType {
 }
 /// Monotonically increasing identifier for proposed validator set changes.
 #[derive(
-    serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Copy,
+    Hash,
+    Debug,
+    Default,
 )]
 pub struct ChangeSetId(pub u64);
 
+impl ChangeSetId {
+    pub fn next(self) -> ChangeSetId {
+        ChangeSetId(self.0 + 1)
+    }
+}
+
+impl Display for ChangeSetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl MerkleSerialize for ChangeSetId {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+impl MerkleDeserialize for ChangeSetId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        u64::merkle_deserialize(deserializer).map(Self)
+    }
+}
+
 /// Information defining the initial state of an app.
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct GenesisInfo {
     /// Unique identifier for this application, never changes.
     pub kolme_ident: String,
-    /// Public key of the processor for this app
-    pub processor: PublicKey,
-    /// Public keys of the listeners for this app
-    pub listeners: BTreeSet<PublicKey>,
-    /// How many of the listeners are needed to approve a reported bridge event?
-    pub needed_listeners: usize,
-    /// Public keys of the approvers for this app
-    pub approvers: BTreeSet<PublicKey>,
-    /// How many of the approvers are needed to approve a bridge action?
-    pub needed_approvers: usize,
+    /// The rules defining the validator set for this app.
+    pub validator_set: ValidatorSet,
     /// Initial configuration of different chains
     pub chains: ConfiguredChains,
 }
 
 impl GenesisInfo {
     pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
-        anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
-        anyhow::ensure!(self.needed_approvers > 0);
+        self.validator_set.validate()?;
         Ok(())
     }
 }
@@ -1098,7 +1168,7 @@ impl ChainStates {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Default, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, Debug, Clone)]
 pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
 
 impl ConfiguredChains {

@@ -7,7 +7,7 @@ pub async fn instantiate(
     cosmos: &Cosmos,
     seed_phrase: &SeedPhrase,
     code_id: u64,
-    args: InstantiateArgs,
+    args: ValidatorSet,
 ) -> Result<String> {
     let needed_approvers = u16::try_from(args.needed_approvers)?;
     let msg = InstantiateMsg {

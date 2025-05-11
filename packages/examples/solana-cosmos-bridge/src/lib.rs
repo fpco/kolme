@@ -106,11 +106,13 @@ impl Default for SolanaCosmosBridgeApp {
 
         let genesis = GenesisInfo {
             kolme_ident: "Solana<->Cosmos bridge example".to_owned(),
-            processor: my_public_key,
-            listeners: set.clone(),
-            needed_listeners: 1,
-            approvers: set,
-            needed_approvers: 1,
+            validator_set: ValidatorSet {
+                processor: my_public_key,
+                listeners: set.clone(),
+                needed_listeners: 1,
+                approvers: set,
+                needed_approvers: 1,
+            },
             chains: bridges,
         };
 

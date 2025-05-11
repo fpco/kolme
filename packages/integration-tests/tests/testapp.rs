@@ -5,7 +5,7 @@ use kolme::{
     testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
     ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
     MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor,
-    Transaction,
+    Transaction, ValidatorSet,
 };
 
 use rust_decimal::dec;
@@ -62,11 +62,13 @@ impl Default for TestApp {
 
         let genesis = GenesisInfo {
             kolme_ident: "Test framework".to_owned(),
-            processor: my_public_key,
-            listeners: set.clone(),
-            needed_listeners: 1,
-            approvers: set,
-            needed_approvers: 1,
+            validator_set: ValidatorSet {
+                processor: my_public_key,
+                listeners: set.clone(),
+                needed_listeners: 1,
+                approvers: set,
+                needed_approvers: 1,
+            },
             chains: Default::default(),
         };
 

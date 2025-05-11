@@ -38,7 +38,10 @@ impl TestTasks {
         recv_keep_running.changed().await.unwrap();
 
         match recv_error.try_recv() {
-            Ok(err) => panic!("{err:?}"),
+            Ok(err) => {
+                eprintln!("{err:?}");
+                panic!("Test run failed due to panic");
+            }
             Err(TryRecvError::Empty) => (),
             Err(TryRecvError::Disconnected) => unreachable!(),
         }
