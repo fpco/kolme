@@ -626,16 +626,72 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
                 // FIXME emit action to update bridge contracts
             }
-            KeyRotationMessage::NewSet {
-                processor,
-                listeners,
-                needed_listeners,
-                approvers,
-                needed_approvers,
-            } => todo!(),
-            KeyRotationMessage::Approve { change_set_id } => todo!(),
+            KeyRotationMessage::NewSet { validator_set } => {
+                self.framework_state
+                    .validator_set
+                    .as_ref()
+                    .ensure_is_validator(self.pubkey)?;
+                validator_set.validate()?;
+                let state = self.framework_state.key_rotation_state.as_mut();
+                let id = state.next_change_set_id;
+                state.next_change_set_id = id.next();
+                state.change_sets.insert(
+                    id,
+                    PendingChangeSet {
+                        validator_set: validator_set.clone(),
+                        approvals: std::iter::once(self.pubkey).collect(),
+                    },
+                );
+                self.check_pending_change_sets();
+            }
+            KeyRotationMessage::Approve { change_set_id } => {
+                self.framework_state
+                    .validator_set
+                    .as_ref()
+                    .ensure_is_validator(self.pubkey)?;
+
+                let state = self.framework_state.key_rotation_state.as_mut();
+                let pending = state.change_sets.get_mut(change_set_id).with_context(|| {
+                    format!("Specified an unknown change set ID {change_set_id}")
+                })?;
+                let newly_added = pending.approvals.insert(self.pubkey);
+                anyhow::ensure!(
+                    newly_added,
+                    "{} already approved change set {change_set_id}",
+                    self.pubkey
+                );
+                self.check_pending_change_sets();
+            }
         }
         Ok(())
+    }
+
+    fn check_pending_change_sets(&mut self) {
+        if let Some(validator_set) = self.find_approved_change_set() {
+            *self.framework_state.validator_set.as_mut() = validator_set;
+            self.framework_state
+                .key_rotation_state
+                .as_mut()
+                .change_sets
+                .clear();
+            // FIXME emit action to update bridge contracts
+        }
+    }
+
+    fn find_approved_change_set(&self) -> Option<ValidatorSet> {
+        for pending in self
+            .framework_state
+            .key_rotation_state
+            .as_ref()
+            .change_sets
+            .values()
+        {
+            if pending.has_sufficient_approvals(self.framework_state.validator_set.as_ref()) {
+                return Some(pending.validator_set.clone());
+            }
+        }
+
+        None
     }
 
     pub fn log(&mut self, msg: impl Into<String>) {

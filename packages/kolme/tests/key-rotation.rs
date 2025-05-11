@@ -199,3 +199,283 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     kolme2.wait_on_empty_mempool().await;
     assert_ne!(kolme2.get_tx_height(txhash).await.unwrap(), None);
 }
+
+#[tokio::test]
+async fn test_total_replace() {
+    init_logger(false, None);
+    TestTasks::start(test_total_replace_inner, ()).await;
+}
+
+async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
+    let orig_processor = SecretKey::random(&mut rand::thread_rng());
+    let listener = SecretKey::random(&mut rand::thread_rng());
+    let temp_approver = SecretKey::random(&mut rand::thread_rng());
+    let new_approvers = std::iter::repeat_with(|| SecretKey::random(&mut rand::thread_rng()))
+        .take(3)
+        .collect::<Vec<_>>();
+    let new_processor = SecretKey::random(&mut rand::thread_rng());
+    let client = SecretKey::random(&mut rand::thread_rng());
+    let store = KolmeStore::new_in_memory();
+    let kolme = Kolme::new(
+        SampleKolmeApp::new(orig_processor.public_key()),
+        DUMMY_CODE_VERSION,
+        store.clone(),
+    )
+    .await
+    .unwrap();
+
+    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), orig_processor.clone()).run());
+
+    // Swap out the approver and listener right away. Since there's only one
+    // key being used, we don't need to do any approving.
+    let expected_new_set = ValidatorSet {
+        processor: orig_processor.public_key(),
+        listeners: std::iter::once(listener.public_key()).collect(),
+        needed_listeners: 1,
+        approvers: std::iter::once(temp_approver.public_key()).collect(),
+        needed_approvers: 1,
+    };
+    kolme
+        .sign_propose_await_transaction(
+            &orig_processor,
+            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
+                validator_set: expected_new_set.clone(),
+            })],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        &expected_new_set,
+        kolme.read().get_framework_state().get_validator_set()
+    );
+    // And no pending proposals should be left behind
+    assert_eq!(
+        kolme
+            .read()
+            .get_framework_state()
+            .get_key_rotation_state()
+            .change_sets
+            .len(),
+        0
+    );
+
+    // Use the processor to initiate an approver replacement
+    let proposed_set1 = ValidatorSet {
+        processor: new_processor.public_key(),
+        listeners: [orig_processor.public_key()].into_iter().collect(),
+        needed_listeners: 1,
+        approvers: new_approvers.iter().map(SecretKey::public_key).collect(),
+        needed_approvers: 2,
+    };
+    kolme
+        .sign_propose_await_transaction(
+            &orig_processor,
+            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
+                validator_set: proposed_set1.clone(),
+            })],
+        )
+        .await
+        .unwrap();
+
+    // Old approver can still make a proposal too
+    let proposed_set2 = ValidatorSet {
+        processor: temp_approver.public_key(),
+        listeners: [temp_approver.public_key()].into_iter().collect(),
+        needed_listeners: 1,
+        approvers: [temp_approver.public_key()].into_iter().collect(),
+        needed_approvers: 1,
+    };
+    kolme
+        .sign_propose_await_transaction(
+            &temp_approver,
+            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
+                validator_set: proposed_set2.clone(),
+            })],
+        )
+        .await
+        .unwrap();
+
+    // But a random client can't make a proposal
+    let rejected_set = ValidatorSet {
+        processor: client.public_key(),
+        listeners: [client.public_key()].into_iter().collect(),
+        needed_listeners: 1,
+        approvers: [client.public_key()].into_iter().collect(),
+        needed_approvers: 1,
+    };
+    kolme
+        .sign_propose_await_transaction(
+            &client,
+            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
+                validator_set: rejected_set,
+            })],
+        )
+        .await
+        .unwrap_err();
+
+    // These proposals shouldn't have changed anything yet
+    assert_eq!(
+        &expected_new_set,
+        kolme.read().get_framework_state().get_validator_set()
+    );
+
+    // And make sure the new proposals are waiting
+    let (change_id_1, change_id_2) = {
+        let kolme = kolme.read();
+        let proposals = kolme.get_framework_state().get_key_rotation_state();
+        assert_eq!(proposals.change_sets.len(), 2);
+        let first_id = ChangeSetId(proposals.next_change_set_id.0 - 2);
+        let second_id = first_id.next();
+        assert_eq!(
+            proposed_set1,
+            proposals.change_sets.get(&first_id).unwrap().validator_set,
+        );
+        assert_eq!(
+            proposed_set2,
+            proposals.change_sets.get(&second_id).unwrap().validator_set,
+        );
+        (first_id, second_id)
+    };
+
+    // Random clients, newly added validators, and validators that
+    // already voted cannot approve
+    kolme
+        .sign_propose_await_transaction(
+            &client,
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id: change_id_1,
+            })],
+        )
+        .await
+        .unwrap_err();
+    kolme
+        .sign_propose_await_transaction(
+            &new_processor,
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id: change_id_1,
+            })],
+        )
+        .await
+        .unwrap_err();
+    kolme
+        .sign_propose_await_transaction(
+            &orig_processor,
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id: change_id_1,
+            })],
+        )
+        .await
+        .unwrap_err();
+
+    // One vote from a current approver is sufficient
+    kolme
+        .sign_propose_await_transaction(
+            &temp_approver,
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id: change_id_1,
+            })],
+        )
+        .await
+        .unwrap();
+
+    // This should have worked, so signing with a listener will fail because
+    // the change is no longer pending.
+    kolme
+        .sign_propose_await_transaction(
+            &listener,
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id: change_id_1,
+            })],
+        )
+        .await
+        .unwrap_err();
+    kolme
+        .sign_propose_await_transaction(
+            &listener,
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id: change_id_2,
+            })],
+        )
+        .await
+        .unwrap_err();
+
+    // Confirm the new change set is correct
+    assert_eq!(
+        &proposed_set1,
+        kolme.read().get_framework_state().get_validator_set()
+    );
+
+    // Need to switch over to a new Kolme and a new Processor...
+    let kolme = Kolme::new(
+        SampleKolmeApp::new(orig_processor.public_key()),
+        DUMMY_CODE_VERSION,
+        store,
+    )
+    .await
+    .unwrap();
+    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), new_processor.clone()).run());
+
+    // Now that we have more than 1 approver, do a final check that we need
+    // 2 members of the approver group before a change is approved.
+    kolme
+        .sign_propose_await_transaction(
+            &new_approvers[0],
+            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
+                validator_set: expected_new_set.clone(),
+            })],
+        )
+        .await
+        .unwrap();
+    let change_set_id = *kolme
+        .read()
+        .get_framework_state()
+        .get_key_rotation_state()
+        .change_sets
+        .first_key_value()
+        .unwrap()
+        .0;
+    kolme
+        .sign_propose_await_transaction(
+            &new_processor,
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id,
+            })],
+        )
+        .await
+        .unwrap();
+    kolme
+        .sign_propose_await_transaction(
+            &new_approvers[1],
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id,
+            })],
+        )
+        .await
+        .unwrap();
+    kolme
+        .sign_propose_await_transaction(
+            &new_approvers[2],
+            vec![Message::KeyRotation(KeyRotationMessage::Approve {
+                change_set_id,
+            })],
+        )
+        .await
+        .unwrap_err();
+
+    // Confirm the new change set is correct
+    assert_eq!(
+        &expected_new_set,
+        kolme.read().get_framework_state().get_validator_set()
+    );
+    assert_eq!(
+        kolme
+            .read()
+            .get_framework_state()
+            .get_key_rotation_state()
+            .change_sets
+            .len(),
+        0
+    );
+}
+
+// TODO Do some kind of test with localosmosis
