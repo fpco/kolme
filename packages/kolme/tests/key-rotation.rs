@@ -477,5 +477,3 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         0
     );
 }
-
-// TODO Do some kind of test with localosmosis

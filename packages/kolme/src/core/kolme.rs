@@ -427,6 +427,44 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Wait for the given public key to have an account ID and then return it.
+    pub async fn wait_account_for_key(&self, pubkey: PublicKey) -> Result<AccountId> {
+        loop {
+            let kolme = self.read();
+            if let Some((id, _)) = kolme
+                .get_framework_state()
+                .accounts
+                .get_account_for_key(pubkey)
+            {
+                break Ok(id);
+            }
+
+            self.wait_for_block(kolme.get_next_height()).await?;
+        }
+    }
+
+    /// Wait until the given action ID is no longer pending.
+    pub async fn wait_for_action_finished(
+        &self,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    ) -> Result<()> {
+        loop {
+            let kolme = self.read();
+            let state = kolme.get_framework_state().chains.get(chain)?;
+
+            if state.next_action_id <= action_id {
+                anyhow::bail!("Cannot wait for bridge action ID {action_id} on {chain}, since the next action will be {}", state.next_action_id);
+            }
+
+            if !state.pending_actions.contains_key(&action_id) {
+                break Ok(());
+            }
+
+            self.wait_for_block(kolme.get_next_height()).await?;
+        }
+    }
+
     pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());

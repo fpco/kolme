@@ -101,7 +101,7 @@ impl Accounts {
             let account = self.accounts.get_mut(&account_id).ok_or(Decimal::ZERO)?;
             let asset = account.assets.get_mut(&asset_id).ok_or(Decimal::ZERO)?;
             match (*asset).cmp(&to_burn) {
-                std::cmp::Ordering::Less => Err(Decimal::ZERO),
+                std::cmp::Ordering::Less => Err(*asset),
                 std::cmp::Ordering::Equal => {
                     account.assets.remove(&asset_id);
                     Ok(())

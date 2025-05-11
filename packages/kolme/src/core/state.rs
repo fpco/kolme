@@ -160,6 +160,10 @@ impl FrameworkState {
         self.key_rotation_state.as_ref()
     }
 
+    pub fn get_chain_states(&self) -> &ChainStates {
+        &self.chains
+    }
+
     pub(super) fn validate(&self) -> Result<()> {
         self.get_validator_set().validate()
     }
