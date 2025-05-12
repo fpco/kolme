@@ -24,6 +24,7 @@ pub struct Gossip<App: KolmeApp> {
     swarm: Mutex<Swarm<KolmeBehaviour<App::Message>>>,
     notifications: IdentTopic,
     find_peers: IdentTopic,
+    local_peer_id: PeerId,
 }
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -235,6 +236,7 @@ impl GossipBuilder {
         }
 
         let (last_seen_watch, _) = tokio::sync::watch::channel(None);
+        let local_peer_id = *swarm.local_peer_id();
 
         Ok(Gossip {
             kolme,
@@ -242,11 +244,16 @@ impl GossipBuilder {
             swarm: Mutex::new(swarm),
             notifications,
             find_peers,
+            local_peer_id,
         })
     }
 }
 
 impl<App: KolmeApp> Gossip<App> {
+    pub fn peer_id(&self) -> PeerId {
+        self.local_peer_id
+    }
+
     pub fn subscribe_last_seen(&self) -> tokio::sync::watch::Receiver<Option<BlockHeight>> {
         self.last_seen_watch.subscribe()
     }
