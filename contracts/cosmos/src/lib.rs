@@ -159,9 +159,12 @@ fn signed(
     info: MessageInfo,
     processor: SignatureWithRecovery,
     approvers: Vec<SignatureWithRecovery>,
-    payload: String,
+    payload_string: String,
 ) -> Result<Response> {
-    let Payload { id, messages } = from_json(&payload)?;
+    let PayloadWithId {
+        id,
+        action: payload,
+    } = from_json(&payload_string)?;
 
     let mut state = STATE.load(deps.storage)?;
     if id != state.next_action_id {
@@ -185,7 +188,7 @@ fn signed(
     }
 
     let mut hasher = Sha256::new();
-    hasher.update(&payload);
+    hasher.update(&payload_string);
     let hash = hasher.finalize();
 
     let processor = signing::validate_signature(deps.api, &hash, &processor)?;
@@ -209,15 +212,20 @@ fn signed(
         used.push(key);
     }
 
-    Ok(bridge_event_message_to_response(
+    let event = bridge_event_message_to_response(
         &BridgeEventMessage::Signed {
             wallet: info.sender.into_string(),
             action_id: id,
         },
         incoming_id,
         deps.storage,
-    )?
-    .add_messages(messages))
+    )?;
+
+    let event = match payload {
+        CosmosAction::Cosmos(messages) => event.add_messages(messages),
+        CosmosAction::SelfReplace(self_replace) => todo!(),
+    };
+    Ok(event)
 }
 
 #[entry_point]

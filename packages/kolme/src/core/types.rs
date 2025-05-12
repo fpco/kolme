@@ -5,6 +5,7 @@ use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
+use shared::cosmos::PayloadWithId;
 
 use crate::*;
 
@@ -1009,16 +1010,6 @@ impl KeyRotationMessage {
     }
 }
 
-/// The payload for self-replacing.
-///
-/// We separate this to its own type so that we can
-/// pass along this message with its signature to the contracts.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct SelfReplace {
-    pub validator_type: ValidatorType,
-    pub replacement: PublicKey,
-}
-
 /// Definition of the validator set for a chain.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ValidatorSet {
@@ -1080,13 +1071,6 @@ impl ValidatorSet {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum ValidatorType {
-    Listener,
-    Processor,
-    Approver,
-}
 /// Monotonically increasing identifier for proposed validator set changes.
 #[derive(
     serde::Serialize,
@@ -1289,12 +1273,6 @@ impl ExecAction {
         use base64::Engine;
         use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
 
-        #[derive(serde::Serialize)]
-        struct CwPayload {
-            id: BridgeActionId,
-            messages: Vec<cosmwasm_std::CosmosMsg>,
-        }
-
         match self {
             Self::Transfer {
                 chain: chain2,
@@ -1326,9 +1304,9 @@ impl ExecAction {
                             amount: coins,
                         });
 
-                        let payload = serde_json::to_string(&CwPayload {
+                        let payload = serde_json::to_string(&PayloadWithId {
                             id,
-                            messages: vec![message],
+                            action: shared::cosmos::CosmosAction::Cosmos(vec![message]),
                         })?;
 
                         Ok(payload)
@@ -1393,7 +1371,14 @@ impl ExecAction {
             }
             ExecAction::SelfReplace(self_replace) => match chain.name() {
                 ChainName::Cosmos => {
-                    todo!("Need to update the Cosmos contract API, it should take either CosmosMsgs or control messages: {self_replace:?}")
+                    let payload = serde_json::to_string(&PayloadWithId {
+                        id,
+                        action: shared::cosmos::CosmosAction::SelfReplace(
+                            self_replace.message.clone().into_inner(),
+                        ),
+                    })?;
+
+                    Ok(payload)
                 }
                 ChainName::Solana => todo!(),
                 #[cfg(feature = "pass_through")]

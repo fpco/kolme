@@ -155,3 +155,21 @@ impl<'de> serde::Deserialize<'de> for Sha256Hash {
         Sha256Hash::from_hash(&bytes).map_err(D::Error::custom)
     }
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidatorType {
+    Listener,
+    Processor,
+    Approver,
+}
+
+/// The payload for self-replacing.
+///
+/// We separate this to its own type so that we can
+/// pass along this message with its signature to the contracts.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct SelfReplace {
+    pub validator_type: ValidatorType,
+    pub replacement: crate::cryptography::PublicKey,
+}

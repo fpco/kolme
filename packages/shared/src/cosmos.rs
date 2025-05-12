@@ -32,12 +32,20 @@ pub struct InstantiateMsg {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct Payload {
+pub struct PayloadWithId {
     /// Monotonically increasing ID to ensure messages are sent in the correct order.
     /// It must be included in the payload in order to prevent anyone to from re-submitting
     /// a previously successfully executed message but with a different ID.
     pub id: BridgeActionId,
-    pub messages: Vec<CosmosMsg>,
+    pub action: CosmosAction,
+}
+
+/// An action to be performed based on a submission from the Kolme chain.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum CosmosAction {
+    Cosmos(Vec<CosmosMsg>),
+    SelfReplace(crate::types::SelfReplace),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -60,7 +68,7 @@ pub enum ExecuteMsg {
         approvers: Vec<SignatureWithRecovery>,
         /// The raw payload to execute
         ///
-        /// This is a JSON encoding of [Payload]. We use a rendered
+        /// This is a JSON encoding of [PayloadWithId]. We use a rendered
         /// String here to ensure identical binary representation
         /// so that the signatures will match.
         payload: String,

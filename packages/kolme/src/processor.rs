@@ -163,6 +163,14 @@ impl<App: KolmeApp> Processor<App> {
 
         let now = Timestamp::now();
 
+        // Make sure we're the current processor
+        anyhow::ensure!(
+            kolme.get_framework_state().get_validator_set().processor == self.secret.public_key(),
+            "Processor has public key {}, but chain currently expects {}",
+            self.secret.public_key(),
+            kolme.get_framework_state().get_validator_set().processor
+        );
+
         let ExecutionResults {
             framework_state,
             app_state,
