@@ -99,13 +99,11 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn test_cosmos_contract_update_self() {
-    init_logger(false, None);
     TestTasks::start(test_cosmos_contract_update_inner, true).await;
 }
 
 #[tokio::test]
 async fn test_cosmos_contract_update_set() {
-    init_logger(false, None);
     TestTasks::start(test_cosmos_contract_update_inner, false).await;
 }
 

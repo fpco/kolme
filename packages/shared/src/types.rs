@@ -164,6 +164,16 @@ pub enum ValidatorType {
     Approver,
 }
 
+impl Display for ValidatorType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(match self {
+            ValidatorType::Listener => "listener",
+            ValidatorType::Processor => "processor",
+            ValidatorType::Approver => "approver",
+        })
+    }
+}
+
 /// The payload for self-replacing.
 ///
 /// We separate this to its own type so that we can

@@ -1373,9 +1373,13 @@ impl ExecAction {
                 ChainName::Cosmos => {
                     let payload = serde_json::to_string(&PayloadWithId {
                         id,
-                        action: shared::cosmos::CosmosAction::SelfReplace(
-                            self_replace.message.clone().into_inner(),
-                        ),
+                        action: shared::cosmos::CosmosAction::SelfReplace {
+                            rendered: self_replace.message.as_str().to_owned(),
+                            signature: SignatureWithRecovery {
+                                recid: self_replace.recovery_id,
+                                sig: self_replace.signature,
+                            },
+                        },
                     })?;
 
                     Ok(payload)

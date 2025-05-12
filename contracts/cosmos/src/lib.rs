@@ -3,15 +3,15 @@ mod signing;
 use std::num::TryFromIntError;
 
 use cosmwasm_std::{
-    entry_point, from_json, to_json_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo,
-    Response, Storage,
+    entry_point, from_json, to_json_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event,
+    MessageInfo, Response, Storage,
 };
 use cw_storage_plus::{Item, Map};
 use sha2::{Digest, Sha256};
 use shared::{
     cosmos::*,
     cryptography::{PublicKey, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId},
+    types::{BridgeActionId, BridgeEventId, SelfReplace, ValidatorType},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -47,6 +47,13 @@ pub enum Error {
     PublicKeyRecoveryMismatch {
         expected: Box<PublicKey>,
         actual: Box<PublicKey>,
+    },
+    #[error("Invalid self-replace. Signed by {signed_by} for validator type {validator_type}. Existing set: {expected:?}. Replacement provided: {replacement}.")]
+    InvalidSelfReplace {
+        signed_by: Box<PublicKey>,
+        replacement: Box<PublicKey>,
+        validator_type: ValidatorType,
+        expected: String,
     },
 }
 
@@ -161,10 +168,7 @@ fn signed(
     approvers: Vec<SignatureWithRecovery>,
     payload_string: String,
 ) -> Result<Response> {
-    let PayloadWithId {
-        id,
-        action: payload,
-    } = from_json(&payload_string)?;
+    let PayloadWithId { id, action } = from_json(&payload_string)?;
 
     let mut state = STATE.load(deps.storage)?;
     if id != state.next_action_id {
@@ -177,7 +181,6 @@ fn signed(
     state.next_action_id.increment();
     let incoming_id = state.next_event_id;
     state.next_event_id.increment();
-    STATE.save(deps.storage, &state)?;
 
     let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
     if approvers_len < state.needed_approvers {
@@ -191,9 +194,80 @@ fn signed(
     hasher.update(&payload_string);
     let hash = hasher.finalize();
 
+    enum ParsedAction {
+        Cosmos(Vec<CosmosMsg>),
+        SelfReplace {
+            validator_type: ValidatorType,
+            old: PublicKey,
+            new: PublicKey,
+        },
+    }
+
+    // Determine who the expected processor and approver signatures are.
+    // This is tricky because of key rotation. If we're recording a key rotation
+    // right now, validate that the signature on the key rotation itself is valid
+    // and then trust the new entries.
+    let (expected_processor, expected_approvers, action) = match action {
+        CosmosAction::Cosmos(messages) => (
+            state.processor,
+            state.approvers.clone(),
+            ParsedAction::Cosmos(messages),
+        ),
+        CosmosAction::SelfReplace {
+            rendered,
+            signature,
+        } => {
+            let hash = Sha256::digest(&rendered);
+            let validator = signing::validate_signature(deps.api, &hash, &signature)?;
+            let SelfReplace {
+                validator_type,
+                replacement,
+            } = from_json(&rendered)?;
+            let mut expected_processor = state.processor;
+            let mut expected_approvers = state.approvers.clone();
+            match validator_type {
+                ValidatorType::Listener => (),
+                ValidatorType::Processor => {
+                    if validator != state.processor {
+                        return Err(Error::InvalidSelfReplace {
+                            signed_by: validator.into(),
+                            replacement: replacement.into(),
+                            validator_type,
+                            expected: state.processor.to_string(),
+                        });
+                    }
+                    expected_processor = replacement;
+                }
+                ValidatorType::Approver => {
+                    if !state.approvers.contains(&validator)
+                        || state.approvers.contains(&replacement)
+                    {
+                        return Err(Error::InvalidSelfReplace {
+                            signed_by: validator.into(),
+                            replacement: replacement.into(),
+                            validator_type,
+                            expected: format!("{:?}", state.approvers),
+                        });
+                    }
+                    expected_approvers.remove(&validator);
+                    expected_approvers.insert(replacement);
+                }
+            }
+            (
+                expected_processor,
+                expected_approvers,
+                ParsedAction::SelfReplace {
+                    validator_type,
+                    old: validator,
+                    new: replacement,
+                },
+            )
+        }
+    };
+
     let processor = signing::validate_signature(deps.api, &hash, &processor)?;
 
-    if processor != state.processor {
+    if processor != expected_processor {
         return Err(Error::PublicKeyRecoveryMismatch {
             expected: state.processor.into(),
             actual: processor.into(),
@@ -203,16 +277,22 @@ fn signed(
     let mut used = vec![];
     for approver in approvers {
         let key = signing::validate_signature(deps.api, &hash, &approver)?;
-        if !state.approvers.contains(&key) {
-            return Err(Error::NonApproverKey { key });
+        if !expected_approvers.contains(&key) {
+            continue;
         }
         if used.contains(&key) {
             return Err(Error::DuplicateKey { key });
         }
         used.push(key);
     }
+    if used.len() < state.needed_approvers as usize {
+        return Err(Error::InsufficientApprovers {
+            needed: state.needed_approvers,
+            provided: used.len() as u16,
+        });
+    }
 
-    let event = bridge_event_message_to_response(
+    let mut event = bridge_event_message_to_response(
         &BridgeEventMessage::Signed {
             wallet: info.sender.into_string(),
             action_id: id,
@@ -221,10 +301,26 @@ fn signed(
         deps.storage,
     )?;
 
-    let event = match payload {
-        CosmosAction::Cosmos(messages) => event.add_messages(messages),
-        CosmosAction::SelfReplace(self_replace) => todo!(),
+    match action {
+        ParsedAction::Cosmos(messages) => event = event.add_messages(messages),
+        ParsedAction::SelfReplace {
+            validator_type,
+            old,
+            new,
+        } => match validator_type {
+            ValidatorType::Listener => todo!(),
+            ValidatorType::Processor => {
+                // Already checked above, but why not
+                assert_eq!(state.processor, old);
+                state.processor = new;
+            }
+            ValidatorType::Approver => {
+                state.approvers.remove(&old);
+                state.approvers.insert(new);
+            }
+        },
     };
+    STATE.save(deps.storage, &state)?;
     Ok(event)
 }
 

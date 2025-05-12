@@ -45,7 +45,12 @@ pub struct PayloadWithId {
 #[serde(rename_all = "snake_case")]
 pub enum CosmosAction {
     Cosmos(Vec<CosmosMsg>),
-    SelfReplace(crate::types::SelfReplace),
+    SelfReplace {
+        /// The rendered version of a [crate::types::SelfReplace]
+        rendered: String,
+        /// The signature of the validator who is self-replacing.
+        signature: SignatureWithRecovery,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
