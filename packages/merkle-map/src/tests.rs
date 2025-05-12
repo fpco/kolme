@@ -447,6 +447,22 @@ fn range_desc() {
     assert_eq!(in_order_actual, in_order_expected);
 }
 
+#[test]
+fn range_exclude_empty() {
+    let mut mmap = MerkleMap::new();
+    mmap.insert("".to_owned(), ());
+    assert_eq!(mmap.range(.."".to_owned()).next_back(), None);
+    assert_eq!(
+        mmap.range("".to_owned()..).next_back(),
+        Some((&"".to_owned(), &()))
+    );
+    assert_eq!(
+        mmap.range("".to_owned()..).next(),
+        Some((&"".to_owned(), &()))
+    );
+    assert_eq!(mmap.range(.."".to_owned()).next(), None);
+}
+
 fn range_helper(
     pairs: Vec<(String, u32)>,
     asc: bool,
