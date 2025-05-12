@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::LazyLock};
 
 use cosmos::{
     proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
@@ -108,6 +108,53 @@ async fn test_cosmos_contract_update_set() {
 }
 
 async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: bool) {
+    static WALLET_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::const_new(()));
+
+    // Ensure we have exclusive access to the master wallet
+    // and fund our local wallet.
+    let local_wallet = SeedPhrase::random()
+        .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
+        .unwrap();
+    let submitter_seed = SeedPhrase::random();
+    let submitter_wallet = submitter_seed
+        .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
+        .unwrap();
+    let master_wallet = SeedPhrase::from_str("osmosis-local")
+        .unwrap()
+        .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
+        .unwrap();
+    let cosmos = CosmosNetwork::OsmosisLocal.connect().await.unwrap();
+    {
+        let _guard = WALLET_LOCK.lock().await;
+        let mut builder = TxBuilder::default();
+        builder.add_message(MsgSend {
+            from_address: master_wallet.get_address_string(),
+            to_address: local_wallet.get_address_string(),
+            amount: vec![Coin {
+                denom: "uosmo".to_owned(),
+                amount: "20000000".to_owned(),
+            }],
+        });
+        builder
+            .sign_and_broadcast(&cosmos, &master_wallet)
+            .await
+            .unwrap();
+    }
+    let mut builder = TxBuilder::default();
+    builder.add_message(MsgSend {
+        from_address: local_wallet.get_address_string(),
+        to_address: submitter_wallet.get_address_string(),
+        amount: vec![Coin {
+            denom: "uosmo".to_owned(),
+            amount: "1000000".to_owned(),
+        }],
+    });
+    builder
+        .sign_and_broadcast(&cosmos, &local_wallet)
+        .await
+        .unwrap();
+
     let orig_processor = SecretKey::random(&mut rand::thread_rng());
     let new_processor = SecretKey::random(&mut rand::thread_rng());
     let listener = SecretKey::random(&mut rand::thread_rng());
@@ -128,9 +175,7 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
     let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
     processor.add_secret(new_processor.clone());
     testtasks.try_spawn_persistent(processor.run());
-    testtasks.try_spawn_persistent(
-        Submitter::new_cosmos(kolme.clone(), "osmosis-local".parse().unwrap()).run(),
-    );
+    testtasks.try_spawn_persistent(Submitter::new_cosmos(kolme.clone(), submitter_seed).run());
     testtasks.try_spawn_persistent(
         Listener::new(kolme.clone(), listener.clone()).run(ChainName::Cosmos),
     );
@@ -142,10 +187,6 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         .unwrap();
 
     let cosmos = kolme.get_cosmos(CosmosChain::OsmosisLocal).await.unwrap();
-    let master_wallet = SeedPhrase::from_str("osmosis-local")
-        .unwrap()
-        .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
-        .unwrap();
     let client_wallet = SeedPhrase::random()
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
         .unwrap();
@@ -155,15 +196,15 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         .get_address();
     let mut builder = TxBuilder::default();
     builder.add_message(MsgSend {
-        from_address: master_wallet.get_address_string(),
+        from_address: local_wallet.get_address_string(),
         to_address: client_wallet.get_address_string(),
         amount: vec![Coin {
             denom: "uosmo".to_owned(),
-            amount: "1000000000".to_owned(),
+            amount: "10000000".to_owned(),
         }],
     });
     builder
-        .sign_and_broadcast(&cosmos, &master_wallet)
+        .sign_and_broadcast(&cosmos, &local_wallet)
         .await
         .unwrap();
 

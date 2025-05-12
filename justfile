@@ -13,8 +13,10 @@ postgres:
     docker compose -f ./packages/integration-tests/docker-compose.yml down
     docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
 
-test: postgres kademlia-test
+test: setup-localosmo
     PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
+    just kademlia-test
+    just run-integration-tests
 
 [working-directory: "packages/kolme-store-postgresql"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
@@ -34,3 +36,15 @@ build-contracts:
 [working-directory: "packages/examples/kademlia-discovery"]
 kademlia-test:
     ./test.sh
+
+[working-directory: "packages/integration-tests"]
+drop-integration-tests-db:
+    rm -rf six-sigma-app.fjall
+
+[working-directory: "packages/integration-tests"]
+setup-localosmo:
+    cargo run --example setup-localosmo
+
+[working-directory: "packages/integration-tests"]
+run-integration-tests: setup-localosmo
+    RUST_LOG=info,kolme=debug,six_sigma=debug cargo t -- --ignored --nocapture
