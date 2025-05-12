@@ -1,6 +1,6 @@
 mod signing;
 
-use std::num::TryFromIntError;
+use std::{collections::BTreeSet, num::TryFromIntError};
 
 use cosmwasm_std::{
     entry_point, from_json, to_json_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event,
@@ -194,16 +194,18 @@ fn signed(
             old: PublicKey,
             new: PublicKey,
         },
+        NewSet(ValidatorSet),
     }
 
     // Determine who the expected processor and approver signatures are.
     // This is tricky because of key rotation. If we're recording a key rotation
     // right now, validate that the signature on the key rotation itself is valid
     // and then trust the new entries.
-    let (expected_processor, expected_approvers, action) = match action {
+    let (expected_processor, expected_approvers, needed_approvers, action) = match action {
         CosmosAction::Cosmos(messages) => (
             state.set.processor,
             state.set.approvers.clone(),
+            state.set.needed_approvers,
             ParsedAction::Cosmos(messages),
         ),
         CosmosAction::SelfReplace {
@@ -249,6 +251,7 @@ fn signed(
             (
                 expected_processor,
                 expected_approvers,
+                state.set.needed_approvers,
                 ParsedAction::SelfReplace {
                     validator_type,
                     old: validator,
@@ -261,7 +264,56 @@ fn signed(
             approvals,
         } => {
             let new_set = from_json::<ValidatorSet>(&rendered)?;
-            todo!()
+            let hash = Sha256::digest(&rendered);
+
+            let mut processor = false;
+            let mut listeners = 0;
+            let mut approvers = 0;
+            let mut used = BTreeSet::new();
+
+            for signature in approvals {
+                let validator = signing::validate_signature(deps.api, &hash, &signature)?;
+                if used.contains(&validator) {
+                    return Err(Error::DuplicateKey { key: validator });
+                }
+                used.insert(validator);
+                if state.set.processor == validator {
+                    assert!(!processor);
+                    processor = true;
+                }
+                if state.set.listeners.contains(&validator) {
+                    listeners += 1;
+                }
+                if state.set.approvers.contains(&validator) {
+                    approvers += 1;
+                }
+            }
+
+            let count = if processor { 1 } else { 0 }
+                + if listeners >= state.set.needed_listeners {
+                    1
+                } else {
+                    0
+                }
+                + if approvers >= state.set.needed_approvers {
+                    1
+                } else {
+                    0
+                };
+
+            if count < 2 {
+                return Err(Error::InsufficientSignatures {
+                    needed: 2,
+                    provided: count,
+                });
+            }
+
+            (
+                new_set.processor,
+                new_set.approvers.clone(),
+                new_set.needed_approvers,
+                ParsedAction::NewSet(new_set),
+            )
         }
     };
 
@@ -285,7 +337,7 @@ fn signed(
         }
         used.push(key);
     }
-    if used.len() < state.set.needed_approvers as usize {
+    if used.len() < needed_approvers as usize {
         return Err(Error::InsufficientApprovers {
             needed: state.set.needed_approvers,
             provided: used.len() as u16,
@@ -308,7 +360,10 @@ fn signed(
             old,
             new,
         } => match validator_type {
-            ValidatorType::Listener => todo!(),
+            ValidatorType::Listener => {
+                state.set.listeners.remove(&old);
+                state.set.listeners.insert(new);
+            }
             ValidatorType::Processor => {
                 // Already checked above, but why not
                 assert_eq!(state.set.processor, old);
@@ -319,6 +374,7 @@ fn signed(
                 state.set.approvers.insert(new);
             }
         },
+        ParsedAction::NewSet(set) => state.set = set,
     };
     STATE.save(deps.storage, &state)?;
     Ok(event)
