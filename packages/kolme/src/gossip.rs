@@ -259,11 +259,19 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     pub async fn run(self) -> Result<()> {
+        self.run_with_catch_up_interval(tokio::time::Duration::from_secs(5))
+            .await
+    }
+
+    pub async fn run_with_catch_up_interval(
+        self,
+        catch_up_interval: tokio::time::Duration,
+    ) -> Result<()> {
         let mut subscription = self.kolme.subscribe();
         let mut swarm = self.swarm.lock().await;
         let mut event_state = EventState::default();
 
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(catch_up_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
