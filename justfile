@@ -16,7 +16,7 @@ postgres:
 test: setup-localosmo
     PROCESSOR_BLOCK_DB=psql://postgres:postgres@localhost:45921/postgres cargo test
     just kademlia-test
-    just run-integration-tests
+    cd packages/integration-tests && cargo test -- --nocapture
 
 [working-directory: "packages/kolme-store-postgresql"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
