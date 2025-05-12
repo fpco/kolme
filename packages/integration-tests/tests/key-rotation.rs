@@ -263,33 +263,37 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         kolme
             .sign_propose_await_transaction(
                 &listener,
-                vec![Message::KeyRotation(KeyRotationMessage::NewSet {
-                    validator_set: ValidatorSet {
-                        processor: new_processor.public_key(),
-                        listeners: std::iter::once(listener.public_key()).collect(),
-                        needed_listeners: 1,
-                        approvers: std::iter::once(approver.public_key()).collect(),
-                        needed_approvers: 1,
-                    },
-                })],
+                vec![Message::KeyRotation(
+                    KeyRotationMessage::new_set(
+                        ValidatorSet {
+                            processor: new_processor.public_key(),
+                            listeners: std::iter::once(listener.public_key()).collect(),
+                            needed_listeners: 1,
+                            approvers: std::iter::once(approver.public_key()).collect(),
+                            needed_approvers: 1,
+                        },
+                        &listener,
+                    )
+                    .unwrap(),
+                )],
             )
             .await
             .unwrap();
-        let change_set_id = *kolme
-            .read()
+        let kolme = kolme.read();
+        let (change_set_id, pending_change_set) = kolme
             .get_framework_state()
             .get_key_rotation_state()
             .change_sets
             .first_key_value()
-            .unwrap()
-            .0;
+            .unwrap();
+        let msg = KeyRotationMessage::approve(
+            *change_set_id,
+            &pending_change_set.validator_set,
+            &approver,
+        )
+        .unwrap();
         kolme
-            .sign_propose_await_transaction(
-                &approver,
-                vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                    change_set_id,
-                })],
-            )
+            .sign_propose_await_transaction(&approver, vec![Message::KeyRotation(msg)])
             .await
             .unwrap();
     }

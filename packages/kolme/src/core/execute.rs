@@ -211,11 +211,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 .next()?;
 
             // Let's find out how many existing signatures there are so we can decide if we can execute.
-            let existing_signatures = pending
-                .attestations
-                .iter()
-                .filter(|key| framework_state.get_validator_set().listeners.contains(key))
-                .count();
+            let existing_signatures = u16::try_from(
+                pending
+                    .attestations
+                    .iter()
+                    .filter(|key| framework_state.get_validator_set().listeners.contains(key))
+                    .count(),
+            )
+            .expect("Too many attestations found");
 
             // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
             let was_accepted =
@@ -345,7 +348,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         approvers: &[SignatureWithRecovery],
     ) -> Result<()> {
         anyhow::ensure!(
-            approvers.len() >= self.framework_state.get_validator_set().needed_approvers
+            approvers.len()
+                >= self
+                    .framework_state
+                    .get_validator_set()
+                    .needed_approvers
+                    .into()
         );
 
         let action = self
@@ -637,24 +645,33 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 self.add_action_all_chains(ExecAction::SelfReplace(self_replace.clone()))?;
             }
             KeyRotationMessage::NewSet { validator_set } => {
+                let signer = validator_set.verify_signature()?;
+                anyhow::ensure!(signer == self.pubkey);
                 self.framework_state
                     .validator_set
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
-                validator_set.validate()?;
+                validator_set.message.as_inner().validate()?;
                 let state = self.framework_state.key_rotation_state.as_mut();
                 let id = state.next_change_set_id;
                 state.next_change_set_id = id.next();
                 state.change_sets.insert(
                     id,
                     PendingChangeSet {
-                        validator_set: validator_set.clone(),
-                        approvals: std::iter::once(self.pubkey).collect(),
+                        validator_set: validator_set.message.clone(),
+                        approvals: std::iter::once((
+                            self.pubkey,
+                            validator_set.signature_with_recovery(),
+                        ))
+                        .collect(),
                     },
                 );
-                self.check_pending_change_sets();
+                self.check_pending_change_sets()?;
             }
-            KeyRotationMessage::Approve { change_set_id } => {
+            KeyRotationMessage::Approve {
+                change_set_id,
+                signature,
+            } => {
                 self.framework_state
                     .validator_set
                     .as_ref()
@@ -664,31 +681,43 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 let pending = state.change_sets.get_mut(change_set_id).with_context(|| {
                     format!("Specified an unknown change set ID {change_set_id}")
                 })?;
-                let newly_added = pending.approvals.insert(self.pubkey);
+
+                let pubkey = signature.validate(pending.validator_set.as_bytes())?;
+                anyhow::ensure!(pubkey == self.pubkey);
+
+                let old_value = pending.approvals.insert(pubkey, *signature);
                 anyhow::ensure!(
-                    newly_added,
+                    old_value.is_none(),
                     "{} already approved change set {change_set_id}",
                     self.pubkey
                 );
-                self.check_pending_change_sets();
+                self.check_pending_change_sets()?;
             }
         }
         Ok(())
     }
 
-    fn check_pending_change_sets(&mut self) {
-        if let Some(validator_set) = self.find_approved_change_set() {
-            *self.framework_state.validator_set.as_mut() = validator_set;
+    fn check_pending_change_sets(&mut self) -> Result<()> {
+        if let Some(PendingChangeSet {
+            validator_set,
+            approvals,
+        }) = self.find_approved_change_set()
+        {
+            *self.framework_state.validator_set.as_mut() = validator_set.as_inner().clone();
             self.framework_state
                 .key_rotation_state
                 .as_mut()
                 .change_sets
                 .clear();
-            // FIXME emit action to update bridge contracts
+            self.add_action_all_chains(ExecAction::NewSet {
+                validator_set,
+                approvals: approvals.values().copied().collect(),
+            })?;
         }
+        Ok(())
     }
 
-    fn find_approved_change_set(&self) -> Option<ValidatorSet> {
+    fn find_approved_change_set(&self) -> Option<PendingChangeSet> {
         for pending in self
             .framework_state
             .key_rotation_state
@@ -697,7 +726,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .values()
         {
             if pending.has_sufficient_approvals(self.framework_state.validator_set.as_ref()) {
-                return Some(pending.validator_set.clone());
+                return Some(pending.clone());
             }
         }
 

@@ -236,7 +236,7 @@ impl<App: KolmeApp> Processor<App> {
             }
         }
 
-        if approvers.len() < kolme.get_needed_approvers() {
+        if approvers.len() < usize::from(kolme.get_needed_approvers()) {
             // Not enough approvals. Don't bother with later actions, we want to approve in order.
             return Ok(());
         }

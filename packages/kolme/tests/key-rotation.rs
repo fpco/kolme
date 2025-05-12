@@ -246,9 +246,9 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &orig_processor,
-            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
-                validator_set: expected_new_set.clone(),
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::new_set(expected_new_set.clone(), &orig_processor).unwrap(),
+            )],
         )
         .await
         .unwrap();
@@ -278,9 +278,9 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &orig_processor,
-            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
-                validator_set: proposed_set1.clone(),
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::new_set(proposed_set1.clone(), &orig_processor).unwrap(),
+            )],
         )
         .await
         .unwrap();
@@ -296,9 +296,9 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &temp_approver,
-            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
-                validator_set: proposed_set2.clone(),
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::new_set(proposed_set2.clone(), &temp_approver).unwrap(),
+            )],
         )
         .await
         .unwrap();
@@ -314,9 +314,9 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &client,
-            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
-                validator_set: rejected_set,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::new_set(rejected_set, &client).unwrap(),
+            )],
         )
         .await
         .unwrap_err();
@@ -335,12 +335,22 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         let first_id = ChangeSetId(proposals.next_change_set_id.0 - 2);
         let second_id = first_id.next();
         assert_eq!(
-            proposed_set1,
-            proposals.change_sets.get(&first_id).unwrap().validator_set,
+            &proposed_set1,
+            proposals
+                .change_sets
+                .get(&first_id)
+                .unwrap()
+                .validator_set
+                .as_inner(),
         );
         assert_eq!(
-            proposed_set2,
-            proposals.change_sets.get(&second_id).unwrap().validator_set,
+            &proposed_set2,
+            proposals
+                .change_sets
+                .get(&second_id)
+                .unwrap()
+                .validator_set
+                .as_inner(),
         );
         (first_id, second_id)
     };
@@ -350,27 +360,42 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &client,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id: change_id_1,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_id_1,
+                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &client,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap_err();
     kolme
         .sign_propose_await_transaction(
             &new_processor,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id: change_id_1,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_id_1,
+                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &new_processor,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap_err();
     kolme
         .sign_propose_await_transaction(
             &orig_processor,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id: change_id_1,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_id_1,
+                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &orig_processor,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap_err();
@@ -379,9 +404,14 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &temp_approver,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id: change_id_1,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_id_1,
+                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &temp_approver,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap();
@@ -391,18 +421,28 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &listener,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id: change_id_1,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_id_1,
+                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &listener,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap_err();
     kolme
         .sign_propose_await_transaction(
             &listener,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id: change_id_2,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_id_2,
+                    &TaggedJson::new(proposed_set2).unwrap(),
+                    &listener,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap_err();
@@ -428,9 +468,9 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &new_approvers[0],
-            vec![Message::KeyRotation(KeyRotationMessage::NewSet {
-                validator_set: expected_new_set.clone(),
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::new_set(expected_new_set.clone(), &new_approvers[0]).unwrap(),
+            )],
         )
         .await
         .unwrap();
@@ -445,27 +485,42 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &new_processor,
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_set_id,
+                    &TaggedJson::new(expected_new_set.clone()).unwrap(),
+                    &new_processor,
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap();
     kolme
         .sign_propose_await_transaction(
             &new_approvers[1],
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_set_id,
+                    &TaggedJson::new(expected_new_set.clone()).unwrap(),
+                    &new_approvers[1],
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap();
     kolme
         .sign_propose_await_transaction(
             &new_approvers[2],
-            vec![Message::KeyRotation(KeyRotationMessage::Approve {
-                change_set_id,
-            })],
+            vec![Message::KeyRotation(
+                KeyRotationMessage::approve(
+                    change_set_id,
+                    &TaggedJson::new(expected_new_set.clone()).unwrap(),
+                    &new_approvers[2],
+                )
+                .unwrap(),
+            )],
         )
         .await
         .unwrap_err();

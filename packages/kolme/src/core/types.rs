@@ -989,9 +989,14 @@ pub enum KeyRotationMessage {
     /// Replace the complete validator set.
     ///
     /// Must be proposed by one of the members of an existing set.
-    NewSet { validator_set: ValidatorSet },
+    NewSet {
+        validator_set: Box<SignedTaggedJson<ValidatorSet>>,
+    },
     /// Vote to approve a proposed set change.
-    Approve { change_set_id: ChangeSetId },
+    Approve {
+        change_set_id: ChangeSetId,
+        signature: SignatureWithRecovery,
+    },
 }
 
 impl KeyRotationMessage {
@@ -1008,66 +1013,25 @@ impl KeyRotationMessage {
         let signed = json.sign(current)?;
         Ok(KeyRotationMessage::SelfReplace(Box::new(signed)))
     }
-}
 
-/// Definition of the validator set for a chain.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ValidatorSet {
-    pub processor: PublicKey,
-    pub listeners: BTreeSet<PublicKey>,
-    pub needed_listeners: usize,
-    pub approvers: BTreeSet<PublicKey>,
-    pub needed_approvers: usize,
-}
-
-impl MerkleSerialize for ValidatorSet {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        let Self {
-            processor,
-            listeners,
-            needed_listeners,
-            approvers,
-            needed_approvers,
-        } = self;
-        serializer.store(processor)?;
-        serializer.store(listeners)?;
-        serializer.store(needed_listeners)?;
-        serializer.store(approvers)?;
-        serializer.store(needed_approvers)?;
-        Ok(())
-    }
-}
-
-impl MerkleDeserialize for ValidatorSet {
-    fn merkle_deserialize(
-        deserializer: &mut MerkleDeserializer,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(Self {
-            processor: deserializer.load()?,
-            listeners: deserializer.load()?,
-            needed_listeners: deserializer.load()?,
-            approvers: deserializer.load()?,
-            needed_approvers: deserializer.load()?,
+    pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self> {
+        let json = TaggedJson::new(set)?;
+        let signed = json.sign(proposer)?;
+        Ok(KeyRotationMessage::NewSet {
+            validator_set: Box::new(signed),
         })
     }
-}
 
-impl ValidatorSet {
-    pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
-        anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
-        anyhow::ensure!(self.needed_approvers > 0);
-        Ok(())
-    }
-
-    /// Ensure that the given public key is a member of one of the validator sets.
-    pub fn ensure_is_validator(&self, key: PublicKey) -> Result<(), KolmeError> {
-        if key == self.processor || self.listeners.contains(&key) || self.approvers.contains(&key) {
-            Ok(())
-        } else {
-            Err(KolmeError::NotAValidator { key })
-        }
+    pub fn approve(
+        change_set_id: ChangeSetId,
+        set: &TaggedJson<ValidatorSet>,
+        validator: &SecretKey,
+    ) -> Result<Self> {
+        let signature = validator.sign_recoverable(set.as_bytes())?;
+        Ok(KeyRotationMessage::Approve {
+            change_set_id,
+            signature,
+        })
     }
 }
 
@@ -1259,6 +1223,11 @@ pub enum ExecAction {
     },
     /// Replace a single validator using a self-replacement.
     SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
+    /// Replace the entire validator set.
+    NewSet {
+        validator_set: TaggedJson<ValidatorSet>,
+        approvals: Vec<SignatureWithRecovery>,
+    },
 }
 
 impl ExecAction {
@@ -1379,6 +1348,25 @@ impl ExecAction {
                                 recid: self_replace.recovery_id,
                                 sig: self_replace.signature,
                             },
+                        },
+                    })?;
+
+                    Ok(payload)
+                }
+                ChainName::Solana => todo!(),
+                #[cfg(feature = "pass_through")]
+                ChainName::PassThrough => todo!(),
+            },
+            ExecAction::NewSet {
+                validator_set,
+                approvals,
+            } => match chain.name() {
+                ChainName::Cosmos => {
+                    let payload = serde_json::to_string(&PayloadWithId {
+                        id,
+                        action: shared::cosmos::CosmosAction::NewSet {
+                            rendered: validator_set.as_str().to_owned(),
+                            approvals: approvals.clone(),
                         },
                     })?;
 

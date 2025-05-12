@@ -61,14 +61,14 @@ pub struct KeyRotationState {
 /// Status of an in-flight key rotation.
 #[derive(Clone, Debug)]
 pub struct PendingChangeSet {
-    pub validator_set: ValidatorSet,
-    pub approvals: BTreeSet<PublicKey>,
+    pub validator_set: TaggedJson<ValidatorSet>,
+    pub approvals: BTreeMap<PublicKey, SignatureWithRecovery>,
 }
 impl PendingChangeSet {
     /// Do we have enough approvals to meet the current validator set rules?
     pub(crate) fn has_sufficient_approvals(&self, validator_set: &ValidatorSet) -> bool {
         let mut group_approvals = 0;
-        if self.approvals.contains(&validator_set.processor) {
+        if self.approvals.contains_key(&validator_set.processor) {
             group_approvals += 1;
         }
         if self.fulfills_groups(&validator_set.listeners, validator_set.needed_listeners) {
@@ -81,10 +81,10 @@ impl PendingChangeSet {
         group_approvals >= 2
     }
 
-    fn fulfills_groups(&self, group: &BTreeSet<PublicKey>, needed: usize) -> bool {
+    fn fulfills_groups(&self, group: &BTreeSet<PublicKey>, needed: u16) -> bool {
         let mut approvals = 0;
         for member in group {
-            if self.approvals.contains(member) {
+            if self.approvals.contains_key(member) {
                 approvals += 1;
             }
         }
@@ -164,7 +164,7 @@ impl FrameworkState {
         &self.chains
     }
 
-    pub(super) fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<(), ValidatorSetError> {
         self.get_validator_set().validate()
     }
 

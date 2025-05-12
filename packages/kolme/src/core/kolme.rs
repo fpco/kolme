@@ -615,7 +615,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         &self.get_framework_state().get_validator_set().approvers
     }
 
-    pub fn get_needed_approvers(&self) -> usize {
+    pub fn get_needed_approvers(&self) -> u16 {
         self.get_framework_state()
             .get_validator_set()
             .needed_approvers

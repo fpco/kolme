@@ -123,7 +123,7 @@ pub async fn sanity_check_contract(
             .contains(&PublicKey::try_from_bytes(a.0.as_slice())?));
     }
 
-    anyhow::ensure!(info.validator_set.needed_approvers == usize::from(state.needed_executors));
+    anyhow::ensure!(info.validator_set.needed_approvers == u16::from(state.needed_executors));
 
     Ok(())
 }

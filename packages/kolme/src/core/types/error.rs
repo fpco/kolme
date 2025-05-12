@@ -9,8 +9,6 @@ pub enum KolmeError {
         expected: AccountNonce,
         actual: AccountNonce,
     },
-    #[error("This operation requires a validator to perform it, but {key} is not part of the validator set.")]
-    NotAValidator { key: PublicKey },
     #[error("{0}")]
     Other(String),
 }

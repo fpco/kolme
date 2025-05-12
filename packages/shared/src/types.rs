@@ -1,4 +1,6 @@
-use std::{fmt::Display, num::TryFromIntError};
+use std::{collections::BTreeSet, fmt::Display, num::TryFromIntError};
+
+use crate::cryptography::PublicKey;
 
 /// Monotonically increasing identifier for actions sent to a bridge contract.
 #[derive(
@@ -181,5 +183,72 @@ impl Display for ValidatorType {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct SelfReplace {
     pub validator_type: ValidatorType,
-    pub replacement: crate::cryptography::PublicKey,
+    pub replacement: PublicKey,
+}
+
+/// Definition of the validator set for a chain.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorSet {
+    pub processor: PublicKey,
+    pub listeners: BTreeSet<PublicKey>,
+    pub needed_listeners: u16,
+    pub approvers: BTreeSet<PublicKey>,
+    pub needed_approvers: u16,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ValidatorSetError {
+    #[error("This operation requires a validator to perform it, but {key} is not part of the validator set.")]
+    NotAValidator { key: PublicKey },
+    #[error("Too many keys provided in validator set: {source}")]
+    TooManyKeys { source: TryFromIntError },
+    #[error("No listeners provided in a validator set")]
+    NoListeners,
+    #[error(
+        "Validator set specified {needed} for listener quorum, but only found {provided} keys."
+    )]
+    InvalidNeededListeners { provided: u16, needed: u16 },
+    #[error("No approvers provided in a validator set")]
+    NoApprovers,
+    #[error(
+        "Validator set specified {needed} for approver quorum, but only found {provided} keys."
+    )]
+    InvalidNeededApprovers { provided: u16, needed: u16 },
+}
+
+impl ValidatorSet {
+    pub fn validate(&self) -> Result<(), ValidatorSetError> {
+        let listeners = u16::try_from(self.listeners.len())
+            .map_err(|source| ValidatorSetError::TooManyKeys { source })?;
+        let approvers = u16::try_from(self.approvers.len())
+            .map_err(|source| ValidatorSetError::TooManyKeys { source })?;
+        if listeners == 0 {
+            return Err(ValidatorSetError::NoListeners);
+        }
+        if listeners < self.needed_listeners {
+            return Err(ValidatorSetError::InvalidNeededListeners {
+                provided: listeners,
+                needed: self.needed_listeners,
+            });
+        }
+        if approvers == 0 {
+            return Err(ValidatorSetError::NoApprovers);
+        }
+        if approvers < self.needed_approvers {
+            return Err(ValidatorSetError::InvalidNeededApprovers {
+                provided: approvers,
+                needed: self.needed_approvers,
+            });
+        }
+        Ok(())
+    }
+
+    /// Ensure that the given public key is a member of one of the validator sets.
+    pub fn ensure_is_validator(&self, key: PublicKey) -> Result<(), ValidatorSetError> {
+        if key == self.processor || self.listeners.contains(&key) || self.approvers.contains(&key) {
+            Ok(())
+        } else {
+            Err(ValidatorSetError::NotAValidator { key })
+        }
+    }
 }

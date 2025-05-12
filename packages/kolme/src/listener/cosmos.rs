@@ -94,16 +94,23 @@ pub async fn sanity_check_contract(
     );
 
     let shared::cosmos::State {
-        processor,
-        approvers,
-        needed_approvers,
+        set:
+            ValidatorSet {
+                processor,
+                approvers,
+                needed_approvers,
+                listeners,
+                needed_listeners,
+            },
         next_event_id: _,
         next_action_id: _,
     } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
 
     anyhow::ensure!(info.validator_set.processor == processor);
+    anyhow::ensure!(listeners == info.validator_set.listeners);
+    anyhow::ensure!(needed_listeners == info.validator_set.needed_listeners);
     anyhow::ensure!(approvers == info.validator_set.approvers);
-    anyhow::ensure!(usize::from(needed_approvers) == info.validator_set.needed_approvers);
+    anyhow::ensure!(needed_approvers == info.validator_set.needed_approvers);
 
     Ok(())
 }

@@ -11,7 +11,9 @@ use sha2::{Digest, Sha256};
 use shared::{
     cosmos::*,
     cryptography::{PublicKey, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId, SelfReplace, ValidatorType},
+    types::{
+        BridgeActionId, BridgeEventId, SelfReplace, ValidatorSet, ValidatorSetError, ValidatorType,
+    },
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -55,6 +57,8 @@ pub enum Error {
         validator_type: ValidatorType,
         expected: String,
     },
+    #[error(transparent)]
+    ValidatorSetError { source: ValidatorSetError },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -74,26 +78,15 @@ pub fn instantiate(
     deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
-    InstantiateMsg {
-        processor,
-        approvers,
-        needed_approvers,
-    }: InstantiateMsg,
+    InstantiateMsg { set }: InstantiateMsg,
 ) -> Result<Response> {
-    if approvers.is_empty() {
+    set.validate()
+        .map_err(|source| Error::ValidatorSetError { source })?;
+    if set.approvers.is_empty() {
         return Err(Error::NoApproversProvided);
     }
-    let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
-    if approvers_len < needed_approvers {
-        return Err(Error::InsufficientApprovers {
-            needed: needed_approvers,
-            provided: approvers_len,
-        });
-    }
     let state = State {
-        processor,
-        approvers,
-        needed_approvers,
+        set,
         // We start events at ID 1, since the instantiation itself is event 0.
         next_event_id: BridgeEventId::start().next(),
         next_action_id: BridgeActionId::start(),
@@ -183,9 +176,9 @@ fn signed(
     state.next_event_id.increment();
 
     let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
-    if approvers_len < state.needed_approvers {
+    if approvers_len < state.set.needed_approvers {
         return Err(Error::InsufficientSignatures {
-            needed: state.needed_approvers,
+            needed: state.set.needed_approvers,
             provided: approvers_len,
         });
     }
@@ -209,8 +202,8 @@ fn signed(
     // and then trust the new entries.
     let (expected_processor, expected_approvers, action) = match action {
         CosmosAction::Cosmos(messages) => (
-            state.processor,
-            state.approvers.clone(),
+            state.set.processor,
+            state.set.approvers.clone(),
             ParsedAction::Cosmos(messages),
         ),
         CosmosAction::SelfReplace {
@@ -223,30 +216,30 @@ fn signed(
                 validator_type,
                 replacement,
             } = from_json(&rendered)?;
-            let mut expected_processor = state.processor;
-            let mut expected_approvers = state.approvers.clone();
+            let mut expected_processor = state.set.processor;
+            let mut expected_approvers = state.set.approvers.clone();
             match validator_type {
                 ValidatorType::Listener => (),
                 ValidatorType::Processor => {
-                    if validator != state.processor {
+                    if validator != state.set.processor {
                         return Err(Error::InvalidSelfReplace {
                             signed_by: validator.into(),
                             replacement: replacement.into(),
                             validator_type,
-                            expected: state.processor.to_string(),
+                            expected: state.set.processor.to_string(),
                         });
                     }
                     expected_processor = replacement;
                 }
                 ValidatorType::Approver => {
-                    if !state.approvers.contains(&validator)
-                        || state.approvers.contains(&replacement)
+                    if !state.set.approvers.contains(&validator)
+                        || state.set.approvers.contains(&replacement)
                     {
                         return Err(Error::InvalidSelfReplace {
                             signed_by: validator.into(),
                             replacement: replacement.into(),
                             validator_type,
-                            expected: format!("{:?}", state.approvers),
+                            expected: format!("{:?}", state.set.approvers),
                         });
                     }
                     expected_approvers.remove(&validator);
@@ -263,13 +256,20 @@ fn signed(
                 },
             )
         }
+        CosmosAction::NewSet {
+            rendered,
+            approvals,
+        } => {
+            let new_set = from_json::<ValidatorSet>(&rendered)?;
+            todo!()
+        }
     };
 
     let processor = signing::validate_signature(deps.api, &hash, &processor)?;
 
     if processor != expected_processor {
         return Err(Error::PublicKeyRecoveryMismatch {
-            expected: state.processor.into(),
+            expected: state.set.processor.into(),
             actual: processor.into(),
         });
     }
@@ -285,9 +285,9 @@ fn signed(
         }
         used.push(key);
     }
-    if used.len() < state.needed_approvers as usize {
+    if used.len() < state.set.needed_approvers as usize {
         return Err(Error::InsufficientApprovers {
-            needed: state.needed_approvers,
+            needed: state.set.needed_approvers,
             provided: used.len() as u16,
         });
     }
@@ -311,12 +311,12 @@ fn signed(
             ValidatorType::Listener => todo!(),
             ValidatorType::Processor => {
                 // Already checked above, but why not
-                assert_eq!(state.processor, old);
-                state.processor = new;
+                assert_eq!(state.set.processor, old);
+                state.set.processor = new;
             }
             ValidatorType::Approver => {
-                state.approvers.remove(&old);
-                state.approvers.insert(new);
+                state.set.approvers.remove(&old);
+                state.set.approvers.insert(new);
             }
         },
     };

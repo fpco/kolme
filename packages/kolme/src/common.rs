@@ -68,6 +68,15 @@ pub struct SignedTaggedJson<T> {
     pub recovery_id: RecoveryId,
 }
 
+impl<T> SignedTaggedJson<T> {
+    pub fn signature_with_recovery(&self) -> SignatureWithRecovery {
+        SignatureWithRecovery {
+            recid: self.recovery_id,
+            sig: self.signature,
+        }
+    }
+}
+
 impl<T> MerkleSerialize for SignedTaggedJson<T> {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let Self {

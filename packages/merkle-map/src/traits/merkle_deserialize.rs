@@ -5,7 +5,7 @@ use std::{
 
 use shared::{
     cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId, Sha256Hash},
+    types::{BridgeActionId, BridgeEventId, Sha256Hash, ValidatorSet},
 };
 
 use crate::*;
@@ -15,6 +15,14 @@ impl MerkleDeserialize for u8 {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.pop_byte()
+    }
+}
+
+impl MerkleDeserialize for u16 {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load_array().map(u16::from_le_bytes)
     }
 }
 
@@ -240,5 +248,19 @@ impl<T1: MerkleDeserialize, T2: MerkleDeserialize> MerkleDeserialize for (T1, T2
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok((deserializer.load()?, deserializer.load()?))
+    }
+}
+
+impl MerkleDeserialize for ValidatorSet {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            processor: deserializer.load()?,
+            listeners: deserializer.load()?,
+            needed_listeners: deserializer.load()?,
+            approvers: deserializer.load()?,
+            needed_approvers: deserializer.load()?,
+        })
     }
 }
