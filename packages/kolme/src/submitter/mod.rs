@@ -192,7 +192,7 @@ impl<App: KolmeApp> Submitter<App> {
             return Ok(());
         };
         if let Some(last) = self.last_submitted.get(&chain) {
-            if *last <= action_id {
+            if *last >= action_id {
                 return Ok(());
             }
         }

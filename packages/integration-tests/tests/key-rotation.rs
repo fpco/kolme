@@ -115,7 +115,6 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
     let listener = SecretKey::random(&mut rand::thread_rng());
     let approver = SecretKey::random(&mut rand::thread_rng());
     let client = SecretKey::random(&mut rand::thread_rng());
-    let store = KolmeStore::new_in_memory();
     let kolme = Kolme::new(
         SampleKolmeApp::new(
             orig_processor.public_key(),
@@ -123,12 +122,14 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
             approver.public_key(),
         ),
         DUMMY_CODE_VERSION,
-        store.clone(),
+        KolmeStore::new_in_memory(),
     )
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), orig_processor.clone()).run());
+    let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
+    processor.add_secret(new_processor.clone());
+    testtasks.try_spawn_persistent(processor.run());
     testtasks.try_spawn_persistent(
         Submitter::new_cosmos(kolme.clone(), "osmosis-local".parse().unwrap()).run(),
     );
@@ -294,27 +295,6 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
             .await
             .unwrap();
     }
-
-    // Now start a new processor with the new key
-    let kolme = Kolme::new(
-        SampleKolmeApp::new(
-            orig_processor.public_key(),
-            listener.public_key(),
-            approver.public_key(),
-        ),
-        DUMMY_CODE_VERSION,
-        store.clone(),
-    )
-    .await
-    .unwrap();
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), new_processor).run());
-    testtasks.try_spawn_persistent(
-        Listener::new(kolme.clone(), listener.clone()).run(ChainName::Cosmos),
-    );
-    testtasks.try_spawn_persistent(Approver::new(kolme.clone(), approver.clone()).run());
-    testtasks.try_spawn_persistent(
-        Submitter::new_cosmos(kolme.clone(), "osmosis-local".parse().unwrap()).run(),
-    );
 
     // And now do another withdrawal
     let block = kolme
