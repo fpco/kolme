@@ -34,6 +34,11 @@ impl KolmeStoreInMemory {
         Ok(())
     }
 
+    pub(crate) async fn delete_block(&self, height: BlockHeight) {
+        let mut guard = self.0.write().await;
+        guard.blocks.remove(&height);
+    }
+
     pub(crate) async fn load_latest_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
         let guard = self.0.read().await;
         let Some((key, _)) = guard.blocks.last_key_value() else {

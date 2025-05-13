@@ -24,11 +24,13 @@ pub struct Gossip<App: KolmeApp> {
     swarm: Mutex<Swarm<KolmeBehaviour<App::Message>>>,
     notifications: IdentTopic,
     find_peers: IdentTopic,
+    sync_mode: SyncMode,
+    data_load_validation: DataLoadValidation,
 }
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
-struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + 'static> {
+struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 'static> {
     gossipsub: gossipsub::Behaviour,
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
@@ -42,6 +44,8 @@ enum BlockRequest {
     NextHeight,
     /// Return the contents of a specific block.
     BlockAtHeight(BlockHeight),
+    /// Return both the raw block as well as the full app and framework state to go along with it.
+    BlockWithStateAtHeight(BlockHeight),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -52,7 +56,12 @@ enum BlockRequest {
 ))]
 enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     Next(BlockHeight),
-    Block(SignedBlock<AppMessage>),
+    Block(Arc<SignedBlock<AppMessage>>),
+    BlockWithState {
+        block: Arc<SignedBlock<AppMessage>>,
+        framework_state: Arc<MerkleContents>,
+        app_state: Arc<MerkleContents>,
+    },
     HeightNotFound(BlockHeight),
 }
 
@@ -65,6 +74,38 @@ pub struct GossipBuilder {
     disable_ip4: bool,
     disable_ip6: bool,
     listen_ports: Vec<u16>,
+    sync_mode: SyncMode,
+    data_load_validation: DataLoadValidation,
+}
+
+/// How block data is synchronized.
+///
+/// Default: [SyncMode::StateTransfer]
+#[derive(Default, Debug)]
+pub enum SyncMode {
+    /// Allow state transfer always (aka fast sync).
+    ///
+    /// Requires trust in the processor to only produce valid blocks, no verification occurs on our node.
+    #[default]
+    StateTransfer,
+    /// Allow state transfer for version upgrades, but otherwise use block sync.
+    StateTransferForUpgrade,
+    /// Always do block sync, verifying each new block
+    BlockTransfer,
+}
+
+/// Whether we validate data loads during block processing.
+///
+/// Default: [DataLoadValidation::ValidateDataLoads].
+#[derive(Default)]
+pub enum DataLoadValidation {
+    /// Validate that data loaded during a block is accurate.
+    ///
+    /// This may involve additional I/O, such as making HTTP requests.
+    #[default]
+    ValidateDataLoads,
+    /// Trust that the loaded data is accurate.
+    TrustDataLoads,
 }
 
 impl GossipBuilder {
@@ -107,6 +148,17 @@ impl GossipBuilder {
     /// If none are provided, a random port is selected per interface
     pub fn add_listen_port(mut self, port: u16) -> Self {
         self.listen_ports.push(port);
+        self
+    }
+
+    /// Set the sync mode and data validation rules.
+    pub fn set_sync_mode(
+        mut self,
+        sync_mode: SyncMode,
+        data_load_validation: DataLoadValidation,
+    ) -> Self {
+        self.sync_mode = sync_mode;
+        self.data_load_validation = data_load_validation;
         self
     }
 
@@ -192,7 +244,7 @@ impl GossipBuilder {
         swarm.behaviour_mut().gossipsub.subscribe(&find_peers)?;
 
         // Begin listening based on the config
-        fn add_listen<AppMessage: serde::de::DeserializeOwned + Send>(
+        fn add_listen<AppMessage: serde::de::DeserializeOwned + Send + Sync>(
             swarm: &mut Swarm<KolmeBehaviour<AppMessage>>,
             is_quic: bool,
             is_ip6: bool,
@@ -242,6 +294,8 @@ impl GossipBuilder {
             swarm: Mutex::new(swarm),
             notifications,
             find_peers,
+            sync_mode: self.sync_mode,
+            data_load_validation: self.data_load_validation,
         })
     }
 }
@@ -253,6 +307,7 @@ impl<App: KolmeApp> Gossip<App> {
 
     pub async fn run(self) -> Result<()> {
         let mut subscription = self.kolme.subscribe();
+        let mut last_seen_watch = self.last_seen_watch.subscribe();
         let mut swarm = self.swarm.lock().await;
         let mut event_state = EventState::default();
 
@@ -265,6 +320,7 @@ impl<App: KolmeApp> Gossip<App> {
                     self.handle_notification(&mut swarm, notification? ).await?,
                 event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &mut event_state).await?,
                 _ = interval.tick() => self.catch_up(&mut swarm, &mut event_state).await,
+                _ = last_seen_watch.changed() => self.catch_up(&mut swarm, &mut event_state).await,
             }
         }
     }
@@ -376,18 +432,47 @@ impl<App: KolmeApp> Gossip<App> {
                     channel,
                 } => match request {
                     BlockRequest::NextHeight => {
+                        println!("NextHeight");
+                        tracing::error!(
+                            "Received a NextHeight request: {}",
+                            self.kolme.read().get_next_height()
+                        );
                         if let Err(e) = swarm.behaviour_mut().request_response.send_response(
                             channel,
                             BlockResponse::Next(self.kolme.read().get_next_height()),
                         ) {
-                            tracing::warn!("Unable to answer Next request: {e:?}");
+                            tracing::warn!("Unable to answer NextHeight request: {e:?}");
                         }
                     }
                     BlockRequest::BlockAtHeight(height) => {
                         let res = match self.kolme.read().get_block(height).await? {
                             None => BlockResponse::HeightNotFound(height),
+                            Some(storable_block) => BlockResponse::Block(storable_block.block),
+                        };
+                        if let Err(e) = swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_response(channel, res)
+                        {
+                            tracing::warn!("Unable to answer BlockAtHeight request: {e:?}");
+                        }
+                    }
+                    BlockRequest::BlockWithStateAtHeight(height) => {
+                        tracing::error!("Received a BlockWithStateAtHeight request: {height}");
+                        let res = match self.kolme.read().get_block(height).await? {
+                            None => BlockResponse::HeightNotFound(height),
                             Some(storable_block) => {
-                                BlockResponse::Block(Arc::unwrap_or_clone(storable_block.block))
+                                tracing::error!("here1");
+                                let framework_state = storable_block
+                                    .framework_state
+                                    .get_merkle_contents()
+                                    .unwrap();
+                                tracing::error!("here2");
+                                BlockResponse::BlockWithState {
+                                    block: storable_block.block,
+                                    framework_state,
+                                    app_state: todo!(),
+                                }
                             }
                         };
                         if let Err(e) = swarm
@@ -395,7 +480,9 @@ impl<App: KolmeApp> Gossip<App> {
                             .request_response
                             .send_response(channel, res)
                         {
-                            tracing::warn!("Unable to answer GetHeight request: {e:?}");
+                            tracing::warn!(
+                                "Unable to answer BlockWithStateAtHeight request: {e:?}"
+                            );
                         }
                     }
                 },
@@ -404,6 +491,7 @@ impl<App: KolmeApp> Gossip<App> {
                     response,
                 } => match response {
                     BlockResponse::Next(next_height) => {
+                        tracing::error!("Received a Next: {next_height}");
                         let updated = state.observe_next_block_height(next_height);
                         // event state starts with BlockHeight::start (equal to 0) and if max next height
                         // was updated we should have received at least 1 but we do an extra check for safety
@@ -417,7 +505,14 @@ impl<App: KolmeApp> Gossip<App> {
                         }
                     }
                     BlockResponse::Block(block) => {
-                        self.add_block(Arc::new(block)).await;
+                        self.add_block(block).await;
+                    }
+                    BlockResponse::BlockWithState {
+                        block,
+                        framework_state,
+                        app_state,
+                    } => {
+                        panic!("BlockWithState");
                     }
                     BlockResponse::HeightNotFound(height) => {
                         tracing::warn!(
@@ -460,11 +555,29 @@ impl<App: KolmeApp> Gossip<App> {
 
         let next = self.kolme.read().get_next_height();
         if state.expected_next_block > next {
-            if let Some(peer) = state.get_next_peer() {
-                swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_request(peer, BlockRequest::BlockAtHeight(next));
+            if let Some(peer) = state.get_next_peer().copied() {
+                let do_state = match self.sync_mode {
+                    // Only do a state transfer if we've fallen more than 1 block behind.
+                    SyncMode::StateTransfer => next.next() != state.expected_next_block,
+                    SyncMode::StateTransferForUpgrade => {
+                        todo!("Holding off on StateTransferForUpgrade until we handle upgrades")
+                    }
+                    SyncMode::BlockTransfer => false,
+                };
+
+                tracing::error!("do_state == {do_state}, sync mode == {:?}", self.sync_mode);
+
+                if do_state {
+                    swarm.behaviour_mut().request_response.send_request(
+                        &peer,
+                        BlockRequest::BlockWithStateAtHeight(state.expected_next_block),
+                    );
+                } else {
+                    swarm
+                        .behaviour_mut()
+                        .request_response
+                        .send_request(&peer, BlockRequest::BlockAtHeight(next));
+                }
             }
         }
     }

@@ -173,3 +173,109 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
     assert_eq!(txhash, block.0.message.as_inner().tx.hash());
 }
+
+#[tokio::test]
+async fn fast_sync() {
+    kolme::init_logger(false, None);
+    TestTasks::start(fast_sync_inner, ()).await
+}
+
+async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
+    // We're going to launch a fully working cluster, then manually
+    // delete some older blocks and confirm we can fast-sync
+    // just the newest block.
+    let store1 = KolmeStore::new_in_memory();
+    let kolme1 = Kolme::new(
+        SampleKolmeApp::default(),
+        DUMMY_CODE_VERSION,
+        store1.clone(),
+    )
+    .await
+    .unwrap();
+
+    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
+
+    // Send a few transactions to bump up the block height
+    for _ in 0..10 {
+        let secret = SecretKey::random(&mut rand::thread_rng());
+        kolme1
+            .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+            .await
+            .unwrap();
+    }
+
+    let orig_next_block_height = kolme1.read().get_next_height();
+    let latest_block_height = BlockHeight(orig_next_block_height.0 - 1);
+    let latest_block = kolme1
+        .get_block(latest_block_height)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Now delete some older blocks
+    for height in BlockHeight::start().0..latest_block_height.0 {
+        store1.delete_block(BlockHeight(height)).await.unwrap();
+    }
+
+    assert_eq!(orig_next_block_height, kolme1.read().get_next_height());
+
+    // And now launch a gossip node for this Kolme
+    testtasks.try_spawn_persistent(GossipBuilder::new().build(kolme1).await.unwrap().run());
+
+    // Launching a new Kolme with a new gossip set to BlockTransfer should fail
+    let kolme_block_transfer = Kolme::new(
+        SampleKolmeApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+    testtasks.try_spawn_persistent(
+        GossipBuilder::new()
+            .set_sync_mode(
+                SyncMode::BlockTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+            .build(kolme_block_transfer.clone())
+            .await
+            .unwrap()
+            .run(),
+    );
+
+    // We'll check at the end of the run to confirm that this never received the latest block.
+    // First check that StateTransfer works
+    let kolme_state_transfer = Kolme::new(
+        SampleKolmeApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+    testtasks.try_spawn_persistent(
+        GossipBuilder::new()
+            .set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+            .build(kolme_state_transfer.clone())
+            .await
+            .unwrap()
+            .run(),
+    );
+
+    // We should be able to sync the latest block within a few seconds
+    let latest_from_gossip = tokio::time::timeout(
+        tokio::time::Duration::from_secs(10),
+        kolme_state_transfer.wait_for_block(latest_block_height),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(latest_from_gossip.hash(), BlockHash(latest_block.blockhash));
+
+    // And now make sure we never got any blocks via block transfer
+    assert_eq!(
+        kolme_block_transfer.read().get_next_height(),
+        BlockHeight::start()
+    );
+}

@@ -112,6 +112,23 @@ impl<App: KolmeApp> KolmeStore<App> {
         }
     }
 
+    /// Delete the given block height.
+    ///
+    /// Currently only implemented for the in-memory store, since this is intended
+    /// exclusively for test cases.
+    pub async fn delete_block(&self, height: BlockHeight) -> Result<()> {
+        match &self.inner {
+            KolmeStoreInner::Fjall(_) | KolmeStoreInner::Postgres(_) => Err(anyhow::anyhow!(
+                "KolmeStore::delete_block only supports InMemory"
+            )),
+            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
+                self.block_cache.write().pop(&height);
+                kolme_store_in_memory.delete_block(height).await;
+                Ok(())
+            }
+        }
+    }
+
     pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
         match &self.inner {
             KolmeStoreInner::Postgres(kolme_store_postgres) => Ok(KolmeConstructLock::Postgres {
