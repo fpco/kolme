@@ -15,7 +15,7 @@ pub struct CosmosBridgeApp {
     pub genesis: GenesisInfo,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct State {
     #[serde(default)]
     hi_count: u32,

@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::{AppState, BalanceChange, Odds, OUTCOME_COUNT};
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct State {
     admin_keys: BTreeSet<PublicKey>,
     #[serde(serialize_with = "as_btree_map")]
@@ -78,7 +78,13 @@ impl State {
 const HOUSE_FUNDS: Decimal = dec!(1000); // 1000 coins with 6 decimals
 
 #[derive(
-    PartialEq, serde::Serialize, serde::Deserialize, Clone, strum::AsRefStr, strum::EnumString,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    strum::AsRefStr,
+    strum::EnumString,
+    Debug,
 )]
 pub enum MarketState {
     Operational,
@@ -105,7 +111,7 @@ impl MerkleDeserialize for MarketState {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Market {
     pub state: MarketState,
     id: u64,
@@ -165,7 +171,7 @@ impl MerkleDeserialize for Market {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Bet {
     bettor: AccountId,
     wallet: Wallet,

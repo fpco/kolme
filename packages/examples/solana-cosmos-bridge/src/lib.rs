@@ -16,7 +16,7 @@ pub struct SolanaCosmosBridgeApp {
     pub genesis: GenesisInfo,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Default, Debug)]
 pub struct State;
 
 impl MerkleSerialize for State {
