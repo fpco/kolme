@@ -74,13 +74,15 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
             Bound::Unbounded => (&Cow::Owned(MerkleKey::default()), true),
         };
 
-        if included {
+        let entry = if included {
             if let Some(entry) = self.node.get(0, key) {
-                self.start = Bound::Excluded(Cow::Borrowed(&entry.key_bytes));
-                return Some((&entry.key, &entry.value));
+                entry
+            } else {
+                self.node.find_entry_after(0, key)?
             }
-        }
-        let entry = self.node.find_entry_after(0, key)?;
+        } else {
+            self.node.find_entry_after(0, key)?
+        };
         self.start = Bound::Excluded(Cow::Borrowed(&entry.key_bytes));
         match &self.end {
             Bound::Included(end) => {
