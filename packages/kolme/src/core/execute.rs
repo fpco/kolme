@@ -390,7 +390,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    fn get_or_add_account_id_for_wallet(&mut self, wallet: &Wallet) -> AccountId {
+    pub fn get_or_add_account_id_for_key(&mut self, key: &PublicKey) -> AccountId {
+        self.framework_state
+            .accounts
+            .get_or_add_account_for_key(key)
+    }
+
+    pub fn get_or_add_account_id_for_wallet(&mut self, wallet: &Wallet) -> AccountId {
         self.framework_state
             .accounts
             .get_or_add_account_for_wallet(wallet)

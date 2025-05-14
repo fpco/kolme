@@ -165,6 +165,17 @@ impl Accounts {
         account.pubkeys.insert(key);
     }
 
+    pub(in crate::core) fn get_or_add_account_for_key(&mut self, key: &PublicKey) -> AccountId {
+        if let Some(account_id) = self.pubkeys.get(key) {
+            return *account_id;
+        }
+        let account_id = AccountId(self.accounts.len().try_into().unwrap());
+        let account = self.accounts.get_or_default(account_id);
+        self.pubkeys.insert(*key, account_id);
+        account.pubkeys.insert(*key);
+        account_id
+    }
+
     pub(in crate::core) fn get_or_add_account_for_wallet(
         &mut self,
         wallet: &Wallet,
