@@ -266,4 +266,41 @@ impl<App: KolmeApp> KolmeStore<App> {
         debug_assert!(old.is_none());
         Ok(())
     }
+
+    /// Store merkle contents then reload the data as a serializable type.
+    pub(super) async fn store_and_load<T: MerkleDeserialize>(
+        &self,
+        merkle_manager: &MerkleManager,
+        hash: Sha256Hash,
+        contents: Arc<MerkleContents>,
+    ) -> Result<T> {
+        anyhow::ensure!(hash == contents.hash);
+
+        match &self.inner {
+            KolmeStoreInner::Fjall(kolme_store_fjall) => {
+                let mut store = kolme_store_fjall.get_merkle_store();
+                store_and_load_helper(merkle_manager, &mut store, &contents).await
+            }
+            KolmeStoreInner::Postgres(kolme_store_postgres) => {
+                let mut store = kolme_store_postgres.get_merkle_store();
+                store_and_load_helper(merkle_manager, &mut store, &contents).await
+            }
+            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
+                let mut store = kolme_store_in_memory.get_merkle_store().await;
+                store_and_load_helper(merkle_manager, &mut store, &contents).await
+            }
+        }
+    }
+}
+
+async fn store_and_load_helper<T: MerkleDeserialize, Store: MerkleStore>(
+    merkle_manager: &MerkleManager,
+    store: &mut Store,
+    contents: &MerkleContents,
+) -> Result<T> {
+    merkle_manager.save_merkle_contents(store, contents).await?;
+    merkle_manager
+        .load(store, contents.hash)
+        .await
+        .map_err(Into::into)
 }

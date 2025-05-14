@@ -25,6 +25,7 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
         block: Arc<SignedBlock<AppMessage>>,
         framework_state: Arc<MerkleContents>,
         app_state: Arc<MerkleContents>,
+        logs: Arc<[Vec<String>]>,
     },
     HeightNotFound(BlockHeight),
 }

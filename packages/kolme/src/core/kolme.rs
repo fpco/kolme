@@ -310,6 +310,27 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
 
+        let framework_state = Arc::new(
+            self.inner
+                .store
+                .store_and_load::<FrameworkState>(
+                    &self.inner.merkle_manager,
+                    block.framework_state,
+                    framework_state,
+                )
+                .await?,
+        );
+        let app_state = Arc::new(
+            self.inner
+                .store
+                .store_and_load::<App::State>(
+                    &self.inner.merkle_manager,
+                    block.app_state,
+                    app_state,
+                )
+                .await?,
+        );
+
         self.inner
             .store
             .add_block(

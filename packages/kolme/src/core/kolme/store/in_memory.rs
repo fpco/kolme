@@ -106,4 +106,8 @@ impl KolmeStoreInMemory {
     pub(crate) async fn take_construct_lock(&self) -> OwnedSemaphorePermit {
         self.1.clone().acquire_owned().await.unwrap()
     }
+
+    pub(super) async fn get_merkle_store(&self) -> MerkleMemoryStore {
+        self.0.read().await.merkle.clone()
+    }
 }

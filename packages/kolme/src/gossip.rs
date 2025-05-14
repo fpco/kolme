@@ -506,6 +506,8 @@ impl<App: KolmeApp> Gossip<App> {
                                 block: storable_block.block,
                                 framework_state,
                                 app_state,
+                                // FIXME should we store a hash of the logs in the block as well?
+                                logs: storable_block.logs,
                             },
                             (Err(e), _) => {
                                 tracing::warn!("Unable to serialize framework state: {e}");
@@ -538,10 +540,11 @@ impl<App: KolmeApp> Gossip<App> {
                 block,
                 framework_state,
                 app_state,
+                logs,
             } => {
                 if let Err(e) = self
                     .kolme
-                    .add_block_with_state(block, framework_state, app_state)
+                    .add_block_with_state(block, framework_state, app_state, logs)
                     .await
                 {
                     tracing::warn!("Unable to add block (with state) to chain: {e}");
