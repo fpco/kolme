@@ -2,7 +2,7 @@ mod api_server;
 mod approver;
 mod common;
 mod core;
-mod gossip;
+pub mod gossip;
 pub(crate) mod listener;
 #[cfg(feature = "pass_through")]
 pub mod pass_through;

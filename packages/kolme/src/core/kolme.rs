@@ -540,13 +540,14 @@ impl<App: KolmeApp> Kolme<App> {
             let kolme = self.read();
             let state = kolme.get_framework_state().chains.get(chain)?;
 
-            if state.next_action_id <= action_id {
-                anyhow::bail!("Cannot wait for bridge action ID {action_id} on {chain}, since the next action will be {}", state.next_action_id);
-            }
-
-            if !state.pending_actions.contains_key(&action_id) {
+            // Check that we've already issued the action, _and_ that the action
+            // isn't pending.
+            if state.next_action_id > action_id && !state.pending_actions.contains_key(&action_id) {
                 break Ok(());
             }
+
+            // Either we haven't actually issued that action yet, or the action is still pending.
+            // Either way, wait for another block and then try again.
 
             self.wait_for_block(kolme.get_next_height()).await?;
         }

@@ -2,6 +2,7 @@ mod messages;
 
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
+    str::FromStr,
     time::Duration,
 };
 
@@ -11,13 +12,14 @@ use messages::*;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
-    identity::Keypair,
     mdns, noise,
     request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder,
+    tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
 use tokio::sync::{broadcast::error::RecvError, Mutex};
+
+pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
 
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
@@ -614,4 +616,48 @@ impl<App: KolmeApp> Gossip<App> {
             }
         }
     }
+}
+
+/// Information on a bootstrap node to connect to over Kademlia.
+///
+/// This provides a [FromStr] impl that follows the format
+/// `PEER_ID@MULTIADDR`
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct KademliaBootstrap {
+    #[serde(
+        serialize_with = "serialize_peer_id",
+        deserialize_with = "deserialize_peer_id"
+    )]
+    pub peer: libp2p::PeerId,
+    pub address: libp2p::Multiaddr,
+}
+
+impl FromStr for KademliaBootstrap {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let (peer, address) = s
+            .split_once('@')
+            .with_context(|| format!("No @ found in Kademlia bootstrap: {s}"))?;
+        Ok(KademliaBootstrap {
+            peer: peer.parse()?,
+            address: address.parse()?,
+        })
+    }
+}
+
+fn serialize_peer_id<S>(peer_id: &PeerId, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&peer_id.to_base58())
+}
+
+fn deserialize_peer_id<'de, D>(deserializer: D) -> Result<PeerId, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <String as serde::Deserialize>::deserialize(deserializer)?
+        .parse()
+        .map_err(serde::de::Error::custom)
 }
