@@ -594,8 +594,6 @@ impl<App: KolmeApp> Gossip<App> {
             SyncMode::BlockTransfer => false,
         };
 
-        tracing::error!("do_state == {do_state}, sync mode == {:?}", self.sync_mode);
-
         if do_state {
             swarm
                 .behaviour_mut()
