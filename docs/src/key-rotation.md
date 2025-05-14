@@ -2,8 +2,6 @@
 
 <!-- toc -->
 
-Note: at time of writing, nothing on this page is implemented. The current implemented strategy is that the processor, listener, and approvers keys and quorums are all defined in the code itself, become the genesis block, and never change. Consider this document a design doc for how key rotation will ultimately be implemented.
-
 ## Motivation
 
 There are three groups of specially recognized public keys within Kolme: the processor node, the listener set, and the approver set. Each set has its own quorum rules, requiring a certain number of members from the set to perform their operations. Since the goal of the processor is to allow fast, centralized block production, the processor has only one key and operates autonomously.

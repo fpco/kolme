@@ -26,6 +26,7 @@ pub struct Gossip<App: KolmeApp> {
     find_peers: IdentTopic,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
+    local_peer_id: PeerId,
 }
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -287,6 +288,7 @@ impl GossipBuilder {
         }
 
         let (last_seen_watch, _) = tokio::sync::watch::channel(None);
+        let local_peer_id = *swarm.local_peer_id();
 
         Ok(Gossip {
             kolme,
@@ -296,22 +298,35 @@ impl GossipBuilder {
             find_peers,
             sync_mode: self.sync_mode,
             data_load_validation: self.data_load_validation,
+            local_peer_id,
         })
     }
 }
 
 impl<App: KolmeApp> Gossip<App> {
+    pub fn peer_id(&self) -> PeerId {
+        self.local_peer_id
+    }
+
     pub fn subscribe_last_seen(&self) -> tokio::sync::watch::Receiver<Option<BlockHeight>> {
         self.last_seen_watch.subscribe()
     }
 
     pub async fn run(self) -> Result<()> {
+        self.run_with_catch_up_interval(tokio::time::Duration::from_secs(5))
+            .await
+    }
+
+    pub async fn run_with_catch_up_interval(
+        self,
+        catch_up_interval: tokio::time::Duration,
+    ) -> Result<()> {
         let mut subscription = self.kolme.subscribe();
         let mut last_seen_watch = self.last_seen_watch.subscribe();
         let mut swarm = self.swarm.lock().await;
         let mut event_state = EventState::default();
 
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(catch_up_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
