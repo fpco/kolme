@@ -221,7 +221,18 @@ fn signed(
             let mut expected_processor = state.set.processor;
             let mut expected_approvers = state.set.approvers.clone();
             match validator_type {
-                ValidatorType::Listener => (),
+                ValidatorType::Listener => {
+                    if !state.set.listeners.contains(&validator)
+                        || state.set.listeners.contains(&replacement)
+                    {
+                        return Err(Error::InvalidSelfReplace {
+                            signed_by: validator.into(),
+                            replacement: replacement.into(),
+                            validator_type,
+                            expected: format!("{:?}", state.set.listeners),
+                        });
+                    }
+                }
                 ValidatorType::Processor => {
                     if validator != state.set.processor {
                         return Err(Error::InvalidSelfReplace {
