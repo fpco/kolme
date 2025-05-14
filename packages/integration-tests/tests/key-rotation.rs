@@ -14,7 +14,7 @@ pub struct SampleKolmeApp {
     pub genesis: GenesisInfo,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SampleState {}
 
 impl MerkleSerialize for SampleState {
