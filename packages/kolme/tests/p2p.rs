@@ -99,7 +99,6 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn sanity() {
-    kolme::init_logger(false, None);
     TestTasks::start(sanity_inner, ()).await;
 }
 
@@ -180,7 +179,6 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
 
 #[tokio::test]
 async fn fast_sync() {
-    kolme::init_logger(false, None);
     TestTasks::start(fast_sync_inner, ()).await
 }
 
