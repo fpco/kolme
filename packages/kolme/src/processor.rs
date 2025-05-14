@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use kolme_store::KolmeStoreError;
 use rand::Rng;
 
@@ -5,7 +7,7 @@ use crate::*;
 
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
-    secret: SecretKey,
+    secrets: HashMap<PublicKey, SecretKey>,
     ready: tokio::sync::watch::Sender<bool>,
 }
 
@@ -13,9 +15,13 @@ impl<App: KolmeApp> Processor<App> {
     pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
         Processor {
             kolme,
-            secret,
+            secrets: std::iter::once((secret.public_key(), secret)).collect(),
             ready: tokio::sync::watch::channel(false).0,
         }
+    }
+
+    pub fn add_secret(&mut self, secret: SecretKey) {
+        self.secrets.insert(secret.public_key(), secret);
     }
 
     pub async fn run(self) -> Result<()> {
@@ -70,12 +76,26 @@ impl<App: KolmeApp> Processor<App> {
         }
     }
 
+    /// Get the correct secret key for the current validator set.
+    ///
+    /// If we don't have it, returns an error.
+    fn get_correct_secret(&self, kolme: &KolmeRead<App>) -> Result<&SecretKey> {
+        let pubkey = &kolme.get_framework_state().get_validator_set().processor;
+        self.secrets.get(pubkey).with_context(|| {
+            format!(
+                "Current processor pubkey is {pubkey}, but we don't have the matching secret key"
+            )
+        })
+    }
+
     pub async fn create_genesis_event(&self) -> Result<()> {
         let info = self.kolme.get_app().genesis_info().clone();
-        let signed = self.kolme.read().create_signed_transaction(
-            &self.secret,
-            vec![Message::<App::Message>::Genesis(info)],
-        )?;
+        let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
+        let signed = self
+            .kolme
+            .read()
+            .create_signed_transaction(secret, vec![Message::<App::Message>::Genesis(info)])?;
 
         let block = self.construct_block(signed).await?;
         if let Err(e) = self.kolme.add_block(Arc::new(block)).await {
@@ -153,6 +173,7 @@ impl<App: KolmeApp> Processor<App> {
     ) -> Result<SignedBlock<App::Message>> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
 
         let txhash = tx.hash();
         if kolme.get_tx_height(txhash).await?.is_some() {
@@ -176,7 +197,7 @@ impl<App: KolmeApp> Processor<App> {
         let approved_block = Block {
             tx,
             timestamp: now,
-            processor: self.secret.public_key(),
+            processor: secret.public_key(),
             height: kolme.get_next_height(),
             parent: kolme.get_current_block_hash(),
             framework_state,
@@ -184,7 +205,7 @@ impl<App: KolmeApp> Processor<App> {
             loads,
         };
         let event = TaggedJson::new(approved_block)?;
-        Ok(SignedBlock(event.sign(&self.secret)?))
+        Ok(SignedBlock(event.sign(secret)?))
     }
 
     async fn approve_actions_all(&self, chains: &[ExternalChain]) {
@@ -200,6 +221,7 @@ impl<App: KolmeApp> Processor<App> {
         // approve an action, it produces a new block, which will allow us to check if we
         // need to approve anything else.
         let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
 
         let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());
@@ -214,15 +236,20 @@ impl<App: KolmeApp> Processor<App> {
             }
         }
 
-        if approvers.len() < kolme.get_needed_approvers() {
+        if approvers.len() < usize::from(kolme.get_needed_approvers()) {
             // Not enough approvals. Don't bother with later actions, we want to approve in order.
             return Ok(());
         }
 
-        let processor = self.secret.sign_recoverable(&action.payload)?;
+        // Handle the key rotation case, where a previous processor already signed.
+        if action.processor.is_some() {
+            return Ok(());
+        }
+
+        let processor = secret.sign_recoverable(&action.payload)?;
 
         let tx = kolme.create_signed_transaction(
-            &self.secret,
+            secret,
             vec![Message::ProcessorApprove {
                 chain,
                 action_id,

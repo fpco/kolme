@@ -145,6 +145,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(auth) => self.auth(auth).await?,
+            Message::KeyRotation(key_rotation) => self.key_rotation(key_rotation).await?,
         }
         Ok(())
     }
@@ -157,7 +158,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     ) -> Result<()> {
         anyhow::ensure!(self
             .framework_state
-            .get_config()
+            .get_validator_set()
             .listeners
             .contains(&self.pubkey));
 
@@ -210,14 +211,18 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 .next()?;
 
             // Let's find out how many existing signatures there are so we can decide if we can execute.
-            let existing_signatures = pending
-                .attestations
-                .iter()
-                .filter(|key| framework_state.get_config().listeners.contains(key))
-                .count();
+            let existing_signatures = u16::try_from(
+                pending
+                    .attestations
+                    .iter()
+                    .filter(|key| framework_state.get_validator_set().listeners.contains(key))
+                    .count(),
+            )
+            .expect("Too many attestations found");
 
             // We accept this event if the existing signatures, plus our newest signature, meet the quorum requirements.
-            let was_accepted = existing_signatures >= framework_state.get_config().needed_listeners;
+            let was_accepted =
+                existing_signatures >= framework_state.get_validator_set().needed_listeners;
 
             // If this event isn't accepted yet, we simply exit. We never try to
             // process later events while an earlier one is unprocessed.
@@ -326,7 +331,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         // a borrow conflict with the mutable borrow above
         anyhow::ensure!(self
             .framework_state
-            .config
+            .validator_set
             .as_ref()
             .approvers
             .contains(&key));
@@ -342,7 +347,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         processor: &SignatureWithRecovery,
         approvers: &[SignatureWithRecovery],
     ) -> Result<()> {
-        anyhow::ensure!(approvers.len() >= self.framework_state.get_config().needed_approvers);
+        anyhow::ensure!(
+            approvers.len()
+                >= self
+                    .framework_state
+                    .get_validator_set()
+                    .needed_approvers
+                    .into()
+        );
 
         let action = self
             .framework_state
@@ -356,7 +368,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         let payload = action.payload.as_bytes();
         let processor_key = processor.validate(payload)?;
-        anyhow::ensure!(processor_key == self.framework_state.config.as_ref().processor);
+        anyhow::ensure!(processor_key == self.framework_state.validator_set.as_ref().processor);
 
         let approvers_checked = approvers
             .iter()
@@ -364,7 +376,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 let pubkey = sig.validate(payload)?;
                 anyhow::ensure!(self
                     .framework_state
-                    .config
+                    .validator_set
                     .as_ref()
                     .approvers
                     .contains(&pubkey));
@@ -439,6 +451,16 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         );
         state.next_action_id = state.next_action_id.next();
         Ok(id)
+    }
+
+    /// Add an action on all chains
+    fn add_action_all_chains(&mut self, action: ExecAction) -> Result<()> {
+        let chains = self.framework_state.chains.keys().collect::<Vec<_>>();
+        for chain in chains {
+            self.add_action(chain, action.clone())?;
+        }
+
+        Ok(())
     }
 
     /// Withdraw an asset to an external chain.
@@ -583,6 +605,138 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
         }
         Ok(())
+    }
+
+    async fn key_rotation(&mut self, key_rotation: &KeyRotationMessage) -> Result<()> {
+        match key_rotation {
+            KeyRotationMessage::SelfReplace(self_replace) => {
+                let signer = self_replace.verify_signature()?;
+                anyhow::ensure!(signer == self.pubkey);
+                fn set_helper(
+                    validator_set: &mut ValidatorSet,
+                    is_approver: bool,
+                    sender: PublicKey,
+                    replacement: PublicKey,
+                ) -> Result<()> {
+                    let set = if is_approver {
+                        &mut validator_set.approvers
+                    } else {
+                        &mut validator_set.listeners
+                    };
+                    if !set.remove(&sender) {
+                        anyhow::bail!("Signing public key {} is not a member of the {} set and cannot self-replace", sender, if is_approver {"approver"}else{"listener"});
+                    }
+                    set.insert(replacement);
+                    Ok(())
+                }
+
+                let config = self.framework_state.validator_set.as_mut();
+                let replacement = self_replace.message.as_inner().replacement;
+                match self_replace.message.as_inner().validator_type {
+                    ValidatorType::Processor => {
+                        if config.processor == signer {
+                            config.processor = replacement;
+                        } else {
+                            anyhow::bail!("Signing public key {} is not the current processor and cannot self-replace", self.pubkey);
+                        }
+                    }
+                    ValidatorType::Listener => {
+                        set_helper(config, false, signer, replacement)?;
+                    }
+                    ValidatorType::Approver => {
+                        set_helper(config, true, signer, replacement)?;
+                    }
+                }
+
+                self.add_action_all_chains(ExecAction::SelfReplace(self_replace.clone()))?;
+            }
+            KeyRotationMessage::NewSet { validator_set } => {
+                let signer = validator_set.verify_signature()?;
+                anyhow::ensure!(signer == self.pubkey);
+                self.framework_state
+                    .validator_set
+                    .as_ref()
+                    .ensure_is_validator(self.pubkey)?;
+                validator_set.message.as_inner().validate()?;
+                let state = self.framework_state.key_rotation_state.as_mut();
+                let id = state.next_change_set_id;
+                state.next_change_set_id = id.next();
+                state.change_sets.insert(
+                    id,
+                    PendingChangeSet {
+                        validator_set: validator_set.message.clone(),
+                        approvals: std::iter::once((
+                            self.pubkey,
+                            validator_set.signature_with_recovery(),
+                        ))
+                        .collect(),
+                    },
+                );
+                self.check_pending_change_sets()?;
+            }
+            KeyRotationMessage::Approve {
+                change_set_id,
+                signature,
+            } => {
+                self.framework_state
+                    .validator_set
+                    .as_ref()
+                    .ensure_is_validator(self.pubkey)?;
+
+                let state = self.framework_state.key_rotation_state.as_mut();
+                let pending = state.change_sets.get_mut(change_set_id).with_context(|| {
+                    format!("Specified an unknown change set ID {change_set_id}")
+                })?;
+
+                let pubkey = signature.validate(pending.validator_set.as_bytes())?;
+                anyhow::ensure!(pubkey == self.pubkey);
+
+                let old_value = pending.approvals.insert(pubkey, *signature);
+                anyhow::ensure!(
+                    old_value.is_none(),
+                    "{} already approved change set {change_set_id}",
+                    self.pubkey
+                );
+                self.check_pending_change_sets()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn check_pending_change_sets(&mut self) -> Result<()> {
+        if let Some(PendingChangeSet {
+            validator_set,
+            approvals,
+        }) = self.find_approved_change_set()
+        {
+            *self.framework_state.validator_set.as_mut() = validator_set.as_inner().clone();
+            self.framework_state
+                .key_rotation_state
+                .as_mut()
+                .change_sets
+                .clear();
+            self.add_action_all_chains(ExecAction::NewSet {
+                validator_set,
+                approvals: approvals.values().copied().collect(),
+            })?;
+        }
+        Ok(())
+    }
+
+    fn find_approved_change_set(&self) -> Option<PendingChangeSet> {
+        for pending in self
+            .framework_state
+            .key_rotation_state
+            .as_ref()
+            .change_sets
+            .values()
+        {
+            if pending.has_sufficient_approvals(self.framework_state.validator_set.as_ref()) {
+                return Some(pending.clone());
+            }
+        }
+
+        None
     }
 
     pub fn log(&mut self, msg: impl Into<String>) {

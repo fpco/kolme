@@ -62,6 +62,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libudev-dev libusb-1.0-0-dev
           sudo apt-get install -y libhidapi-dev
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Run tests
         run: RUST_BACKTRACE=1 just test
       - name: Build

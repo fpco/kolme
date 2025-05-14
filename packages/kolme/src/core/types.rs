@@ -5,6 +5,7 @@ use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
+use shared::cosmos::PayloadWithId;
 
 use crate::*;
 
@@ -540,22 +541,13 @@ pub enum GenesisAction {
     InstantiateCosmos {
         chain: CosmosChain,
         code_id: u64,
-        args: InstantiateArgs,
+        validator_set: ValidatorSet,
     },
     InstantiateSolana {
         chain: SolanaChain,
         program_id: String,
-        args: InstantiateArgs,
+        validator_set: ValidatorSet,
     },
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct InstantiateArgs {
-    pub processor: PublicKey,
-    pub listeners: BTreeSet<PublicKey>,
-    pub needed_listeners: usize,
-    pub approvers: BTreeSet<PublicKey>,
-    pub needed_approvers: usize,
 }
 
 #[derive(
@@ -934,6 +926,7 @@ pub enum Message<AppMessage> {
     },
     Auth(AuthMessage),
     Bank(BankMessage),
+    KeyRotation(KeyRotationMessage),
     // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
 }
 
@@ -987,31 +980,116 @@ pub enum BankMessage {
     },
 }
 
+/// Messages for handling key rotation.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyRotationMessage {
+    /// The sending key is replacing itself with a new key.
+    SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
+    /// Replace the complete validator set.
+    ///
+    /// Must be proposed by one of the members of an existing set.
+    NewSet {
+        validator_set: Box<SignedTaggedJson<ValidatorSet>>,
+    },
+    /// Vote to approve a proposed set change.
+    Approve {
+        change_set_id: ChangeSetId,
+        signature: SignatureWithRecovery,
+    },
+}
+
+impl KeyRotationMessage {
+    pub fn self_replace(
+        validator_type: ValidatorType,
+        replacement: PublicKey,
+        current: &SecretKey,
+    ) -> Result<Self> {
+        let self_replace = SelfReplace {
+            validator_type,
+            replacement,
+        };
+        let json = TaggedJson::new(self_replace)?;
+        let signed = json.sign(current)?;
+        Ok(KeyRotationMessage::SelfReplace(Box::new(signed)))
+    }
+
+    pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self> {
+        let json = TaggedJson::new(set)?;
+        let signed = json.sign(proposer)?;
+        Ok(KeyRotationMessage::NewSet {
+            validator_set: Box::new(signed),
+        })
+    }
+
+    pub fn approve(
+        change_set_id: ChangeSetId,
+        set: &TaggedJson<ValidatorSet>,
+        validator: &SecretKey,
+    ) -> Result<Self> {
+        let signature = validator.sign_recoverable(set.as_bytes())?;
+        Ok(KeyRotationMessage::Approve {
+            change_set_id,
+            signature,
+        })
+    }
+}
+
+/// Monotonically increasing identifier for proposed validator set changes.
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Copy,
+    Hash,
+    Debug,
+    Default,
+)]
+pub struct ChangeSetId(pub u64);
+
+impl ChangeSetId {
+    pub fn next(self) -> ChangeSetId {
+        ChangeSetId(self.0 + 1)
+    }
+}
+
+impl Display for ChangeSetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl MerkleSerialize for ChangeSetId {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+impl MerkleDeserialize for ChangeSetId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        u64::merkle_deserialize(deserializer).map(Self)
+    }
+}
+
 /// Information defining the initial state of an app.
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct GenesisInfo {
     /// Unique identifier for this application, never changes.
     pub kolme_ident: String,
-    /// Public key of the processor for this app
-    pub processor: PublicKey,
-    /// Public keys of the listeners for this app
-    pub listeners: BTreeSet<PublicKey>,
-    /// How many of the listeners are needed to approve a reported bridge event?
-    pub needed_listeners: usize,
-    /// Public keys of the approvers for this app
-    pub approvers: BTreeSet<PublicKey>,
-    /// How many of the approvers are needed to approve a bridge action?
-    pub needed_approvers: usize,
+    /// The rules defining the validator set for this app.
+    pub validator_set: ValidatorSet,
     /// Initial configuration of different chains
     pub chains: ConfiguredChains,
 }
 
 impl GenesisInfo {
     pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
-        anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
-        anyhow::ensure!(self.needed_approvers > 0);
+        self.validator_set.validate()?;
         Ok(())
     }
 }
@@ -1061,7 +1139,7 @@ impl ChainStates {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Default, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, Debug, Clone)]
 pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
 
 impl ConfiguredChains {
@@ -1136,12 +1214,19 @@ pub struct BlockDataLoad {
 }
 
 /// A specific action to be taken as a result of an execution.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum ExecAction {
     Transfer {
         chain: ExternalChain,
         recipient: Wallet,
         funds: Vec<AssetAmount>,
+    },
+    /// Replace a single validator using a self-replacement.
+    SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
+    /// Replace the entire validator set.
+    NewSet {
+        validator_set: TaggedJson<ValidatorSet>,
+        approvals: Vec<SignatureWithRecovery>,
     },
 }
 
@@ -1156,12 +1241,6 @@ impl ExecAction {
     ) -> Result<String> {
         use base64::Engine;
         use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
-
-        #[derive(serde::Serialize)]
-        struct CwPayload {
-            id: BridgeActionId,
-            messages: Vec<cosmwasm_std::CosmosMsg>,
-        }
 
         match self {
             Self::Transfer {
@@ -1194,9 +1273,9 @@ impl ExecAction {
                             amount: coins,
                         });
 
-                        let payload = serde_json::to_string(&CwPayload {
+                        let payload = serde_json::to_string(&PayloadWithId {
                             id,
-                            messages: vec![message],
+                            action: shared::cosmos::CosmosAction::Cosmos(vec![message]),
                         })?;
 
                         Ok(payload)
@@ -1259,6 +1338,44 @@ impl ExecAction {
                     }
                 }
             }
+            ExecAction::SelfReplace(self_replace) => match chain.name() {
+                ChainName::Cosmos => {
+                    let payload = serde_json::to_string(&PayloadWithId {
+                        id,
+                        action: shared::cosmos::CosmosAction::SelfReplace {
+                            rendered: self_replace.message.as_str().to_owned(),
+                            signature: SignatureWithRecovery {
+                                recid: self_replace.recovery_id,
+                                sig: self_replace.signature,
+                            },
+                        },
+                    })?;
+
+                    Ok(payload)
+                }
+                ChainName::Solana => todo!(),
+                #[cfg(feature = "pass_through")]
+                ChainName::PassThrough => todo!(),
+            },
+            ExecAction::NewSet {
+                validator_set,
+                approvals,
+            } => match chain.name() {
+                ChainName::Cosmos => {
+                    let payload = serde_json::to_string(&PayloadWithId {
+                        id,
+                        action: shared::cosmos::CosmosAction::NewSet {
+                            rendered: validator_set.as_str().to_owned(),
+                            approvals: approvals.clone(),
+                        },
+                    })?;
+
+                    Ok(payload)
+                }
+                ChainName::Solana => todo!(),
+                #[cfg(feature = "pass_through")]
+                ChainName::PassThrough => todo!(),
+            },
         }
     }
 }

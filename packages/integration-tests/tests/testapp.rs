@@ -5,7 +5,7 @@ use kolme::{
     testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
     ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
     MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor,
-    Transaction,
+    Transaction, ValidatorSet,
 };
 
 use rust_decimal::dec;
@@ -62,11 +62,13 @@ impl Default for TestApp {
 
         let genesis = GenesisInfo {
             kolme_ident: "Test framework".to_owned(),
-            processor: my_public_key,
-            listeners: set.clone(),
-            needed_listeners: 1,
-            approvers: set,
-            needed_approvers: 1,
+            validator_set: ValidatorSet {
+                processor: my_public_key,
+                listeners: set.clone(),
+                needed_listeners: 1,
+                approvers: set,
+                needed_approvers: 1,
+            },
             chains: Default::default(),
         };
 
@@ -160,7 +162,7 @@ async fn test_websocket_notifications_inner(testtasks: TestTasks, (): ()) {
         .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
         .unwrap();
 
-    kolme.propose_transaction(tx.clone()).unwrap();
+    kolme.propose_transaction(tx.clone());
 
     let notification = next_message_as_json(&mut ws).await.unwrap();
 
@@ -211,7 +213,7 @@ async fn test_validate_tx_valid_signature_inner(testtasks: TestTasks, (): ()) {
         .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
         .unwrap();
 
-    kolme.propose_transaction(tx.clone()).unwrap();
+    kolme.propose_transaction(tx.clone());
 
     let notification = next_message_as_json(&mut ws).await.unwrap();
 
@@ -293,7 +295,7 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
     };
     let signed_tx = tx.sign(&secret).unwrap();
 
-    kolme.propose_transaction(signed_tx.clone()).unwrap();
+    kolme.propose_transaction(signed_tx.clone());
 
     let read = kolme.read();
     let state = read.get_app_state();
@@ -305,34 +307,6 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
 
     ws.close(None).await.unwrap();
     tracing::info!("WebSocket closed successfully");
-}
-
-#[tokio::test]
-async fn test_no_subscribers() {
-    TestTasks::start(test_no_subscribers_inner, ()).await;
-}
-
-async fn test_no_subscribers_inner(_testtasks: TestTasks, (): ()) {
-    let db_path = tempfile::tempdir().unwrap();
-    let (kolme, _) = setup(db_path.path()).await.unwrap();
-    let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
-
-    let tx = kolme
-        .read()
-        .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-        .unwrap();
-
-    tracing::info!("Proposing transaction with no subscribers");
-    let result = kolme.propose_transaction(tx.clone());
-
-    assert!(
-        result.is_err(),
-        "Transaction should fail with no subscribers listening"
-    );
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "Tried to propose a transaction, but no one is listening to our notifications"
-    );
 }
 
 #[tokio::test]
@@ -364,7 +338,7 @@ async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTas
         )
         .unwrap();
 
-    kolme.propose_transaction(tx_withdraw.clone()).unwrap();
+    kolme.propose_transaction(tx_withdraw.clone());
 
     let read = kolme.read();
     let state = read.get_app_state();
@@ -401,7 +375,7 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
             .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
             .unwrap();
 
-        kolme.propose_transaction(tx.clone()).unwrap();
+        kolme.propose_transaction(tx.clone());
 
         let notification = next_message_as_json(&mut ws).await.unwrap();
 

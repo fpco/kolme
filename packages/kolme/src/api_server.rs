@@ -86,14 +86,8 @@ async fn broadcast<App: KolmeApp>(
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         return res;
     }
-    match kolme.propose_transaction(tx) {
-        Ok(()) => Json(serde_json::json!({"txhash":txhash})).into_response(),
-        Err(e) => {
-            let mut res = e.to_string().into_response();
-            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            res
-        }
-    }
+    kolme.propose_transaction(tx);
+    Json(serde_json::json!({"txhash":txhash})).into_response()
 }
 
 #[derive(serde::Deserialize)]

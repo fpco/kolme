@@ -101,7 +101,7 @@ impl Accounts {
             let account = self.accounts.get_mut(&account_id).ok_or(Decimal::ZERO)?;
             let asset = account.assets.get_mut(&asset_id).ok_or(Decimal::ZERO)?;
             match (*asset).cmp(&to_burn) {
-                std::cmp::Ordering::Less => Err(Decimal::ZERO),
+                std::cmp::Ordering::Less => Err(*asset),
                 std::cmp::Ordering::Equal => {
                     account.assets.remove(&asset_id);
                     Ok(())
@@ -268,7 +268,7 @@ impl Accounts {
                 let account = self.accounts.get_mut(account_id).unwrap();
                 if account.next_nonce != nonce {
                     return Err(KolmeError::InvalidNonce {
-                        pubkey,
+                        pubkey: Box::new(pubkey),
                         account_id: *account_id,
                         expected: account.next_nonce,
                         actual: nonce,

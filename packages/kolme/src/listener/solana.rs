@@ -111,16 +111,19 @@ pub async fn sanity_check_contract(
     let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..])
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
 
-    anyhow::ensure!(info.processor.as_bytes().deref() == state.processor.0.as_slice());
-    anyhow::ensure!(info.approvers.len() == state.executors.len());
+    anyhow::ensure!(
+        info.validator_set.processor.as_bytes().deref() == state.processor.0.as_slice()
+    );
+    anyhow::ensure!(info.validator_set.approvers.len() == state.executors.len());
 
     for a in &state.executors {
         anyhow::ensure!(info
+            .validator_set
             .approvers
             .contains(&PublicKey::try_from_bytes(a.0.as_slice())?));
     }
 
-    anyhow::ensure!(info.needed_approvers == usize::from(state.needed_executors));
+    anyhow::ensure!(info.validator_set.needed_approvers == u16::from(state.needed_executors));
 
     Ok(())
 }

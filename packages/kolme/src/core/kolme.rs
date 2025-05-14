@@ -112,13 +112,15 @@ impl<App: KolmeApp> Kolme<App> {
     /// Propose a new transaction for the processor to add to the chain.
     ///
     /// Note that this will not detect any issues if the transaction is rejected.
-    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
-        self.notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "Tried to propose a transaction, but no one is listening to our notifications"
+    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) {
+        if self
+            .notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
+            .is_err()
+        {
+            tracing::debug!(
+                    "Tried to propose a transaction, but no one is listening to our notifications. Ignoring, the tx is still in the mempool"
                 )
-            })
+        }
     }
 
     /// Propose a new transaction and wait for it to land on chain.
@@ -130,7 +132,7 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut recv = self.subscribe();
         let txhash_orig = tx.hash();
-        self.propose_transaction(tx)?;
+        self.propose_transaction(tx);
         loop {
             let note = recv.recv().await?;
             match note {
@@ -143,9 +145,7 @@ impl<App: KolmeApp> Kolme<App> {
                 Notification::Broadcast { .. } => (),
                 Notification::FailedTransaction { txhash, error } => {
                     if txhash == txhash_orig {
-                        break Err(anyhow::anyhow!(
-                            "Error when awaiting transaction {txhash}: {error}"
-                        ));
+                        break Err(error.into());
                     }
                 }
             }
@@ -208,6 +208,19 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+        // Make sure we're at the right height for this and the correct processor is signing this.
+        let kolme = self.read();
+        if kolme.get_next_height() != signed_block.height() {
+            anyhow::bail!(
+                "Tried to add block with height {}, but next expected height is {}",
+                signed_block.height(),
+                kolme.get_next_height()
+            );
+        }
+        let expected_processor = kolme.get_framework_state().get_validator_set().processor;
+        let actual_processor = signed_block.0.message.as_inner().processor;
+        anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+
         let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
@@ -286,6 +299,13 @@ impl<App: KolmeApp> Kolme<App> {
                 }
             }
         }
+    }
+
+    /// Wait for the mempool to be empty.
+    ///
+    /// This is mostly intended for writing tests.
+    pub async fn wait_on_empty_mempool(&self) {
+        self.inner.mempool.wait_for_pool_size(0).await;
     }
 
     /// Remove a transaction from the mempool, if present.
@@ -407,6 +427,45 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Wait for the given public key to have an account ID and then return it.
+    pub async fn wait_account_for_key(&self, pubkey: PublicKey) -> Result<AccountId> {
+        loop {
+            let kolme = self.read();
+            if let Some((id, _)) = kolme
+                .get_framework_state()
+                .accounts
+                .get_account_for_key(pubkey)
+            {
+                break Ok(id);
+            }
+
+            self.wait_for_block(kolme.get_next_height()).await?;
+        }
+    }
+
+    /// Wait until the given action ID is no longer pending.
+    pub async fn wait_for_action_finished(
+        &self,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    ) -> Result<()> {
+        loop {
+            let kolme = self.read();
+            let state = kolme.get_framework_state().chains.get(chain)?;
+
+            // Check that we've already issued the action, _and_ that the action
+            // isn't pending.
+            if state.next_action_id > action_id && !state.pending_actions.contains_key(&action_id) {
+                break Ok(());
+            }
+
+            // Either we haven't actually issued that action yet, or the action is still pending.
+            // Either way, wait for another block and then try again.
+
+            self.wait_for_block(kolme.get_next_height()).await?;
+        }
+    }
+
     pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
@@ -510,14 +569,14 @@ impl<App: KolmeApp> KolmeRead<App> {
                     return Some(GenesisAction::InstantiateCosmos {
                         chain: chain.to_cosmos_chain().unwrap(),
                         code_id: *code_id,
-                        args: self.get_framework_state().instantiate_args(),
+                        validator_set: self.get_framework_state().get_validator_set().clone(),
                     })
                 }
                 BridgeContract::NeededSolanaBridge { program_id } => {
                     return Some(GenesisAction::InstantiateSolana {
                         chain: chain.to_solana_chain().unwrap(),
                         program_id: program_id.clone(),
-                        args: self.get_framework_state().instantiate_args(),
+                        validator_set: self.get_framework_state().get_validator_set().clone(),
                     })
                 }
                 BridgeContract::Deployed(_) => (),
@@ -550,15 +609,17 @@ impl<App: KolmeApp> KolmeRead<App> {
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.get_framework_state().get_config().processor
+        self.get_framework_state().get_validator_set().processor
     }
 
     pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.get_framework_state().get_config().approvers
+        &self.get_framework_state().get_validator_set().approvers
     }
 
-    pub fn get_needed_approvers(&self) -> usize {
-        self.get_framework_state().get_config().needed_approvers
+    pub fn get_needed_approvers(&self) -> u16 {
+        self.get_framework_state()
+            .get_validator_set()
+            .needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &ChainStates {

@@ -28,6 +28,16 @@ impl<AppMessage> Mempool<AppMessage> {
         }
     }
 
+    pub(super) async fn wait_for_pool_size(&self, size: usize) {
+        let mut recv = self.notify.subscribe();
+        loop {
+            if self.txs.read().len() == size {
+                break;
+            }
+            recv.changed().await.unwrap();
+        }
+    }
+
     pub(super) async fn peek(&self) -> (TxHash, Arc<SignedTransaction<AppMessage>>) {
         if let Some(pair) = self.txs.read().front() {
             return pair.clone();

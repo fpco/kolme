@@ -61,6 +61,7 @@ pub enum LoggedMessage {
     ProcessorApprove,
     Auth,
     Bank,
+    KeyRotation,
 }
 
 impl From<kolme::Message<AppMessage>> for LoggedMessage {
@@ -73,6 +74,7 @@ impl From<kolme::Message<AppMessage>> for LoggedMessage {
             kolme::Message::ProcessorApprove { .. } => LoggedMessage::ProcessorApprove,
             kolme::Message::Auth(_) => LoggedMessage::Auth,
             kolme::Message::Bank(_) => LoggedMessage::Bank,
+            kolme::Message::KeyRotation(_) => LoggedMessage::KeyRotation,
         }
     }
 }
