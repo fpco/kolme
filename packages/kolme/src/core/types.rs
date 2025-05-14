@@ -698,6 +698,10 @@ impl BlockHeight {
         BlockHeight(self.0 + 1)
     }
 
+    pub fn prev(self) -> Option<Self> {
+        self.0.checked_sub(1).map(BlockHeight)
+    }
+
     pub fn start() -> BlockHeight {
         BlockHeight(0)
     }

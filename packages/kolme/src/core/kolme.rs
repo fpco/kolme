@@ -285,6 +285,72 @@ impl<App: KolmeApp> Kolme<App> {
         Ok(())
     }
 
+    /// Validate and append the given block.
+    pub async fn add_block_with_state(
+        &self,
+        signed_block: Arc<SignedBlock<App::Message>>,
+        framework_state: Arc<MerkleContents>,
+        app_state: Arc<MerkleContents>,
+        logs: Arc<[Vec<String>]>,
+    ) -> Result<()> {
+        // Don't accept blocks we already have
+        let kolme = self.read();
+        if kolme.get_next_height() > signed_block.height() {
+            anyhow::bail!(
+                "Tried to add block (with state) with height {}, but next expected height is {}",
+                signed_block.height(),
+                kolme.get_next_height()
+            );
+        }
+        let expected_processor = kolme.get_framework_state().get_validator_set().processor;
+        let actual_processor = signed_block.0.message.as_inner().processor;
+        anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+
+        let txhash = signed_block.tx().hash();
+        signed_block.validate_signature()?;
+        let block = signed_block.0.message.as_inner();
+
+        self.inner
+            .store
+            .add_block(
+                &self.inner.merkle_manager,
+                StorableBlock {
+                    height: signed_block.height().0,
+                    blockhash: signed_block.hash().0,
+                    txhash: signed_block.tx().hash().0,
+                    block: signed_block.clone(),
+                    framework_state: framework_state.clone(),
+                    app_state: app_state.clone(),
+                    logs: logs.clone(),
+                },
+            )
+            .await?;
+
+        self.inner.mempool.drop_tx(txhash);
+
+        // Now do the write lock
+        let mut guard = self.inner.current_block.write();
+
+        if guard.get_next_height() > signed_block.height() {
+            return Ok(());
+        }
+
+        *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
+            block: signed_block.clone(),
+            logs,
+            state: BlockState {
+                blockhash: signed_block.hash(),
+                framework_state,
+                app_state,
+            },
+        }));
+        std::mem::drop(guard);
+
+        self.notify(Notification::NewBlock(signed_block));
+
+        Ok(())
+    }
+
     pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
         loop {
             let (txhash, tx) = self.inner.mempool.peek().await;

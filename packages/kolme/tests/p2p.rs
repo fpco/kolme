@@ -122,6 +122,10 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     );
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
+            .set_sync_mode(
+                SyncMode::BlockTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
             .build(kolme_processor)
             .await
             .unwrap()
