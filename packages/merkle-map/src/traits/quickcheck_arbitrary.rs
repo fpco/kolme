@@ -44,12 +44,12 @@ impl<K: Arbitrary + ToMerkleKey + FromMerkleKey + Ord, V: Arbitrary> Arbitrary
 
 impl Arbitrary for SerializableTimestamp {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-        let random_ts = <i64>::arbitrary(g);
+        let random_ts = <i128>::arbitrary(g);
         let normalized = if random_ts < 0 {
-            random_ts % Timestamp::MIN.as_millisecond()
+            random_ts % Timestamp::MIN.as_nanosecond()
         } else {
-            random_ts % Timestamp::MAX.as_millisecond()
+            random_ts % Timestamp::MAX.as_nanosecond()
         };
-        Self(Timestamp::from_millisecond(normalized).unwrap())
+        Self(Timestamp::from_nanosecond(normalized).unwrap())
     }
 }
