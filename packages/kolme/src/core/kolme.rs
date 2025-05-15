@@ -34,6 +34,7 @@ use crate::core::*;
 /// [Arc] clone, and so is very cheap.
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<KolmeInner<App>>,
+    tx_await_duration: tokio::time::Duration,
 }
 
 pub(super) struct KolmeInner<App: KolmeApp> {
@@ -67,6 +68,7 @@ impl<App: KolmeApp> Clone for Kolme<App> {
     fn clone(&self) -> Self {
         Kolme {
             inner: self.inner.clone(),
+            tx_await_duration: self.tx_await_duration,
         }
     }
 }
@@ -100,10 +102,38 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.add(tx);
     }
 
+    /// How long should we wait for a transaction to land before giving up?
+    ///
+    /// This affects [Self::propose_and_await_transaction] and [Self::sign_propose_await_transaction].
+    ///
+    /// Default: 10 seconds
+    pub fn set_tx_await_duration(mut self, duration: tokio::time::Duration) -> Self {
+        self.tx_await_duration = duration;
+        self
+    }
+
     /// Propose a new transaction and wait for it to land on chain.
     ///
     /// This can be useful for detecting when a transaction was rejected after proposing.
     pub async fn propose_and_await_transaction(
+        &self,
+        tx: Arc<SignedTransaction<App::Message>>,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
+        let txhash = tx.hash();
+        match tokio::time::timeout(
+            self.tx_await_duration,
+            self.propose_and_await_transaction_inner(tx),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => Err(anyhow::Error::from(e).context(format!(
+                "Timed out proposing and awaiting transaction {txhash}"
+            ))),
+        }
+    }
+
+    async fn propose_and_await_transaction_inner(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
@@ -161,12 +191,29 @@ impl<App: KolmeApp> Kolme<App> {
         secret: &SecretKey,
         messages: Vec<Message<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
+        match tokio::time::timeout(
+            self.tx_await_duration,
+            self.sign_propose_await_transaction_inner(secret, messages),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => Err(anyhow::Error::from(e)
+                .context("Timed out while signing/proposing/awaiting a transaction")),
+        }
+    }
+
+    async fn sign_propose_await_transaction_inner(
+        &self,
+        secret: &SecretKey,
+        messages: Vec<Message<App::Message>>,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
         loop {
             let tx = Arc::new(
                 self.read()
                     .create_signed_transaction(secret, messages.clone())?,
             );
-            match self.propose_and_await_transaction(tx).await {
+            match self.propose_and_await_transaction_inner(tx).await {
                 Ok(block) => break Ok(block),
                 Err(e) => {
                     if let Some(KolmeError::InvalidNonce {
@@ -427,6 +474,7 @@ impl<App: KolmeApp> Kolme<App> {
 
         let kolme = Kolme {
             inner: Arc::new(inner),
+            tx_await_duration: tokio::time::Duration::from_secs(10),
         };
 
         kolme.resync().await?;
