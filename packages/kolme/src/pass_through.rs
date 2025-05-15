@@ -26,6 +26,7 @@ pub struct PassThrough {
     next_event_id: Arc<Mutex<BridgeEventId>>,
     notify: Broadcast,
     actions: Arc<RwLock<BTreeMap<BridgeActionId, Action>>>,
+    latest_action: tokio::sync::watch::Sender<Option<BridgeActionId>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -74,10 +75,12 @@ pub async fn execute(
 impl PassThrough {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        let (latest_action, _) = tokio::sync::watch::channel(None);
         Self {
             next_event_id: Arc::new(Mutex::new(BridgeEventId::start())),
             notify: tokio::sync::broadcast::channel(100).0,
             actions: Arc::new(RwLock::new(BTreeMap::new())),
+            latest_action,
         }
     }
 
@@ -92,6 +95,7 @@ impl PassThrough {
             .route("/notifications", get(ws_handler))
             .route("/actions", get(actions).post(new_action))
             .route("/actions/{bridge_action_id}", get(action))
+            .route("/actions/{bridge_action_id}/wait", get(action_wait))
             .layer(cors)
             .with_state(self);
 
@@ -203,6 +207,7 @@ async fn new_action(
         .expect("payload is expected to contain Transfer serialized as JSON");
     let mut guard = state.actions.write().await;
     guard.insert(bridge_action_id, action);
+    state.latest_action.send(Some(bridge_action_id)).ok();
 }
 
 async fn actions(State(state): State<PassThrough>) -> impl IntoResponse {
@@ -218,4 +223,21 @@ async fn action(
     let actions = state.actions.read().await.clone();
     let action = actions.get(&bridge_action_id).cloned();
     Json(action)
+}
+
+async fn action_wait(
+    State(state): State<PassThrough>,
+    Path(bridge_action_id): Path<BridgeActionId>,
+) -> impl IntoResponse {
+    let mut recv = state.latest_action.subscribe();
+    loop {
+        tracing::debug!("got request for action {bridge_action_id}");
+        let actions = state.actions.read().await.clone();
+        match actions.get(&bridge_action_id).cloned() {
+            Some(action) => break Json(action),
+            None => {
+                recv.changed().await.ok();
+            }
+        }
+    }
 }
