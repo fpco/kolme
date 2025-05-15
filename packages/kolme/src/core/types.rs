@@ -139,7 +139,7 @@ impl SolanaChain {
         let url = match self {
             Self::Mainnet => "https://api.mainnet-beta.solana.com",
             Self::Testnet => "https://api.testnet.solana.com",
-            Self::Devnet => "https://api.devnet.solana.com",
+            Self::Devnet => "https://devnet.helius-rpc.com/?api-key=0e3cea3d-d50e-4673-87d0-481b991a595a",
             Self::Local => "http://localhost:8899",
         };
 
@@ -151,7 +151,7 @@ impl SolanaChain {
         let url = match self {
             Self::Mainnet => "wss://api.mainnet-beta.solana.com",
             Self::Testnet => "wss://api.testnet.solana.com",
-            Self::Devnet => "wss://api.devnet.solana.com/",
+            Self::Devnet => "wss://devnet.helius-rpc.com/?api-key=0e3cea3d-d50e-4673-87d0-481b991a595a",
             Self::Local => "ws://localhost:8900",
         };
 
