@@ -145,7 +145,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(auth) => self.auth(auth).await?,
-            Message::KeyRotation(key_rotation) => self.key_rotation(key_rotation).await?,
+            Message::Admin(admin) => self.admin(admin).await?,
         }
         Ok(())
     }
@@ -450,6 +450,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             },
         );
         state.next_action_id = state.next_action_id.next();
+        self.log_event(LogEvent::NewBridgeAction { chain, id })?;
         Ok(id)
     }
 
@@ -607,9 +608,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn key_rotation(&mut self, key_rotation: &KeyRotationMessage) -> Result<()> {
-        match key_rotation {
-            KeyRotationMessage::SelfReplace(self_replace) => {
+    async fn admin(&mut self, admin: &AdminMessage) -> Result<()> {
+        match admin {
+            AdminMessage::SelfReplace(self_replace) => {
                 let signer = self_replace.verify_signature()?;
                 anyhow::ensure!(signer == self.pubkey);
                 fn set_helper(
@@ -650,7 +651,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
                 self.add_action_all_chains(ExecAction::SelfReplace(self_replace.clone()))?;
             }
-            KeyRotationMessage::NewSet { validator_set } => {
+            AdminMessage::NewSet { validator_set } => {
                 let signer = validator_set.verify_signature()?;
                 anyhow::ensure!(signer == self.pubkey);
                 self.framework_state
@@ -658,13 +659,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
                 validator_set.message.as_inner().validate()?;
-                let state = self.framework_state.key_rotation_state.as_mut();
-                let id = state.next_change_set_id;
-                state.next_change_set_id = id.next();
-                state.change_sets.insert(
+                let id = self.get_next_admin_proposal_id()?;
+                let state = self.framework_state.admin_proposal_state.as_mut();
+                state.proposals.insert(
                     id,
-                    PendingChangeSet {
-                        validator_set: validator_set.message.clone(),
+                    PendingProposal {
+                        payload: ProposalPayload::NewSet(validator_set.message.clone()),
                         approvals: std::iter::once((
                             self.pubkey,
                             validator_set.signature_with_recovery(),
@@ -672,10 +672,32 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         .collect(),
                     },
                 );
-                self.check_pending_change_sets()?;
+                self.check_pending_proposals()?;
             }
-            KeyRotationMessage::Approve {
-                change_set_id,
+            AdminMessage::MigrateContract(migrate) => {
+                let signer = migrate.verify_signature()?;
+                anyhow::ensure!(signer == self.pubkey);
+                self.framework_state
+                    .validator_set
+                    .as_ref()
+                    .ensure_is_validator(self.pubkey)?;
+                let id = self.get_next_admin_proposal_id()?;
+                let state = self.framework_state.admin_proposal_state.as_mut();
+                state.proposals.insert(
+                    id,
+                    PendingProposal {
+                        payload: ProposalPayload::MigrateContract(migrate.message.clone()),
+                        approvals: std::iter::once((
+                            self.pubkey,
+                            migrate.signature_with_recovery(),
+                        ))
+                        .collect(),
+                    },
+                );
+                self.check_pending_proposals()?;
+            }
+            AdminMessage::Approve {
+                admin_proposal_id,
                 signature,
             } => {
                 self.framework_state
@@ -683,56 +705,62 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
 
-                let state = self.framework_state.key_rotation_state.as_mut();
-                let pending = state.change_sets.get_mut(change_set_id).with_context(|| {
-                    format!("Specified an unknown change set ID {change_set_id}")
-                })?;
+                let state = self.framework_state.admin_proposal_state.as_mut();
+                let pending = state
+                    .proposals
+                    .get_mut(admin_proposal_id)
+                    .with_context(|| {
+                        format!("Specified an unknown proposal ID {admin_proposal_id}")
+                    })?;
 
-                let pubkey = signature.validate(pending.validator_set.as_bytes())?;
+                let pubkey = signature.validate(pending.payload.as_bytes())?;
                 anyhow::ensure!(pubkey == self.pubkey);
 
                 let old_value = pending.approvals.insert(pubkey, *signature);
                 anyhow::ensure!(
                     old_value.is_none(),
-                    "{} already approved change set {change_set_id}",
+                    "{} already approved proposal {admin_proposal_id}",
                     self.pubkey
                 );
-                self.check_pending_change_sets()?;
+                self.check_pending_proposals()?;
             }
         }
         Ok(())
     }
 
-    fn check_pending_change_sets(&mut self) -> Result<()> {
-        if let Some(PendingChangeSet {
-            validator_set,
-            approvals,
-        }) = self.find_approved_change_set()
-        {
-            *self.framework_state.validator_set.as_mut() = validator_set.as_inner().clone();
+    fn check_pending_proposals(&mut self) -> Result<()> {
+        if let Some((id, PendingProposal { payload, approvals })) = self.find_approved_proposal() {
+            self.log_event(LogEvent::AdminProposalApproved(id))?;
+            match payload {
+                ProposalPayload::NewSet(validator_set) => {
+                    *self.framework_state.validator_set.as_mut() = validator_set.as_inner().clone();
+                    self.add_action_all_chains(ExecAction::NewSet {
+                        validator_set,
+                        approvals: approvals.values().copied().collect(),
+                    })?;
+                }
+                ProposalPayload::MigrateContract(migrate_contract) => {
+                    self.add_action(
+                        migrate_contract.as_inner().chain,
+                        ExecAction::MigrateContract { migrate_contract },
+                    )?;
+                }
+            }
+
+            // We always clear all pending proposals when an admin action completes.
             self.framework_state
-                .key_rotation_state
+                .admin_proposal_state
                 .as_mut()
-                .change_sets
+                .proposals
                 .clear();
-            self.add_action_all_chains(ExecAction::NewSet {
-                validator_set,
-                approvals: approvals.values().copied().collect(),
-            })?;
         }
         Ok(())
     }
 
-    fn find_approved_change_set(&self) -> Option<PendingChangeSet> {
-        for pending in self
-            .framework_state
-            .key_rotation_state
-            .as_ref()
-            .change_sets
-            .values()
-        {
+    fn find_approved_proposal(&self) -> Option<(AdminProposalId, PendingProposal)> {
+        for (id, pending) in &self.framework_state.admin_proposal_state.as_ref().proposals {
             if pending.has_sufficient_approvals(self.framework_state.validator_set.as_ref()) {
-                return Some(pending.clone());
+                return Some((*id, pending.clone()));
             }
         }
 
@@ -747,5 +775,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let json = serde_json::to_string(&event)?;
         self.log(json);
         Ok(())
+    }
+
+    fn get_next_admin_proposal_id(&mut self) -> Result<AdminProposalId> {
+        let state = self.framework_state.admin_proposal_state.as_mut();
+        let id = state.next_admin_proposal_id;
+        state.next_admin_proposal_id = id.next();
+        self.log_event(LogEvent::NewAdminProposal(id))?;
+        Ok(id)
     }
 }
