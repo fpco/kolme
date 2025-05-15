@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::Result;
 
@@ -155,10 +155,12 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap()
     .unwrap();
-    let tx = kolme_client
-        .read()
-        .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
-        .unwrap();
+    let tx = Arc::new(
+        kolme_client
+            .read()
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+            .unwrap(),
+    );
     let txhash = tx.hash();
     timeout(
         Duration::from_secs(5),

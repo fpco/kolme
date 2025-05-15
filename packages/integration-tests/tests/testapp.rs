@@ -12,10 +12,10 @@ use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use shared::cryptography::SecretKey;
-use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
+use std::{collections::BTreeSet, sync::Arc};
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite};
@@ -157,20 +157,17 @@ async fn test_websocket_notifications_inner(testtasks: TestTasks, (): ()) {
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
     tracing::info!("Connected to WebSocket");
 
-    let tx = kolme
-        .read()
-        .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-        .unwrap();
+    let tx = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
+            .unwrap(),
+    );
 
     kolme.propose_transaction(tx.clone());
 
-    let notification = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        notification["Broadcast"].is_object(),
-        "Expected Broadcast notification, got: {}",
-        notification
-    );
+    // Note we previously tested for a Broadcast notification, but those are no
+    // longer emited via websockets.
 
     let notification = next_message_as_json(&mut ws).await.unwrap();
 
@@ -208,20 +205,17 @@ async fn test_validate_tx_valid_signature_inner(testtasks: TestTasks, (): ()) {
 
     tracing::info!("Connected to WebSocket");
 
-    let tx = kolme
-        .read()
-        .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-        .unwrap();
+    let tx = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
+            .unwrap(),
+    );
 
     kolme.propose_transaction(tx.clone());
 
-    let notification = next_message_as_json(&mut ws).await.unwrap();
-
-    assert!(
-        notification["Broadcast"].is_object(),
-        "Expected Broadcast notification, got: {}",
-        notification
-    );
+    // Note we previously tested for a Broadcast notification, but those are no
+    // longer emited via websockets.
 
     let notification = next_message_as_json(&mut ws).await.unwrap();
 
@@ -293,7 +287,7 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
         created: jiff::Timestamp::now(),
         messages: vec![Message::App(TestMessage::Increment)],
     };
-    let signed_tx = tx.sign(&secret).unwrap();
+    let signed_tx = Arc::new(tx.sign(&secret).unwrap());
 
     kolme.propose_transaction(signed_tx.clone());
 
@@ -326,17 +320,19 @@ async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTas
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
     tracing::info!("Connected to WebSocket");
 
-    let tx_withdraw = kolme
-        .read()
-        .create_signed_transaction(
-            &secret,
-            vec![Message::Bank(BankMessage::Transfer {
-                asset: AssetId(1),
-                dest: kolme::AccountId(0),
-                amount: dec!(500),
-            })],
-        )
-        .unwrap();
+    let tx_withdraw = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(
+                &secret,
+                vec![Message::Bank(BankMessage::Transfer {
+                    asset: AssetId(1),
+                    dest: kolme::AccountId(0),
+                    amount: dec!(500),
+                })],
+            )
+            .unwrap(),
+    );
 
     kolme.propose_transaction(tx_withdraw.clone());
 
@@ -370,21 +366,17 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
     tracing::info!("Connected to WebSocket");
 
     for i in 0..100 {
-        let tx = kolme
-            .read()
-            .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
-            .unwrap();
+        let tx = Arc::new(
+            kolme
+                .read()
+                .create_signed_transaction(&secret, vec![Message::App(TestMessage::Increment)])
+                .unwrap(),
+        );
 
         kolme.propose_transaction(tx.clone());
 
-        let notification = next_message_as_json(&mut ws).await.unwrap();
-
-        assert!(
-            notification["Broadcast"].is_object(),
-            "Expected Broadcast notification for tx {}, got: {}",
-            i,
-            notification
-        );
+        // Note we previously tested for a Broadcast notification, but those are no
+        // longer emited via websockets.
 
         let notification = next_message_as_json(&mut ws).await.unwrap();
 
@@ -445,7 +437,7 @@ async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
                 messages: vec![Message::App(TestMessage::Increment)],
             };
 
-            let signed_tx = tx.sign(&secret).unwrap();
+            let signed_tx = Arc::new(tx.sign(&secret).unwrap());
             kolme_clone
                 .propose_and_await_transaction(signed_tx)
                 .await

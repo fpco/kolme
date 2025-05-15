@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::OnceLock};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, OnceLock},
+};
 
 use kolme::*;
 use testtasks::TestTasks;
@@ -175,10 +178,12 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
 
     // Generate a new transaction then try to broadcast it. It should fail to land
     // because we don't have a valid processor running.
-    let tx = kolme
-        .read()
-        .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
-        .unwrap();
+    let tx = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
+            .unwrap(),
+    );
     let txhash = tx.hash();
     kolme.propose_transaction(tx.clone());
 

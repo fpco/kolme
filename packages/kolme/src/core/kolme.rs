@@ -71,8 +71,6 @@ impl<App: KolmeApp> Clone for Kolme<App> {
     }
 }
 
-struct NoNotificationListenersError;
-
 impl<App: KolmeApp> Kolme<App> {
     /// Lock the local storage and the database.
     ///
@@ -92,35 +90,14 @@ impl<App: KolmeApp> Kolme<App> {
     pub fn notify(&self, note: Notification<App::Message>) {
         // Ignore errors from notifications, it just means no one
         // is subscribed.
-        self.notify_inner(note).ok();
-    }
-
-    fn notify_inner(
-        &self,
-        note: Notification<App::Message>,
-    ) -> Result<(), NoNotificationListenersError> {
-        if let Notification::Broadcast { tx } = &note {
-            self.inner.mempool.add(tx.clone());
-        }
-        self.inner
-            .notify
-            .send(note)
-            .map(|_| ())
-            .map_err(|_| NoNotificationListenersError)
+        self.inner.notify.send(note).ok();
     }
 
     /// Propose a new transaction for the processor to add to the chain.
     ///
     /// Note that this will not detect any issues if the transaction is rejected.
-    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) {
-        if self
-            .notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
-            .is_err()
-        {
-            tracing::debug!(
-                    "Tried to propose a transaction, but no one is listening to our notifications. Ignoring, the tx is still in the mempool"
-                )
-        }
+    pub fn propose_transaction(&self, tx: Arc<SignedTransaction<App::Message>>) {
+        self.inner.mempool.add(tx);
     }
 
     /// Propose a new transaction and wait for it to land on chain.
@@ -128,7 +105,7 @@ impl<App: KolmeApp> Kolme<App> {
     /// This can be useful for detecting when a transaction was rejected after proposing.
     pub async fn propose_and_await_transaction(
         &self,
-        tx: SignedTransaction<App::Message>,
+        tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut recv = self.subscribe();
         let txhash_orig = tx.hash();
@@ -142,9 +119,28 @@ impl<App: KolmeApp> Kolme<App> {
                     }
                 }
                 Notification::GenesisInstantiation { .. } => (),
-                Notification::Broadcast { .. } => (),
-                Notification::FailedTransaction { txhash, error } => {
-                    if txhash == txhash_orig {
+                Notification::FailedTransaction(failed) => {
+                    let pubkey = match failed.verify_signature() {
+                        Ok(pubkey) => pubkey,
+                        Err(e) => {
+                            tracing::warn!(
+                            "Received invalid signature on a FailedTransaction notification: {e}"
+                        );
+                            continue;
+                        }
+                    };
+                    if pubkey
+                        != self
+                            .read()
+                            .get_framework_state()
+                            .get_validator_set()
+                            .processor
+                    {
+                        tracing::warn!("Received a FailedTransaction notification from {pubkey}, which is not the processor, ignoring");
+                        continue;
+                    }
+                    let FailedTransaction { txhash, error } = failed.message.into_inner();
+                    if txhash_orig == txhash {
                         break Err(error.into());
                     }
                 }
@@ -166,9 +162,10 @@ impl<App: KolmeApp> Kolme<App> {
         messages: Vec<Message<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         loop {
-            let tx = self
-                .read()
-                .create_signed_transaction(secret, messages.clone())?;
+            let tx = Arc::new(
+                self.read()
+                    .create_signed_transaction(secret, messages.clone())?,
+            );
             match self.propose_and_await_transaction(tx).await {
                 Ok(block) => break Ok(block),
                 Err(e) => {
@@ -446,6 +443,16 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.notify.subscribe()
     }
 
+    /// Subscribe to get a notification each time an entry is added to the mempool.
+    pub fn subscribe_mempool_additions(&self) -> tokio::sync::watch::Receiver<usize> {
+        self.inner.mempool.subscribe_additions()
+    }
+
+    /// Get all entries currently in the mempool
+    pub fn get_mempool_entries(&self) -> Vec<Arc<SignedTransaction<App::Message>>> {
+        self.inner.mempool.get_entries()
+    }
+
     /// Wait until the given block is published
     pub async fn wait_for_block(
         &self,
@@ -471,7 +478,6 @@ impl<App: KolmeApp> Kolme<App> {
                             }
                         },
                         Notification::GenesisInstantiation { .. } => (),
-                        Notification::Broadcast { .. } => (),
                         Notification::FailedTransaction { .. } => (),
                     },
                     Err(e) => match e {
@@ -502,7 +508,6 @@ impl<App: KolmeApp> Kolme<App> {
                             }
                         }
                         Notification::GenesisInstantiation { .. } => (),
-                        Notification::Broadcast { .. } => (),
                         Notification::FailedTransaction { .. } => (),
                     },
                     Err(e) => match e {

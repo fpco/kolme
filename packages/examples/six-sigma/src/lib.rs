@@ -372,11 +372,7 @@ impl TxLogger {
         loop {
             let notification = receiver.recv().await?;
             let output = match notification.clone() {
-                Notification::Broadcast { .. } => {
-                    // we skip initial tx broadcast, only tx as a part of a block
-                    continue;
-                }
-                Notification::FailedTransaction { .. } => continue,
+                Notification::FailedTransaction(_) => continue,
                 Notification::NewBlock(msg) => {
                     let block = msg.0.message.as_inner();
                     let height = block.height;

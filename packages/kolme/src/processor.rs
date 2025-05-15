@@ -156,13 +156,25 @@ impl<App: KolmeApp> Processor<App> {
         };
         if let Err(e) = &res {
             tracing::warn!("Giving up on adding transaction {txhash}: {e}");
-            self.kolme.notify(Notification::FailedTransaction {
-                txhash,
-                error: match e.downcast_ref::<KolmeError>() {
-                    Some(e) => e.clone(),
-                    None => KolmeError::Other(e.to_string()),
-                },
-            });
+            let failed = (|| {
+                let failed = FailedTransaction {
+                    txhash,
+                    error: match e.downcast_ref::<KolmeError>() {
+                        Some(e) => e.clone(),
+                        None => KolmeError::Other(e.to_string()),
+                    },
+                };
+                let failed = TaggedJson::new(failed)?;
+                let key = self.get_correct_secret(&self.kolme.read())?;
+                failed.sign(key)
+            })();
+
+            match failed {
+                Ok(failed) => self.kolme.notify(Notification::FailedTransaction(failed)),
+                Err(e) => {
+                    tracing::error!("Unable to generated failed transaction notification: {e}")
+                }
+            }
         }
         res
     }

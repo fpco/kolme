@@ -175,8 +175,8 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
         match recv.recv().await? {
             Notification::NewBlock(_) => (),
             Notification::GenesisInstantiation { .. } => (),
-            Notification::Broadcast { .. } => (),
-            Notification::FailedTransaction { txhash, error } => {
+            Notification::FailedTransaction(failed) => {
+                let FailedTransaction { txhash, error } = failed.message.into_inner();
                 anyhow::bail!("Error with transaction {txhash}: {error}")
             }
         }
@@ -195,9 +195,11 @@ async fn client(
             let secret = SecretKey::random(&mut rng);
             (kolme, secret)
         };
-        let tx = kolme
-            .read()
-            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?;
+        let tx = Arc::new(
+            kolme
+                .read()
+                .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
+        );
         let txhash = tx.hash();
         kolme.propose_and_await_transaction(tx).await?;
 

@@ -305,6 +305,8 @@ impl<App: KolmeApp> Gossip<App> {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut trigger_broadcast_height = self.trigger_broadcast_height.subscribe();
 
+        let mut mempool_additions = self.kolme.subscribe_mempool_additions();
+
         loop {
             tokio::select! {
                 // When the network switches to ready, request everyone's block height.
@@ -319,9 +321,15 @@ impl<App: KolmeApp> Gossip<App> {
                 // try to synchronize with it
                 report_block_height = peers_with_blocks_rx.recv() => self.catch_up(&mut swarm,report_block_height).await,
                 // Periodically notify the p2p network of our latest block height
-                _ = interval.tick() => self.broadcast_latest_block(&mut swarm).await,
+                // Also use this time to broadcast any transactions from the mempool.
+                _ = interval.tick() => {
+                    self.broadcast_latest_block(&mut swarm).await;
+                    self.broadcast_mempool_entries(&mut swarm).await;
+                }
                 // When we're specifically triggered for it, also notify for latest block height
                 _ = trigger_broadcast_height.changed() => self.broadcast_latest_block(&mut swarm).await,
+                // And any time we add something new to the mempool, broadcast all items.
+                _ = mempool_additions.changed() => self.broadcast_mempool_entries(&mut swarm).await,
             }
         }
     }
@@ -347,6 +355,19 @@ impl<App: KolmeApp> Gossip<App> {
         .await
         {
             tracing::error!("Unable to broadcast latest block height: {e:?}")
+        }
+    }
+
+    async fn broadcast_mempool_entries(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        for tx in self.kolme.get_mempool_entries() {
+            let txhash = tx.hash();
+            let msg = GossipMessage::BroadcastTx {
+                tx,
+                timestamp: jiff::Timestamp::now(),
+            };
+            if let Err(e) = msg.publish(self, swarm).await {
+                tracing::error!("Unable to broadcast transaction {txhash}: {e:?}")
+            }
         }
     }
 
@@ -449,8 +470,11 @@ impl<App: KolmeApp> Gossip<App> {
                         self.add_block(block.clone()).await;
                     }
                     Notification::GenesisInstantiation { .. } => (),
-                    Notification::Broadcast { .. } => (),
-                    Notification::FailedTransaction { .. } => (),
+                    // TODO should we validate that this has a proper signature from
+                    // the processor before accepting it?
+                    //
+                    // See propose_and_await_transaction for an example.
+                    Notification::FailedTransaction(_) => (),
                 }
                 self.kolme.notify(msg);
             }
@@ -462,6 +486,9 @@ impl<App: KolmeApp> Gossip<App> {
                 if self.kolme.read().get_next_height() < report.next {
                     peers_with_blocks.try_send(report).ok();
                 }
+            }
+            GossipMessage::BroadcastTx { tx, timestamp: _ } => {
+                self.kolme.propose_transaction(tx);
             }
         }
 
