@@ -268,7 +268,7 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         kolme
             .read()
             .get_framework_state()
-            .get_key_rotation_state()
+            .get_admin_proposal_state()
             .proposals
             .len(),
         0
@@ -337,7 +337,7 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     // And make sure the new proposals are waiting
     let (change_id_1, change_id_2) = {
         let kolme = kolme.read();
-        let proposals = kolme.get_framework_state().get_key_rotation_state();
+        let proposals = kolme.get_framework_state().get_admin_proposal_state();
         assert_eq!(proposals.proposals.len(), 2);
         let first_id = AdminProposalId(proposals.next_admin_proposal_id.0 - 2);
         let second_id = first_id.next();
@@ -470,7 +470,7 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     let change_set_id = *kolme
         .read()
         .get_framework_state()
-        .get_key_rotation_state()
+        .get_admin_proposal_state()
         .proposals
         .first_key_value()
         .unwrap()
@@ -527,7 +527,7 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         kolme
             .read()
             .get_framework_state()
-            .get_key_rotation_state()
+            .get_admin_proposal_state()
             .proposals
             .len(),
         0

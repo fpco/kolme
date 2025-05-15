@@ -181,7 +181,7 @@ impl FrameworkState {
         self.validator_set.as_ref()
     }
 
-    pub fn get_key_rotation_state(&self) -> &AdminProposalState {
+    pub fn get_admin_proposal_state(&self) -> &AdminProposalState {
         self.admin_proposal_state.as_ref()
     }
 

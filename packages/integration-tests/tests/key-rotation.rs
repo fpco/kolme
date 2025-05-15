@@ -335,7 +335,7 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         let kolme = kolme.read();
         let (admin_proposal_id, pending_admin_proposal) = kolme
             .get_framework_state()
-            .get_key_rotation_state()
+            .get_admin_proposal_state()
             .proposals
             .first_key_value()
             .unwrap();
