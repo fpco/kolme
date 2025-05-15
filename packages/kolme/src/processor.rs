@@ -172,7 +172,7 @@ impl<App: KolmeApp> Processor<App> {
             match failed {
                 Ok(failed) => self.kolme.notify(Notification::FailedTransaction(failed)),
                 Err(e) => {
-                    tracing::error!("Unable to generated failed transaction notification: {e}")
+                    tracing::error!("Unable to generate failed transaction notification: {e}")
                 }
             }
         }
