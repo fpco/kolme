@@ -1,10 +1,13 @@
-use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice, SerializableTimestamp};
+use crate::quickcheck_newtypes::{
+    SerializableMerkleMap, SerializableSlice, SerializableSmallVec, SerializableTimestamp,
+};
 use crate::types::MerkleMap;
 use jiff::Timestamp;
 use quickcheck::Arbitrary;
+use smallvec::{Array, SmallVec};
 use std::collections::BTreeMap;
 
-use super::{FromMerkleKey, ToMerkleKey};
+use super::{FromMerkleKey, MerkleDeserialize, MerkleSerialize, ToMerkleKey};
 
 impl<T: Arbitrary> Arbitrary for SerializableSlice<'static, T> {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
@@ -51,5 +54,23 @@ impl Arbitrary for SerializableTimestamp {
             random_ts % Timestamp::MAX.as_nanosecond()
         };
         Self(Timestamp::from_nanosecond(normalized).unwrap())
+    }
+}
+
+impl<
+        A: Array<
+                Item: Clone
+                          + MerkleSerialize
+                          + MerkleDeserialize
+                          + Arbitrary
+                          + PartialEq
+                          + std::fmt::Debug,
+            > + Clone
+            + 'static,
+    > Arbitrary for SerializableSmallVec<A>
+{
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        let as_vec: Vec<A::Item> = (0..A::size()).map(|_| <A::Item>::arbitrary(g)).collect();
+        Self(<SmallVec<A>>::from_vec(as_vec))
     }
 }
