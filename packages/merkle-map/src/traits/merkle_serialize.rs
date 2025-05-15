@@ -8,6 +8,8 @@ use shared::{
     types::{BridgeActionId, BridgeEventId, Sha256Hash, ValidatorSet},
 };
 
+use jiff::Timestamp;
+
 use crate::*;
 
 impl MerkleSerialize for u8 {
@@ -223,6 +225,13 @@ impl MerkleSerialize for ValidatorSet {
 impl MerkleSerialize for bool {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_byte(if *self { 1 } else { 0 });
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for Timestamp {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_raw_bytes(&self.as_nanosecond().to_le_bytes());
         Ok(())
     }
 }

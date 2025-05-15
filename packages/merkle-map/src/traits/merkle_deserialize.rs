@@ -3,6 +3,7 @@ use std::{
     rc::Rc,
 };
 
+use jiff::Timestamp;
 use shared::{
     cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
     types::{BridgeActionId, BridgeEventId, Sha256Hash, ValidatorSet},
@@ -270,5 +271,15 @@ impl MerkleDeserialize for bool {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(deserializer.pop_byte()? == 1)
+    }
+}
+
+impl MerkleDeserialize for Timestamp {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let as_bytes: [u8; 128 / 8] = deserializer.load_array()?;
+        Timestamp::from_nanosecond(i128::from_le_bytes(as_bytes))
+            .map_err(|e| MerkleSerialError::Other(format!("When deserializing Timestamp: {e}")))
     }
 }
