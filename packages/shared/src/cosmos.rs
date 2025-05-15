@@ -119,3 +119,7 @@ impl KeyRegistration {
         })
     }
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct MigrateMsg {}
