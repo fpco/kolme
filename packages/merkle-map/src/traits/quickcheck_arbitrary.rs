@@ -1,5 +1,6 @@
-use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice};
+use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice, SerializableTimestamp};
 use crate::types::MerkleMap;
+use jiff::Timestamp;
 use quickcheck::Arbitrary;
 use std::collections::BTreeMap;
 
@@ -38,5 +39,17 @@ impl<K: Arbitrary + ToMerkleKey + FromMerkleKey + Ord, V: Arbitrary> Arbitrary
                 .shrink()
                 .map(|shrunk_btreemap| Self(MerkleMap::from_iter(shrunk_btreemap))),
         )
+    }
+}
+
+impl Arbitrary for SerializableTimestamp {
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        let random_ts = <i64>::arbitrary(g);
+        let normalized = if random_ts < 0 {
+            random_ts % Timestamp::MIN.as_millisecond()
+        } else {
+            random_ts % Timestamp::MAX.as_millisecond()
+        };
+        Self(Timestamp::from_millisecond(normalized).unwrap())
     }
 }

@@ -6,7 +6,7 @@ use std::{
     ops::Bound,
 };
 
-use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice};
+use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice, SerializableTimestamp};
 
 use crate::*;
 
@@ -820,4 +820,15 @@ quickcheck! {
 
         quickcheck::TestResult::from_bool(value == SerializableMerkleMap(deserialized))
     }
+    fn serializing_is_idempotent_for_timestamp (value: SerializableTimestamp) -> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value.0).unwrap();
+        let deserialized = SerializableTimestamp(manager
+            .deserialize(serialized.hash, serialized.payload.clone())
+            .unwrap());
+
+        quickcheck::TestResult::from_bool(value == deserialized)
+    }
+
+
 }
