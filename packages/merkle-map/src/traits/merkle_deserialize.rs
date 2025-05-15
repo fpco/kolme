@@ -264,3 +264,11 @@ impl MerkleDeserialize for ValidatorSet {
         })
     }
 }
+
+impl MerkleDeserialize for bool {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(deserializer.pop_byte()? == 1)
+    }
+}
