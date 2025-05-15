@@ -219,3 +219,10 @@ impl MerkleSerialize for ValidatorSet {
         Ok(())
     }
 }
+
+impl MerkleSerialize for bool {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_byte(if *self { 1 } else { 0 });
+        Ok(())
+    }
+}
