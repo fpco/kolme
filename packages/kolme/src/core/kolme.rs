@@ -596,6 +596,19 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    pub async fn get_log_events_for(&self, height: BlockHeight) -> Result<Vec<LogEvent>> {
+        let block = self
+            .get_block(height)
+            .await?
+            .with_context(|| format!("get_log_events_for({height}: block not available"))?;
+        Ok(block
+            .logs
+            .iter()
+            .flatten()
+            .flat_map(|s| serde_json::from_str::<LogEvent>(s).ok())
+            .collect())
+    }
+
     pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
@@ -793,5 +806,17 @@ impl<App: KolmeApp> KolmeRead<App> {
             .accounts
             .get_account_for_key(key)
             .map_or_else(AccountNonce::start, |(_, account)| account.get_next_nonce())
+    }
+
+    pub fn get_admin_proposal_payload(
+        &self,
+        proposal_id: AdminProposalId,
+    ) -> Option<&ProposalPayload> {
+        self.get_framework_state()
+            .admin_proposal_state
+            .as_ref()
+            .proposals
+            .get(&proposal_id)
+            .map(|p| &p.payload)
     }
 }

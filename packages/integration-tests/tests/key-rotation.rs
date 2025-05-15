@@ -301,8 +301,8 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         kolme
             .sign_propose_await_transaction(
                 &orig_processor,
-                vec![Message::KeyRotation(
-                    KeyRotationMessage::self_replace(
+                vec![Message::Admin(
+                    AdminMessage::self_replace(
                         ValidatorType::Processor,
                         new_processor.public_key(),
                         &orig_processor,
@@ -316,8 +316,8 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         kolme
             .sign_propose_await_transaction(
                 &listener,
-                vec![Message::KeyRotation(
-                    KeyRotationMessage::new_set(
+                vec![Message::Admin(
+                    AdminMessage::new_set(
                         ValidatorSet {
                             processor: new_processor.public_key(),
                             listeners: std::iter::once(listener.public_key()).collect(),
@@ -333,20 +333,20 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
             .await
             .unwrap();
         let kolme = kolme.read();
-        let (change_set_id, pending_change_set) = kolme
+        let (admin_proposal_id, pending_admin_proposal) = kolme
             .get_framework_state()
             .get_key_rotation_state()
-            .change_sets
+            .proposals
             .first_key_value()
             .unwrap();
-        let msg = KeyRotationMessage::approve(
-            *change_set_id,
-            &pending_change_set.validator_set,
+        let msg = AdminMessage::approve(
+            *admin_proposal_id,
+            &pending_admin_proposal.payload,
             &approver,
         )
         .unwrap();
         kolme
-            .sign_propose_await_transaction(&approver, vec![Message::KeyRotation(msg)])
+            .sign_propose_await_transaction(&approver, vec![Message::Admin(msg)])
             .await
             .unwrap();
     }
