@@ -848,6 +848,11 @@ pub struct Block<AppMessage> {
     pub framework_state: Sha256Hash,
     /// New app state at the end of execution
     pub app_state: Sha256Hash,
+    /// The log messages generated when executing this block.
+    ///
+    /// This will be a `Vec<Vec<String>>`, where the outer Vec
+    /// is per-message and the inner contains each log.
+    pub logs: Sha256Hash,
     /// Any data loads that were used for execution.
     pub loads: Vec<BlockDataLoad>,
 }

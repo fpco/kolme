@@ -583,28 +583,39 @@ impl<App: KolmeApp> Gossip<App> {
                     Ok(None) => BlockResponse::HeightNotFound(height),
                     Ok(Some(storable_block)) => {
                         let manager = self.kolme.get_merkle_manager();
-                        let framework_state = manager.serialize(&storable_block.framework_state);
-                        let app_state = manager.serialize(&storable_block.app_state);
-                        match (framework_state, app_state) {
-                            (Ok(framework_state), Ok(app_state)) => BlockResponse::BlockWithState {
-                                block: storable_block.block,
-                                framework_state,
-                                app_state,
-                                // FIXME should we store a hash of the logs in the block as well?
-                                logs: storable_block.logs,
-                            },
-                            (Err(e), _) => {
-                                tracing::warn!(
-                                    "{local_display_name}: Unable to serialize framework state: {e}"
-                                );
+                        let framework_state = match manager
+                            .serialize(&storable_block.framework_state)
+                        {
+                            Ok(x) => x,
+                            Err(e) => {
+                                tracing::warn!("{local_display_name}: Unable to serialize framework state: {e}");
                                 return;
                             }
-                            (_, Err(e)) => {
+                        };
+                        let app_state = match manager.serialize(&storable_block.app_state) {
+                            Ok(x) => x,
+                            Err(e) => {
                                 tracing::warn!(
                                     "{local_display_name}: Unable to serialize app state: {e}"
                                 );
                                 return;
                             }
+                        };
+                        let logs = match manager.serialize(&storable_block.logs) {
+                            Ok(x) => x,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "{local_display_name}: Unable to serialize logs: {e}"
+                                );
+                                return;
+                            }
+                        };
+
+                        BlockResponse::BlockWithState {
+                            block: storable_block.block,
+                            framework_state,
+                            app_state,
+                            logs,
                         }
                     }
                 };
