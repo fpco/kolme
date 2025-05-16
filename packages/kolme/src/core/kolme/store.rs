@@ -262,11 +262,9 @@ impl<App: KolmeApp> KolmeStore<App> {
                     .await?
             }
         }
-        let old = self
-            .block_cache
+        self.block_cache
             .write()
             .put(BlockHeight(block.height), block);
-        debug_assert!(old.is_none());
         self.trigger_notify();
         Ok(())
     }
