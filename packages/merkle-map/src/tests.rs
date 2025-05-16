@@ -6,7 +6,9 @@ use std::{
     ops::Bound,
 };
 
-use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice, SerializableTimestamp};
+use crate::quickcheck_newtypes::{
+    SerializableMerkleMap, SerializableSlice, SerializableSmallVec, SerializableTimestamp,
+};
 
 use crate::*;
 
@@ -824,6 +826,16 @@ quickcheck! {
         let manager = MerkleManager::default();
         let serialized = manager.serialize(&value.0).unwrap();
         let deserialized = SerializableTimestamp(manager
+            .deserialize(serialized.hash, serialized.payload.clone())
+            .unwrap());
+
+        quickcheck::TestResult::from_bool(value == deserialized)
+    }
+
+    fn serializing_is_idempotent_for_smallvec_u64_4 (value: SerializableSmallVec<[u64;4]>) -> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value.0).unwrap();
+        let deserialized = SerializableSmallVec(manager
             .deserialize(serialized.hash, serialized.payload.clone())
             .unwrap());
 
