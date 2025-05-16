@@ -117,8 +117,11 @@ impl<App: KolmeApp> Processor<App> {
         if self.kolme.read().get_tx_height(txhash).await?.is_some() {
             return Ok(());
         }
-        let block = self.construct_block(tx.clone()).await?;
-        let res = self.kolme.add_block(Arc::new(block)).await;
+        let res = async {
+            let block = self.construct_block(tx.clone()).await?;
+            self.kolme.add_block(Arc::new(block)).await
+        }
+        .await;
         if let Err(e) = &res {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
                 tracing::warn!("Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this");
