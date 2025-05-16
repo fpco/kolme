@@ -285,10 +285,14 @@ impl MerkleDeserialize for Timestamp {
     }
 }
 
-impl<A: Array<Item: MerkleDeserialize + Clone>> MerkleDeserialize for SmallVec<A> {
+impl<A: Array<Item: MerkleDeserialize>> MerkleDeserialize for SmallVec<A> {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        Ok(Self::from_vec(deserializer.load()?))
+        let mut result = SmallVec::with_capacity(A::size());
+        for _ in 0..A::size() {
+            result.push(deserializer.load()?)
+        }
+        Ok(result)
     }
 }
