@@ -238,7 +238,7 @@ impl MerkleSerialize for Timestamp {
     }
 }
 
-impl<A: Array<Item: MerkleSerialize + Clone>> MerkleSerialize for SmallVec<A> {
+impl<A: Array<Item: MerkleSerialize>> MerkleSerialize for SmallVec<A> {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store(self.as_slice())?;
         Ok(())
