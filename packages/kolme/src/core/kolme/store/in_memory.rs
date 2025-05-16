@@ -22,6 +22,7 @@ impl Default for KolmeStoreInMemory {
 #[derive(Default)]
 struct Inner {
     merkle: MerkleMemoryStore,
+    blockhashes: BTreeMap<BlockHeight, BlockHash>,
     blocks: BTreeMap<BlockHeight, Sha256Hash>,
     txhashes: HashMap<TxHash, BlockHeight>,
 }
@@ -82,35 +83,24 @@ impl KolmeStoreInMemory {
         let height = BlockHeight(block.height);
         let txhash = TxHash(block.txhash);
 
-        if let Ok(stored_block) = self.load_block::<App>(merkle_manager, height).await {
-            tracing::warn!(
-                "in memory add_block: found stored with blockhash {}, adding blockhash {}",
-                stored_block.blockhash,
-                block.blockhash
-            );
-            if stored_block.blockhash == block.blockhash {
-                return Ok(());
-            }
+        let mut guard = self.0.write().await;
+
+        if guard.blockhashes.get(&height) == Some(&BlockHash(block.blockhash)) {
+            return Ok(());
         }
 
-        let checks = |inner: &Inner| {
-            if inner.blocks.contains_key(&height) {
-                Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 })
-            } else if inner.txhashes.contains_key(&txhash) {
-                Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 })
-            } else {
-                Ok(())
-            }
-        };
+        if guard.blocks.contains_key(&height) {
+            return Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 }.into());
+        }
+        if guard.txhashes.contains_key(&txhash) {
+            return Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 }.into());
+        }
 
-        checks(&*self.0.read().await)?;
-
-        let mut guard = self.0.write().await;
-        checks(&guard)?;
         guard.txhashes.insert(txhash, height);
 
         let hash = merkle_manager.save(&mut guard.merkle, block).await?;
         guard.blocks.insert(height, hash.hash);
+        guard.blockhashes.insert(height, BlockHash(block.blockhash));
         Ok(())
     }
 
