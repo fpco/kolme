@@ -289,6 +289,15 @@ impl<A: Array<Item: MerkleDeserialize>> MerkleDeserialize for SmallVec<A> {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
+        // SmallVec is serialized as slice, so it is preceded by length
+        let size: usize = deserializer.load()?;
+        if size != A::size() {
+            Err(MerkleSerialError::Other(format!(
+                "When deserializing SmallVec, expected length {} got {}",
+                A::size(),
+                size
+            )))?;
+        }
         let mut result = SmallVec::with_capacity(A::size());
         for _ in 0..A::size() {
             result.push(deserializer.load()?)
