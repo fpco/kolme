@@ -11,7 +11,7 @@ pub use store::KolmeStore;
 
 #[cfg(feature = "pass_through")]
 use std::sync::OnceLock;
-use std::{cmp::Ordering, collections::HashMap, ops::Deref};
+use std::{collections::HashMap, ops::Deref};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -506,34 +506,18 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
-        // Start an outer loop so that we can keep processing if we end up Lagged
+        // First subscribe to avoid a race condition...
+        let mut recv = self.inner.store.subscribe();
         loop {
-            // First subscribe to avoid a race condition...
-            let mut recv = self.subscribe();
             // And then check if we're at the requested height.
             if let Some(storable_block) = self.get_block(height).await? {
                 return Ok(storable_block.block);
             }
-            loop {
-                match recv.recv().await {
-                    Ok(note) => match note {
-                        Notification::NewBlock(block) => match block.height().cmp(&height) {
-                            Ordering::Less => (),
-                            Ordering::Equal => return Ok(block),
-                            Ordering::Greater => {
-                                let storable_block = self.get_block(height).await?.with_context(|| format!("wait_for_block: received notification that block {} is available, but unable to find {height} in database", block.height()))?;
-                                return Ok(storable_block.block);
-                            }
-                        },
-                        Notification::GenesisInstantiation { .. } => (),
-                        Notification::FailedTransaction { .. } => (),
-                    },
-                    Err(e) => match e {
-                        RecvError::Closed => panic!("wait_for_block: unexpected Closed"),
-                        RecvError::Lagged(_) => break,
-                    },
-                }
-            }
+
+            // Wait for more data
+            recv.changed()
+                .await
+                .context("wait_for_block: unexpected end of stream from store.subscribe()")?;
         }
     }
 

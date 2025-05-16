@@ -482,8 +482,10 @@ impl<App: KolmeApp> Gossip<App> {
                 self.trigger_broadcast_height.send_modify(|old| *old += 1);
             }
             GossipMessage::ReportBlockHeight(report) => {
+                let our_next = self.kolme.read().get_next_height();
+                tracing::debug!("Received ReportBlockHeight: {report:?}, our_next: {our_next}");
                 // Check if this peer has new blocks that we'd want to request.
-                if self.kolme.read().get_next_height() < report.next {
+                if our_next < report.next {
                     peers_with_blocks.try_send(report).ok();
                 }
             }
@@ -602,12 +604,16 @@ impl<App: KolmeApp> Gossip<App> {
             None => return,
         };
 
+        let our_next = self.kolme.read().get_next_height();
+
+        tracing::debug!(
+            "In catch_up, their_node=={their_next}, peer=={peer}, our_next=={our_next}"
+        );
+
         let their_highest = match their_next.prev() {
             None => return,
             Some(highest) => highest,
         };
-
-        let our_next = self.kolme.read().get_next_height();
 
         if their_highest < our_next {
             // They don't have any new blocks for us.
