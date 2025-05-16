@@ -68,14 +68,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run tests
-        run: RUST_BACKTRACE=1 just test
       - name: Build
         run: cargo build --workspace
       - name: Cargo fmt
         run: just fmt
       - name: Clippy check
         run: just clippy
+      - name: Run tests
+        run: RUST_BACKTRACE=1 just test
 
   contracts:
     name: Build Contracts
