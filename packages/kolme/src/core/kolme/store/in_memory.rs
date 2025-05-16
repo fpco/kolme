@@ -82,6 +82,17 @@ impl KolmeStoreInMemory {
         let height = BlockHeight(block.height);
         let txhash = TxHash(block.txhash);
 
+        if let Ok(stored_block) = self.load_block::<App>(merkle_manager, height).await {
+            tracing::warn!(
+                "in memory add_block: found stored with blockhash {}, adding blockhash {}",
+                stored_block.blockhash,
+                block.blockhash
+            );
+            if stored_block.blockhash == block.blockhash {
+                return Ok(());
+            }
+        }
+
         let checks = |inner: &Inner| {
             if inner.blocks.contains_key(&height) {
                 Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 })
