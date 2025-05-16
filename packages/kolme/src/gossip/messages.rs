@@ -101,6 +101,7 @@ impl<App: KolmeApp> GossipMessage<App> {
         gossip: &Gossip<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) -> Result<()> {
+        tracing::debug!("Publishing message to gossipsub: {self}");
         // TODO should we put in some retry logic to handle the "InsufficientPeers" case?
         swarm
             .behaviour_mut()

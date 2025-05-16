@@ -19,6 +19,7 @@ const BLOCK_CACHE_SIZE: usize = 60;
 pub struct KolmeStore<App: KolmeApp> {
     inner: KolmeStoreInner,
     block_cache: Arc<RwLock<BlockCacheMap<App>>>,
+    notify: tokio::sync::watch::Sender<usize>,
 }
 
 #[allow(type_alias_bounds)]
@@ -35,10 +36,12 @@ enum KolmeStoreInner {
 impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
     fn from(inner: KolmeStoreInner) -> Self {
         let cache = BlockCacheMap::<App>::new(NonZeroUsize::new(BLOCK_CACHE_SIZE).unwrap());
+        let notify = tokio::sync::watch::Sender::new(0);
 
         Self {
             inner,
             block_cache: Arc::new(RwLock::new(cache)),
+            notify,
         }
     }
 }
@@ -264,6 +267,7 @@ impl<App: KolmeApp> KolmeStore<App> {
             .write()
             .put(BlockHeight(block.height), block);
         debug_assert!(old.is_none());
+        self.trigger_notify();
         Ok(())
     }
 
@@ -276,7 +280,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     ) -> Result<T> {
         anyhow::ensure!(hash == contents.hash);
 
-        match &self.inner {
+        let x = match &self.inner {
             KolmeStoreInner::Fjall(kolme_store_fjall) => {
                 let mut store = kolme_store_fjall.get_merkle_store();
                 store_and_load_helper(merkle_manager, &mut store, &contents).await
@@ -289,7 +293,19 @@ impl<App: KolmeApp> KolmeStore<App> {
                 let mut store = kolme_store_in_memory.get_merkle_store().await;
                 store_and_load_helper(merkle_manager, &mut store, &contents).await
             }
-        }
+        }?;
+
+        self.trigger_notify();
+        Ok(x)
+    }
+
+    fn trigger_notify(&self) {
+        self.notify.send_modify(|x| *x += 1);
+    }
+
+    /// Subscribe to receive notifications of new data becoming available in the store.
+    pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<usize> {
+        self.notify.subscribe()
     }
 }
 

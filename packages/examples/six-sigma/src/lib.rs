@@ -641,7 +641,9 @@ mod tests {
         tracing::debug!("Checking executed transfer action with the award");
         (|| async {
             let resp = client
-                .get(format!("http://localhost:12345/actions/{bridge_action_id}"))
+                .get(format!(
+                    "http://localhost:12345/actions/{bridge_action_id}/wait"
+                ))
                 .send()
                 .await
                 .unwrap();
