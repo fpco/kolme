@@ -10,7 +10,7 @@ use axum::{
 use cosmwasm_std::Coin;
 use futures_util::StreamExt;
 use listener::cosmos::get_next_bridge_event_id;
-use reqwest::{header::CONTENT_TYPE, Method};
+use reqwest::{header::CONTENT_TYPE, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use shared::cosmos::{BridgeEventMessage, ExecuteMsg};
 use tokio::sync::{broadcast, Mutex, RwLock};
@@ -228,16 +228,27 @@ async fn action(
 async fn action_wait(
     State(state): State<PassThrough>,
     Path(bridge_action_id): Path<BridgeActionId>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     let mut recv = state.latest_action.subscribe();
-    loop {
-        tracing::debug!("got request for action {bridge_action_id}");
-        let actions = state.actions.read().await.clone();
-        match actions.get(&bridge_action_id).cloned() {
-            Some(action) => break Json(action),
-            None => {
-                recv.changed().await.ok();
+    let res = tokio::time::timeout(tokio::time::Duration::from_secs(30), async move {
+        loop {
+            tracing::debug!("got request for action {bridge_action_id}");
+            let actions = state.actions.read().await.clone();
+            match actions.get(&bridge_action_id) {
+                Some(action) => break Json(action).into_response(),
+                None => {
+                    recv.changed().await.ok();
+                }
             }
+        }
+    })
+    .await;
+    match res {
+        Ok(res) => res,
+        Err(_) => {
+            let mut res = Json(serde_json::Value::Null).into_response();
+            *res.status_mut() = StatusCode::NOT_FOUND;
+            res
         }
     }
 }
