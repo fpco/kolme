@@ -274,15 +274,9 @@ impl<App: KolmeApp> Kolme<App> {
         let actual_processor = signed_block.0.message.as_inner().processor;
         anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
 
-        let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
-        let ExecutionResults {
-            framework_state,
-            app_state,
-            logs,
-            loads,
-        } = self
+        let execution_results = self
             .read()
             .execute_transaction(
                 &block.tx,
@@ -293,9 +287,26 @@ impl<App: KolmeApp> Kolme<App> {
                 },
             )
             .await?;
+        anyhow::ensure!(execution_results.loads == block.loads);
 
-        anyhow::ensure!(loads == block.loads);
+        self.add_executed_block(signed_block, execution_results)
+            .await
+    }
 
+    /// Add a block that has already been executed.
+    ///
+    /// This is an optimization to allow the processor to not need to
+    /// immediately revalidate executions is performed.
+    pub(crate) async fn add_executed_block(
+        &self,
+        signed_block: Arc<SignedBlock<App::Message>>,
+        ExecutionResults {
+            framework_state,
+            app_state,
+            logs,
+            loads: _,
+        }: ExecutionResults<App>,
+    ) -> Result<()> {
         let framework_state = Arc::new(framework_state);
         let app_state = Arc::new(app_state);
         let logs: Arc<[_]> = logs.into();
@@ -316,7 +327,7 @@ impl<App: KolmeApp> Kolme<App> {
             )
             .await?;
 
-        self.inner.mempool.drop_tx(txhash);
+        self.inner.mempool.drop_tx(signed_block.tx().hash());
 
         // Now do the write lock
         let mut guard = self.inner.current_block.write();
