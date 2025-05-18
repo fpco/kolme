@@ -34,10 +34,22 @@ pub struct ExecutionResults<App: KolmeApp> {
     pub loads: Vec<BlockDataLoad>,
 }
 
+/// Specifies how block data should be handled during transaction execution.
+/// 
+/// - `NoPriorData`: Indicates that no prior block data is available or required.
+/// - `PriorData`: Indicates that prior block data is available and should be used.
+///   This variant includes additional fields for managing data loads and validation.
 pub enum BlockDataHandling {
+    /// No prior block data is available or required for this transaction.
     NoPriorData,
+    /// Prior block data is available and should be used during execution.
+    /// 
+    /// - `loads`: A queue of data loads that were retrieved from prior blocks.
+    /// - `validation`: Specifies the validation rules to apply to the loaded data.
     PriorData {
+        /// A queue of data loads retrieved from prior blocks.
         loads: VecDeque<BlockDataLoad>,
+        /// Validation rules to ensure the correctness of the loaded data.
         validation: DataLoadValidation,
     },
 }
