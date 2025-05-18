@@ -1500,6 +1500,20 @@ pub enum LogBridgeEvent {
     },
 }
 
+/// Whether we validate data loads during block processing.
+///
+/// Default: [DataLoadValidation::ValidateDataLoads].
+#[derive(Default, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+pub enum DataLoadValidation {
+    /// Validate that data loaded during a block is accurate.
+    ///
+    /// This may involve additional I/O, such as making HTTP requests.
+    #[default]
+    ValidateDataLoads,
+    /// Trust that the loaded data is accurate.
+    TrustDataLoads,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

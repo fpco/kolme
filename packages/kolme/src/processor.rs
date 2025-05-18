@@ -173,7 +173,9 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             logs,
             loads,
-        } = kolme.execute_transaction(&tx, now, None).await?;
+        } = kolme
+            .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
+            .await?;
 
         let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
         let app_state = kolme.get_merkle_manager().serialize(&app_state)?.hash;
