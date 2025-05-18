@@ -252,6 +252,15 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+        self.add_block_with(signed_block, DataLoadValidation::ValidateDataLoads)
+            .await
+    }
+
+    pub(crate) async fn add_block_with(
+        &self,
+        signed_block: Arc<SignedBlock<App::Message>>,
+        data_load_validation: DataLoadValidation,
+    ) -> Result<()> {
         // Make sure we're at the right height for this and the correct processor is signing this.
         let kolme = self.read();
         if kolme.get_next_height() != signed_block.height() {
@@ -278,7 +287,10 @@ impl<App: KolmeApp> Kolme<App> {
             .execute_transaction(
                 &block.tx,
                 block.timestamp,
-                Some(signed_block.0.message.as_inner().loads.clone()),
+                BlockDataHandling::PriorData {
+                    loads: signed_block.0.message.as_inner().loads.clone().into(),
+                    validation: data_load_validation,
+                },
             )
             .await?;
 

@@ -9,8 +9,7 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     app_state: App::State,
     logs: Vec<Vec<String>>,
     loads: Vec<BlockDataLoad>,
-    /// If we're doing a validation run, these are the prior data loads.
-    validation_data_loads: Option<VecDeque<BlockDataLoad>>,
+    block_data_handling: BlockDataHandling,
     /// Who signed the transaction
     pubkey: PublicKey,
     /// ID of the account that signed the transaction
@@ -33,6 +32,14 @@ pub struct ExecutionResults<App: KolmeApp> {
     /// Logs collected from each message.
     pub logs: Vec<Vec<String>>,
     pub loads: Vec<BlockDataLoad>,
+}
+
+pub enum BlockDataHandling {
+    NoPriorData,
+    PriorData {
+        loads: VecDeque<BlockDataLoad>,
+        validation: DataLoadValidation,
+    },
 }
 
 impl<App: KolmeApp> KolmeRead<App> {
@@ -58,7 +65,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         &self,
         signed_tx: &SignedTransaction<App::Message>,
         timestamp: Timestamp,
-        validation_data_loads: Option<Vec<BlockDataLoad>>,
+        block_data_handling: BlockDataHandling,
     ) -> Result<ExecutionResults<App>> {
         self.validate_tx(signed_tx).await?;
         let tx = signed_tx.0.message.as_inner();
@@ -69,7 +76,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         let mut execution_context = ExecutionContext::<App> {
             framework_state,
             app_state: self.get_app_state().clone(),
-            validation_data_loads: validation_data_loads.map(Into::into),
+            block_data_handling,
             pubkey: tx.pubkey,
             sender: sender_account_id,
             app: self.get_app(),
@@ -88,7 +95,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         let ExecutionContext {
             framework_state,
             app_state,
-            validation_data_loads,
+            block_data_handling,
             pubkey: _,
             sender: _,
             app: _,
@@ -98,10 +105,16 @@ impl<App: KolmeApp> KolmeRead<App> {
             loads,
         } = execution_context;
 
-        if let Some(loads) = validation_data_loads {
-            // For a proper validation, every piece of data loaded during execution
-            // must be used during validation.
-            anyhow::ensure!(loads.is_empty());
+        match block_data_handling {
+            BlockDataHandling::NoPriorData => (),
+            BlockDataHandling::PriorData {
+                loads,
+                validation: _,
+            } => {
+                // For a proper validation, every piece of data loaded during execution
+                // must be used during validation.
+                anyhow::ensure!(loads.is_empty());
+            }
         }
 
         Ok(ExecutionResults {
@@ -538,19 +551,24 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         req: Req,
     ) -> Result<Req::Response> {
         let request_str = serde_json::to_string(&req)?;
-        let res = match self.validation_data_loads.as_mut() {
-            Some(loads) => {
+        let res = match &mut self.block_data_handling {
+            BlockDataHandling::PriorData { loads, validation } => {
                 let BlockDataLoad { request, response } = loads
                     .pop_front()
                     .context("Incorrect number of data loads")?;
                 let prev_req = serde_json::from_str::<Req>(&request)?;
                 let prev_res = serde_json::from_str(&response)?;
                 anyhow::ensure!(prev_req == req);
-                req.validate(self.app, &prev_res).await?;
+                match validation {
+                    DataLoadValidation::ValidateDataLoads => {
+                        req.validate(self.app, &prev_res).await?;
+                    }
+                    DataLoadValidation::TrustDataLoads => (),
+                }
 
                 prev_res
             }
-            None => req.load(self.app).await?,
+            BlockDataHandling::NoPriorData => req.load(self.app).await?,
         };
         self.loads.push(BlockDataLoad {
             request: request_str,

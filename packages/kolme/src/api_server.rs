@@ -79,7 +79,7 @@ async fn broadcast<App: KolmeApp>(
     let txhash = tx.0.message_hash();
     if let Err(e) = kolme
         .read()
-        .execute_transaction(&tx, Timestamp::now(), None)
+        .execute_transaction(&tx, Timestamp::now(), BlockDataHandling::NoPriorData)
         .await
     {
         let mut res = e.to_string().into_response();
