@@ -27,8 +27,6 @@ pub struct Gossip<App: KolmeApp> {
     swarm: Mutex<Swarm<KolmeBehaviour<App::Message>>>,
     gossip_topic: IdentTopic,
     sync_mode: SyncMode,
-    // FIXME resolve this when we implement data load validation logic
-    #[allow(dead_code)]
     data_load_validation: DataLoadValidation,
     local_peer_id: PeerId,
     // human-readable name for an instance
@@ -77,20 +75,6 @@ pub enum SyncMode {
     StateTransferForUpgrade,
     /// Always do block sync, verifying each new block
     BlockTransfer,
-}
-
-/// Whether we validate data loads during block processing.
-///
-/// Default: [DataLoadValidation::ValidateDataLoads].
-#[derive(Default)]
-pub enum DataLoadValidation {
-    /// Validate that data loaded during a block is accurate.
-    ///
-    /// This may involve additional I/O, such as making HTTP requests.
-    #[default]
-    ValidateDataLoads,
-    /// Trust that the loaded data is accurate.
-    TrustDataLoads,
 }
 
 impl GossipBuilder {
@@ -721,7 +705,11 @@ impl<App: KolmeApp> Gossip<App> {
 
     async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
         if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
-            if let Err(e) = self.kolme.add_block(block).await {
+            if let Err(e) = self
+                .kolme
+                .add_block_with(block, self.data_load_validation)
+                .await
+            {
                 tracing::warn!(
                     "{}: Unable to add block to chain: {e}",
                     self.local_display_name
