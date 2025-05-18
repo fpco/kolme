@@ -1,9 +1,17 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, LazyLock},
+};
 
 use anyhow::Result;
 
 use kolme::{testtasks::TestTasks, *};
 use tokio::time::{timeout, Duration};
+
+// We only want one copy of this test running at a time
+// to avoid mDNS Gossip confusion
+static P2P_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
@@ -99,6 +107,7 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn sanity() {
+    let _guard = P2P_TEST_LOCK.lock().await;
     init_logger(true, None);
     TestTasks::start(sanity_inner, ()).await;
 }
@@ -182,6 +191,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
 
 #[tokio::test]
 async fn fast_sync() {
+    let _guard = P2P_TEST_LOCK.lock().await;
     init_logger(true, None);
     TestTasks::start(fast_sync_inner, ()).await
 }

@@ -1,9 +1,10 @@
-use std::{collections::BTreeMap, path::PathBuf, str::FromStr};
+use std::{collections::BTreeMap, str::FromStr};
 
 use cosmos::{
-    proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
+    proto::cosmos::bank::v1beta1::MsgSend, CodeId, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
     SeedPhrase, TxBuilder,
 };
+use integration_tests::{prepare_local_contract, upload_contract};
 use kolme::*;
 use testtasks::TestTasks;
 
@@ -41,14 +42,21 @@ pub enum SampleMessage {
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 impl SampleKolmeApp {
-    fn new(listener: PublicKey, processor: PublicKey, approver: PublicKey) -> Self {
+    fn new(
+        code_id: CodeId,
+        listener: PublicKey,
+        processor: PublicKey,
+        approver: PublicKey,
+    ) -> Self {
         let mut chains = ConfiguredChains::default();
         chains
             .insert_cosmos(
                 CosmosChain::OsmosisLocal,
                 ChainConfig {
                     assets: BTreeMap::new(),
-                    bridge: BridgeContract::NeededCosmosBridge { code_id: 1 },
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: code_id.get_code_id(),
+                    },
                 },
             )
             .unwrap();
@@ -124,8 +132,10 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
     let processor = SecretKey::random(&mut rand::thread_rng());
     let listener = SecretKey::random(&mut rand::thread_rng());
     let approver = SecretKey::random(&mut rand::thread_rng());
+    let orig_code_id = prepare_local_contract(&submitter_wallet).await.unwrap();
     let kolme = Kolme::new(
         SampleKolmeApp::new(
+            orig_code_id.clone(),
             listener.public_key(),
             processor.public_key(),
             approver.public_key(),
@@ -165,16 +175,14 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
     };
     let contract = cosmos.make_contract(contract);
 
-    // Make sure we started with code ID 1
-    assert_eq!(contract.info().await.unwrap().code_id, 1);
+    // Make sure we started with the correct code ID
+    assert_eq!(
+        contract.info().await.unwrap().code_id,
+        orig_code_id.get_code_id()
+    );
 
     // Upload the contract again
-    let mut wasm_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    wasm_file.push("../../artifacts/kolme_cosmos_bridge.wasm");
-    let new_code_id = cosmos
-        .store_code_path(&submitter_wallet, &wasm_file)
-        .await
-        .unwrap();
+    let new_code_id = upload_contract(&cosmos, &submitter_wallet).await.unwrap();
 
     // Initiate a contract migration
     let block = kolme
