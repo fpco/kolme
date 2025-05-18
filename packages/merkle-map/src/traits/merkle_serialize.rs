@@ -10,6 +10,8 @@ use shared::{
 
 use jiff::Timestamp;
 
+use smallvec::{Array, SmallVec};
+
 use crate::*;
 
 impl MerkleSerialize for u8 {
@@ -232,6 +234,13 @@ impl MerkleSerialize for bool {
 impl MerkleSerialize for Timestamp {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_raw_bytes(&self.as_nanosecond().to_le_bytes());
+        Ok(())
+    }
+}
+
+impl<A: Array<Item: MerkleSerialize>> MerkleSerialize for SmallVec<A> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store(self.as_slice())?;
         Ok(())
     }
 }
