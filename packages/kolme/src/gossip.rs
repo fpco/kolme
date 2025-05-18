@@ -280,21 +280,18 @@ impl<App: KolmeApp> Gossip<App> {
         let mut subscription = self.kolme.subscribe();
         let mut swarm = self.swarm.lock().await;
 
-        let mut network_ready = self.watch_network_ready.subscribe();
-
         let (peers_with_blocks_tx, mut peers_with_blocks_rx) = tokio::sync::mpsc::channel(16);
 
         // Interval for broadcasting our block height
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.reset_immediately();
         let mut trigger_broadcast_height = self.trigger_broadcast_height.subscribe();
 
         let mut mempool_additions = self.kolme.subscribe_mempool_additions();
 
         loop {
             tokio::select! {
-                // When the network switches to ready, request everyone's block height.
-                _ = network_ready.changed() => self.request_block_heights(&mut swarm).await,
                 // Our local Kolme generated a notification to be sent through the
                 // rest of the p2p network
                 notification = subscription.recv() =>
@@ -307,6 +304,7 @@ impl<App: KolmeApp> Gossip<App> {
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
                 _ = interval.tick() => {
+                    self.request_block_heights(&mut swarm).await;
                     self.broadcast_latest_block(&mut swarm).await;
                     self.broadcast_mempool_entries(&mut swarm).await;
                 }
@@ -319,13 +317,21 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
-        // First thing to do: ask the network to tell us about their latest
-        // block heights.
-        if let Err(e) = GossipMessage::RequestBlockHeights(jiff::Timestamp::now())
+        if *self.watch_network_ready.borrow() {
+            // We already sent this request successfully, no need to repeat.
+            return;
+        }
+        match GossipMessage::RequestBlockHeights(jiff::Timestamp::now())
             .publish(self, swarm)
             .await
         {
-            tracing::error!("Unable to request block heights: {e:?}");
+            Ok(_) => {
+                tracing::info!("Successfully sent a block height request, p2p network is ready");
+                self.watch_network_ready.send(true).ok();
+            }
+            Err(e) => {
+                tracing::warn!("Unable to request block heights: {e:?}");
+            }
         }
     }
 
@@ -382,13 +388,6 @@ impl<App: KolmeApp> Gossip<App> {
         peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
     ) {
         match event {
-            SwarmEvent::ConnectionEstablished { .. } => {
-                self.watch_network_ready.send_if_modified(|value| {
-                    let ret = *value;
-                    *value = true;
-                    ret
-                });
-            }
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
