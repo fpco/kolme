@@ -34,6 +34,18 @@ pub struct ExecutionResults<App: KolmeApp> {
     pub loads: Vec<BlockDataLoad>,
 }
 
+/// An already executed block that can be added to storage.
+///
+/// This is used by the processor to avoid the need to execute a transaction twice
+/// during processing.
+pub struct ExecutedBlock<App: KolmeApp> {
+    pub signed_block: Arc<SignedBlock<App::Message>>,
+    pub framework_state: FrameworkState,
+    pub app_state: App::State,
+    /// Logs collected from each message.
+    pub logs: Vec<Vec<String>>,
+}
+
 /// Specifies how block data should be handled during transaction execution.
 ///
 /// - `NoPriorData`: Indicates that no prior block data is available or required.
