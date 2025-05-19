@@ -156,6 +156,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(GossipBuilder::new().build(kolme1).await.unwrap().run());
 
     // Launching a new Kolme with a new gossip set to BlockTransfer should fail
+    // at syncing blocks, since the source gossip doesn't have the early blocks
     let kolme_block_transfer = Kolme::new(
         SampleKolmeApp::default(),
         DUMMY_CODE_VERSION,
