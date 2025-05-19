@@ -6,6 +6,7 @@ use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
+use solana_client::nonblocking::pubsub_client::PubsubClient;
 use store::KolmeConstructLock;
 pub use store::KolmeStore;
 
@@ -44,6 +45,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     pub(super) app: App,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
+    pub(super) solana_endpoints: parking_lot::RwLock<SolanaEndpoints>,
     #[cfg(feature = "pass_through")]
     pub(super) pass_through_conn: OnceLock<reqwest::Client>,
     pub(super) merkle_manager: MerkleManager,
@@ -476,6 +478,7 @@ impl<App: KolmeApp> Kolme<App> {
             notify: tokio::sync::broadcast::channel(100).0,
             mempool: Mempool::new(),
             current_block: RwLock::new(Arc::new(current_block)),
+            solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
         };
 
         let kolme = Kolme {
@@ -612,6 +615,32 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Sets a Solana endpoint for regular (non-pubsub) connections.
+    ///
+    /// # Parameters
+    /// - `chain`: The Solana chain for which the endpoint is being set.
+    /// - `endpoint`: The URL of the Solana endpoint to use for regular connections.
+    ///
+    /// # Usage
+    /// Call this method to specify a custom Solana endpoint for regular connections.
+    /// If no custom endpoint is set, a default endpoint will be used.
+    pub fn set_solana_endpoint_regular(&self, chain: SolanaChain, endpoint: impl Into<Arc<str>>) {
+        self.inner
+            .solana_endpoints
+            .write()
+            .regular
+            .insert(chain, endpoint.into());
+    }
+
+    /// Set a Solana endpoint for pubsub connections.
+    pub fn set_solana_endpoint_pubsub(&self, chain: SolanaChain, endpoint: impl Into<Arc<str>>) {
+        self.inner
+            .solana_endpoints
+            .write()
+            .pubsub
+            .insert(chain, endpoint.into());
+    }
+
     pub async fn get_solana_client(&self, chain: SolanaChain) -> Arc<SolanaClient> {
         if let Some(client) = self.inner.solana_conns.read().await.get(&chain) {
             return client.clone();
@@ -621,12 +650,29 @@ impl<App: KolmeApp> Kolme<App> {
         match guard.get(&chain) {
             Some(client) => Arc::clone(client),
             None => {
-                let client = Arc::new(chain.make_client());
+                let client = Arc::new(
+                    self.inner
+                        .solana_endpoints
+                        .read()
+                        .get_regular_endpoint(chain)
+                        .make_client(),
+                );
                 guard.insert(chain, Arc::clone(&client));
 
                 client
             }
         }
+    }
+
+    pub async fn get_solana_pubsub_client(&self, chain: SolanaChain) -> Result<PubsubClient> {
+        // TODO do we need caching here?
+
+        let endpoint = self
+            .inner
+            .solana_endpoints
+            .read()
+            .get_pubsub_endpoint(chain);
+        endpoint.make_pubsub_client().await
     }
 
     #[cfg(feature = "pass_through")]

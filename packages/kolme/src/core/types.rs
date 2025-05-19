@@ -2,7 +2,7 @@ mod accounts;
 mod error;
 
 use crate::core::CoreStateError;
-use std::{fmt::Display, str::FromStr, sync::OnceLock};
+use std::{collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
 use shared::cosmos::PayloadWithId;
@@ -131,32 +131,63 @@ impl CosmosChain {
     }
 }
 
+#[derive(Default)]
+pub struct SolanaEndpoints {
+    pub regular: HashMap<SolanaChain, Arc<str>>,
+    pub pubsub: HashMap<SolanaChain, Arc<str>>,
+}
+
+pub enum SolanaClientEndpoint {
+    Static(&'static str),
+    Arc(Arc<str>),
+}
+
+impl SolanaEndpoints {
+    pub fn get_regular_endpoint(&self, chain: SolanaChain) -> SolanaClientEndpoint {
+        self.regular.get(&chain).map_or(
+            SolanaClientEndpoint::Static(match chain {
+                SolanaChain::Mainnet => "https://api.mainnet-beta.solana.com",
+                SolanaChain::Testnet => "https://api.testnet.solana.com",
+                SolanaChain::Devnet => "https://api.devnet.solana.com",
+                SolanaChain::Local => "http://localhost:8899",
+            }),
+            |s| SolanaClientEndpoint::Arc(s.clone()),
+        )
+    }
+
+    pub fn get_pubsub_endpoint(&self, chain: SolanaChain) -> SolanaClientEndpoint {
+        self.pubsub.get(&chain).map_or(
+            SolanaClientEndpoint::Static(match chain {
+                SolanaChain::Mainnet => "wss://api.mainnet-beta.solana.com",
+                SolanaChain::Testnet => "wss://api.testnet.solana.com",
+                SolanaChain::Devnet => "wss://api.devnet.solana.com/",
+                SolanaChain::Local => "ws://localhost:8900",
+            }),
+            |s| SolanaClientEndpoint::Arc(s.clone()),
+        )
+    }
+}
+
+impl SolanaClientEndpoint {
+    pub fn make_client(self) -> SolanaClient {
+        SolanaClient::new(match self {
+            SolanaClientEndpoint::Static(url) => url.to_owned(),
+            SolanaClientEndpoint::Arc(url) => (*url).to_owned(),
+        })
+    }
+
+    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
+        match self {
+            SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
+            SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
+        }
+        .map_err(anyhow::Error::from)
+    }
+}
+
 impl SolanaChain {
     pub const fn name() -> ChainName {
         ChainName::Solana
-    }
-
-    pub fn make_client(self) -> SolanaClient {
-        let url = match self {
-            Self::Mainnet => "https://api.mainnet-beta.solana.com",
-            Self::Testnet => "https://api.testnet.solana.com",
-            Self::Devnet => "https://api.devnet.solana.com",
-            Self::Local => "http://localhost:8899",
-        };
-
-        SolanaClient::new(url.into())
-    }
-
-    // TODO: We should have a way to configure those endpoints - the public ones are not suitable for production use.
-    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
-        let url = match self {
-            Self::Mainnet => "wss://api.mainnet-beta.solana.com",
-            Self::Testnet => "wss://api.testnet.solana.com",
-            Self::Devnet => "wss://api.devnet.solana.com/",
-            Self::Local => "ws://localhost:8900",
-        };
-
-        Ok(SolanaPubsubClient::new(url).await?)
     }
 }
 
