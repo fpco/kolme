@@ -87,7 +87,7 @@ pub async fn upload_contract(cosmos: &Cosmos, wallet: &Wallet) -> Result<CodeId>
 
     // Fun optimization: if we already uploaded, use it.
     // Since we expected queries to be cheap and a very small number of uploads,
-    // the linear serarch is worth it.
+    // the linear search is worth it.
     if let Ok(code_id) = find_code_id_by_hash(cosmos, hash).await {
         return Ok(code_id);
     }
