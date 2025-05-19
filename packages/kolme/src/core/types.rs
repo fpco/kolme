@@ -172,7 +172,7 @@ impl SolanaClientEndpoint {
     pub fn make_client(self) -> SolanaClient {
         SolanaClient::new(match self {
             SolanaClientEndpoint::Static(url) => url.to_owned(),
-            SolanaClientEndpoint::Arc(url) => (&*url).to_owned(),
+            SolanaClientEndpoint::Arc(url) => (*url).to_owned(),
         })
     }
 
