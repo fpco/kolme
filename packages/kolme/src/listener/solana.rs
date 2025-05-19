@@ -18,7 +18,7 @@ pub async fn listen<App: KolmeApp>(
 ) -> Result<()> {
     const PROGRAM_DATA_LOG: &str = "Program data: ";
 
-    let client = chain.make_pubsub_client().await?;
+    let client = kolme.get_solana_pubsub_client(chain).await?;
     let mut next_bridge_event_id =
         get_next_bridge_event_id(&kolme.read(), secret.public_key(), chain.into());
 
