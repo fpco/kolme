@@ -42,6 +42,13 @@ impl MerkleSerialize for u64 {
     }
 }
 
+impl MerkleSerialize for u128 {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_raw_bytes(&self.to_le_bytes());
+        Ok(())
+    }
+}
+
 impl MerkleSerialize for usize {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_usize(*self);

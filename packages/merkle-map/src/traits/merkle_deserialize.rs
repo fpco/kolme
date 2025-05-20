@@ -44,6 +44,14 @@ impl MerkleDeserialize for u64 {
     }
 }
 
+impl MerkleDeserialize for u128 {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load_array().map(u128::from_le_bytes)
+    }
+}
+
 impl MerkleDeserialize for usize {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,

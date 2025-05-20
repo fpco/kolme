@@ -225,7 +225,7 @@ impl ValidatorSet {
         if listeners == 0 {
             return Err(ValidatorSetError::NoListeners);
         }
-        if listeners < self.needed_listeners {
+        if listeners < self.needed_listeners || self.needed_listeners == 0 {
             return Err(ValidatorSetError::InvalidNeededListeners {
                 provided: listeners,
                 needed: self.needed_listeners,
@@ -234,7 +234,7 @@ impl ValidatorSet {
         if approvers == 0 {
             return Err(ValidatorSetError::NoApprovers);
         }
-        if approvers < self.needed_approvers {
+        if approvers < self.needed_approvers || self.needed_approvers == 0 {
             return Err(ValidatorSetError::InvalidNeededApprovers {
                 provided: approvers,
                 needed: self.needed_approvers,

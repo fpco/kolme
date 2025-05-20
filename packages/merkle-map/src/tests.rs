@@ -802,6 +802,7 @@ serializing_idempotency_for_type!(usize, serializing_is_idempotent_for_usize);
 serializing_idempotency_for_type!(u8, serializing_is_idempotent_for_u8);
 serializing_idempotency_for_type!(u32, serializing_is_idempotent_for_u32);
 serializing_idempotency_for_type!(u64, serializing_is_idempotent_for_u64);
+serializing_idempotency_for_type!(u128, serializing_is_idempotent_for_u128);
 
 quickcheck! {
     fn serializing_is_idempotent_for_btreemap_string_u64(value: BTreeMap<String, u64>) -> quickcheck::TestResult {
