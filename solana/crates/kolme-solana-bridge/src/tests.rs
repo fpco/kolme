@@ -1,38 +1,39 @@
-use std::ops::Deref;
+use std::{collections::BTreeSet, ops::Deref};
 
-use litesvm::{LiteSVM, types::TransactionResult};
+use base64::Engine;
+use borsh::BorshSerialize;
+use k256::{ecdsa, elliptic_curve::rand_core::OsRng};
+use litesvm::{types::TransactionResult, LiteSVM};
 use litesvm_token::{
-    spl_token::state::Account as SplAccount,
-    CreateMint, MintTo, CreateAssociatedTokenAccount,
-    get_spl_account
+    get_spl_account, spl_token::state::Account as SplAccount, CreateAssociatedTokenAccount,
+    CreateMint, MintTo,
 };
+use sha_256::Sha256;
 use solana_instruction::{account_meta::AccountMeta, error::InstructionError, Instruction};
-use solana_transaction_error::TransactionError;
 use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+use solana_transaction_error::TransactionError;
 use spl_associated_token_account_client as spl_client;
-use borsh::BorshSerialize;
-use k256::{ecdsa, elliptic_curve::rand_core::OsRng};
-use sha_256::Sha256;
-use base64::Engine;
 
 use kolme_solana_bridge_client::{
-    InitializeIxData, RegularMsgIxData, SignedMsgIxData, Payload,
-    Secp256k1Signature, Secp256k1PubkeyCompressed, Signature,
-    transfer_payload, TokenProgram, INITIALIZE_IX, REGULAR_IX, SIGNED_IX
+    transfer_payload, ExecuteAction, InitializeIxData, Payload, RegularMsgIxData,
+    Secp256k1PubkeyCompressed, Secp256k1Signature, Signature, SignedAction, SignedMsgIxData,
+    TokenProgram, ValidatorSet, INITIALIZE_IX, REGULAR_IX, SIGNED_IX,
 };
 
 use crate::{SignedIxError, TOKEN_HOLDER_SEED};
 
-const KEYS_LEN: usize = 5;
+const KEYS_LEN: usize = 7;
 const PROCESSOR_KEY: usize = 0;
-const EXECUTOR1_KEY: usize = 1;
-const EXECUTOR2_KEY: usize = 2;
-const EXECUTOR3_KEY: usize = 3;
-const EXECUTOR4_KEY: usize = 4;
+const APPROVER1_KEY: usize = 1;
+const APPROVER2_KEY: usize = 2;
+const APPROVER3_KEY: usize = 3;
+const APPROVER4_KEY: usize = 4;
+const LISTENER1_KEY: usize = 5;
+const LISTENER2_KEY: usize = 6;
 
 const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
 const TOKEN: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -50,14 +51,15 @@ impl Program {
         let mut svm = LiteSVM::new().with_spl_programs();
 
         let program_id: Pubkey = crate::ID.into();
-        svm.add_program_from_file(program_id, "../../target/deploy/kolme_solana_bridge.so").unwrap();
+        svm.add_program_from_file(program_id, "../../target/deploy/kolme_solana_bridge.so")
+            .unwrap();
 
         let keys = unsafe {
             let mut keys = Box::<[ecdsa::SigningKey; KEYS_LEN]>::new_uninit();
             let mut rng = OsRng;
 
             for i in 0..KEYS_LEN {
-                (&mut *keys.as_mut_ptr()).as_mut_slice()[i] = ecdsa::SigningKey::random(&mut rng);
+                (*keys.as_mut_ptr()).as_mut_slice()[i] = ecdsa::SigningKey::random(&mut rng);
             }
 
             keys.assume_init()
@@ -68,25 +70,62 @@ impl Program {
 
         let token = CreateMint::new(&mut svm, &token_owner).send().unwrap();
 
-        Self { svm, keys, token, token_owner }
+        Self {
+            svm,
+            keys,
+            token,
+            token_owner,
+        }
     }
 
+    #[allow(clippy::result_large_err)]
     fn init_default(&mut self, sender: &Keypair) -> TransactionResult {
-        let mut executors = Vec::with_capacity(KEYS_LEN - 1);
+        let mut approvers = BTreeSet::new();
+        let mut listeners = BTreeSet::new();
 
-        for i in 1..KEYS_LEN {
-            executors.push(Secp256k1PubkeyCompressed(self.keys[i].verifying_key().to_sec1_bytes().deref().try_into().unwrap()));
+        for i in APPROVER1_KEY..=APPROVER4_KEY {
+            approvers.insert(Secp256k1PubkeyCompressed(
+                self.keys[i]
+                    .verifying_key()
+                    .to_sec1_bytes()
+                    .deref()
+                    .try_into()
+                    .unwrap(),
+            ));
+        }
+
+        for i in LISTENER1_KEY..=LISTENER2_KEY {
+            listeners.insert(Secp256k1PubkeyCompressed(
+                self.keys[i]
+                    .verifying_key()
+                    .to_sec1_bytes()
+                    .deref()
+                    .try_into()
+                    .unwrap(),
+            ));
         }
 
         let data = InitializeIxData {
-            needed_executors: ((KEYS_LEN - 1) / 2) as u8,
-            processor: Secp256k1PubkeyCompressed(self.keys[PROCESSOR_KEY].verifying_key().to_sec1_bytes().deref().try_into().unwrap()),
-            executors
+            set: ValidatorSet {
+                processor: Secp256k1PubkeyCompressed(
+                    self.keys[PROCESSOR_KEY]
+                        .verifying_key()
+                        .to_sec1_bytes()
+                        .deref()
+                        .try_into()
+                        .unwrap(),
+                ),
+                approvers,
+                listeners,
+                needed_approvers: 2,
+                needed_listeners: 1,
+            },
         };
 
         self.init(sender, &data)
     }
 
+    #[allow(clippy::result_large_err)]
     fn init(&mut self, sender: &Keypair, data: &InitializeIxData) -> TransactionResult {
         let mut bytes = Vec::with_capacity(1 + borsh::object_length(data).unwrap());
         bytes.push(INITIALIZE_IX);
@@ -95,22 +134,31 @@ impl Program {
         let accounts = vec![
             AccountMeta::new(sender.pubkey(), true),
             AccountMeta::new(SYSTEM, false),
-            AccountMeta::new(STATE_PDA, false)
+            AccountMeta::new(STATE_PDA, false),
         ];
         let tx = self.make_tx(sender, accounts, bytes);
 
         self.svm.send_transaction(tx)
     }
 
-    fn regular(&mut self, sender: &Keypair, data: &RegularMsgIxData, token_mints: &[Pubkey]) -> TransactionResult {
+    #[allow(clippy::result_large_err)]
+    fn regular(
+        &mut self,
+        sender: &Keypair,
+        data: &RegularMsgIxData,
+        token_mints: &[Pubkey],
+    ) -> TransactionResult {
         assert_eq!(data.transfer_amounts.len(), token_mints.len());
 
         let mut bytes = Vec::with_capacity(1 + borsh::object_length(data).unwrap());
         bytes.push(REGULAR_IX);
         data.serialize(&mut bytes).unwrap();
 
-        let accounts = if token_mints.len() == 0 {
-            vec![AccountMeta::new(sender.pubkey(), true)]
+        let accounts = if token_mints.is_empty() {
+            vec![
+                AccountMeta::new(sender.pubkey(), true),
+                AccountMeta::new(STATE_PDA, false)
+            ]
         } else {
             let mut accounts = Vec::with_capacity(4 + token_mints.len() * 4);
             accounts.push(AccountMeta::new(sender.pubkey(), true));
@@ -123,7 +171,8 @@ impl Program {
             for mint in token_mints {
                 accounts.push(AccountMeta::new_readonly(*mint, false));
 
-                let sender_ata = spl_client::address::get_associated_token_address(&sender_pk, mint);
+                let sender_ata =
+                    spl_client::address::get_associated_token_address(&sender_pk, mint);
                 accounts.push(AccountMeta::new(sender_ata, false));
 
                 let holder = token_holder_acc(mint, &sender_pk);
@@ -133,7 +182,10 @@ impl Program {
                 accounts.push(AccountMeta::new(holder_ata, false));
 
                 if self.svm.get_account(&holder).is_none() {
-                    CreateAssociatedTokenAccount::new(&mut self.svm, sender, mint).owner(&holder).send().unwrap();
+                    CreateAssociatedTokenAccount::new(&mut self.svm, sender, mint)
+                        .owner(&holder)
+                        .send()
+                        .unwrap();
                 }
             }
 
@@ -150,14 +202,21 @@ impl Program {
         res
     }
 
-    fn signed(&mut self, sender: &Keypair, data: &SignedMsgIxData, additional: &[AccountMeta]) -> TransactionResult {
+    #[allow(clippy::result_large_err)]
+    fn signed(
+        &mut self,
+        sender: &Keypair,
+        data: &SignedMsgIxData,
+        additional: &[AccountMeta],
+    ) -> TransactionResult {
         let mut bytes = Vec::with_capacity(1 + borsh::object_length(data).unwrap());
         bytes.push(SIGNED_IX);
         data.serialize(&mut bytes).unwrap();
 
         let mut accounts = vec![
             AccountMeta::new(sender.pubkey(), true),
-            AccountMeta::new(STATE_PDA, false)
+            AccountMeta::new(STATE_PDA, false),
+            AccountMeta::new(SYSTEM, false),
         ];
 
         accounts.extend_from_slice(additional);
@@ -178,7 +237,7 @@ impl Program {
             &[Instruction {
                 program_id: crate::ID.into(),
                 accounts,
-                data
+                data,
             }],
             Some(&sender.pubkey()),
             &blockhash,
@@ -187,7 +246,11 @@ impl Program {
         Transaction::new(&[sender], msg, blockhash)
     }
 
-    fn make_signed_msg(&self, payload: &Payload, executor_indices: &[usize]) -> (SignedMsgIxData, Vec<AccountMeta>) {
+    fn make_signed_msg(
+        &self,
+        payload: &Payload,
+        executor_indices: &[usize],
+    ) -> (SignedMsgIxData, Vec<AccountMeta>) {
         let mut bytes = Vec::with_capacity(borsh::object_length(payload).unwrap());
         payload.serialize(&mut bytes).unwrap();
 
@@ -196,15 +259,17 @@ impl Program {
         let mut sha256 = Sha256::new();
         let hash = sha256.digest(bytes.as_bytes());
 
-        let (sig, rec) = self.keys[PROCESSOR_KEY].sign_prehash_recoverable(&hash).unwrap();
+        let (sig, rec) = self.keys[PROCESSOR_KEY]
+            .sign_prehash_recoverable(&hash)
+            .unwrap();
         assert!(sig.normalize_s().is_none());
 
         let processor = Signature {
             signature: Secp256k1Signature(sig.to_bytes().into()),
-            recovery_id: rec.to_byte()
+            recovery_id: rec.to_byte(),
         };
 
-        let mut executors = Vec::with_capacity(executor_indices.len());
+        let mut approvers = Vec::with_capacity(executor_indices.len());
 
         for i in executor_indices {
             let i = *i;
@@ -215,53 +280,70 @@ impl Program {
 
             let signature = Signature {
                 signature: Secp256k1Signature(sig.to_bytes().into()),
-                recovery_id: rec.to_byte()
+                recovery_id: rec.to_byte(),
             };
 
-            executors.push(signature);
+            approvers.push(signature);
         }
 
         let data = SignedMsgIxData {
             processor,
-            executors,
-            payload: bytes
+            approvers,
+            payload: bytes,
         };
 
-        let mut metas: Vec<AccountMeta> = Vec::with_capacity(1 + payload.accounts.len());
-        metas.push(
-            AccountMeta {
-                pubkey: Pubkey::new_from_array(payload.program_id),
+        let metas = if let SignedAction::Execute(action) = &payload.action {
+            let mut metas: Vec<AccountMeta> = Vec::with_capacity(1 + action.accounts.len());
+            metas.push(AccountMeta {
+                pubkey: Pubkey::new_from_array(action.program_id),
                 is_writable: true,
                 is_signer: false,
-            }
-        );
+            });
 
-        metas.extend(payload.accounts.iter().map(|x|
-            AccountMeta {
+            metas.extend(action.accounts.iter().map(|x| AccountMeta {
                 pubkey: Pubkey::new_from_array(x.pubkey),
                 is_writable: x.is_writable,
                 is_signer: false,
-            }
-        ));
+            }));
+
+            metas
+        } else {
+            vec![]
+        };
 
         (data, metas)
     }
 
     fn mint(&mut self, to: &Pubkey, amount: u64) {
-        MintTo::new(&mut self.svm, &self.token_owner, &self.token, to, amount).send().unwrap()
+        MintTo::new(&mut self.svm, &self.token_owner, &self.token, to, amount)
+            .send()
+            .unwrap()
     }
 
     fn make_ata(&mut self, acc: &Keypair) -> Pubkey {
-        CreateAssociatedTokenAccount::new(&mut self.svm, acc, &self.token).send().unwrap()
+        CreateAssociatedTokenAccount::new(&mut self.svm, acc, &self.token)
+            .send()
+            .unwrap()
     }
 
     fn transfer_payload(&self, id: u64, to: Pubkey, amount: u64) -> Payload {
-        transfer_payload(id, crate::ID.into(), TokenProgram::Legacy, self.token, to, amount)
+        transfer_payload(
+            id,
+            crate::ID.into(),
+            TokenProgram::Legacy,
+            self.token,
+            to,
+            amount,
+        )
     }
 }
 
 fn token_holder_acc(mint: &Pubkey, sender: &Pubkey) -> Pubkey {
-    let seeds = &[TOKEN_HOLDER_SEED, mint.as_array().as_slice(), sender.as_array().as_slice()];
+    let seeds = &[
+        TOKEN_HOLDER_SEED,
+        mint.as_array().as_slice(),
+        sender.as_array().as_slice(),
+    ];
     let (holder, _) = Pubkey::find_program_address(seeds, &crate::ID.into());
 
     holder
@@ -276,16 +358,21 @@ fn must_init_first() {
 
     let payload = Payload {
         id: 0,
-        program_id: TOKEN.to_bytes(),
-        accounts: vec![],
-        instruction_data: vec![],
-        signer: None
+        action: SignedAction::Execute(ExecuteAction {
+            program_id: TOKEN.to_bytes(),
+            accounts: vec![],
+            instruction_data: vec![],
+            signer: None,
+        }),
     };
 
-    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let (data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER3_KEY]);
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::UninitializedAccount));
+    assert_eq!(
+        meta.err,
+        TransactionError::InstructionError(0, InstructionError::UninitializedAccount)
+    );
 }
 
 #[test]
@@ -310,7 +397,7 @@ fn sending_funds_works() {
 
     let data = RegularMsgIxData {
         keys: vec![],
-        transfer_amounts: vec![transfer_amount]
+        transfer_amounts: vec![transfer_amount],
     };
 
     p.regular(&sender, &data, &[p.token]).unwrap();
@@ -347,16 +434,36 @@ fn signing_multiple_tokens_work() {
 
     let mint_amount = 10_00000000; // 10
 
-    let sender_ata_acc_1 = CreateAssociatedTokenAccount::new(&mut p.svm, &sender, &p.token).send().unwrap();
-    let sender_ata_acc_2 = CreateAssociatedTokenAccount::new(&mut p.svm, &sender, &token_2).send().unwrap();
+    let sender_ata_acc_1 = CreateAssociatedTokenAccount::new(&mut p.svm, &sender, &p.token)
+        .send()
+        .unwrap();
+    let sender_ata_acc_2 = CreateAssociatedTokenAccount::new(&mut p.svm, &sender, &token_2)
+        .send()
+        .unwrap();
 
-    MintTo::new(&mut p.svm, &p.token_owner, &p.token, &sender_ata_acc_1, mint_amount).send().unwrap();
-    MintTo::new(&mut p.svm, &token_owner, &token_2, &sender_ata_acc_2, mint_amount).send().unwrap();
+    MintTo::new(
+        &mut p.svm,
+        &p.token_owner,
+        &p.token,
+        &sender_ata_acc_1,
+        mint_amount,
+    )
+    .send()
+    .unwrap();
+    MintTo::new(
+        &mut p.svm,
+        &token_owner,
+        &token_2,
+        &sender_ata_acc_2,
+        mint_amount,
+    )
+    .send()
+    .unwrap();
 
     let transfer_amounts = &[mint_amount, mint_amount / 2];
     let data = RegularMsgIxData {
         keys: vec![],
-        transfer_amounts: transfer_amounts.into()
+        transfer_amounts: transfer_amounts.into(),
     };
 
     p.regular(&sender, &data, &[p.token, token_2]).unwrap();
@@ -370,7 +477,6 @@ fn signing_multiple_tokens_work() {
         assert_eq!(holder_ata.owner, holder_acc);
         assert_eq!(holder_ata.amount, transfer_amounts[i]);
     }
-
 }
 
 #[test]
@@ -382,13 +488,16 @@ fn signing_works() {
     p.init_default(&sender).unwrap();
 
     let payload = p.transfer_payload(0, sender.pubkey(), 100);
-    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let (data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER3_KEY]);
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
 
     // This error occurs on the SPL program invocation because we didn't provide
     // the relevant accounts to it which means that signature checks have passed.
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::InvalidAccountData));
+    assert_eq!(
+        meta.err,
+        TransactionError::InstructionError(0, InstructionError::InvalidAccountData)
+    );
 }
 
 #[test]
@@ -410,7 +519,7 @@ fn signed_transfer() {
 
     let data = RegularMsgIxData {
         keys: vec![],
-        transfer_amounts: vec![transfer_amount]
+        transfer_amounts: vec![transfer_amount],
     };
 
     p.regular(&sender, &data, &[p.token]).unwrap();
@@ -419,7 +528,7 @@ fn signed_transfer() {
     assert_eq!(holder_ata.amount, transfer_amount);
 
     let payload = p.transfer_payload(0, sender.pubkey(), transfer_amount);
-    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let (data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER3_KEY]);
 
     p.signed(&sender, &data, &metas).unwrap();
 
@@ -440,10 +549,16 @@ fn insufficient_signatures_are_rejected() {
     p.init_default(&sender).unwrap();
 
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
-    let (data, metas) = p.make_signed_msg(&payload, &[EXECUTOR2_KEY]);
+    let (data, metas) = p.make_signed_msg(&payload, &[APPROVER2_KEY]);
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::InsufficientSignatures as u32)));
+    assert_eq!(
+        meta.err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SignedIxError::InsufficientSignatures as u32)
+        )
+    );
 }
 
 #[test]
@@ -456,7 +571,7 @@ fn false_processor_signature_is_rejected() {
     p.init_default(&sender).unwrap();
 
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
-    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER3_KEY]);
 
     let mut rng = OsRng;
     let fake_key = ecdsa::SigningKey::random(&mut rng);
@@ -470,22 +585,34 @@ fn false_processor_signature_is_rejected() {
     let (sig, rec) = fake_key.sign_prehash_recoverable(&hash).unwrap();
     data.processor = Signature {
         signature: Secp256k1Signature(sig.to_bytes().into()),
-        recovery_id: rec.to_byte()
+        recovery_id: rec.to_byte(),
     };
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::ProcessorKeyMismatch as u32)));
+    assert_eq!(
+        meta.err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SignedIxError::ProcessorKeyMismatch as u32)
+        )
+    );
 
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
-    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER3_KEY]);
 
     let other_payload = p.transfer_payload(1, sender.pubkey(), 1000);
-    let (other_data, _) = p.make_signed_msg(&other_payload, &[EXECUTOR1_KEY, EXECUTOR3_KEY]);
+    let (other_data, _) = p.make_signed_msg(&other_payload, &[APPROVER1_KEY, APPROVER3_KEY]);
 
     data.processor = other_data.processor;
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::ProcessorKeyMismatch as u32)));
+    assert_eq!(
+        meta.err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SignedIxError::ProcessorKeyMismatch as u32)
+        )
+    );
 }
 
 #[test]
@@ -498,7 +625,7 @@ fn false_executor_signature_is_rejected() {
     p.init_default(&sender).unwrap();
 
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
-    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER4_KEY]);
 
     let mut rng = OsRng;
     let fake_key = ecdsa::SigningKey::random(&mut rng);
@@ -510,29 +637,46 @@ fn false_executor_signature_is_rejected() {
     let hash = sha256.digest(&bytes);
 
     let (sig, rec) = fake_key.sign_prehash_recoverable(&hash).unwrap();
-    data.executors[1] = Signature {
+    data.approvers[1] = Signature {
         signature: Secp256k1Signature(sig.to_bytes().into()),
-        recovery_id: rec.to_byte()
+        recovery_id: rec.to_byte(),
     };
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::NonExecutorKey as u32)));
+    assert_eq!(
+        meta.err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SignedIxError::InsufficientSignatures as u32)
+        )
+    );
 
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
-    let (mut data, metas) = p.make_signed_msg(&payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
+    let (mut data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER4_KEY]);
 
     let other_payload = p.transfer_payload(1, sender.pubkey(), 1000);
-    let (mut other_data, _) = p.make_signed_msg(&other_payload, &[EXECUTOR1_KEY, EXECUTOR4_KEY]);
+    let (mut other_data, _) = p.make_signed_msg(&other_payload, &[APPROVER1_KEY, APPROVER4_KEY]);
 
-    data.executors[1] = other_data.executors.pop().unwrap();
+    data.approvers[1] = other_data.approvers.pop().unwrap();
 
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
-    assert_eq!(meta.err, TransactionError::InstructionError(0, InstructionError::Custom(SignedIxError::NonExecutorKey as u32)));
+    assert_eq!(
+        meta.err,
+        TransactionError::InstructionError(
+            0,
+            InstructionError::Custom(SignedIxError::InsufficientSignatures as u32)
+        )
+    );
 }
 
 #[test]
 fn secp256k1_is_normalized() {
-    let sig = Secp256k1Signature([227, 15, 46, 106, 15, 112, 95, 79, 181, 248, 80, 27, 167, 156, 124, 13, 63, 172, 132, 127, 26, 215, 11, 135, 62, 151, 151, 177, 123, 137, 179, 144, 129, 241, 164, 69, 117, 137, 243, 13, 118, 171, 159, 137, 231, 72, 166, 140, 138, 148, 195, 15, 224, 186, 200, 251, 92, 11, 84, 234, 112, 191, 109, 47]);
+    let sig = Secp256k1Signature([
+        227, 15, 46, 106, 15, 112, 95, 79, 181, 248, 80, 27, 167, 156, 124, 13, 63, 172, 132, 127,
+        26, 215, 11, 135, 62, 151, 151, 177, 123, 137, 179, 144, 129, 241, 164, 69, 117, 137, 243,
+        13, 118, 171, 159, 137, 231, 72, 166, 140, 138, 148, 195, 15, 224, 186, 200, 251, 92, 11,
+        84, 234, 112, 191, 109, 47,
+    ]);
     assert!(!sig.is_normalized());
 
     // let mut rng = OsRng;

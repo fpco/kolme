@@ -9,8 +9,8 @@ use solana_transaction::Transaction;
 use spl_associated_token_account_client as spl_client;
 
 use crate::{
-    InitializeIxData, InstructionAccount, Payload, RegularMsgIxData, SignedMsgIxData,
-    SignerAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
+    ExecuteAction, InitializeIxData, InstructionAccount, Payload, RegularMsgIxData, SignedAction,
+    SignedMsgIxData, SignerAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
 };
 
 const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
@@ -89,6 +89,7 @@ pub fn signed_ix(
     let mut accounts = vec![
         AccountMeta::new(sender, true),
         AccountMeta::new(state_pda, false),
+        AccountMeta::new(SYSTEM, false),
     ];
 
     accounts.extend_from_slice(additional);
@@ -137,7 +138,10 @@ pub fn regular_ix(
     data.serialize(&mut bytes)?;
 
     let accounts = if token_mints.is_empty() {
-        vec![AccountMeta::new(sender, true)]
+        vec![
+            AccountMeta::new(sender, true),
+            AccountMeta::new(derive_state_pda(&program_id), false),
+        ]
     } else {
         let token_program = token_program.program_id();
 
@@ -247,12 +251,14 @@ pub fn transfer_payload(
 
     Payload {
         id,
-        program_id: TOKEN.to_bytes(),
-        accounts,
-        instruction_data,
-        signer: Some(SignerAccount {
-            index: 2, // authority must be the signer
-            seeds,
+        action: SignedAction::Execute(ExecuteAction {
+            program_id: TOKEN.to_bytes(),
+            accounts,
+            instruction_data,
+            signer: Some(SignerAccount {
+                index: 2, // authority must be the signer
+                seeds,
+            }),
         }),
     }
 }

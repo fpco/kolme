@@ -1,20 +1,20 @@
 pub use pinocchio;
+pub use pinocchio_pubkey as pubkey;
 pub use pinocchio_system as system;
 pub use pinocchio_token as token;
-pub use pinocchio_pubkey as pubkey;
 
+use bitflags::bitflags;
+use borsh::{BorshDeserialize, BorshSerialize};
+use once_cell::unsync::Lazy;
 use pinocchio::{
     account_info::AccountInfo,
     instruction::{Seed, Signer},
     program_error::ProgramError,
     pubkey::{create_program_address, find_program_address, Pubkey},
+    syscalls,
     sysvars::{rent::Rent, Sysvar},
-    syscalls
 };
-use bitflags::bitflags;
-use borsh::{BorshDeserialize, BorshSerialize};
 use smallvec::SmallVec;
-use once_cell::unsync::Lazy;
 
 pub mod token2022 {
     use pinocchio_pubkey::declare_id;
@@ -29,7 +29,7 @@ pub struct Context<'a> {
     pub program_id: &'a Pubkey,
     /// The raw unchecked accounts that were passed to the entrypoint.
     pub accounts: &'a [AccountInfo],
-    rent: Lazy<Result<Rent>>
+    rent: Lazy<Result<Rent>>,
 }
 
 pub trait PdaDataSerialize {
@@ -43,7 +43,7 @@ pub trait PdaDataDeserialize: Sized {
 
 pub struct PdaData<T, const D: u8> {
     pub bump: u8,
-    pub data: T
+    pub data: T,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,9 +86,7 @@ pub fn log_base64(data: &[&[u8]]) {
 
 #[inline]
 pub fn log_pubkey(pubkey: &Pubkey) {
-    unsafe {
-        syscalls::sol_log_pubkey(pubkey as *const _ as *const u8)
-    };
+    unsafe { syscalls::sol_log_pubkey(pubkey as *const _ as *const u8) };
 }
 
 #[inline]
@@ -110,13 +108,16 @@ impl<'a> Context<'a> {
         Self {
             program_id,
             accounts,
-            rent: Lazy::new(Rent::get)
+            rent: Lazy::new(Rent::get),
         }
     }
 
     #[inline]
     pub fn rent(&self) -> Result<Rent> {
-        Lazy::force(&self.rent).as_ref().map_err(|e| e.clone()).cloned()
+        Lazy::force(&self.rent)
+            .as_ref()
+            .map_err(|e| e.clone())
+            .cloned()
     }
 
     #[inline]
@@ -132,10 +133,9 @@ impl<'a> Context<'a> {
     pub fn account(&self, index: usize, req: AccountReq) -> Result<AccountInfo> {
         let acc = self.accounts[index].clone();
 
-        let not_ok =
-            (req.contains(AccountReq::SIGNER) & !acc.is_signer()) |
-            (req.contains(AccountReq::WRITABLE) & !acc.is_writable()) |
-            (req.contains(AccountReq::EXECUTABLE) & !acc.executable());
+        let not_ok = (req.contains(AccountReq::SIGNER) & !acc.is_signer())
+            | (req.contains(AccountReq::WRITABLE) & !acc.is_writable())
+            | (req.contains(AccountReq::EXECUTABLE) & !acc.executable());
 
         if not_ok {
             return Err(ProgramError::InvalidArgument);
@@ -170,7 +170,7 @@ impl<'a> Context<'a> {
         payer: &AccountInfo,
         pda: &AccountInfo,
         derivation: PdaDerivation,
-        data: T
+        data: T,
     ) -> Result<PdaData<T, D>> {
         unsafe {
             // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
@@ -182,16 +182,17 @@ impl<'a> Context<'a> {
 
         let (address, bump) = if let Some(bump) = derivation.bump {
             let bump_slice = &[bump];
-            let mut seeds = SmallVec::<[&[u8]; 4]>::from_iter(derivation.seeds.into_iter().map(|x| *x));
+            let mut seeds =
+                SmallVec::<[&[u8]; 4]>::from_iter(derivation.seeds.iter().copied());
 
             // Can't use chain() like below because the compiler thinks it's being passed &u8 even when bump_slice is explicity typed as &[u8]...
             seeds.push(bump_slice);
 
-            let address = create_program_address(seeds.as_slice(), &self.program_id)?;
+            let address = create_program_address(seeds.as_slice(), self.program_id)?;
 
             (address, bump)
         } else {
-            find_program_address(derivation.seeds, &self.program_id)
+            find_program_address(derivation.seeds, self.program_id)
         };
 
         if pda.key() != &address {
@@ -200,9 +201,12 @@ impl<'a> Context<'a> {
 
         let bump_slice = &[bump];
         let bump_seed = [Seed::from(bump_slice)];
-        let seeds: SmallVec<[Seed; 4]> = SmallVec::from_iter(derivation.seeds.into_iter()
-            .map(|x| Seed::from(*x))
-            .chain(bump_seed)
+        let seeds: SmallVec<[Seed; 4]> = SmallVec::from_iter(
+            derivation
+                .seeds
+                .iter()
+                .map(|x| Seed::from(*x))
+                .chain(bump_seed),
         );
 
         let rent = self.rent()?;
@@ -261,7 +265,11 @@ impl<'a> Context<'a> {
     /// The latter case means that account ownership was transferred from another program (or strictly speaking the PDA wasn't initialized using this library's code).
     /// We currently don't have logic to handle this scenario but if we did it would be a separate method to explicitly opt-out of this data check.
     /// Will check if the provided PDA address is legitimate by deriving its key and comparing it to the provided account.
-    pub fn load_pda<T: PdaDataDeserialize, const D: u8>(&self, pda: &AccountInfo, seeds: &[&[u8]]) -> Result<PdaData<T, D>> {
+    pub fn load_pda<T: PdaDataDeserialize, const D: u8>(
+        &self,
+        pda: &AccountInfo,
+        seeds: &[&[u8]],
+    ) -> Result<PdaData<T, D>> {
         unsafe {
             // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
             // However we do not keep or receive any references to it.
@@ -279,18 +287,18 @@ impl<'a> Context<'a> {
         let data = PdaData::<T, D>::deserialize_from(pda)?;
 
         let bump_slice = &[data.bump];
-        let mut seeds = SmallVec::<[&[u8]; 4]>::from_iter(seeds.into_iter().map(|x| *x));
+        let mut seeds = SmallVec::<[&[u8]; 4]>::from_iter(seeds.iter().copied());
 
         // Can't use chain() because the compiler thinks it's being passed &u8 even when bump_slice is explicity typed as &[u8]...
         seeds.push(bump_slice);
 
-        let address = create_program_address(seeds.as_slice(), &self.program_id)?;
+        let address = create_program_address(seeds.as_slice(), self.program_id)?;
 
         if pda.key() != &address {
             return Err(ProgramError::InvalidArgument);
         }
 
-        return Ok(data);
+        Ok(data)
     }
 
     /// Will create the account if it hasn't been initialized. Otherwise will load the existing data.
@@ -300,7 +308,7 @@ impl<'a> Context<'a> {
         payer: &AccountInfo,
         pda: &AccountInfo,
         derivation: PdaDerivation,
-        init: impl FnOnce() -> T
+        init: impl FnOnce() -> T,
     ) -> Result<PdaData<T, D>> {
         // Note: load_pda() also checks for data_len being 0 (see the comment there).
         // Here we don't because we still want to treat the account as initialized in such case.
@@ -326,7 +334,10 @@ impl<'a> PdaDerivation<'a> {
 
     #[inline]
     pub const fn with_bump(seeds: &'a [&'a [u8]], bump: u8) -> Self {
-        Self { seeds, bump: Some(bump) }
+        Self {
+            seeds,
+            bump: Some(bump),
+        }
     }
 }
 
@@ -338,6 +349,58 @@ impl<T: PdaDataSerialize, const D: u8> PdaData<T, D> {
             return Err(ProgramError::AccountDataTooSmall);
         }
 
+        bytes[0] = D;
+        bytes[1] = self.bump;
+
+        PdaDataSerialize::serialize(&self.data, &mut bytes[2..])
+    }
+
+    /// Store the PDA data into the provided account. If the account has insufficient space to store the data,
+    /// it will be resized to fit using the provided `payer` account to pay for rent if needed.
+    ///
+    /// - This method should **not** be used on unitialized accounts! Will return an error if so.
+    /// - Maximum permitted size increase is [`pinocchio::account_info::MAX_PERMITTED_DATA_INCREASE`].
+    pub fn serialize_into_growable(
+        &self,
+        acc: &AccountInfo,
+        payer: &AccountInfo,
+        rent: &Rent,
+        zero_mem: bool,
+    ) -> Result<()> {
+        let data_size = (self.data.serialized_size() + 2) as usize; // +2 for discriminant and bump seed bytes.
+        let bytes = &mut *acc.try_borrow_mut_data()?;
+
+        // Protect against using this method to initialize an account.
+        if bytes.is_empty() {
+            return Err(ProgramError::UninitializedAccount);
+        } else if bytes.len() >= data_size {
+            bytes[0] = D;
+            bytes[1] = self.bump;
+
+            return PdaDataSerialize::serialize(&self.data, &mut bytes[2..]);
+        }
+
+        let needed_space = data_size - bytes.len();
+        let _ = bytes; // Drop the borrow because realloc() needs it.
+
+        let existing_lamports = acc.lamports();
+        let required_lamports = rent
+            .minimum_balance(needed_space)
+            .max(1)
+            .saturating_sub(existing_lamports);
+
+        if required_lamports > 0 {
+            system::instructions::Transfer {
+                from: payer,
+                to: acc,
+                lamports: required_lamports,
+            }
+            .invoke()?;
+        }
+
+        acc.realloc(data_size, zero_mem)?;
+
+        let bytes = &mut *acc.try_borrow_mut_data()?;
         bytes[0] = D;
         bytes[1] = self.bump;
 
