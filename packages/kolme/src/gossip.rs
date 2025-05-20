@@ -473,7 +473,9 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             GossipMessage::BroadcastTx { tx, timestamp: _ } => {
-                self.kolme.propose_transaction(tx);
+                if self.kolme.read().get_tx_height(tx.hash()).await?.is_none() {
+                    self.kolme.propose_transaction(tx);
+                }
             }
         }
 
