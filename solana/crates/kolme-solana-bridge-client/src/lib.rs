@@ -29,7 +29,7 @@ pub const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
 pub struct Secp256k1Pubkey(pub [u8; Self::LEN]);
 
-#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
+#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, Debug)]
 pub struct Secp256k1PubkeyCompressed(pub [u8; Self::LEN]);
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
@@ -94,14 +94,14 @@ pub struct SignerAccount {
     pub seeds: Vec<Vec<u8>>,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct BridgeMessage {
     pub id: u64,
     pub wallet: Pubkey,
     pub ty: Message,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub enum Message {
     Regular {
         funds: Vec<Token>,
@@ -112,7 +112,7 @@ pub enum Message {
     },
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct Token {
     pub mint: Pubkey,
     pub amount: u64,

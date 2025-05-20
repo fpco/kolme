@@ -74,6 +74,7 @@ pub async fn listen<App: KolmeApp>(
         }
 
         if let Some(msg) = msg {
+            tracing::info!("Processing Solana bridge message: {:?}", msg);
             let msg = to_kolme_message::<App::Message>(msg, chain);
 
             kolme
