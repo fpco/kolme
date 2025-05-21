@@ -55,9 +55,6 @@ runs:
         echo "ACTION_RESULTS_URL=$ACTIONS_RESULTS_URL" >> $GITHUB_ENV
         echo "ACTION_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" >> $GITHUB_ENV
 
-        env
-        cat $GITHUB_ENV
-
     - name: Free Disk Space (Ubuntu)
       uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
       with:
