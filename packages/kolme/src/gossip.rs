@@ -17,6 +17,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
+use quick_cache::sync::Cache;
 use tokio::sync::{broadcast::error::RecvError, Mutex};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
@@ -33,6 +34,7 @@ pub struct Gossip<App: KolmeApp> {
     trigger_broadcast_height: tokio::sync::watch::Sender<u64>,
     /// Switches to true once we have our first success received message
     watch_network_ready: tokio::sync::watch::Sender<bool>,
+    cache: Cache<TxHash, ()>,
 }
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -263,6 +265,7 @@ impl GossipBuilder {
             local_peer_id,
             trigger_broadcast_height,
             watch_network_ready,
+            cache: Cache::new(1024)
         })
     }
 }
@@ -473,7 +476,9 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             GossipMessage::BroadcastTx { tx, timestamp: _ } => {
-                if self.kolme.read().get_tx_height(tx.hash()).await?.is_none() {
+                let hash = tx.hash();
+                if !self.cache.contains_key(&hash) {
+                    self.cache.insert(hash, ());
                     self.kolme.propose_transaction(tx);
                 }
             }
