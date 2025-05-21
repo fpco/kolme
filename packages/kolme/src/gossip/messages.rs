@@ -1,7 +1,10 @@
 use std::fmt::Display;
 
 use gossip::KolmeBehaviour;
-use libp2p::{gossipsub::Message, PeerId, Swarm};
+use libp2p::{
+    gossipsub::{Message, PublishError},
+    PeerId, Swarm,
+};
 
 use crate::*;
 
@@ -37,7 +40,6 @@ pub(super) enum GossipMessage<App: KolmeApp> {
     Notification(Notification<App::Message>),
     BroadcastTx {
         tx: Arc<SignedTransaction<App::Message>>,
-        timestamp: Timestamp,
     },
 }
 
@@ -53,8 +55,8 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
             GossipMessage::Notification(notification) => {
                 write!(f, "Notification: {notification:?}")
             }
-            GossipMessage::BroadcastTx { tx, timestamp } => {
-                write!(f, "Broadcast {} @ {timestamp}", tx.hash())
+            GossipMessage::BroadcastTx { tx } => {
+                write!(f, "Broadcast {}", tx.hash())
             }
         }
     }
@@ -103,11 +105,19 @@ impl<App: KolmeApp> GossipMessage<App> {
     ) -> Result<()> {
         tracing::debug!("Publishing message to gossipsub: {self}");
         // TODO should we put in some retry logic to handle the "InsufficientPeers" case?
-        swarm
+        let result = swarm
             .behaviour_mut()
             .gossipsub
-            .publish(gossip.gossip_topic.clone(), serde_json::to_vec(&self)?)
-            .map(|_| ())
-            .with_context(|| format!("Unable to publish a gossipsub message: {self}"))
+            .publish(gossip.gossip_topic.clone(), serde_json::to_vec(&self)?);
+        match result {
+            Ok(_id) => Ok(()),
+            Err(PublishError::Duplicate) => {
+                tracing::info!("Skipping sending dupllicate message");
+                Ok(())
+            }
+            Err(err) => {
+                Err(err).with_context(|| format!("Unable to publish a gossipsub message: {self}"))
+            }
+        }
     }
 }
