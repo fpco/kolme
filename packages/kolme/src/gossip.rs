@@ -265,7 +265,7 @@ impl GossipBuilder {
             local_peer_id,
             trigger_broadcast_height,
             watch_network_ready,
-            cache: Cache::new(1024)
+            cache: Cache::new(1024),
         })
     }
 }
