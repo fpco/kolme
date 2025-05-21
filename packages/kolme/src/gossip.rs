@@ -462,7 +462,7 @@ impl<App: KolmeApp> Gossip<App> {
     ) -> Result<()> {
         match message {
             GossipMessage::Notification(msg) => {
-                tracing::info!("notif");
+                tracing::debug!("got notification message");
                 match &msg {
                     Notification::NewBlock(block) => {
                         self.add_block(block.clone()).await;
@@ -477,11 +477,11 @@ impl<App: KolmeApp> Gossip<App> {
                 self.kolme.notify(msg);
             }
             GossipMessage::RequestBlockHeights(_) => {
-                tracing::info!("rbheights");
+                tracing::debug!("got block heights request message");
                 self.trigger_broadcast_height.send_modify(|old| *old += 1);
             }
             GossipMessage::ReportBlockHeight(report) => {
-                tracing::info!("rbheight");
+                tracing::debug!("got block height report message");
                 let our_next = self.kolme.read().get_next_height();
                 tracing::debug!("Received ReportBlockHeight: {report:?}, our_next: {our_next}");
                 // Check if this peer has new blocks that we'd want to request.
@@ -563,7 +563,7 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn handle_response(&self, response: BlockResponse<App::Message>) {
-        tracing::info!("response");
+        tracing::debug!("response");
         match response {
             BlockResponse::Block(block) => {
                 self.add_block(block).await;
