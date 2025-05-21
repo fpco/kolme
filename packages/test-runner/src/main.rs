@@ -40,7 +40,7 @@ fn build_tests() -> Result<()> {
             .arg("--all-targets")
             .spawn()?
             .wait()
-            .context("Error while building contracts")?;
+            .context("Error while building tests")?;
         if status.success() {
             Ok(())
         } else {
