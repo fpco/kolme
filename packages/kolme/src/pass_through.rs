@@ -9,8 +9,8 @@ use axum::{
 };
 use cosmwasm_std::Coin;
 use futures_util::StreamExt;
-use listener::cosmos::get_next_bridge_event_id;
 use reqwest::{header::CONTENT_TYPE, Method, StatusCode};
+use listener::get_next_bridge_event_id;
 use serde::{Deserialize, Serialize};
 use shared::cosmos::{BridgeEventMessage, ExecuteMsg};
 use tokio::sync::{broadcast, Mutex, RwLock};
