@@ -4,6 +4,7 @@ use cosmos::{
     proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
     SeedPhrase, TxBuilder,
 };
+use integration_tests::prepare_local_contract;
 use kolme::*;
 use shared::cosmos::{ExecuteMsg, KeyRegistration};
 use testtasks::TestTasks;
@@ -42,7 +43,12 @@ pub enum SampleMessage {
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 impl SampleKolmeApp {
-    fn new(processor: PublicKey, listener: PublicKey, approver: PublicKey) -> Self {
+    fn new(
+        bridge_code_id: u64,
+        processor: PublicKey,
+        listener: PublicKey,
+        approver: PublicKey,
+    ) -> Self {
         let mut chains = ConfiguredChains::default();
         chains
             .insert_cosmos(
@@ -56,7 +62,9 @@ impl SampleKolmeApp {
                         },
                     ))
                     .collect(),
-                    bridge: BridgeContract::NeededCosmosBridge { code_id: 1 },
+                    bridge: BridgeContract::NeededCosmosBridge {
+                        code_id: bridge_code_id,
+                    },
                 },
             )
             .unwrap();
@@ -162,6 +170,10 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
     let client = SecretKey::random(&mut rand::thread_rng());
     let kolme = Kolme::new(
         SampleKolmeApp::new(
+            prepare_local_contract(&local_wallet)
+                .await
+                .unwrap()
+                .get_code_id(),
             orig_processor.public_key(),
             listener.public_key(),
             approver.public_key(),
