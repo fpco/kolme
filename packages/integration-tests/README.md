@@ -17,4 +17,4 @@ application DB so subsequent runs could fail as a workaround test could be run w
 dropped using `just drop-db run-tests`
 
 ## Solana-Cosmos bridge
-To run the Solana-Cosmos bridge test execute the `solana-bridge-tests.sh` script.
+To run the Solana-Cosmos bridge test run the shell script: `sh solana-bridge-tests.sh bridge_transfer`.

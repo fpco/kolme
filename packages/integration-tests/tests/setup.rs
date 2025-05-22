@@ -95,6 +95,8 @@ pub async fn deploy_solana_bridge() -> Result<()> {
             "--program-id",
             "./solana/bridge_keypair.json",
             "./solana/sbf-out/kolme_solana_bridge.so",
+            "--url",
+            "http://localhost:8899",
         ])
         .spawn()?
         .wait()
@@ -175,6 +177,10 @@ pub async fn cosmos_send_osmo(
     });
 
     builder.sign_and_broadcast(client, from).await?;
+    tracing::info!(
+        "Successfully sent {}uosmo!",
+        amount_to_ui_amount_string(amount as u64, 6)
+    );
 
     Ok(())
 }
@@ -190,6 +196,8 @@ pub async fn airdrop(client: &SolanaClient, to: &Pubkey, amount: u64) -> Result<
     client
         .wait_for_balance_with_commitment(to, Some(amount), CommitmentConfig::finalized())
         .await?;
+
+    tracing::info!("Airdrop successful!");
 
     Ok(())
 }
@@ -214,6 +222,12 @@ pub async fn solana_mint_to(token: &SolanaToken, to: &Pubkey, amount: u64) -> Re
     token
         .mint_to(&ata, &AUTHORITY_PUBKEY, amount, &[authority])
         .await?;
+
+    tracing::info!(
+        "Successfully minted {} {}!",
+        amount_to_ui_amount_string(amount, info.decimals),
+        token.get_address().to_string()
+    );
 
     Ok(())
 }

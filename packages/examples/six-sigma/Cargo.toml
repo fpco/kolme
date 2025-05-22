@@ -18,6 +18,7 @@ cosmos = { workspace = true }
 jiff = { workspace = true }
 serde_json = { workspace = true }
 shared = { workspace = true }
+solana-keypair = { version = "2.2" }
 
 [dev-dependencies]
 backon = "1.4.1"
