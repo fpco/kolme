@@ -31,6 +31,8 @@ pub struct Gossip<App: KolmeApp> {
     #[allow(dead_code)]
     data_load_validation: DataLoadValidation,
     local_peer_id: PeerId,
+    // human-readable name for an instance
+    local_display_name: String,
     /// Trigger a broadcast of our latest block height.
     trigger_broadcast_height: tokio::sync::watch::Sender<u64>,
     /// Switches to true once we have our first success received message
@@ -58,6 +60,7 @@ pub struct GossipBuilder {
     listen_ports: Vec<u16>,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
+    local_display_name: Option<String>,
 }
 
 /// How block data is synchronized.
@@ -141,6 +144,11 @@ impl GossipBuilder {
     ) -> Self {
         self.sync_mode = sync_mode;
         self.data_load_validation = data_load_validation;
+        self
+    }
+
+    pub fn set_local_display_name(mut self, display_name: &str) -> Self {
+        self.local_display_name = Some(String::from(display_name));
         self
     }
 
@@ -279,6 +287,7 @@ impl GossipBuilder {
             local_peer_id,
             trigger_broadcast_height,
             watch_network_ready,
+            local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
         })
     }
 }
