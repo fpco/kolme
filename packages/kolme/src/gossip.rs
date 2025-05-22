@@ -403,6 +403,8 @@ impl<App: KolmeApp> Gossip<App> {
         event: SwarmEvent<KolmeBehaviourEvent<App::Message>>,
         peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
     ) {
+        let local_display_name = self.local_display_name.clone();
+
         match event {
             SwarmEvent::ConnectionEstablished { .. } => {
                 self.watch_network_ready.send_if_modified(|value| {
@@ -416,13 +418,15 @@ impl<App: KolmeApp> Gossip<App> {
                 address,
             } => {
                 tracing::info!(
-                    "New listener {listener_id} on {address}, {:?}",
+                    "{local_display_name}: New listener {listener_id} on {address}, {:?}",
                     swarm.local_peer_id()
                 );
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
                 for (peer, address) in peers {
-                    tracing::info!("Discovered new peer over mDNS: {peer} @ {address}");
+                    tracing::info!(
+                        "{local_display_name}: Discovered new peer over mDNS: {peer} @ {address}"
+                    );
                     // TODO do we need to manually add mDNS peers to Kademlia?
                     swarm.behaviour_mut().kademlia.add_address(&peer, address);
                 }
@@ -432,15 +436,21 @@ impl<App: KolmeApp> Gossip<App> {
                 message_id,
                 message,
             })) => {
-                tracing::debug!("Received a message {message_id} from {propagation_source}");
+                tracing::debug!(
+                    "{local_display_name}: Received a message {message_id} from {propagation_source}"
+                );
                 match GossipMessage::parse(self, message) {
                     Err(e) => {
-                        tracing::warn!("Received a gossipsub message we couldn't parse: {e}");
+                        tracing::warn!(
+                            "{local_display_name}: Received a gossipsub message we couldn't parse: {e}"
+                        );
                     }
                     Ok(message) => {
-                        tracing::debug!("Received message: {message}");
+                        tracing::debug!("{local_display_name}: Received message: {message}");
                         if let Err(e) = self.handle_message(message, peers_with_blocks).await {
-                            tracing::warn!("Error while handling message: {e}");
+                            tracing::warn!(
+                                "{local_display_name}: Error while handling message: {e}"
+                            );
                         }
                     }
                 }
@@ -463,7 +473,9 @@ impl<App: KolmeApp> Gossip<App> {
                     response,
                 } => self.handle_response(response).await,
             },
-            _ => tracing::debug!("Received and ignoring libp2p event: {event:?}"),
+            _ => tracing::debug!(
+                "{local_display_name}: Received and ignoring libp2p event: {event:?}"
+            ),
         }
     }
 
@@ -472,9 +484,10 @@ impl<App: KolmeApp> Gossip<App> {
         message: GossipMessage<App>,
         peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
     ) -> Result<()> {
+        let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::Notification(msg) => {
-                tracing::debug!("got notification message");
+                tracing::debug!("{local_display_name}: got notification message");
                 match &msg {
                     Notification::NewBlock(block) => {
                         self.add_block(block.clone()).await;
@@ -489,13 +502,15 @@ impl<App: KolmeApp> Gossip<App> {
                 self.kolme.notify(msg);
             }
             GossipMessage::RequestBlockHeights(_) => {
-                tracing::debug!("got block heights request message");
+                tracing::debug!("{local_display_name}: got block heights request message");
                 self.trigger_broadcast_height.send_modify(|old| *old += 1);
             }
             GossipMessage::ReportBlockHeight(report) => {
-                tracing::debug!("got block height report message");
+                tracing::debug!("{local_display_name}: got block height report message");
                 let our_next = self.kolme.read().get_next_height();
-                tracing::debug!("Received ReportBlockHeight: {report:?}, our_next: {our_next}");
+                tracing::debug!(
+                    "{local_display_name}: Received ReportBlockHeight: {report:?}, our_next: {our_next}"
+                );
                 // Check if this peer has new blocks that we'd want to request.
                 if our_next < report.next {
                     peers_with_blocks.try_send(report).ok();
@@ -515,11 +530,12 @@ impl<App: KolmeApp> Gossip<App> {
         channel: ResponseChannel<BlockResponse<App::Message>>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) {
+        let local_display_name = self.local_display_name.clone();
         match request {
             BlockRequest::BlockAtHeight(height) => {
                 let res = match self.kolme.read().get_block(height).await {
                     Err(e) => {
-                        tracing::warn!("Error querying block in gossip: {e}");
+                        tracing::warn!("{local_display_name}: Error querying block in gossip: {e}");
                         return;
                     }
                     Ok(None) => BlockResponse::HeightNotFound(height),
@@ -530,13 +546,17 @@ impl<App: KolmeApp> Gossip<App> {
                     .request_response
                     .send_response(channel, res)
                 {
-                    tracing::warn!("Unable to answer BlockAtHeight request: {e:?}");
+                    tracing::warn!(
+                        "{local_display_name}: Unable to answer BlockAtHeight request: {e:?}"
+                    );
                 }
             }
             BlockRequest::BlockWithStateAtHeight(height) => {
                 let res = match self.kolme.read().get_block(height).await {
                     Err(e) => {
-                        tracing::warn!("Error querying block (with state) in gossip: {e}");
+                        tracing::warn!(
+                            "{local_display_name}: Error querying block (with state) in gossip: {e}"
+                        );
                         return;
                     }
                     Ok(None) => BlockResponse::HeightNotFound(height),
@@ -553,11 +573,15 @@ impl<App: KolmeApp> Gossip<App> {
                                 logs: storable_block.logs,
                             },
                             (Err(e), _) => {
-                                tracing::warn!("Unable to serialize framework state: {e}");
+                                tracing::warn!(
+                                    "{local_display_name}: Unable to serialize framework state: {e}"
+                                );
                                 return;
                             }
                             (_, Err(e)) => {
-                                tracing::warn!("Unable to serialize app state: {e}");
+                                tracing::warn!(
+                                    "{local_display_name}: Unable to serialize app state: {e}"
+                                );
                                 return;
                             }
                         }
@@ -568,14 +592,17 @@ impl<App: KolmeApp> Gossip<App> {
                     .request_response
                     .send_response(channel, res)
                 {
-                    tracing::warn!("Unable to answer BlockWithStateAtHeight request: {e:?}");
+                    tracing::warn!(
+                        "{local_display_name}: Unable to answer BlockWithStateAtHeight request: {e:?}"
+                    );
                 }
             }
         }
     }
 
     async fn handle_response(&self, response: BlockResponse<App::Message>) {
-        tracing::debug!("response");
+        let local_display_name = self.local_display_name.clone();
+        tracing::debug!("{local_display_name}: response");
         match response {
             BlockResponse::Block(block) => {
                 self.add_block(block).await;
@@ -591,11 +618,15 @@ impl<App: KolmeApp> Gossip<App> {
                     .add_block_with_state(block, framework_state, app_state, logs)
                     .await
                 {
-                    tracing::warn!("Unable to add block (with state) to chain: {e}");
+                    tracing::warn!(
+                        "{local_display_name}: Unable to add block (with state) to chain: {e}"
+                    );
                 }
             }
             BlockResponse::HeightNotFound(height) => {
-                tracing::warn!("Tried to find block height {height}, but peer didn't find it");
+                tracing::warn!(
+                    "{local_display_name}: Tried to find block height {height}, but peer didn't find it"
+                );
             }
         }
     }
@@ -620,7 +651,8 @@ impl<App: KolmeApp> Gossip<App> {
         let our_next = self.kolme.read().get_next_height();
 
         tracing::debug!(
-            "In catch_up, their_node=={their_next}, peer=={peer}, our_next=={our_next}"
+            "{}: In catch_up, their_node=={their_next}, peer=={peer}, our_next=={our_next}",
+            self.local_display_name
         );
 
         let their_highest = match their_next.prev() {
@@ -658,7 +690,10 @@ impl<App: KolmeApp> Gossip<App> {
     async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
         if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
             if let Err(e) = self.kolme.add_block(block).await {
-                tracing::warn!("Unable to add block to chain: {e}")
+                tracing::warn!(
+                    "{}: Unable to add block to chain: {e}",
+                    self.local_display_name
+                )
             }
         }
     }
