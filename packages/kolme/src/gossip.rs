@@ -354,7 +354,10 @@ impl<App: KolmeApp> Gossip<App> {
             .publish(self, swarm)
             .await
         {
-            tracing::error!("Unable to request block heights: {e:?}");
+            tracing::error!(
+                "{}: Unable to request block heights: {e:?}",
+                self.local_display_name
+            );
         }
     }
 
@@ -367,7 +370,10 @@ impl<App: KolmeApp> Gossip<App> {
         .publish(self, swarm)
         .await
         {
-            tracing::error!("Unable to broadcast latest block height: {e:?}")
+            tracing::error!(
+                "{}: Unable to broadcast latest block height: {e:?}",
+                self.local_display_name
+            )
         }
     }
 
@@ -376,7 +382,10 @@ impl<App: KolmeApp> Gossip<App> {
             let txhash = tx.hash();
             let msg = GossipMessage::BroadcastTx { tx };
             if let Err(e) = msg.publish(self, swarm).await {
-                tracing::error!("Unable to broadcast transaction {txhash}: {e:?}")
+                tracing::error!(
+                    "{}: Unable to broadcast transaction {txhash}: {e:?}",
+                    self.local_display_name
+                )
             }
         }
     }
@@ -389,7 +398,10 @@ impl<App: KolmeApp> Gossip<App> {
         let notification = match notification {
             Ok(notification) => notification,
             Err(e) => {
-                tracing::warn!("Gossip::handle_notification: received an error: {e}");
+                tracing::warn!(
+                    "{}: Gossip::handle_notification: received an error: {e}",
+                    self.local_display_name
+                );
                 return;
             }
         };
@@ -397,7 +409,10 @@ impl<App: KolmeApp> Gossip<App> {
             .publish(self, swarm)
             .await
         {
-            tracing::warn!("Error when handling notification: {e}");
+            tracing::warn!(
+                "{}: Error when handling notification: {e}",
+                self.local_display_name
+            );
         }
     }
 

@@ -103,7 +103,10 @@ impl<App: KolmeApp> GossipMessage<App> {
         gossip: &Gossip<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) -> Result<()> {
-        tracing::debug!("Publishing message to gossipsub: {self}");
+        tracing::debug!(
+            "{}: Publishing message to gossipsub: {self}",
+            gossip.local_display_name
+        );
         // TODO should we put in some retry logic to handle the "InsufficientPeers" case?
         let result = swarm
             .behaviour_mut()
@@ -112,12 +115,18 @@ impl<App: KolmeApp> GossipMessage<App> {
         match result {
             Ok(_id) => Ok(()),
             Err(PublishError::Duplicate) => {
-                tracing::info!("Skipping sending duplicate message");
+                tracing::info!(
+                    "{}: Skipping sending duplicate message",
+                    gossip.local_display_name
+                );
                 Ok(())
             }
-            Err(err) => {
-                Err(err).with_context(|| format!("Unable to publish a gossipsub message: {self}"))
-            }
+            Err(err) => Err(err).with_context(|| {
+                format!(
+                    "{}: Unable to publish a gossipsub message: {self}",
+                    gossip.local_display_name
+                )
+            }),
         }
     }
 }
