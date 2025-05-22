@@ -7,6 +7,10 @@ use kolme_solana_bridge_client::{
 };
 use libp2p::futures::StreamExt;
 use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
+use solana_signature::Signature;
+use solana_transaction_status_client_types::{
+    option_serializer::OptionSerializer, UiTransactionEncoding,
+};
 
 use super::*;
 
@@ -16,79 +20,76 @@ pub async fn listen<App: KolmeApp>(
     chain: SolanaChain,
     contract: String,
 ) -> Result<()> {
-    const PROGRAM_DATA_LOG: &str = "Program data: ";
+    let contract_pubkey = Pubkey::from_str_const(&contract);
+    let pubsub_client = chain.get_solana_pubsub_client(chain).await?;
+    let client = chain.make_client();
 
-    let client = kolme.get_solana_pubsub_client(chain).await?;
     let mut next_bridge_event_id =
         get_next_bridge_event_id(&kolme.read(), secret.public_key(), chain.into());
 
-    let filter = RpcTransactionLogsFilter::Mentions(vec![contract.clone()]);
-    let config = RpcTransactionLogsConfig {
-        commitment: None, // Defaults to finalized
-    };
+    loop {
+        let filter = RpcTransactionLogsFilter::Mentions(vec![contract.clone()]);
+        let config = RpcTransactionLogsConfig {
+            commitment: None, // Defaults to finalized
+        };
 
-    let (mut subscription, unsub) = client.logs_subscribe(filter, config).await?;
+        // Subscribe now in order to ensure we don't miss any transactions while catching up.
+        let (mut subscription, unsub) = pubsub_client.logs_subscribe(filter, config).await?;
 
-    tracing::info!(
-        "Beginning listener loop on contract {contract}, next event ID: {next_bridge_event_id}"
-    );
-
-    // TODO: How do we handle disconnects and missed updates?
-    'subscription_loop: while let Some(resp) = subscription.next().await {
-        // We don't care about unsuccessful transactions.
-        if resp.value.err.is_some() {
-            continue;
+        let to = next_bridge_event_id
+            .prev()
+            .unwrap_or(BridgeEventId::start());
+        if let Some(latest_id) =
+            catch_up(&kolme, &client, &secret, to, chain, &contract_pubkey).await?
+        {
+            next_bridge_event_id = latest_id.next();
         }
 
-        let mut msg: Option<BridgeMessage> = None;
+        tracing::info!(
+            "Beginning listener loop on contract {contract}, next event ID: {next_bridge_event_id}"
+        );
 
-        // Our program data should always be the last "Program data:" entry even if CPI was invoked.
-        for log in resp.value.logs.into_iter().rev() {
-            if !log.starts_with(PROGRAM_DATA_LOG) {
+        while let Some(resp) = subscription.next().await {
+            // We don't care about unsuccessful transactions.
+            if resp.value.err.is_some() {
                 continue;
             }
 
-            let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
-            let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
+            let Some(msg) = extract_bridge_message_from_logs(&resp.value.logs)? else {
+                tracing::warn!("No bridge message data log was found in {contract} logs.");
 
-            let result: BridgeMessage = BorshDeserialize::try_from_slice(&bytes).map_err(|x| {
-                anyhow::anyhow!(
-                    "Error deserializing Solana bridge message from logs: {:?}",
-                    x
-                )
-            })?;
+                continue;
+            };
 
-            if next_bridge_event_id.0 != result.id {
+            if next_bridge_event_id.0 > msg.id {
                 tracing::warn!(
-                    "Received bridge message with ID {} but expected ID {}. Ignoring...",
+                    "Received bridge message that was already processed. Message ID: {}, next expected ID {}. Ignoring...",
+                    msg.id,
                     next_bridge_event_id.0,
-                    result.id
                 );
+            } else if next_bridge_event_id.0 != msg.id {
+                let to = next_bridge_event_id
+                    .prev()
+                    .unwrap_or(BridgeEventId::start());
+                let latest_id =
+                    catch_up(&kolme, &client, &secret, to, chain, &contract_pubkey).await?;
 
-                continue 'subscription_loop;
+                next_bridge_event_id = latest_id
+                    .expect("should have at least one TX processed.")
+                    .next();
+            } else {
+                let msg = to_kolme_message::<App::Message>(msg, chain);
+
+                kolme
+                    .sign_propose_await_transaction(&secret, vec![msg])
+                    .await?;
+
+                next_bridge_event_id = next_bridge_event_id.next();
             }
-
-            msg = Some(result);
-
-            break;
         }
 
-        if let Some(msg) = msg {
-            let msg = to_kolme_message::<App::Message>(msg, chain);
-
-            kolme
-                .sign_propose_await_transaction(&secret, vec![msg])
-                .await?;
-
-            next_bridge_event_id = next_bridge_event_id.next();
-        } else {
-            tracing::error!("No bridge message data log was found in {contract} logs.");
-        }
+        (unsub)().await;
     }
-
-    (unsub)().await;
-
-    Ok(())
 }
 
 pub async fn sanity_check_contract(
@@ -126,6 +127,106 @@ pub async fn sanity_check_contract(
     anyhow::ensure!(info.validator_set.needed_approvers == u16::from(state.needed_executors));
 
     Ok(())
+}
+
+async fn catch_up<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    client: &SolanaClient,
+    secret: &SecretKey,
+    to: BridgeEventId,
+    chain: SolanaChain,
+    contract: &Pubkey,
+) -> Result<Option<BridgeEventId>> {
+    tracing::info!("Catching up to bridge event {}.", to);
+
+    let mut messages = vec![];
+    let txs = client.get_signatures_for_address(contract).await?;
+
+    // First entry is the latest transaction, we want to work up until to the target ID provided.
+    for tx in txs {
+        // We don't care about unsuccessful transactions.
+        if tx.err.is_some() {
+            continue;
+        }
+
+        let sig = Signature::from_str(&tx.signature)?;
+        let tx = client
+            .get_transaction(&sig, UiTransactionEncoding::Binary)
+            .await?
+            .transaction;
+
+        let Some(meta) = tx.meta else {
+            tracing::warn!("No transaction metadata was found for {}.", sig);
+
+            continue;
+        };
+
+        let OptionSerializer::Some(logs) = meta.log_messages else {
+            tracing::warn!("No transaction logs were found for {}.", sig);
+
+            continue;
+        };
+
+        let Some(msg) = extract_bridge_message_from_logs(&logs)? else {
+            tracing::warn!("No bridge message data log was found in {contract} logs.");
+
+            continue;
+        };
+
+        if msg.id <= to.0 {
+            break;
+        }
+
+        messages.push(msg);
+    }
+
+    assert!(messages.is_sorted_by(|a, b| a.id > b.id));
+    let Some(latest_id) = messages.first().map(|x| x.id) else {
+        return Ok(None);
+    };
+
+    tracing::info!(
+        "Found {} missed bridge events. Proposing Kolme transaction...",
+        messages.len()
+    );
+
+    // Now process in reverse insertion order - from oldest to newest.
+    let kolme_messages: Vec<Message<App::Message>> = messages
+        .into_iter()
+        .rev()
+        .map(|x| to_kolme_message(x, chain))
+        .collect();
+
+    kolme
+        .sign_propose_await_transaction(secret, kolme_messages)
+        .await?;
+
+    Ok(Some(BridgeEventId(latest_id)))
+}
+
+fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMessage>> {
+    const PROGRAM_DATA_LOG: &str = "Program data: ";
+
+    // Our program data should always be the last "Program data:" entry even if CPI was invoked.
+    for log in logs.iter().rev() {
+        if !log.starts_with(PROGRAM_DATA_LOG) {
+            continue;
+        }
+
+        let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
+
+        let result: BridgeMessage = BorshDeserialize::try_from_slice(&bytes).map_err(|x| {
+            anyhow::anyhow!(
+                "Error deserializing Solana bridge message from logs: {:?}",
+                x
+            )
+        })?;
+
+        return Ok(Some(result));
+    }
+
+    Ok(None)
 }
 
 fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {

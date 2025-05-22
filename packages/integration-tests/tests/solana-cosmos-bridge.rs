@@ -1,12 +1,11 @@
 mod setup;
 
-use std::{net::SocketAddr, str::FromStr, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, str::FromStr, time::Duration};
 
 use cosmos::{Address, AddressHrp, HasAddress, SeedPhrase, Wallet};
-use rust_decimal::Decimal;
+use rust_decimal::{dec, Decimal};
 use tokio::task;
 
-use example_solana_cosmos_bridge::{BridgeMessage, SolanaCosmosBridgeApp, ASSET_ID};
 use kolme::*;
 use kolme_solana_bridge_client::{keypair::Keypair, signer::Signer};
 use setup::{
@@ -16,7 +15,7 @@ use setup::{
 };
 use shared::cosmos::KeyRegistration as CosmosKeyRegistration;
 
-const DB_PATH: &str = "example-solana-cosmos-bridge.fjall";
+const DB_PATH: &str = "solana-single-test-store.fjall";
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 const COSMOS_SUBMITTER_SEED: &str = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
 
@@ -25,6 +24,8 @@ const LOCALHOST: &str = "http://localhost:3000";
 #[test_log::test(tokio::test)]
 #[ignore = "depends on local Solana validator and localosmosis thus hidden from default tests"]
 async fn bridge_transfer() {
+    use example_solana_cosmos_bridge::{BridgeMessage, SolanaCosmosBridgeApp, ASSET_ID};
+
     deploy_solana_bridge().await.unwrap();
 
     let mint_amount: u64 = 12_000000;
@@ -80,6 +81,8 @@ async fn bridge_transfer() {
             airdrop(&solana_client, &user_solana.pubkey(), 2000000)
                 .await
                 .unwrap();
+        },
+        async {
             solana_mint_to(&osmo, &user_solana.pubkey(), mint_amount)
                 .await
                 .unwrap();
@@ -214,4 +217,126 @@ async fn bridge_transfer() {
     }
 
     handle.abort();
+}
+
+#[test_log::test(tokio::test)]
+#[ignore = "depends on local Solana validator and localosmosis thus hidden from default tests"]
+async fn solana_listener_catchup() {
+    use example_six_sigma::SixSigmaApp;
+
+    deploy_solana_bridge().await.unwrap();
+
+    let mut rng = rand::thread_rng();
+
+    let http_client = reqwest::Client::new();
+    let client = make_solana_client();
+    let user = Keypair::new();
+    let user_key = SecretKey::random(&mut rng);
+    let submitter = Keypair::new();
+
+    let (osmo, _) = futures::join!(
+        async { make_osmo_token(client.clone()).await.unwrap() },
+        async {
+            airdrop(&client, &submitter.pubkey(), 10000000)
+                .await
+                .unwrap()
+        },
+    );
+
+    let socket_addr = SocketAddr::from_str("[::]:3000").unwrap();
+    let mut tasks = example_six_sigma::run_tasks(
+        SixSigmaApp::new_solana(submitter),
+        socket_addr,
+        PathBuf::from(String::from(DB_PATH)),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let mint_amount = 10000000; // 10
+    let send_amount = 2000000; // 2
+    let send_amount_dec = Decimal::new(send_amount as i64, 6);
+
+    futures::join!(
+        async {
+            wait_until_init(&http_client).await.unwrap();
+        },
+        async {
+            airdrop(&client, &user.pubkey(), 2000000).await.unwrap();
+        },
+        async {
+            solana_mint_to(&osmo, &user.pubkey(), mint_amount)
+                .await
+                .unwrap();
+        }
+    );
+
+    solana_deposit_and_register(
+        &client,
+        &user,
+        &osmo,
+        send_amount,
+        vec![solana_key_registration(&user.pubkey(), &user_key)],
+    )
+    .await
+    .unwrap();
+
+    tracing::info!(
+        "Confirming Kolme has registered {} OSMO for user.",
+        send_amount_dec
+    );
+    wait_until(&http_client, 2000, |state| {
+        state
+            .balance(AccountId(1), AssetId(1))
+            .is_some_and(|x| x == send_amount_dec)
+    })
+    .await
+    .unwrap();
+
+    let listener = tasks.listener.clone().unwrap();
+    listener.abort();
+
+    for _ in 0..2 {
+        solana_deposit_and_register(&client, &user, &osmo, send_amount, vec![])
+            .await
+            .unwrap();
+    }
+
+    assert!(listener.is_finished());
+    tasks.spawn_listener();
+
+    solana_deposit_and_register(&client, &user, &osmo, send_amount, vec![])
+        .await
+        .unwrap();
+
+    tracing::info!("Confirming Kolme listener has caught up.");
+    wait_until(&http_client, 2000, |state| {
+        state
+            .balance(AccountId(1), AssetId(1))
+            .is_some_and(|x| x == send_amount_dec * dec!(4))
+    })
+    .await
+    .unwrap();
+
+    // Test for off by 1 errors...
+    let listener = tasks.listener.clone().unwrap();
+    listener.abort();
+
+    solana_deposit_and_register(&client, &user, &osmo, send_amount, vec![])
+        .await
+        .unwrap();
+
+    assert!(listener.is_finished());
+    tasks.spawn_listener();
+
+    tracing::info!("Confirming Kolme listener has caught up.");
+    wait_until(&http_client, 2000, |state| {
+        tracing::info!("{:?}", state.balances);
+        state
+            .balance(AccountId(1), AssetId(1))
+            .is_some_and(|x| x == send_amount_dec * dec!(5))
+    })
+    .await
+    .unwrap();
 }
