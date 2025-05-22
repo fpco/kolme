@@ -95,7 +95,11 @@ pub enum DataLoadValidation {
 
 impl GossipBuilder {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            disable_ip6: true,
+            disable_quic: true,
+            ..Self::default()
+        }
     }
 
     pub fn add_bootstrap(mut self, peer: PeerId, address: Multiaddr) -> Self {
