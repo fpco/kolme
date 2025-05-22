@@ -135,6 +135,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
                 SyncMode::BlockTransfer,
                 DataLoadValidation::ValidateDataLoads,
             )
+            .set_local_display_name("sanity-processor")
             .build(kolme_processor)
             .await
             .unwrap()
@@ -151,6 +152,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
+            .set_local_display_name("sanity-client")
             .build(kolme_client.clone())
             .await
             .unwrap()
