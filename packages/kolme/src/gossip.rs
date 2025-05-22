@@ -406,7 +406,10 @@ impl<App: KolmeApp> Gossip<App> {
                 listener_id,
                 address,
             } => {
-                tracing::info!("New listener {listener_id} on {address}");
+                tracing::info!(
+                    "New listener {listener_id} on {address}, {:?}",
+                    swarm.local_peer_id()
+                );
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
                 for (peer, address) in peers {
