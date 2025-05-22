@@ -92,6 +92,9 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Send a general purpose notification.
     pub fn notify(&self, note: Notification<App::Message>) {
+        if let Notification::FailedTransaction(ref failed) = note {
+            self.remove_from_mempool(failed.message.as_inner().txhash);
+        }
         // Ignore errors from notifications, it just means no one
         // is subscribed.
         self.inner.notify.send(note).ok();
