@@ -454,9 +454,7 @@ impl<App: KolmeApp> Gossip<App> {
                     // the processor before accepting it?
                     //
                     // See propose_and_await_transaction for an example.
-                    Notification::FailedTransaction(failed) => {
-                        self.kolme.remove_from_mempool(failed.message.as_inner().txhash);
-                    },
+                    Notification::FailedTransaction(_) => (),
                 }
                 self.kolme.notify(msg);
             }
