@@ -224,14 +224,26 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
         let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
         let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
 
-        let result: BridgeMessage = BorshDeserialize::try_from_slice(&bytes).map_err(|x| {
+        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|x| {
             anyhow::anyhow!(
                 "Error deserializing Solana bridge message from logs: {:?}",
                 x
             )
-        })?;
+        });
 
-        return Ok(Some(result));
+        match result {
+            Ok(result) => return Ok(Some(result)),
+            Err(e) => {
+                if logs.iter().any(|x| x.contains("Instruction: Initialize")) {
+                    tracing::info!(
+                        "Encountered unexpected Initialize transaction logs. Skipping..."
+                    );
+                    return Ok(None);
+                }
+
+                return Err(e);
+            }
+        }
     }
 
     Ok(None)
