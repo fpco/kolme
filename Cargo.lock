@@ -4144,6 +4144,7 @@ dependencies = [
  "serde_json",
  "shared",
  "solana-client",
+ "solana-commitment-config",
  "solana-signature",
  "solana-transaction-status-client-types",
  "strum 0.27.1",

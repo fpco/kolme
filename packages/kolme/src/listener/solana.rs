@@ -7,6 +7,7 @@ use kolme_solana_bridge_client::{
 };
 use libp2p::futures::StreamExt;
 use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_signature::Signature;
 use solana_transaction_status_client_types::{
     option_serializer::OptionSerializer, UiTransactionEncoding,
@@ -30,7 +31,9 @@ pub async fn listen<App: KolmeApp>(
     loop {
         let filter = RpcTransactionLogsFilter::Mentions(vec![contract.clone()]);
         let config = RpcTransactionLogsConfig {
-            commitment: None, // Defaults to finalized
+            commitment: Some(CommitmentConfig {
+                commitment: CommitmentLevel::Finalized,
+            }),
         };
 
         // Subscribe now in order to ensure we don't miss any transactions while catching up.
@@ -39,6 +42,7 @@ pub async fn listen<App: KolmeApp>(
         let to = next_bridge_event_id
             .prev()
             .unwrap_or(BridgeEventId::start());
+
         if let Some(latest_id) =
             catch_up(&kolme, &client, &secret, to, chain, &contract_pubkey).await?
         {
@@ -56,14 +60,18 @@ pub async fn listen<App: KolmeApp>(
             }
 
             let Some(msg) = extract_bridge_message_from_logs(&resp.value.logs)? else {
-                tracing::warn!("No bridge message data log was found in {contract} logs.");
+                tracing::warn!(
+                    "No bridge message data log was found in TX {} logs.",
+                    resp.value.signature
+                );
 
                 continue;
             };
 
             if next_bridge_event_id.0 > msg.id {
                 tracing::warn!(
-                    "Received bridge message that was already processed. Message ID: {}, next expected ID {}. Ignoring...",
+                    "Received bridge message in TX {} that was already processed. Message ID: {}, next expected ID {}. Ignoring...",
+                    resp.value.signature,
                     msg.id,
                     next_bridge_event_id.0,
                 );
@@ -168,7 +176,7 @@ async fn catch_up<App: KolmeApp>(
         };
 
         let Some(msg) = extract_bridge_message_from_logs(&logs)? else {
-            tracing::warn!("No bridge message data log was found in {contract} logs.");
+            tracing::warn!("No bridge message data log was found in TX {} logs.", sig);
 
             continue;
         };
