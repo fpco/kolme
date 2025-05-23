@@ -39,12 +39,12 @@ pub async fn listen<App: KolmeApp>(
         // Subscribe now in order to ensure we don't miss any transactions while catching up.
         let (mut subscription, unsub) = pubsub_client.logs_subscribe(filter, config).await?;
 
-        let to = next_bridge_event_id
+        let last_seen = next_bridge_event_id
             .prev()
             .unwrap_or(BridgeEventId::start());
 
         if let Some(latest_id) =
-            catch_up(&kolme, &client, &secret, to, chain, &contract_pubkey).await?
+            catch_up(&kolme, &client, &secret, last_seen, chain, &contract_pubkey).await?
         {
             next_bridge_event_id = latest_id.next();
         }
@@ -76,11 +76,11 @@ pub async fn listen<App: KolmeApp>(
                     next_bridge_event_id.0,
                 );
             } else if next_bridge_event_id.0 != msg.id {
-                let to = next_bridge_event_id
+                let last_seen = next_bridge_event_id
                     .prev()
                     .unwrap_or(BridgeEventId::start());
                 let latest_id =
-                    catch_up(&kolme, &client, &secret, to, chain, &contract_pubkey).await?;
+                    catch_up(&kolme, &client, &secret, last_seen, chain, &contract_pubkey).await?;
 
                 next_bridge_event_id = latest_id
                     .expect("should have at least one TX processed.")
@@ -141,11 +141,11 @@ async fn catch_up<App: KolmeApp>(
     kolme: &Kolme<App>,
     client: &SolanaClient,
     secret: &SecretKey,
-    to: BridgeEventId,
+    last_seen: BridgeEventId,
     chain: SolanaChain,
     contract: &Pubkey,
 ) -> Result<Option<BridgeEventId>> {
-    tracing::info!("Catching up to bridge event {}.", to);
+    tracing::info!("Catching up on missing bridge events until {}.", last_seen);
 
     let mut messages = vec![];
     let txs = client.get_signatures_for_address(contract).await?;
@@ -181,7 +181,7 @@ async fn catch_up<App: KolmeApp>(
             continue;
         };
 
-        if msg.id <= to.0 {
+        if msg.id <= last_seen.0 {
             break;
         }
 
