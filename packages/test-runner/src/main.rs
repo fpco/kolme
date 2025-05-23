@@ -1,11 +1,8 @@
 mod join_set;
 
-use std::path::Path;
-
 use anyhow::{Context, Result};
 use join_set::try_join;
 
-const KADEMLIA_VALIDATORS: &str = "kademlia-test-validators";
 const DOCKER_COMPOSE_DIR: &str = "packages/integration-tests";
 
 fn main() -> Result<()> {
@@ -75,6 +72,8 @@ fn launch_local_osmo() -> Result<()> {
             .arg("compose")
             .arg("up")
             .arg("-d")
+            .arg("localosmosis")
+            .arg("postgres")
             .current_dir(DOCKER_COMPOSE_DIR)
             .spawn()?
             .wait()
@@ -132,11 +131,13 @@ fn kill_kademlia_validators() {
 
 fn kill_kademlia_validators_inner() -> Result<()> {
     let status = std::process::Command::new("docker")
-        .arg("rm")
-        .arg("-f")
-        .arg(KADEMLIA_VALIDATORS)
+        .arg("compose")
+        .arg("stop")
+        .arg("kademlia-validators")
+        .current_dir(DOCKER_COMPOSE_DIR)
         .spawn()?
-        .wait()?;
+        .wait()
+        .context("Error while launching Docker Compose")?;
     if status.success() {
         Ok(())
     } else {
@@ -147,23 +148,15 @@ fn kill_kademlia_validators_inner() -> Result<()> {
 }
 
 fn launch_kademlia_validators() -> Result<()> {
-    let release_dir = Path::new("target/release").canonicalize()?;
     let status = std::process::Command::new("docker")
-        .arg("run")
-        .arg("--rm")
+        .arg("compose")
+        .arg("up")
         .arg("-d")
-        .arg("--name")
-        .arg(KADEMLIA_VALIDATORS)
-        .arg("-p")
-        .arg("5400:5400")
-        .arg("-v")
-        .arg(format!("{}:/host:ro", release_dir.display()))
-        .arg("ubuntu")
-        .arg("/host/kademlia-discovery")
-        .arg("validators")
-        .arg("5400")
+        .arg("kademlia-validators")
+        .current_dir(DOCKER_COMPOSE_DIR)
         .spawn()?
-        .wait()?;
+        .wait()
+        .context("Error while launching Docker Compose")?;
     if status.success() {
         Ok(())
     } else {
@@ -174,10 +167,12 @@ fn launch_kademlia_validators() -> Result<()> {
 }
 
 fn run_kademlia_test() -> Result<()> {
-    let kademlia_exe = Path::new("target/release/kademlia-discovery").canonicalize()?;
-    let status = std::process::Command::new(kademlia_exe)
-        .arg("client")
-        .arg("/ip4/127.0.0.1/udp/5400/quic-v1")
+    let status = std::process::Command::new("docker")
+        .arg("compose")
+        .arg("run")
+        .arg("--rm")
+        .arg("kademlia-client")
+        .current_dir(DOCKER_COMPOSE_DIR)
         .spawn()?
         .wait()?;
     if status.success() {
