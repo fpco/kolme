@@ -17,11 +17,11 @@ fn main() -> Result<()> {
         s.spawn(launch_local_osmo);
     })?;
 
-    println!("Launching Kademlia validators Docker container");
-    launch_kademlia_validators()?;
-
     println!("Running test suite");
     run_test_suite()?;
+
+    println!("Launching Kademlia validators Docker container");
+    launch_kademlia_validators()?;
 
     println!("Running Kademlia test case");
     run_kademlia_test()?;
