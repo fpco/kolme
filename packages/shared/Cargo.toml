@@ -6,8 +6,12 @@ license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [features]
-realcryptography = ["dep:k256", "dep:hex", "dep:rand"]
+default = ["realcryptography"]
+realcryptography = ["dep:k256", "dep:hex", "dep:rand", "borsh?/std"]
+chaincryptography = []
+
 cosmwasm = ["dep:cosmwasm-std", "dep:cw-storage-plus"]
+solana = ["dep:borsh", "dep:hex"]
 
 [dependencies]
 cosmwasm-std = { version = "2", optional = true }
@@ -16,4 +20,5 @@ hex = { workspace = true, optional = true }
 k256 = { workspace = true, features = ["serde", "ecdsa", "sha256"], optional = true }
 rand = { version = "0.8", optional = true }
 serde = { version = "1.0.219", features = ["derive"] }
+borsh = { version = "1.5.7", default-features = false, features = ["derive"], optional = true }
 thiserror = "2.0.12"

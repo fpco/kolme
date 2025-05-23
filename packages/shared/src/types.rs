@@ -1,6 +1,8 @@
 use std::{collections::BTreeSet, fmt::Display, num::TryFromIntError};
 
-use crate::cryptography::PublicKey;
+#[cfg(feature = "realcryptography")]
+use crate::cryptography::{SecretKey, SecretKeyError};
+use crate::cryptography::{PublicKey, SignatureWithRecovery};
 
 /// Monotonically increasing identifier for actions sent to a bridge contract.
 #[derive(
@@ -158,6 +160,10 @@ impl<'de> serde::Deserialize<'de> for Sha256Hash {
     }
 }
 
+#[cfg_attr(
+    feature = "solana",
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+)]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum ValidatorType {
@@ -180,6 +186,10 @@ impl Display for ValidatorType {
 ///
 /// We separate this to its own type so that we can
 /// pass along this message with its signature to the contracts.
+#[cfg_attr(
+    feature = "solana",
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+)]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct SelfReplace {
     pub validator_type: ValidatorType,
@@ -187,6 +197,10 @@ pub struct SelfReplace {
 }
 
 /// Definition of the validator set for a chain.
+#[cfg_attr(
+    feature = "solana",
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+)]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ValidatorSet {
     pub processor: PublicKey,
@@ -250,5 +264,25 @@ impl ValidatorSet {
         } else {
             Err(ValidatorSetError::NotAValidator { key })
         }
+    }
+}
+
+#[cfg_attr(
+    feature = "solana",
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct KeyRegistration {
+    pub signature: SignatureWithRecovery,
+    pub key: PublicKey,
+}
+
+#[cfg(feature = "realcryptography")]
+impl KeyRegistration {
+    pub fn new(address: &str, key: &SecretKey) -> Result<Self, SecretKeyError> {
+        Ok(Self {
+            signature: key.sign_recoverable(address)?,
+            key: key.public_key(),
+        })
     }
 }

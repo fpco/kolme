@@ -5,21 +5,14 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
-[features]
-default = ["client"]
-client = [
-    "dep:solana-transaction", "dep:solana-pubkey", "dep:solana-message",
-    "dep:solana-instruction", "dep:solana-hash", "dep:solana-signer",
-    "dep:solana-keypair", "dep:spl-associated-token-account-client"
-]
-
 [dependencies]
-borsh = { version = "1.5.5", default-features = false, features = ["derive"] }
-solana-transaction = { version = "2.2", optional = true, features = ["bincode"] }
-solana-pubkey = { version = "2.2", default-features = false, features = ["std", "curve25519"], optional = true }
-solana-keypair = { version = "2.2", optional = true }
-solana-signer = { version = "2.2", optional = true }
-solana-message = { version = "2.2", optional = true }
-solana-instruction = { version = "2.2", optional = true }
-solana-hash = { version = "2.2", optional = true }
-spl-associated-token-account-client = { version = "2.0.0", optional = true }
+borsh = { version = "1.5.7", default-features = false, features = ["derive"] }
+shared = { path = "../../../packages/shared", features = ["solana"] }
+solana-transaction = { version = "2.2", features = ["bincode"] }
+solana-pubkey = { version = "2.2", default-features = false, features = ["std", "curve25519"] }
+solana-keypair = { version = "2.2" }
+solana-signer = { version = "2.2" }
+solana-message = { version = "2.2" }
+solana-instruction = { version = "2.2" }
+solana-hash = { version = "2.2" }
+spl-associated-token-account-client = { version = "2.0.0" }

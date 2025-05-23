@@ -390,11 +390,11 @@ dependencies = [
 
 [[package]]
 name = "borsh"
-version = "1.5.6"
+version = "1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2b74d67a0fc0af8e9823b79fd1c43a0900e5a8f0e0f4cc9210796bf3a820126"
+checksum = "ad8646f98db542e39fc66e68a20b2144f6a732636df7c2354e74645faaa433ce"
 dependencies = [
- "borsh-derive 1.5.6",
+ "borsh-derive 1.5.7",
  "cfg_aliases",
 ]
 
@@ -413,9 +413,9 @@ dependencies = [
 
 [[package]]
 name = "borsh-derive"
-version = "1.5.6"
+version = "1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d37ed1b2c9b78421218a0b4f6d8349132d6ec2cfeba1cfb0118b0a8e268df9e"
+checksum = "fdd1d3c0c2f5833f22386f252fe8ed005c7f59fdcddeef025c01b4c3b9fd9ac3"
 dependencies = [
  "once_cell",
  "proc-macro-crate 3.3.0",
@@ -829,6 +829,7 @@ dependencies = [
  "digest 0.10.7",
  "elliptic-curve",
  "rfc6979",
+ "serdect",
  "signature 2.2.0",
  "spki",
 ]
@@ -877,6 +878,7 @@ dependencies = [
  "pkcs8",
  "rand_core 0.6.4",
  "sec1",
+ "serdect",
  "subtle",
  "zeroize",
 ]
@@ -1167,6 +1169,12 @@ checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hmac"
@@ -1516,6 +1524,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "once_cell",
+ "serdect",
  "sha2 0.10.8",
  "signature 2.2.0",
 ]
@@ -1534,30 +1543,18 @@ name = "kolme-solana-bridge"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "borsh 1.5.6",
- "k256",
- "kolme-solana-bridge-client",
- "litesvm",
- "litesvm-token",
- "sha_256",
- "solana-account",
- "solana-hash",
- "solana-instruction",
- "solana-keypair",
- "solana-message",
- "solana-pubkey",
- "solana-signer",
- "solana-transaction",
- "solana-transaction-error",
+ "borsh 1.5.7",
+ "serde_json",
+ "shared",
  "solbox",
- "spl-associated-token-account-client",
 ]
 
 [[package]]
 name = "kolme-solana-bridge-client"
 version = "0.1.0"
 dependencies = [
- "borsh 1.5.6",
+ "borsh 1.5.7",
+ "shared",
  "solana-hash",
  "solana-instruction",
  "solana-keypair",
@@ -2437,6 +2434,7 @@ dependencies = [
  "der",
  "generic-array",
  "pkcs8",
+ "serdect",
  "subtle",
  "zeroize",
 ]
@@ -2510,6 +2508,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serdect"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177"
+dependencies = [
+ "base16ct",
+ "serde",
+]
+
+[[package]]
 name = "sha2"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2548,6 +2556,18 @@ name = "sha_256"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67aa05c520a4a52e76d716c5e1fa67fb132d16df779b6479014e40b1aa16e921"
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "borsh 1.5.7",
+ "hex",
+ "k256",
+ "rand 0.8.5",
+ "serde",
+ "thiserror 2.0.12",
+]
 
 [[package]]
 name = "shlex"
@@ -2753,7 +2773,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "718333bcd0a1a7aed6655aa66bef8d7fb047944922b2d3a18f49cbc13e73d004"
 dependencies = [
  "borsh 0.10.4",
- "borsh 1.5.6",
+ "borsh 1.5.7",
 ]
 
 [[package]]
@@ -2909,7 +2929,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a5df17b195d312b66dccdde9beec6709766d8230cb4718c4c08854f780d0309"
 dependencies = [
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "solana-instruction",
  "solana-sdk-ids",
 ]
@@ -3171,7 +3191,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf7bcb14392900fe02e4e34e90234fbf0c673d4e327888410ba99fa2ba0f4e99"
 dependencies = [
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "bs58",
  "bytemuck",
  "bytemuck_derive",
@@ -3196,7 +3216,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ce496a475e5062ba5de97215ab39d9c358f9c9df4bb7f3a45a1f1a8bd9065ed"
 dependencies = [
  "bincode",
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "getrandom 0.2.15",
  "js-sys",
  "num-traits",
@@ -3508,7 +3528,7 @@ dependencies = [
  "bincode",
  "blake3",
  "borsh 0.10.4",
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "bs58",
  "bytemuck",
  "console_error_panic_hook",
@@ -3597,7 +3617,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8ae2c1a8d0d4ae865882d5770a7ebca92bab9c685e43f0461682c6c05a35bfa"
 dependencies = [
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "num-traits",
  "serde",
  "serde_derive",
@@ -3680,7 +3700,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40db1ff5a0f8aea2c158d78ab5f2cf897848964251d1df42fef78efd3c85b863"
 dependencies = [
  "borsh 0.10.4",
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "bs58",
  "bytemuck",
  "bytemuck_derive",
@@ -3950,7 +3970,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5269e89fde216b4d7e1d1739cf5303f8398a1ff372a81232abbee80e554a838c"
 dependencies = [
  "borsh 0.10.4",
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "num-traits",
  "serde",
  "serde_derive",
@@ -4345,7 +4365,7 @@ name = "solbox"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.9.0",
- "borsh 1.5.6",
+ "borsh 1.5.7",
  "once_cell",
  "pinocchio",
  "pinocchio-pubkey",
@@ -4468,6 +4488,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "testing"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "borsh 1.5.7",
+ "kolme-solana-bridge-client",
+ "litesvm",
+ "litesvm-token",
+ "sha_256",
+ "shared",
+ "solana-account",
+ "solana-transaction-error",
 ]
 
 [[package]]

@@ -2,11 +2,14 @@ use std::collections::BTreeSet;
 
 use base64::Engine;
 use borsh::{BorshDeserialize, BorshSerialize};
-use kolme_solana_bridge_client::{
-    BridgeMessage, ExecuteAction, InitializeIxData, Message, Payload, RegularMsgIxData,
-    Secp256k1Pubkey, Secp256k1PubkeyCompressed, Secp256k1Signature, SelfReplace, Signature,
-    SignedAction, SignedMsgIxData, State, Token, ValidatorSet, ValidatorType, INITIALIZE_IX,
-    REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
+use shared::{
+    cryptography::{PublicKey, PublicKeyUncompressed, SignatureWithRecovery},
+    solana::{
+        BridgeMessage, ExecuteAction, InitializeIxData, Message, Payload, RegularMsgIxData,
+        SignedAction, SignedMsgIxData, State, Token, INITIALIZE_IX, REGULAR_IX, SIGNED_IX,
+        TOKEN_HOLDER_SEED,
+    },
+    types::{SelfReplace, ValidatorSet, ValidatorType},
 };
 use solbox::{
     log, log_base64,
@@ -25,11 +28,6 @@ use solbox::{
     },
     token2022, AccountReq, Context, PdaData, PdaDerivation,
 };
-
-#[cfg(test)]
-mod tests;
-
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
 mod ata_program {
     use super::declare_id;
@@ -54,8 +52,7 @@ const SHA256_DIGEST_SIZE: usize = 32;
 #[repr(u32)]
 pub enum InitIxError {
     NoApproversProvided = 0,
-    TooManyApprovers = 1,
-    InsufficientApprovers = 2,
+    ValidatorSetError = 1,
 }
 
 #[repr(u32)]
@@ -77,6 +74,7 @@ pub enum SignedIxError {
     AccountMetaAndPassedAccountsMismatch = 5,
     InvalidBase64Payload = 6,
     InvalidSelfReplace = 7,
+    JsonDeserialize = 8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -134,22 +132,19 @@ fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError>
 
     let ix = InitializeIxData::try_from_slice(instruction_data)
         .map_err(|_| ProgramError::BorshIoError)?;
+
+    if let Err(e) = ix.set.validate() {
+        log!("Validator set validation error: {}", e.to_string());
+
+        return Err(InitIxError::ValidatorSetError.into());
+    }
+
     let state = State {
         set: ix.set,
         // We start events at ID 1, since the instantiation itself is event 0.
         next_event_id: 1,
         next_action_id: 0,
     };
-
-    if state.set.approvers.is_empty() {
-        return Err(InitIxError::NoApproversProvided.into());
-    }
-
-    let approvers_len =
-        u16::try_from(state.set.approvers.len()).map_err(|_| InitIxError::TooManyApprovers)?;
-    if approvers_len < state.set.needed_approvers {
-        return Err(InitIxError::InsufficientApprovers.into());
-    }
 
     let state_pda: StatePda = ctx.init_pda(&payer_acc, &state_acc, STATE_DERIVATION, state)?;
     state_pda.serialize_into(&state_acc)?;
@@ -300,8 +295,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     let hash = Sha256(*sender_acc.key());
 
     for r in &data.keys {
-        let recovered_key =
-            secp256k1_recover(&hash, r.signature.recovery_id, &r.signature.signature)?;
+        let recovered_key = secp256k1_recover(&hash, &r.signature)?;
 
         if recovered_key.to_sec1_bytes() != r.key {
             return Err(RegularIxError::PubkeySignatureMismatch.into());
@@ -363,12 +357,6 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     let incoming_id = state_pda.data.next_event_id;
     state_pda.data.next_event_id += 1;
 
-    let approvers_len =
-        u16::try_from(data.approvers.len()).map_err(|_| SignedIxError::TooManyApprovers)?;
-    if approvers_len < state_pda.data.set.needed_approvers {
-        return Err(SignedIxError::InsufficientSignatures.into());
-    }
-
     let hash = sha256(data.payload.as_bytes());
 
     match payload.action {
@@ -397,12 +385,11 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             let SelfReplace {
                 validator_type,
                 replacement,
-            } = SelfReplace::try_from_slice(&rendered).map_err(|_| ProgramError::BorshIoError)?;
+            } = serde_json::from_str(&rendered)
+                .map_err(|_| ProgramError::from(SignedIxError::JsonDeserialize))?;
 
-            let rendered_hash = sha256(rendered.as_slice());
-            let validator =
-                secp256k1_recover(&rendered_hash, signature.recovery_id, &signature.signature)?
-                    .to_sec1_bytes();
+            let rendered_hash = sha256(rendered.as_bytes());
+            let validator = secp256k1_recover(&rendered_hash, &signature)?.to_sec1_bytes();
 
             match validator_type {
                 ValidatorType::Processor => {
@@ -471,9 +458,10 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             rendered,
             approvals,
         } => {
-            let new_set =
-                ValidatorSet::try_from_slice(&rendered).map_err(|_| ProgramError::BorshIoError)?;
-            let rendered_hash = sha256(rendered.as_slice());
+            let new_set: ValidatorSet = serde_json::from_str(&rendered)
+                .map_err(|_| ProgramError::from(SignedIxError::JsonDeserialize))?;
+
+            let rendered_hash = sha256(rendered.as_bytes());
 
             let mut processor = false;
             let mut listeners = 0;
@@ -481,9 +469,7 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             let mut used = Vec::with_capacity(approvals.len());
 
             for signature in &approvals {
-                let validator =
-                    secp256k1_recover(&rendered_hash, signature.recovery_id, &signature.signature)?
-                        .to_sec1_bytes();
+                let validator = secp256k1_recover(&rendered_hash, &signature)?.to_sec1_bytes();
 
                 if state_pda.data.set.processor == validator {
                     assert!(!processor);
@@ -596,13 +582,13 @@ fn execute_action(action: ExecuteAction, ix_accounts: &[AccountInfo]) -> Result<
 
 fn verify_signatures(
     hash: &Sha256,
-    processor: &Signature,
-    expected_processor: &Secp256k1PubkeyCompressed,
-    approvers: &[Signature],
-    expected_approvers: &BTreeSet<Secp256k1PubkeyCompressed>,
+    processor: &SignatureWithRecovery,
+    expected_processor: &PublicKey,
+    approvers: &[SignatureWithRecovery],
+    expected_approvers: &BTreeSet<PublicKey>,
     needed_approvers: u16,
 ) -> Result<(), ProgramError> {
-    let recovered_key = secp256k1_recover(hash, processor.recovery_id, &processor.signature)?;
+    let recovered_key = secp256k1_recover(hash, &processor)?;
 
     if recovered_key.to_sec1_bytes() != *expected_processor {
         return Err(SignedIxError::ProcessorKeyMismatch.into());
@@ -611,7 +597,7 @@ fn verify_signatures(
     let mut keys = Vec::with_capacity(approvers.len());
 
     for a in approvers {
-        let key = secp256k1_recover(hash, a.recovery_id, &a.signature)?.to_sec1_bytes();
+        let key = secp256k1_recover(hash, &a)?.to_sec1_bytes();
 
         if expected_approvers.contains(&key) {
             keys.push(key);
@@ -636,7 +622,7 @@ fn verify_signatures(
 }
 
 #[inline]
-fn is_distinct(keys: &[Secp256k1PubkeyCompressed]) -> bool {
+fn is_distinct(keys: &[PublicKey]) -> bool {
     for (i, key) in keys.iter().enumerate() {
         if keys.iter().skip(i + 1).any(|x| x == key) {
             return false;
@@ -734,25 +720,24 @@ fn execute_transfer(
 
 fn secp256k1_recover(
     hash: &Sha256,
-    recovery_id: u8,
-    signature: &Secp256k1Signature,
-) -> Result<Secp256k1Pubkey, Secp256k1RecoverError> {
-    if !signature.is_normalized() {
+    signature: &SignatureWithRecovery,
+) -> Result<PublicKeyUncompressed, Secp256k1RecoverError> {
+    if !signature.sig.is_normalized() {
         return Err(Secp256k1RecoverError::SignatureNotNormalized);
     }
 
-    let mut buf = std::mem::MaybeUninit::<[u8; Secp256k1Pubkey::LEN]>::uninit();
+    let mut buf = std::mem::MaybeUninit::<[u8; 64]>::uninit();
 
     unsafe {
         let errno = syscalls::sol_secp256k1_recover(
             hash.0.as_ptr(),
-            recovery_id as u64,
-            signature.0.as_ptr(),
+            signature.recid.to_byte() as u64,
+            signature.sig.to_bytes().as_ptr(),
             buf.as_mut_ptr() as *mut u8,
         );
 
         match errno {
-            0 => Ok(Secp256k1Pubkey(buf.assume_init())),
+            0 => Ok(PublicKeyUncompressed(buf.assume_init())),
             1 => Err(Secp256k1RecoverError::InvalidHash),
             2 => Err(Secp256k1RecoverError::InvalidRecoveryId),
             3 => Err(Secp256k1RecoverError::InvalidSignature),

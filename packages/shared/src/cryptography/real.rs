@@ -1,3 +1,5 @@
+pub use rand::rngs::ThreadRng;
+
 use std::{fmt::Display, str::FromStr};
 
 /// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
@@ -83,6 +85,28 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::ser::BorshSerialize for PublicKey {
+    #[inline]
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        borsh::ser::BorshSerialize::serialize(&self.as_bytes(), writer)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::de::BorshDeserialize for PublicKey {
+    #[inline]
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        use borsh::io::{Error, ErrorKind};
+
+        let bytes: [u8; 33] = borsh::de::BorshDeserialize::try_from_reader(reader)?;
+        match Self::from_bytes(&bytes) {
+            Ok(sig) => Ok(sig),
+            Err(e) => Err(Error::new(ErrorKind::Other, e))
+        }
     }
 }
 
@@ -257,6 +281,29 @@ impl Signature {
     }
 }
 
+#[cfg(feature = "solana")]
+impl borsh::ser::BorshSerialize for Signature {
+    #[inline]
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        let bytes = self.0.to_bytes();
+        borsh::ser::BorshSerialize::serialize(bytes.as_slice(), writer)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::de::BorshDeserialize for Signature {
+    #[inline]
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        use borsh::io::{Error, ErrorKind};
+
+        let bytes: [u8; 64] = borsh::de::BorshDeserialize::try_from_reader(reader)?;
+        match Self::from_slice(&bytes) {
+            Ok(sig) => Ok(sig),
+            Err(e) => Err(Error::new(ErrorKind::Other, e))
+        }
+    }
+}
+
 impl From<k256::ecdsa::Signature> for Signature {
     fn from(sig: k256::ecdsa::Signature) -> Self {
         Signature(sig)
@@ -313,6 +360,29 @@ impl<'de> serde::Deserialize<'de> for RecoveryId {
         match k256::ecdsa::RecoveryId::from_byte(recid) {
             None => Err(serde::de::Error::custom("Invalid recovery ID provided")),
             Some(recid) => Ok(RecoveryId(recid)),
+        }
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::ser::BorshSerialize for RecoveryId {
+    #[inline]
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        borsh::ser::BorshSerialize::serialize(&self.to_byte(), writer)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::de::BorshDeserialize for RecoveryId {
+    #[inline]
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        use borsh::io::{Error, ErrorKind};
+
+        let byte: u8 = borsh::de::BorshDeserialize::try_from_reader(reader)?;
+
+        match Self::from_byte(byte) {
+            Ok(id) => Ok(id),
+            Err(e) => Err(Error::new(ErrorKind::Other, e))
         }
     }
 }

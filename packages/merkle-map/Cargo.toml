@@ -10,7 +10,7 @@ parking_lot = "0.12.3"
 rust_decimal = { workspace = true }
 serde = "1.0.218"
 serde_json = { workspace = true }
-shared = { workspace = true, features = ["realcryptography"] }
+shared = { workspace = true }
 thiserror = "2.0.12"
 tinyvec = { version = "1.9.0", features = ["alloc"] }
 jiff = { workspace = true }

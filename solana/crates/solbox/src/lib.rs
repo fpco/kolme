@@ -182,8 +182,7 @@ impl<'a> Context<'a> {
 
         let (address, bump) = if let Some(bump) = derivation.bump {
             let bump_slice = &[bump];
-            let mut seeds =
-                SmallVec::<[&[u8]; 4]>::from_iter(derivation.seeds.iter().copied());
+            let mut seeds = SmallVec::<[&[u8]; 4]>::from_iter(derivation.seeds.iter().copied());
 
             // Can't use chain() like below because the compiler thinks it's being passed &u8 even when bump_slice is explicity typed as &[u8]...
             seeds.push(bump_slice);

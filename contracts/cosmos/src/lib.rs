@@ -30,8 +30,6 @@ pub enum Error {
     },
     #[error("No approvers provided")]
     NoApproversProvided,
-    #[error("Too many approvers provided")]
-    TooManyApprovers(TryFromIntError),
     #[error("Need at least {needed} approvers , but only {provided} provided.")]
     InsufficientApprovers { needed: u16, provided: u16 },
     #[error("Incorrect action ID. Expected: {expected}. Received: {received}.")]
@@ -174,14 +172,6 @@ fn signed(
     state.next_action_id.increment();
     let incoming_id = state.next_event_id;
     state.next_event_id.increment();
-
-    let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
-    if approvers_len < state.set.needed_approvers {
-        return Err(Error::InsufficientSignatures {
-            needed: state.set.needed_approvers,
-            provided: approvers_len,
-        });
-    }
 
     let mut hasher = Sha256::new();
     hasher.update(&payload_string);
@@ -332,7 +322,7 @@ fn signed(
 
     if processor != expected_processor {
         return Err(Error::PublicKeyRecoveryMismatch {
-            expected: state.set.processor.into(),
+            expected: expected_processor.into(),
             actual: processor.into(),
         });
     }
@@ -348,9 +338,10 @@ fn signed(
         }
         used.push(key);
     }
+
     if used.len() < needed_approvers as usize {
         return Err(Error::InsufficientApprovers {
-            needed: state.set.needed_approvers,
+            needed: needed_approvers,
             provided: used.len() as u16,
         });
     }

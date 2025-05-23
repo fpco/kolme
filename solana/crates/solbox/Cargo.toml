@@ -11,6 +11,6 @@ pinocchio-system = "0.2.2"
 pinocchio-token = "0.3.0"
 pinocchio-pubkey = "0.2.4"
 bitflags = "2.9.0"
-borsh = { version = "1.5.5", default-features = false }
+borsh = { version = "1.5.7", default-features = false }
 smallvec = { version = "1.14.0", default-features = false, features = ["union", "const_generics", "const_new"]}
 once_cell = { version = "1.21.1", default-features = false }
