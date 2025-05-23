@@ -16,6 +16,7 @@ cosmos = { git = "https://github.com/fpco/cosmos-rs", rev = "6f6fea0f7c04e4b64f5
 solana-client = "2.2.7"
 solana-signature = "2.2.1"
 solana-transaction-status-client-types = "2.2.7"
+solana-commitment-config = "2.2.1"
 borsh = { version = "1.5.5", default-features = false }
 cosmwasm-std = "2.2.2"
 base64 = "0.22.1"
