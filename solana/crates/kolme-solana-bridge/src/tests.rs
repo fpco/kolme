@@ -595,14 +595,14 @@ fn zero_amount_transfer() {
     assert!(result.is_ok());
 
     let sender_ata_data: SplAccount = get_spl_account(&p.svm, &sender_ata).unwrap();
-    assert_eq!(sender_ata_data.amount, 10_00000000);
+    assert_eq!(sender_ata_data.amount, 1_000_000_000);
 }
 
 #[test]
 fn duplicate_executor_signatures_rejected() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.svm.airdrop(&sender.pubkey(), 1_000_000_000).unwrap();
     p.init_default(&sender).unwrap();
 
     let receiver = Keypair::new();
@@ -620,7 +620,7 @@ fn duplicate_executor_signatures_rejected() {
 fn large_token_amount_transfer() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.svm.airdrop(&sender.pubkey(), 1_000_000_000).unwrap();
     p.init_default(&sender).unwrap();
 
     let sender_ata = p.make_ata(&sender);
@@ -743,7 +743,7 @@ fn tampered_payload_rejected() {
 fn invalid_needed_executors_rejected() {
     let mut p = Program::new();
     let sender = Keypair::new();
-    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+    p.svm.airdrop(&sender.pubkey(), 1_000_000_000).unwrap();
 
     let mut executors = Vec::with_capacity(KEYS_LEN - 1);
     for i in 1..KEYS_LEN {
@@ -751,7 +751,7 @@ fn invalid_needed_executors_rejected() {
     }
 
     let data = InitializeIxData {
-        needed_executors: (KEYS_LEN - 1 + 1) as u8,
+        needed_executors: (KEYS_LEN) as u8,
         processor: Secp256k1PubkeyCompressed(p.keys[PROCESSOR_KEY].verifying_key().to_sec1_bytes().deref().try_into().unwrap()),
         executors,
     };
