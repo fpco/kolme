@@ -427,9 +427,11 @@ impl<App: KolmeApp> Gossip<App> {
         match event {
             SwarmEvent::ConnectionEstablished { .. } => {
                 self.watch_network_ready.send_if_modified(|value| {
-                    let ret = *value;
-                    *value = true;
-                    ret
+                    if !(*value) {
+                        *value = true;
+                        return true;
+                    }
+                    false
                 });
             }
             SwarmEvent::NewListenAddr {
