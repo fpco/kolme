@@ -22,9 +22,9 @@ pub async fn listen<App: KolmeApp>(
     contract: String,
 ) -> Result<()> {
     let contract_pubkey = Pubkey::from_str_const(&contract);
-    let pubsub_client = chain.make_pubsub_client().await?;
-    let client = chain.make_client();
 
+    let client = kolme.get_solana_client(chain).await;
+    let pubsub_client = kolme.get_solana_pubsub_client(chain).await?;
     let mut next_bridge_event_id =
         get_next_bridge_event_id(&kolme.read(), secret.public_key(), chain.into());
 
