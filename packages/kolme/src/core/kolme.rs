@@ -335,7 +335,7 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block: Arc<SignedBlock<App::Message>>,
         framework_state: Arc<MerkleContents>,
         app_state: Arc<MerkleContents>,
-        logs: Arc<[Vec<String>]>,
+        logs: Arc<MerkleContents>,
     ) -> Result<()> {
         // Don't accept blocks we already have
         let kolme = self.read();
@@ -372,6 +372,12 @@ impl<App: KolmeApp> Kolme<App> {
                     block.app_state,
                     app_state,
                 )
+                .await?,
+        );
+        let logs = Arc::<[Vec<String>]>::from(
+            self.inner
+                .store
+                .store_and_load::<Vec<Vec<String>>>(&self.inner.merkle_manager, block.logs, logs)
                 .await?,
         );
 

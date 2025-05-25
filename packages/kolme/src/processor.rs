@@ -171,12 +171,13 @@ impl<App: KolmeApp> Processor<App> {
         let ExecutionResults {
             framework_state,
             app_state,
-            logs: _,
+            logs,
             loads,
         } = kolme.execute_transaction(&tx, now, None).await?;
 
         let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
         let app_state = kolme.get_merkle_manager().serialize(&app_state)?.hash;
+        let logs = kolme.get_merkle_manager().serialize(&logs)?.hash;
 
         let approved_block = Block {
             tx,
@@ -187,6 +188,7 @@ impl<App: KolmeApp> Processor<App> {
             framework_state,
             app_state,
             loads,
+            logs,
         };
         let event = TaggedJson::new(approved_block)?;
         Ok(SignedBlock(event.sign(secret)?))
