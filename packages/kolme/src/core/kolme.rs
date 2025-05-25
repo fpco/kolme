@@ -704,6 +704,15 @@ impl<App: KolmeApp> Kolme<App> {
     pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
         self.inner.store.take_construct_lock().await
     }
+
+    /// Returns a hash of the genesis info.
+    ///
+    /// Purpose: this provides a unique identifier for a chain.
+    pub fn get_genesis_hash(&self) -> Result<Sha256Hash> {
+        let info = self.inner.app.genesis_info();
+        let info = serde_json::to_vec(info)?;
+        Ok(Sha256Hash::hash(&info))
+    }
 }
 
 impl<App: KolmeApp> Kolme<App> {
