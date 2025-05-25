@@ -14,7 +14,7 @@ pub struct SampleKolmeApp {
     pub genesis: GenesisInfo,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SampleState {}
 
 impl MerkleSerialize for SampleState {
@@ -54,11 +54,13 @@ impl Default for SampleKolmeApp {
         set.insert(my_public_key);
         let genesis = GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
-            processor: my_public_key,
-            listeners: set.clone(),
-            needed_listeners: 1,
-            approvers: set,
-            needed_approvers: 1,
+            validator_set: ValidatorSet {
+                processor: my_public_key,
+                listeners: set.clone(),
+                needed_listeners: 1,
+                approvers: set,
+                needed_approvers: 1,
+            },
             chains: ConfiguredChains::default(),
         };
 
@@ -146,6 +148,12 @@ async fn multiple_processors_inner(
         let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
             .await
             .unwrap();
+
+        // TODO Ideally we would like to speed up things so this test runs much faster.
+        // However, at the moment, sometimes transactions take more than
+        // 10 seconds to land.
+        let kolme = kolme.set_tx_await_duration(tokio::time::Duration::from_secs(60));
+
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         test_tasks.try_spawn_persistent(processor.run());
         test_tasks.try_spawn_persistent(check_failed_txs(kolme.clone()));
@@ -173,8 +181,8 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
         match recv.recv().await? {
             Notification::NewBlock(_) => (),
             Notification::GenesisInstantiation { .. } => (),
-            Notification::Broadcast { .. } => (),
-            Notification::FailedTransaction { txhash, error } => {
+            Notification::FailedTransaction(failed) => {
+                let FailedTransaction { txhash, error } = failed.message.into_inner();
                 anyhow::bail!("Error with transaction {txhash}: {error}")
             }
         }
@@ -193,9 +201,11 @@ async fn client(
             let secret = SecretKey::random(&mut rng);
             (kolme, secret)
         };
-        let tx = kolme
-            .read()
-            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?;
+        let tx = Arc::new(
+            kolme
+                .read()
+                .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
+        );
         let txhash = tx.hash();
         kolme.propose_and_await_transaction(tx).await?;
 
@@ -243,7 +253,9 @@ async fn checker(
         .get_block(highest_block)
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .block;
+
     let next_height = kolmes[0].read().get_next_height();
     assert_eq!(
         next_height,

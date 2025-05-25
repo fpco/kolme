@@ -2,9 +2,10 @@ mod accounts;
 mod error;
 
 use crate::core::CoreStateError;
-use std::{fmt::Display, str::FromStr, sync::OnceLock};
+use std::{collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
 
 use cosmwasm_std::Uint128;
+use shared::cosmos::PayloadWithId;
 
 use crate::*;
 
@@ -130,32 +131,63 @@ impl CosmosChain {
     }
 }
 
+#[derive(Default)]
+pub struct SolanaEndpoints {
+    pub regular: HashMap<SolanaChain, Arc<str>>,
+    pub pubsub: HashMap<SolanaChain, Arc<str>>,
+}
+
+pub enum SolanaClientEndpoint {
+    Static(&'static str),
+    Arc(Arc<str>),
+}
+
+impl SolanaEndpoints {
+    pub fn get_regular_endpoint(&self, chain: SolanaChain) -> SolanaClientEndpoint {
+        self.regular.get(&chain).map_or(
+            SolanaClientEndpoint::Static(match chain {
+                SolanaChain::Mainnet => "https://api.mainnet-beta.solana.com",
+                SolanaChain::Testnet => "https://api.testnet.solana.com",
+                SolanaChain::Devnet => "https://api.devnet.solana.com",
+                SolanaChain::Local => "http://localhost:8899",
+            }),
+            |s| SolanaClientEndpoint::Arc(s.clone()),
+        )
+    }
+
+    pub fn get_pubsub_endpoint(&self, chain: SolanaChain) -> SolanaClientEndpoint {
+        self.pubsub.get(&chain).map_or(
+            SolanaClientEndpoint::Static(match chain {
+                SolanaChain::Mainnet => "wss://api.mainnet-beta.solana.com",
+                SolanaChain::Testnet => "wss://api.testnet.solana.com",
+                SolanaChain::Devnet => "wss://api.devnet.solana.com/",
+                SolanaChain::Local => "ws://localhost:8900",
+            }),
+            |s| SolanaClientEndpoint::Arc(s.clone()),
+        )
+    }
+}
+
+impl SolanaClientEndpoint {
+    pub fn make_client(self) -> SolanaClient {
+        SolanaClient::new(match self {
+            SolanaClientEndpoint::Static(url) => url.to_owned(),
+            SolanaClientEndpoint::Arc(url) => (*url).to_owned(),
+        })
+    }
+
+    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
+        match self {
+            SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
+            SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
+        }
+        .map_err(anyhow::Error::from)
+    }
+}
+
 impl SolanaChain {
     pub const fn name() -> ChainName {
         ChainName::Solana
-    }
-
-    pub fn make_client(self) -> SolanaClient {
-        let url = match self {
-            Self::Mainnet => "https://api.mainnet-beta.solana.com",
-            Self::Testnet => "https://api.testnet.solana.com",
-            Self::Devnet => "https://api.devnet.solana.com",
-            Self::Local => "http://localhost:8899",
-        };
-
-        SolanaClient::new(url.into())
-    }
-
-    // TODO: We should have a way to configure those endpoints - the public ones are not suitable for production use.
-    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
-        let url = match self {
-            Self::Mainnet => "wss://api.mainnet-beta.solana.com",
-            Self::Testnet => "wss://api.testnet.solana.com",
-            Self::Devnet => "wss://api.devnet.solana.com/",
-            Self::Local => "ws://localhost:8900",
-        };
-
-        Ok(SolanaPubsubClient::new(url).await?)
     }
 }
 
@@ -540,22 +572,13 @@ pub enum GenesisAction {
     InstantiateCosmos {
         chain: CosmosChain,
         code_id: u64,
-        args: InstantiateArgs,
+        validator_set: ValidatorSet,
     },
     InstantiateSolana {
         chain: SolanaChain,
         program_id: String,
-        args: InstantiateArgs,
+        validator_set: ValidatorSet,
     },
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct InstantiateArgs {
-    pub processor: PublicKey,
-    pub listeners: BTreeSet<PublicKey>,
-    pub needed_listeners: usize,
-    pub approvers: BTreeSet<PublicKey>,
-    pub needed_approvers: usize,
 }
 
 #[derive(
@@ -706,6 +729,10 @@ impl BlockHeight {
         BlockHeight(self.0 + 1)
     }
 
+    pub fn prev(self) -> Option<Self> {
+        self.0.checked_sub(1).map(BlockHeight)
+    }
+
     pub fn start() -> BlockHeight {
         BlockHeight(0)
     }
@@ -852,6 +879,11 @@ pub struct Block<AppMessage> {
     pub framework_state: Sha256Hash,
     /// New app state at the end of execution
     pub app_state: Sha256Hash,
+    /// The log messages generated when executing this block.
+    ///
+    /// This will be a `Vec<Vec<String>>`, where the outer Vec
+    /// is per-message and the inner contains each log.
+    pub logs: Sha256Hash,
     /// Any data loads that were used for execution.
     pub loads: Vec<BlockDataLoad>,
 }
@@ -934,6 +966,7 @@ pub enum Message<AppMessage> {
     },
     Auth(AuthMessage),
     Bank(BankMessage),
+    KeyRotation(KeyRotationMessage),
     // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
 }
 
@@ -987,31 +1020,116 @@ pub enum BankMessage {
     },
 }
 
+/// Messages for handling key rotation.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyRotationMessage {
+    /// The sending key is replacing itself with a new key.
+    SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
+    /// Replace the complete validator set.
+    ///
+    /// Must be proposed by one of the members of an existing set.
+    NewSet {
+        validator_set: Box<SignedTaggedJson<ValidatorSet>>,
+    },
+    /// Vote to approve a proposed set change.
+    Approve {
+        change_set_id: ChangeSetId,
+        signature: SignatureWithRecovery,
+    },
+}
+
+impl KeyRotationMessage {
+    pub fn self_replace(
+        validator_type: ValidatorType,
+        replacement: PublicKey,
+        current: &SecretKey,
+    ) -> Result<Self> {
+        let self_replace = SelfReplace {
+            validator_type,
+            replacement,
+        };
+        let json = TaggedJson::new(self_replace)?;
+        let signed = json.sign(current)?;
+        Ok(KeyRotationMessage::SelfReplace(Box::new(signed)))
+    }
+
+    pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self> {
+        let json = TaggedJson::new(set)?;
+        let signed = json.sign(proposer)?;
+        Ok(KeyRotationMessage::NewSet {
+            validator_set: Box::new(signed),
+        })
+    }
+
+    pub fn approve(
+        change_set_id: ChangeSetId,
+        set: &TaggedJson<ValidatorSet>,
+        validator: &SecretKey,
+    ) -> Result<Self> {
+        let signature = validator.sign_recoverable(set.as_bytes())?;
+        Ok(KeyRotationMessage::Approve {
+            change_set_id,
+            signature,
+        })
+    }
+}
+
+/// Monotonically increasing identifier for proposed validator set changes.
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Copy,
+    Hash,
+    Debug,
+    Default,
+)]
+pub struct ChangeSetId(pub u64);
+
+impl ChangeSetId {
+    pub fn next(self) -> ChangeSetId {
+        ChangeSetId(self.0 + 1)
+    }
+}
+
+impl Display for ChangeSetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl MerkleSerialize for ChangeSetId {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize(serializer)
+    }
+}
+impl MerkleDeserialize for ChangeSetId {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        u64::merkle_deserialize(deserializer).map(Self)
+    }
+}
+
 /// Information defining the initial state of an app.
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct GenesisInfo {
     /// Unique identifier for this application, never changes.
     pub kolme_ident: String,
-    /// Public key of the processor for this app
-    pub processor: PublicKey,
-    /// Public keys of the listeners for this app
-    pub listeners: BTreeSet<PublicKey>,
-    /// How many of the listeners are needed to approve a reported bridge event?
-    pub needed_listeners: usize,
-    /// Public keys of the approvers for this app
-    pub approvers: BTreeSet<PublicKey>,
-    /// How many of the approvers are needed to approve a bridge action?
-    pub needed_approvers: usize,
+    /// The rules defining the validator set for this app.
+    pub validator_set: ValidatorSet,
     /// Initial configuration of different chains
     pub chains: ConfiguredChains,
 }
 
 impl GenesisInfo {
     pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.listeners.len() >= self.needed_listeners);
-        anyhow::ensure!(self.needed_listeners > 0);
-        anyhow::ensure!(self.approvers.len() >= self.needed_approvers);
-        anyhow::ensure!(self.needed_approvers > 0);
+        self.validator_set.validate()?;
         Ok(())
     }
 }
@@ -1061,7 +1179,7 @@ impl ChainStates {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Default, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, Debug, Clone)]
 pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
 
 impl ConfiguredChains {
@@ -1136,12 +1254,19 @@ pub struct BlockDataLoad {
 }
 
 /// A specific action to be taken as a result of an execution.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum ExecAction {
     Transfer {
         chain: ExternalChain,
         recipient: Wallet,
         funds: Vec<AssetAmount>,
+    },
+    /// Replace a single validator using a self-replacement.
+    SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
+    /// Replace the entire validator set.
+    NewSet {
+        validator_set: TaggedJson<ValidatorSet>,
+        approvals: Vec<SignatureWithRecovery>,
     },
 }
 
@@ -1156,12 +1281,6 @@ impl ExecAction {
     ) -> Result<String> {
         use base64::Engine;
         use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
-
-        #[derive(serde::Serialize)]
-        struct CwPayload {
-            id: BridgeActionId,
-            messages: Vec<cosmwasm_std::CosmosMsg>,
-        }
 
         match self {
             Self::Transfer {
@@ -1194,9 +1313,9 @@ impl ExecAction {
                             amount: coins,
                         });
 
-                        let payload = serde_json::to_string(&CwPayload {
+                        let payload = serde_json::to_string(&PayloadWithId {
                             id,
-                            messages: vec![message],
+                            action: shared::cosmos::CosmosAction::Cosmos(vec![message]),
                         })?;
 
                         Ok(payload)
@@ -1259,6 +1378,44 @@ impl ExecAction {
                     }
                 }
             }
+            ExecAction::SelfReplace(self_replace) => match chain.name() {
+                ChainName::Cosmos => {
+                    let payload = serde_json::to_string(&PayloadWithId {
+                        id,
+                        action: shared::cosmos::CosmosAction::SelfReplace {
+                            rendered: self_replace.message.as_str().to_owned(),
+                            signature: SignatureWithRecovery {
+                                recid: self_replace.recovery_id,
+                                sig: self_replace.signature,
+                            },
+                        },
+                    })?;
+
+                    Ok(payload)
+                }
+                ChainName::Solana => todo!(),
+                #[cfg(feature = "pass_through")]
+                ChainName::PassThrough => todo!(),
+            },
+            ExecAction::NewSet {
+                validator_set,
+                approvals,
+            } => match chain.name() {
+                ChainName::Cosmos => {
+                    let payload = serde_json::to_string(&PayloadWithId {
+                        id,
+                        action: shared::cosmos::CosmosAction::NewSet {
+                            rendered: validator_set.as_str().to_owned(),
+                            approvals: approvals.clone(),
+                        },
+                    })?;
+
+                    Ok(payload)
+                }
+                ChainName::Solana => todo!(),
+                #[cfg(feature = "pass_through")]
+                ChainName::PassThrough => todo!(),
+            },
         }
     }
 }
@@ -1284,20 +1441,38 @@ pub enum Notification<AppMessage> {
         chain: ExternalChain,
         contract: String,
     },
-    /// Broadcast a transaction to be included in the chain.
-    Broadcast {
-        tx: Arc<SignedTransaction<AppMessage>>,
-    },
     /// A transaction failed in the processor.
-    FailedTransaction {
-        txhash: TxHash,
-        error: KolmeError,
+    ///
+    /// The message is signed by the processor. Only failed transactions
+    /// signed by the real processor should be respected for dropping
+    /// transactions from the mempool.
+    FailedTransaction(SignedTaggedJson<FailedTransaction>),
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct FailedTransaction {
+    pub txhash: TxHash,
+    pub error: KolmeError,
+}
+
+/// Represents distinct occurrences in the core of Kolme that could be relevant to users.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum LogEvent {
+    ProcessedBridgeEvent(LogBridgeEvent),
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum LogBridgeEvent {
+    Regular {
+        bridge_event_id: BridgeEventId,
+        account_id: AccountId,
     },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quickcheck::quickcheck;
     use rust_decimal::dec;
 
     #[test]
@@ -1369,4 +1544,31 @@ mod tests {
             (dec!(12.3456789), 1234567890)
         );
     }
+    macro_rules! serializing_idempotency_for {
+        ($value_type: ty, $test_name: ident) => {
+            quickcheck! {
+                fn $test_name(value: $value_type) -> quickcheck::TestResult {
+                    let manager = MerkleManager::default();
+                    let serialized = manager.serialize(&value).unwrap();
+                    let deserialized = manager
+                        .deserialize::<$value_type>(serialized.hash, serialized.payload.clone())
+                        .unwrap();
+
+                    quickcheck::TestResult::from_bool(value == deserialized)
+                }
+            }
+        };
+    }
+    serializing_idempotency_for!(AssetConfig, serialization_is_idempotent_for_assetconfig);
+    serializing_idempotency_for!(AssetId, serialization_is_idempotent_for_assetid);
+    serializing_idempotency_for!(AssetName, serialization_is_idempotent_for_assetname);
+    serializing_idempotency_for!(AccountId, serialization_is_idempotent_for_accountid);
+    serializing_idempotency_for!(AccountNonce, serialization_is_idempotent_for_accountnonce);
+    serializing_idempotency_for!(
+        BridgeContract,
+        serialization_is_idempotent_for_bridgecontract
+    );
+    serializing_idempotency_for!(ChainConfig, serialization_is_idempotent_for_chainconfig);
+    serializing_idempotency_for!(ExternalChain, serialization_is_idempotent_for_externalchain);
+    serializing_idempotency_for!(Wallet, serialization_is_idempotent_for_wallet);
 }

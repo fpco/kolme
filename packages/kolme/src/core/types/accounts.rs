@@ -101,7 +101,7 @@ impl Accounts {
             let account = self.accounts.get_mut(&account_id).ok_or(Decimal::ZERO)?;
             let asset = account.assets.get_mut(&asset_id).ok_or(Decimal::ZERO)?;
             match (*asset).cmp(&to_burn) {
-                std::cmp::Ordering::Less => Err(Decimal::ZERO),
+                std::cmp::Ordering::Less => Err(*asset),
                 std::cmp::Ordering::Equal => {
                     account.assets.remove(&asset_id);
                     Ok(())
@@ -165,6 +165,24 @@ impl Accounts {
         account.pubkeys.insert(key);
     }
 
+    fn get_next_account_id(&self) -> AccountId {
+        self.accounts
+            .iter()
+            .next_back()
+            .map_or(AccountId(0), |(curr_highest, _)| (*curr_highest).next())
+    }
+
+    pub(in crate::core) fn get_or_add_account_for_key(&mut self, key: &PublicKey) -> AccountId {
+        if let Some(account_id) = self.pubkeys.get(key) {
+            return *account_id;
+        }
+        let account_id = self.get_next_account_id();
+        let account = self.accounts.get_or_default(account_id);
+        self.pubkeys.insert(*key, account_id);
+        account.pubkeys.insert(*key);
+        account_id
+    }
+
     pub(in crate::core) fn get_or_add_account_for_wallet(
         &mut self,
         wallet: &Wallet,
@@ -172,7 +190,7 @@ impl Accounts {
         match self.wallets.get(wallet).cloned() {
             Some(id) => (id, self.accounts.get_mut(&id).unwrap()),
             None => {
-                let id = AccountId(self.accounts.len().try_into().unwrap());
+                let id = self.get_next_account_id();
                 self.wallets.insert(wallet.clone(), id);
                 let account = self.accounts.get_or_default(id);
                 account.wallets.insert(wallet.clone());
@@ -257,7 +275,7 @@ impl Accounts {
                 let account = self.accounts.get_mut(account_id).unwrap();
                 if account.next_nonce != nonce {
                     return Err(KolmeError::InvalidNonce {
-                        pubkey,
+                        pubkey: Box::new(pubkey),
                         account_id: *account_id,
                         expected: account.next_nonce,
                         actual: nonce,
@@ -268,7 +286,7 @@ impl Accounts {
                 Ok(*account_id)
             }
             None => {
-                let account_id = AccountId(self.accounts.len().try_into()?);
+                let account_id = self.get_next_account_id();
                 let account = self.accounts.get_or_default(account_id);
                 self.pubkeys.insert(pubkey, account_id);
                 account.pubkeys.insert(pubkey);

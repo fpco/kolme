@@ -87,7 +87,7 @@ async fn basic_scenario() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    fn block_at(height: u64, msg: LogMessage) -> LogOutput {
+    fn block_at(height: u64, msg: LoggedMessage) -> LogOutput {
         LogOutput::NewBlock {
             height: BlockHeight(height),
             messages: vec![msg],
@@ -100,22 +100,22 @@ async fn basic_scenario() {
     assert_eq!(
         log_lines,
         vec![
-            block_at(0, LogMessage::Genesis),
+            block_at(0, LoggedMessage::Genesis),
             LogOutput::GenesisInstantiation,
-            block_at(1, LogMessage::Listener(LogBridgeEvent::Instantiated)),
+            block_at(1, LoggedMessage::Listener(LoggedBridgeEvent::Instantiated)),
             // registering account and transferring funds into it for funder
-            block_at(2, LogMessage::Listener(LogBridgeEvent::Regular)),
+            block_at(2, LoggedMessage::Listener(LoggedBridgeEvent::Regular)),
             block_at(
                 3,
-                LogMessage::App(AppMessage::SendFunds {
+                LoggedMessage::App(AppMessage::SendFunds {
                     asset_id: AssetId(1),
                     amount: dec!(100_000)
                 })
             ),
-            block_at(4, LogMessage::App(AppMessage::Init)),
+            block_at(4, LoggedMessage::App(AppMessage::Init)),
             block_at(
                 5,
-                LogMessage::App(AppMessage::AddMarket {
+                LoggedMessage::App(AppMessage::AddMarket {
                     id: 1,
                     asset_id: AssetId(1),
                     name: "sample market".to_string()

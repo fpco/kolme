@@ -3,10 +3,12 @@ use std::{
     rc::Rc,
 };
 
+use jiff::Timestamp;
 use shared::{
     cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId, Sha256Hash},
+    types::{BridgeActionId, BridgeEventId, Sha256Hash, ValidatorSet},
 };
+use smallvec::{Array, SmallVec};
 
 use crate::*;
 
@@ -15,6 +17,14 @@ impl MerkleDeserialize for u8 {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.pop_byte()
+    }
+}
+
+impl MerkleDeserialize for u16 {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load_array().map(u16::from_le_bytes)
     }
 }
 
@@ -31,6 +41,14 @@ impl MerkleDeserialize for u64 {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(u64::from_le_bytes)
+    }
+}
+
+impl MerkleDeserialize for u128 {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        deserializer.load_array().map(u128::from_le_bytes)
     }
 }
 
@@ -240,5 +258,51 @@ impl<T1: MerkleDeserialize, T2: MerkleDeserialize> MerkleDeserialize for (T1, T2
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok((deserializer.load()?, deserializer.load()?))
+    }
+}
+
+impl MerkleDeserialize for ValidatorSet {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            processor: deserializer.load()?,
+            listeners: deserializer.load()?,
+            needed_listeners: deserializer.load()?,
+            approvers: deserializer.load()?,
+            needed_approvers: deserializer.load()?,
+        })
+    }
+}
+
+impl MerkleDeserialize for bool {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(deserializer.pop_byte()? == 1)
+    }
+}
+
+impl MerkleDeserialize for Timestamp {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        let as_bytes: [u8; 128 / 8] = deserializer.load_array()?;
+        Timestamp::from_nanosecond(i128::from_le_bytes(as_bytes))
+            .map_err(|e| MerkleSerialError::Other(format!("When deserializing Timestamp: {e}")))
+    }
+}
+
+impl<A: Array<Item: MerkleDeserialize>> MerkleDeserialize for SmallVec<A> {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        // SmallVec is serialized as slice, so it is preceded by length
+        let size: usize = deserializer.load()?;
+        let mut result = SmallVec::with_capacity(A::size());
+        for _ in 0..size {
+            result.push(deserializer.load()?)
+        }
+        Ok(result)
     }
 }

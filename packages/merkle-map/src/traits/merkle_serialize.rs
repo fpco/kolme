@@ -5,14 +5,25 @@ use std::{
 
 use shared::{
     cryptography::{PublicKey, RecoveryId, Signature, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId, Sha256Hash},
+    types::{BridgeActionId, BridgeEventId, Sha256Hash, ValidatorSet},
 };
+
+use jiff::Timestamp;
+
+use smallvec::{Array, SmallVec};
 
 use crate::*;
 
 impl MerkleSerialize for u8 {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_byte(*self);
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for u16 {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_raw_bytes(&self.to_le_bytes());
         Ok(())
     }
 }
@@ -25,6 +36,13 @@ impl MerkleSerialize for u32 {
 }
 
 impl MerkleSerialize for u64 {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_raw_bytes(&self.to_le_bytes());
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for u128 {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store_raw_bytes(&self.to_le_bytes());
         Ok(())
@@ -191,6 +209,45 @@ impl<T1: MerkleSerialize, T2: MerkleSerialize> MerkleSerialize for (T1, T2) {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)?;
         serializer.store(&self.1)?;
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for ValidatorSet {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            processor,
+            listeners,
+            needed_listeners,
+            approvers,
+            needed_approvers,
+        } = self;
+        serializer.store(processor)?;
+        serializer.store(listeners)?;
+        serializer.store(needed_listeners)?;
+        serializer.store(approvers)?;
+        serializer.store(needed_approvers)?;
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for bool {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_byte(if *self { 1 } else { 0 });
+        Ok(())
+    }
+}
+
+impl MerkleSerialize for Timestamp {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store_raw_bytes(&self.as_nanosecond().to_le_bytes());
+        Ok(())
+    }
+}
+
+impl<A: Array<Item: MerkleSerialize>> MerkleSerialize for SmallVec<A> {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        serializer.store(self.as_slice())?;
         Ok(())
     }
 }

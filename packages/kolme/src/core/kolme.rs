@@ -6,12 +6,13 @@ use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
+use solana_client::nonblocking::pubsub_client::PubsubClient;
 use store::KolmeConstructLock;
 pub use store::KolmeStore;
 
 #[cfg(feature = "pass_through")]
 use std::sync::OnceLock;
-use std::{cmp::Ordering, collections::HashMap, ops::Deref};
+use std::{collections::HashMap, ops::Deref};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -34,6 +35,7 @@ use crate::core::*;
 /// [Arc] clone, and so is very cheap.
 pub struct Kolme<App: KolmeApp> {
     inner: Arc<KolmeInner<App>>,
+    tx_await_duration: tokio::time::Duration,
 }
 
 pub(super) struct KolmeInner<App: KolmeApp> {
@@ -43,6 +45,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     pub(super) app: App,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
+    pub(super) solana_endpoints: parking_lot::RwLock<SolanaEndpoints>,
     #[cfg(feature = "pass_through")]
     pub(super) pass_through_conn: OnceLock<reqwest::Client>,
     pub(super) merkle_manager: MerkleManager,
@@ -67,11 +70,10 @@ impl<App: KolmeApp> Clone for Kolme<App> {
     fn clone(&self) -> Self {
         Kolme {
             inner: self.inner.clone(),
+            tx_await_duration: self.tx_await_duration,
         }
     }
 }
-
-struct NoNotificationListenersError;
 
 impl<App: KolmeApp> Kolme<App> {
     /// Lock the local storage and the database.
@@ -92,33 +94,24 @@ impl<App: KolmeApp> Kolme<App> {
     pub fn notify(&self, note: Notification<App::Message>) {
         // Ignore errors from notifications, it just means no one
         // is subscribed.
-        self.notify_inner(note).ok();
-    }
-
-    fn notify_inner(
-        &self,
-        note: Notification<App::Message>,
-    ) -> Result<(), NoNotificationListenersError> {
-        if let Notification::Broadcast { tx } = &note {
-            self.inner.mempool.add(tx.clone());
-        }
-        self.inner
-            .notify
-            .send(note)
-            .map(|_| ())
-            .map_err(|_| NoNotificationListenersError)
+        self.inner.notify.send(note).ok();
     }
 
     /// Propose a new transaction for the processor to add to the chain.
     ///
     /// Note that this will not detect any issues if the transaction is rejected.
-    pub fn propose_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
-        self.notify_inner(Notification::Broadcast { tx: Arc::new(tx) })
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "Tried to propose a transaction, but no one is listening to our notifications"
-                )
-            })
+    pub fn propose_transaction(&self, tx: Arc<SignedTransaction<App::Message>>) {
+        self.inner.mempool.add(tx);
+    }
+
+    /// How long should we wait for a transaction to land before giving up?
+    ///
+    /// This affects [Self::propose_and_await_transaction] and [Self::sign_propose_await_transaction].
+    ///
+    /// Default: 10 seconds
+    pub fn set_tx_await_duration(mut self, duration: tokio::time::Duration) -> Self {
+        self.tx_await_duration = duration;
+        self
     }
 
     /// Propose a new transaction and wait for it to land on chain.
@@ -126,11 +119,29 @@ impl<App: KolmeApp> Kolme<App> {
     /// This can be useful for detecting when a transaction was rejected after proposing.
     pub async fn propose_and_await_transaction(
         &self,
-        tx: SignedTransaction<App::Message>,
+        tx: Arc<SignedTransaction<App::Message>>,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
+        let txhash = tx.hash();
+        match tokio::time::timeout(
+            self.tx_await_duration,
+            self.propose_and_await_transaction_inner(tx),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => Err(anyhow::Error::from(e).context(format!(
+                "Timed out proposing and awaiting transaction {txhash}"
+            ))),
+        }
+    }
+
+    async fn propose_and_await_transaction_inner(
+        &self,
+        tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut recv = self.subscribe();
         let txhash_orig = tx.hash();
-        self.propose_transaction(tx)?;
+        self.propose_transaction(tx);
         loop {
             let note = recv.recv().await?;
             match note {
@@ -140,12 +151,29 @@ impl<App: KolmeApp> Kolme<App> {
                     }
                 }
                 Notification::GenesisInstantiation { .. } => (),
-                Notification::Broadcast { .. } => (),
-                Notification::FailedTransaction { txhash, error } => {
-                    if txhash == txhash_orig {
-                        break Err(anyhow::anyhow!(
-                            "Error when awaiting transaction {txhash}: {error}"
-                        ));
+                Notification::FailedTransaction(failed) => {
+                    let pubkey = match failed.verify_signature() {
+                        Ok(pubkey) => pubkey,
+                        Err(e) => {
+                            tracing::warn!(
+                            "Received invalid signature on a FailedTransaction notification: {e}"
+                        );
+                            continue;
+                        }
+                    };
+                    if pubkey
+                        != self
+                            .read()
+                            .get_framework_state()
+                            .get_validator_set()
+                            .processor
+                    {
+                        tracing::warn!("Received a FailedTransaction notification from {pubkey}, which is not the processor, ignoring");
+                        continue;
+                    }
+                    let FailedTransaction { txhash, error } = failed.message.into_inner();
+                    if txhash_orig == txhash {
+                        break Err(error.into());
                     }
                 }
             }
@@ -165,11 +193,29 @@ impl<App: KolmeApp> Kolme<App> {
         secret: &SecretKey,
         messages: Vec<Message<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
+        match tokio::time::timeout(
+            self.tx_await_duration,
+            self.sign_propose_await_transaction_inner(secret, messages),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => Err(anyhow::Error::from(e)
+                .context("Timed out while signing/proposing/awaiting a transaction")),
+        }
+    }
+
+    async fn sign_propose_await_transaction_inner(
+        &self,
+        secret: &SecretKey,
+        messages: Vec<Message<App::Message>>,
+    ) -> Result<Arc<SignedBlock<App::Message>>> {
         loop {
-            let tx = self
-                .read()
-                .create_signed_transaction(secret, messages.clone())?;
-            match self.propose_and_await_transaction(tx).await {
+            let tx = Arc::new(
+                self.read()
+                    .create_signed_transaction(secret, messages.clone())?,
+            );
+            match self.propose_and_await_transaction_inner(tx).await {
                 Ok(block) => break Ok(block),
                 Err(e) => {
                     if let Some(KolmeError::InvalidNonce {
@@ -208,6 +254,19 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+        // Make sure we're at the right height for this and the correct processor is signing this.
+        let kolme = self.read();
+        if kolme.get_next_height() != signed_block.height() {
+            anyhow::bail!(
+                "Tried to add block with height {}, but next expected height is {}",
+                signed_block.height(),
+                kolme.get_next_height()
+            );
+        }
+        let expected_processor = kolme.get_framework_state().get_validator_set().processor;
+        let actual_processor = signed_block.0.message.as_inner().processor;
+        anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+
         let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
@@ -272,6 +331,99 @@ impl<App: KolmeApp> Kolme<App> {
         Ok(())
     }
 
+    /// Validate and append the given block.
+    pub async fn add_block_with_state(
+        &self,
+        signed_block: Arc<SignedBlock<App::Message>>,
+        framework_state: Arc<MerkleContents>,
+        app_state: Arc<MerkleContents>,
+        logs: Arc<MerkleContents>,
+    ) -> Result<()> {
+        // Don't accept blocks we already have
+        let kolme = self.read();
+        if kolme.get_next_height() > signed_block.height() {
+            anyhow::bail!(
+                "Tried to add block (with state) with height {}, but next expected height is {}",
+                signed_block.height(),
+                kolme.get_next_height()
+            );
+        }
+        let expected_processor = kolme.get_framework_state().get_validator_set().processor;
+        let actual_processor = signed_block.0.message.as_inner().processor;
+        anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+
+        let txhash = signed_block.tx().hash();
+        signed_block.validate_signature()?;
+        let block = signed_block.0.message.as_inner();
+
+        let framework_state = Arc::new(
+            self.inner
+                .store
+                .store_and_load::<FrameworkState>(
+                    &self.inner.merkle_manager,
+                    block.framework_state,
+                    framework_state,
+                )
+                .await?,
+        );
+        let app_state = Arc::new(
+            self.inner
+                .store
+                .store_and_load::<App::State>(
+                    &self.inner.merkle_manager,
+                    block.app_state,
+                    app_state,
+                )
+                .await?,
+        );
+        let logs = Arc::<[Vec<String>]>::from(
+            self.inner
+                .store
+                .store_and_load::<Vec<Vec<String>>>(&self.inner.merkle_manager, block.logs, logs)
+                .await?,
+        );
+
+        self.inner
+            .store
+            .add_block(
+                &self.inner.merkle_manager,
+                StorableBlock {
+                    height: signed_block.height().0,
+                    blockhash: signed_block.hash().0,
+                    txhash: signed_block.tx().hash().0,
+                    block: signed_block.clone(),
+                    framework_state: framework_state.clone(),
+                    app_state: app_state.clone(),
+                    logs: logs.clone(),
+                },
+            )
+            .await?;
+
+        self.inner.mempool.drop_tx(txhash);
+
+        // Now do the write lock
+        let mut guard = self.inner.current_block.write();
+
+        if guard.get_next_height() > signed_block.height() {
+            return Ok(());
+        }
+
+        *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
+            block: signed_block.clone(),
+            logs,
+            state: BlockState {
+                blockhash: signed_block.hash(),
+                framework_state,
+                app_state,
+            },
+        }));
+        std::mem::drop(guard);
+
+        self.notify(Notification::NewBlock(signed_block));
+
+        Ok(())
+    }
+
     pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
         loop {
             let (txhash, tx) = self.inner.mempool.peek().await;
@@ -286,6 +438,13 @@ impl<App: KolmeApp> Kolme<App> {
                 }
             }
         }
+    }
+
+    /// Wait for the mempool to be empty.
+    ///
+    /// This is mostly intended for writing tests.
+    pub async fn wait_on_empty_mempool(&self) {
+        self.inner.mempool.wait_for_pool_size(0).await;
     }
 
     /// Remove a transaction from the mempool, if present.
@@ -319,10 +478,12 @@ impl<App: KolmeApp> Kolme<App> {
             notify: tokio::sync::broadcast::channel(100).0,
             mempool: Mempool::new(),
             current_block: RwLock::new(Arc::new(current_block)),
+            solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
         };
 
         let kolme = Kolme {
             inner: Arc::new(inner),
+            tx_await_duration: tokio::time::Duration::from_secs(10),
         };
 
         kolme.resync().await?;
@@ -339,40 +500,33 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.notify.subscribe()
     }
 
+    /// Subscribe to get a notification each time an entry is added to the mempool.
+    pub fn subscribe_mempool_additions(&self) -> tokio::sync::watch::Receiver<usize> {
+        self.inner.mempool.subscribe_additions()
+    }
+
+    /// Get all entries currently in the mempool
+    pub fn get_mempool_entries(&self) -> Vec<Arc<SignedTransaction<App::Message>>> {
+        self.inner.mempool.get_entries()
+    }
+
     /// Wait until the given block is published
     pub async fn wait_for_block(
         &self,
         height: BlockHeight,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
-        // Start an outer loop so that we can keep processing if we end up Lagged
+        // First subscribe to avoid a race condition...
+        let mut recv = self.inner.store.subscribe();
         loop {
-            // First subscribe to avoid a race condition...
-            let mut recv = self.subscribe();
             // And then check if we're at the requested height.
-            if let Some(block) = self.get_block(height).await? {
-                return Ok(block);
+            if let Some(storable_block) = self.get_block(height).await? {
+                return Ok(storable_block.block);
             }
-            loop {
-                match recv.recv().await {
-                    Ok(note) => match note {
-                        Notification::NewBlock(block) => match block.height().cmp(&height) {
-                            Ordering::Less => (),
-                            Ordering::Equal => return Ok(block),
-                            Ordering::Greater => {
-                                let block = self.get_block(height).await?.with_context(|| format!("wait_for_block: received notification that block {} is available, but unable to find {height} in database", block.height()))?;
-                                return Ok(block);
-                            }
-                        },
-                        Notification::GenesisInstantiation { .. } => (),
-                        Notification::Broadcast { .. } => (),
-                        Notification::FailedTransaction { .. } => (),
-                    },
-                    Err(e) => match e {
-                        RecvError::Closed => panic!("wait_for_block: unexpected Closed"),
-                        RecvError::Lagged(_) => break,
-                    },
-                }
-            }
+
+            // Wait for more data
+            recv.changed()
+                .await
+                .context("wait_for_block: unexpected end of stream from store.subscribe()")?;
         }
     }
 
@@ -395,7 +549,6 @@ impl<App: KolmeApp> Kolme<App> {
                             }
                         }
                         Notification::GenesisInstantiation { .. } => (),
-                        Notification::Broadcast { .. } => (),
                         Notification::FailedTransaction { .. } => (),
                     },
                     Err(e) => match e {
@@ -404,6 +557,45 @@ impl<App: KolmeApp> Kolme<App> {
                     },
                 }
             }
+        }
+    }
+
+    /// Wait for the given public key to have an account ID and then return it.
+    pub async fn wait_account_for_key(&self, pubkey: PublicKey) -> Result<AccountId> {
+        loop {
+            let kolme = self.read();
+            if let Some((id, _)) = kolme
+                .get_framework_state()
+                .accounts
+                .get_account_for_key(pubkey)
+            {
+                break Ok(id);
+            }
+
+            self.wait_for_block(kolme.get_next_height()).await?;
+        }
+    }
+
+    /// Wait until the given action ID is no longer pending.
+    pub async fn wait_for_action_finished(
+        &self,
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    ) -> Result<()> {
+        loop {
+            let kolme = self.read();
+            let state = kolme.get_framework_state().chains.get(chain)?;
+
+            // Check that we've already issued the action, _and_ that the action
+            // isn't pending.
+            if state.next_action_id > action_id && !state.pending_actions.contains_key(&action_id) {
+                break Ok(());
+            }
+
+            // Either we haven't actually issued that action yet, or the action is still pending.
+            // Either way, wait for another block and then try again.
+
+            self.wait_for_block(kolme.get_next_height()).await?;
         }
     }
 
@@ -423,6 +615,32 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Sets a Solana endpoint for regular (non-pubsub) connections.
+    ///
+    /// # Parameters
+    /// - `chain`: The Solana chain for which the endpoint is being set.
+    /// - `endpoint`: The URL of the Solana endpoint to use for regular connections.
+    ///
+    /// # Usage
+    /// Call this method to specify a custom Solana endpoint for regular connections.
+    /// If no custom endpoint is set, a default endpoint will be used.
+    pub fn set_solana_endpoint_regular(&self, chain: SolanaChain, endpoint: impl Into<Arc<str>>) {
+        self.inner
+            .solana_endpoints
+            .write()
+            .regular
+            .insert(chain, endpoint.into());
+    }
+
+    /// Set a Solana endpoint for pubsub connections.
+    pub fn set_solana_endpoint_pubsub(&self, chain: SolanaChain, endpoint: impl Into<Arc<str>>) {
+        self.inner
+            .solana_endpoints
+            .write()
+            .pubsub
+            .insert(chain, endpoint.into());
+    }
+
     pub async fn get_solana_client(&self, chain: SolanaChain) -> Arc<SolanaClient> {
         if let Some(client) = self.inner.solana_conns.read().await.get(&chain) {
             return client.clone();
@@ -432,12 +650,29 @@ impl<App: KolmeApp> Kolme<App> {
         match guard.get(&chain) {
             Some(client) => Arc::clone(client),
             None => {
-                let client = Arc::new(chain.make_client());
+                let client = Arc::new(
+                    self.inner
+                        .solana_endpoints
+                        .read()
+                        .get_regular_endpoint(chain)
+                        .make_client(),
+                );
                 guard.insert(chain, Arc::clone(&client));
 
                 client
             }
         }
+    }
+
+    pub async fn get_solana_pubsub_client(&self, chain: SolanaChain) -> Result<PubsubClient> {
+        // TODO do we need caching here?
+
+        let endpoint = self
+            .inner
+            .solana_endpoints
+            .read()
+            .get_pubsub_endpoint(chain);
+        endpoint.make_pubsub_client().await
     }
 
     #[cfg(feature = "pass_through")]
@@ -463,29 +698,11 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn get_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
-        let storable_block = self
-            .inner
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>> {
+        self.inner
             .store
             .load_block(&self.inner.merkle_manager, height)
-            .await?;
-        Ok(match storable_block {
-            Some(storable_block) => Some(storable_block.block.clone()),
-            None => None,
-        })
-    }
-
-    /// Returns the logs of the given block, if available.
-    pub async fn get_block_logs(&self, height: BlockHeight) -> Result<Option<Arc<[Vec<String>]>>> {
-        let storable_block = self
-            .inner
-            .store
-            .load_block(&self.inner.merkle_manager, height)
-            .await?;
-        Ok(match storable_block {
-            Some(storable_block) => Some(storable_block.logs.clone()),
-            None => None,
-        })
+            .await
     }
 
     /// Get the block height for the given transaction, if present.
@@ -499,7 +716,10 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Load the block details from the database
-    pub async fn load_block(&self, height: BlockHeight) -> Result<Arc<SignedBlock<App::Message>>> {
+    pub async fn load_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
@@ -525,14 +745,14 @@ impl<App: KolmeApp> KolmeRead<App> {
                     return Some(GenesisAction::InstantiateCosmos {
                         chain: chain.to_cosmos_chain().unwrap(),
                         code_id: *code_id,
-                        args: self.get_framework_state().instantiate_args(),
+                        validator_set: self.get_framework_state().get_validator_set().clone(),
                     })
                 }
                 BridgeContract::NeededSolanaBridge { program_id } => {
                     return Some(GenesisAction::InstantiateSolana {
                         chain: chain.to_solana_chain().unwrap(),
                         program_id: program_id.clone(),
-                        args: self.get_framework_state().instantiate_args(),
+                        validator_set: self.get_framework_state().get_validator_set().clone(),
                     })
                 }
                 BridgeContract::Deployed(_) => (),
@@ -565,15 +785,17 @@ impl<App: KolmeApp> KolmeRead<App> {
     }
 
     pub fn get_processor_pubkey(&self) -> PublicKey {
-        self.get_framework_state().get_config().processor
+        self.get_framework_state().get_validator_set().processor
     }
 
     pub fn get_approver_pubkeys(&self) -> &BTreeSet<PublicKey> {
-        &self.get_framework_state().get_config().approvers
+        &self.get_framework_state().get_validator_set().approvers
     }
 
-    pub fn get_needed_approvers(&self) -> usize {
-        self.get_framework_state().get_config().needed_approvers
+    pub fn get_needed_approvers(&self) -> u16 {
+        self.get_framework_state()
+            .get_validator_set()
+            .needed_approvers
     }
 
     pub fn get_bridge_contracts(&self) -> &ChainStates {

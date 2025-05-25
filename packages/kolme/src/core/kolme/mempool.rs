@@ -28,6 +28,16 @@ impl<AppMessage> Mempool<AppMessage> {
         }
     }
 
+    pub(super) async fn wait_for_pool_size(&self, size: usize) {
+        let mut recv = self.notify.subscribe();
+        loop {
+            if self.txs.read().len() == size {
+                break;
+            }
+            recv.changed().await.unwrap();
+        }
+    }
+
     pub(super) async fn peek(&self) -> (TxHash, Arc<SignedTransaction<AppMessage>>) {
         if let Some(pair) = self.txs.read().front() {
             return pair.clone();
@@ -63,5 +73,15 @@ impl<AppMessage> Mempool<AppMessage> {
     pub(super) fn add(&self, tx: Arc<SignedTransaction<AppMessage>>) {
         self.txs.write().push_back((tx.hash(), tx));
         self.notify.send_modify(|x| *x += 1);
+    }
+
+    pub(super) fn subscribe_additions(&self) -> tokio::sync::watch::Receiver<usize> {
+        // NOTE: For now, this also notifies on removals, which is fine for our
+        // use cases. If that becomes a problem in the future, we can tweak this.
+        self.notify.subscribe()
+    }
+
+    pub(super) fn get_entries(&self) -> Vec<Arc<SignedTransaction<AppMessage>>> {
+        self.txs.read().iter().map(|(_, tx)| tx.clone()).collect()
     }
 }

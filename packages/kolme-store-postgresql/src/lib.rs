@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use fjall::PartitionCreateOptions;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
-use merkle_store_fjall::MerkleFjallStore;
+use merkle_store_fjall::{MerkleFjallStore, MerkleFjallStoreHelper};
 use sqlx::postgres::PgAdvisoryLock;
 
 #[derive(Clone)]
@@ -280,6 +280,10 @@ impl KolmeStorePostgres {
             Ok(Err(e)) => Err(e),
             Err(e) => Err(KolmeStoreError::custom(e)),
         }
+    }
+
+    pub fn get_merkle_store(&self) -> MerkleFjallStoreHelper {
+        self.fjall.to_store()
     }
 }
 

@@ -1,11 +1,12 @@
+use std::collections::HashMap;
+
 use kolme_store::KolmeStoreError;
-use rand::Rng;
 
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
-    secret: SecretKey,
+    secrets: HashMap<PublicKey, SecretKey>,
     ready: tokio::sync::watch::Sender<bool>,
 }
 
@@ -13,9 +14,13 @@ impl<App: KolmeApp> Processor<App> {
     pub fn new(kolme: Kolme<App>, secret: SecretKey) -> Self {
         Processor {
             kolme,
-            secret,
+            secrets: std::iter::once((secret.public_key(), secret)).collect(),
             ready: tokio::sync::watch::channel(false).0,
         }
+    }
+
+    pub fn add_secret(&mut self, secret: SecretKey) {
+        self.secrets.insert(secret.public_key(), secret);
     }
 
     pub async fn run(self) -> Result<()> {
@@ -70,12 +75,26 @@ impl<App: KolmeApp> Processor<App> {
         }
     }
 
+    /// Get the correct secret key for the current validator set.
+    ///
+    /// If we don't have it, returns an error.
+    fn get_correct_secret(&self, kolme: &KolmeRead<App>) -> Result<&SecretKey> {
+        let pubkey = &kolme.get_framework_state().get_validator_set().processor;
+        self.secrets.get(pubkey).with_context(|| {
+            format!(
+                "Current processor pubkey is {pubkey}, but we don't have the matching secret key"
+            )
+        })
+    }
+
     pub async fn create_genesis_event(&self) -> Result<()> {
         let info = self.kolme.get_app().genesis_info().clone();
-        let signed = self.kolme.read().create_signed_transaction(
-            &self.secret,
-            vec![Message::<App::Message>::Genesis(info)],
-        )?;
+        let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
+        let signed = self
+            .kolme
+            .read()
+            .create_signed_transaction(secret, vec![Message::<App::Message>::Genesis(info)])?;
 
         let block = self.construct_block(signed).await?;
         if let Err(e) = self.kolme.add_block(Arc::new(block)).await {
@@ -93,56 +112,41 @@ impl<App: KolmeApp> Processor<App> {
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
         let txhash = tx.hash();
-        let mut attempts = 0;
-        const MAX_ATTEMPTS: u32 = 50;
-        let res = loop {
-            if self.kolme.read().get_tx_height(txhash).await?.is_some() {
-                break Ok(());
-            }
-            attempts += 1;
-            let res = async {
-                let _construct_lock = self.kolme.take_construct_lock().await?;
-                self.kolme.resync().await?;
-                let block = self.construct_block(tx.clone()).await?;
-                self.kolme.add_block(Arc::new(block)).await
-            }
-            .await;
-            match res {
-                Ok(()) => {
-                    break Ok(());
-                }
-                Err(e) => {
-                    if attempts >= MAX_ATTEMPTS {
-                        break Err(e);
-                    }
-                    if let Some(KolmeStoreError::BlockAlreadyInDb { height }) = e.downcast_ref() {
-                        if let Err(e) = self.kolme.resync().await {
-                            tracing::error!("Error while resyncing with database: {e}");
-                        }
-                        tracing::warn!("Block {height} already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}...");
-
-                        // Introduce a random delay to help with processor contention.
-                        let millis = {
-                            let mut rng = rand::thread_rng();
-                            rng.gen_range(200..600)
-                        };
-                        tokio::time::sleep(tokio::time::Duration::from_millis(millis)).await;
-
-                        continue;
-                    }
-                    break Err(e);
-                }
-            }
-        };
+        let _construct_lock = self.kolme.take_construct_lock().await?;
+        self.kolme.resync().await?;
+        if self.kolme.read().get_tx_height(txhash).await?.is_some() {
+            return Ok(());
+        }
+        let res = async {
+            let block = self.construct_block(tx.clone()).await?;
+            self.kolme.add_block(Arc::new(block)).await
+        }
+        .await;
         if let Err(e) = &res {
-            tracing::warn!("Giving up on adding transaction {txhash}: {e}");
-            self.kolme.notify(Notification::FailedTransaction {
-                txhash,
-                error: match e.downcast_ref::<KolmeError>() {
-                    Some(e) => e.clone(),
-                    None => KolmeError::Other(e.to_string()),
-                },
-            });
+            if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
+                tracing::warn!("Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this");
+            } else {
+                tracing::warn!("Giving up on adding transaction {txhash}: {e}");
+                let failed = (|| {
+                    let failed = FailedTransaction {
+                        txhash,
+                        error: match e.downcast_ref::<KolmeError>() {
+                            Some(e) => e.clone(),
+                            None => KolmeError::Other(e.to_string()),
+                        },
+                    };
+                    let failed = TaggedJson::new(failed)?;
+                    let key = self.get_correct_secret(&self.kolme.read())?;
+                    failed.sign(key)
+                })();
+
+                match failed {
+                    Ok(failed) => self.kolme.notify(Notification::FailedTransaction(failed)),
+                    Err(e) => {
+                        tracing::error!("Unable to generate failed transaction notification: {e}")
+                    }
+                }
+            }
         }
         res
     }
@@ -153,6 +157,7 @@ impl<App: KolmeApp> Processor<App> {
     ) -> Result<SignedBlock<App::Message>> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
 
         let txhash = tx.hash();
         if kolme.get_tx_height(txhash).await?.is_some() {
@@ -166,25 +171,27 @@ impl<App: KolmeApp> Processor<App> {
         let ExecutionResults {
             framework_state,
             app_state,
-            logs: _,
+            logs,
             loads,
         } = kolme.execute_transaction(&tx, now, None).await?;
 
         let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
         let app_state = kolme.get_merkle_manager().serialize(&app_state)?.hash;
+        let logs = kolme.get_merkle_manager().serialize(&logs)?.hash;
 
         let approved_block = Block {
             tx,
             timestamp: now,
-            processor: self.secret.public_key(),
+            processor: secret.public_key(),
             height: kolme.get_next_height(),
             parent: kolme.get_current_block_hash(),
             framework_state,
             app_state,
             loads,
+            logs,
         };
         let event = TaggedJson::new(approved_block)?;
-        Ok(SignedBlock(event.sign(&self.secret)?))
+        Ok(SignedBlock(event.sign(secret)?))
     }
 
     async fn approve_actions_all(&self, chains: &[ExternalChain]) {
@@ -200,6 +207,7 @@ impl<App: KolmeApp> Processor<App> {
         // approve an action, it produces a new block, which will allow us to check if we
         // need to approve anything else.
         let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
 
         let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());
@@ -214,15 +222,20 @@ impl<App: KolmeApp> Processor<App> {
             }
         }
 
-        if approvers.len() < kolme.get_needed_approvers() {
+        if approvers.len() < usize::from(kolme.get_needed_approvers()) {
             // Not enough approvals. Don't bother with later actions, we want to approve in order.
             return Ok(());
         }
 
-        let processor = self.secret.sign_recoverable(&action.payload)?;
+        // Handle the key rotation case, where a previous processor already signed.
+        if action.processor.is_some() {
+            return Ok(());
+        }
+
+        let processor = secret.sign_recoverable(&action.payload)?;
 
         let tx = kolme.create_signed_transaction(
-            &self.secret,
+            secret,
             vec![Message::ProcessorApprove {
                 chain,
                 action_id,

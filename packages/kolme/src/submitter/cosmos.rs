@@ -7,14 +7,9 @@ pub async fn instantiate(
     cosmos: &Cosmos,
     seed_phrase: &SeedPhrase,
     code_id: u64,
-    args: InstantiateArgs,
+    set: ValidatorSet,
 ) -> Result<String> {
-    let needed_approvers = u16::try_from(args.needed_approvers)?;
-    let msg = InstantiateMsg {
-        processor: args.processor,
-        approvers: args.approvers,
-        needed_approvers,
-    };
+    let msg = InstantiateMsg { set };
 
     let wallet = seed_phrase.with_hrp(cosmos.get_address_hrp())?;
     let contract = cosmos

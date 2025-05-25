@@ -10,6 +10,7 @@ members = [
   "packages/merkle-map",
   "packages/merkle-store-fjall",
   "packages/shared",
+  "packages/test-runner",
 ]
 
 [workspace.dependencies]
@@ -29,5 +30,11 @@ kolme-store-postgresql = { path = "packages/kolme-store-postgresql" }
 libp2p = { version = "0.55" }
 merkle-map = { path = "packages/merkle-map" }
 merkle-store-fjall = { path = "packages/merkle-store-fjall" }
+quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
 thiserror = "2.0.12"
+
+[profile.release]
+debug = 0
+strip = "debuginfo"
+lto = false

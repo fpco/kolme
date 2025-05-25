@@ -101,7 +101,6 @@ impl<App: KolmeApp> Submitter<App> {
                     chain: _,
                     contract: _,
                 } => continue,
-                Notification::Broadcast { tx: _ } => continue,
                 Notification::FailedTransaction { .. } => continue,
             }
             self.submit_zero_or_one(&chains).await?;
@@ -132,7 +131,7 @@ impl<App: KolmeApp> Submitter<App> {
             GenesisAction::InstantiateCosmos {
                 chain,
                 code_id,
-                args,
+                validator_set: args,
             } => {
                 let ChainArgs::Cosmos { seed_phrase } = &self.args else {
                     return Ok(());
@@ -151,7 +150,7 @@ impl<App: KolmeApp> Submitter<App> {
             GenesisAction::InstantiateSolana {
                 chain,
                 program_id,
-                args,
+                validator_set: args,
             } => {
                 let ChainArgs::Solana { keypair } = &self.args else {
                     return Ok(());
@@ -192,7 +191,7 @@ impl<App: KolmeApp> Submitter<App> {
             return Ok(());
         };
         if let Some(last) = self.last_submitted.get(&chain) {
-            if *last <= action_id {
+            if *last >= action_id {
                 return Ok(());
             }
         }

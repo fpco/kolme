@@ -2,7 +2,7 @@ mod api_server;
 mod approver;
 mod common;
 mod core;
-mod gossip;
+pub mod gossip;
 pub(crate) mod listener;
 #[cfg(feature = "pass_through")]
 pub mod pass_through;
@@ -14,7 +14,7 @@ pub use api_server::{base_api_router, ApiNotification, ApiServer};
 pub use approver::Approver;
 pub use common::*;
 pub use core::*;
-pub use gossip::{Gossip, GossipBuilder};
+pub use gossip::{DataLoadValidation, Gossip, GossipBuilder, SyncMode};
 pub use listener::Listener;
 pub use merkle_map::*;
 pub use processor::Processor;

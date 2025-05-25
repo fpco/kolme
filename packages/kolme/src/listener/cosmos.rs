@@ -1,25 +1,10 @@
 use std::mem;
 
+use super::get_next_bridge_event_id;
 use crate::*;
 use ::cosmos::{Contract, Cosmos};
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
-
-pub(crate) fn get_next_bridge_event_id<App: KolmeApp>(
-    kolme: &KolmeRead<App>,
-    public: PublicKey,
-    chain: ExternalChain,
-) -> BridgeEventId {
-    let state = kolme.get_bridge_contracts().get(chain).unwrap();
-
-    for (event_id, pending) in &state.pending_events {
-        if !pending.attestations.contains(&public) {
-            return *event_id;
-        }
-    }
-
-    state.next_event_id
-}
 
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
@@ -94,16 +79,23 @@ pub async fn sanity_check_contract(
     );
 
     let shared::cosmos::State {
-        processor,
-        approvers,
-        needed_approvers,
+        set:
+            ValidatorSet {
+                processor,
+                approvers,
+                needed_approvers,
+                listeners,
+                needed_listeners,
+            },
         next_event_id: _,
         next_action_id: _,
     } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
 
-    anyhow::ensure!(info.processor == processor);
-    anyhow::ensure!(approvers == info.approvers);
-    anyhow::ensure!(usize::from(needed_approvers) == info.needed_approvers);
+    anyhow::ensure!(info.validator_set.processor == processor);
+    anyhow::ensure!(listeners == info.validator_set.listeners);
+    anyhow::ensure!(needed_listeners == info.validator_set.needed_listeners);
+    anyhow::ensure!(approvers == info.validator_set.approvers);
+    anyhow::ensure!(needed_approvers == info.validator_set.needed_approvers);
 
     Ok(())
 }

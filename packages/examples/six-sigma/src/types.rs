@@ -46,50 +46,52 @@ pub enum AppMessage {
 pub enum LogOutput {
     NewBlock {
         height: BlockHeight,
-        messages: Vec<LogMessage>,
+        messages: Vec<LoggedMessage>,
     },
     GenesisInstantiation,
 }
 
 // kolme::Message with details only necessary for tests
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
-pub enum LogMessage {
+pub enum LoggedMessage {
     Genesis,
     App(AppMessage),
-    Listener(LogBridgeEvent),
+    Listener(LoggedBridgeEvent),
     Approve,
     ProcessorApprove,
     Auth,
     Bank,
+    KeyRotation,
 }
 
-impl From<kolme::Message<AppMessage>> for LogMessage {
+impl From<kolme::Message<AppMessage>> for LoggedMessage {
     fn from(msg: kolme::Message<AppMessage>) -> Self {
         match msg {
-            kolme::Message::Genesis(_) => LogMessage::Genesis,
-            kolme::Message::App(app_message) => LogMessage::App(app_message),
-            kolme::Message::Listener { event, .. } => LogMessage::Listener(event.into()),
-            kolme::Message::Approve { .. } => LogMessage::Approve,
-            kolme::Message::ProcessorApprove { .. } => LogMessage::ProcessorApprove,
-            kolme::Message::Auth(_) => LogMessage::Auth,
-            kolme::Message::Bank(_) => LogMessage::Bank,
+            kolme::Message::Genesis(_) => LoggedMessage::Genesis,
+            kolme::Message::App(app_message) => LoggedMessage::App(app_message),
+            kolme::Message::Listener { event, .. } => LoggedMessage::Listener(event.into()),
+            kolme::Message::Approve { .. } => LoggedMessage::Approve,
+            kolme::Message::ProcessorApprove { .. } => LoggedMessage::ProcessorApprove,
+            kolme::Message::Auth(_) => LoggedMessage::Auth,
+            kolme::Message::Bank(_) => LoggedMessage::Bank,
+            kolme::Message::KeyRotation(_) => LoggedMessage::KeyRotation,
         }
     }
 }
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
-pub enum LogBridgeEvent {
+pub enum LoggedBridgeEvent {
     Instantiated,
     Regular,
     Signed,
 }
 
-impl From<kolme::BridgeEvent> for LogBridgeEvent {
+impl From<kolme::BridgeEvent> for LoggedBridgeEvent {
     fn from(event: kolme::BridgeEvent) -> Self {
         match event {
-            kolme::BridgeEvent::Instantiated { .. } => LogBridgeEvent::Instantiated,
-            kolme::BridgeEvent::Regular { .. } => LogBridgeEvent::Regular,
-            kolme::BridgeEvent::Signed { .. } => LogBridgeEvent::Signed,
+            kolme::BridgeEvent::Instantiated { .. } => LoggedBridgeEvent::Instantiated,
+            kolme::BridgeEvent::Regular { .. } => LoggedBridgeEvent::Regular,
+            kolme::BridgeEvent::Signed { .. } => LoggedBridgeEvent::Signed,
         }
     }
 }

@@ -2550,6 +2550,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shared",
+ "solana-keypair",
  "strum 0.27.1",
  "tempfile",
  "test-log",
@@ -3872,7 +3873,6 @@ dependencies = [
  "test-log",
  "tokio",
  "tokio-tungstenite 0.26.2",
- "tokio-util 0.7.15",
  "tracing",
 ]
 
@@ -4094,8 +4094,10 @@ dependencies = [
  "kolme-store",
  "kolme-store-postgresql",
  "libp2p",
+ "lru 0.14.0",
  "merkle-map",
  "parking_lot",
+ "quickcheck",
  "rand 0.8.5",
  "reqwest 0.12.15",
  "rust_decimal",
@@ -4103,6 +4105,9 @@ dependencies = [
  "serde_json",
  "shared",
  "solana-client",
+ "solana-commitment-config",
+ "solana-signature",
+ "solana-transaction-status-client-types",
  "strum 0.27.1",
  "tempfile",
  "thiserror 2.0.12",
@@ -4494,7 +4499,7 @@ dependencies = [
  "libp2p-core",
  "libp2p-identity",
  "libp2p-swarm-derive",
- "lru",
+ "lru 0.12.5",
  "multistream-select",
  "once_cell",
  "rand 0.8.5",
@@ -4730,6 +4735,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
+dependencies = [
+ "hashbrown 0.15.2",
+]
+
+[[package]]
 name = "lsm-tree"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4838,6 +4852,8 @@ name = "merkle-map"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
+ "base64 0.22.1",
+ "jiff",
  "parameterized",
  "parking_lot",
  "paste",
@@ -4846,6 +4862,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shared",
+ "smallvec",
  "thiserror 2.0.12",
  "tinyvec",
  "tokio",
@@ -11401,6 +11418,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11679,12 +11703,8 @@ checksum = "66a539a9ad6d5d281510d5bd368c973d636c02dbf8a67300bfb6b950696ad7df"
 dependencies = [
  "bytes",
  "futures-core",
- "futures-io",
  "futures-sink",
- "futures-util",
- "hashbrown 0.15.2",
  "pin-project-lite",
- "slab",
  "tokio",
 ]
 

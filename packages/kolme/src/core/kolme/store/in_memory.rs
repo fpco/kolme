@@ -22,6 +22,7 @@ impl Default for KolmeStoreInMemory {
 #[derive(Default)]
 struct Inner {
     merkle: MerkleMemoryStore,
+    blockhashes: BTreeMap<BlockHeight, BlockHash>,
     blocks: BTreeMap<BlockHeight, Sha256Hash>,
     txhashes: HashMap<TxHash, BlockHeight>,
 }
@@ -32,6 +33,11 @@ impl KolmeStoreInMemory {
         guard.blocks.clear();
         guard.txhashes.clear();
         Ok(())
+    }
+
+    pub(crate) async fn delete_block(&self, height: BlockHeight) {
+        let mut guard = self.0.write().await;
+        guard.blocks.remove(&height);
     }
 
     pub(crate) async fn load_latest_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
@@ -77,28 +83,32 @@ impl KolmeStoreInMemory {
         let height = BlockHeight(block.height);
         let txhash = TxHash(block.txhash);
 
-        let checks = |inner: &Inner| {
-            if inner.blocks.contains_key(&height) {
-                Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 })
-            } else if inner.txhashes.contains_key(&txhash) {
-                Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 })
-            } else {
-                Ok(())
-            }
-        };
-
-        checks(&*self.0.read().await)?;
-
         let mut guard = self.0.write().await;
-        checks(&guard)?;
+
+        if guard.blockhashes.get(&height) == Some(&BlockHash(block.blockhash)) {
+            return Ok(());
+        }
+
+        if guard.blocks.contains_key(&height) {
+            return Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 }.into());
+        }
+        if guard.txhashes.contains_key(&txhash) {
+            return Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 }.into());
+        }
+
         guard.txhashes.insert(txhash, height);
 
         let hash = merkle_manager.save(&mut guard.merkle, block).await?;
         guard.blocks.insert(height, hash.hash);
+        guard.blockhashes.insert(height, BlockHash(block.blockhash));
         Ok(())
     }
 
     pub(crate) async fn take_construct_lock(&self) -> OwnedSemaphorePermit {
         self.1.clone().acquire_owned().await.unwrap()
+    }
+
+    pub(super) async fn get_merkle_store(&self) -> MerkleMemoryStore {
+        self.0.read().await.merkle.clone()
     }
 }

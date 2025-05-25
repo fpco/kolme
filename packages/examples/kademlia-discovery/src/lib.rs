@@ -11,7 +11,7 @@ pub struct KademliaTestApp {
     pub genesis: GenesisInfo,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct State {
     #[serde(default)]
     hi_count: u32,
@@ -58,11 +58,13 @@ impl Default for KademliaTestApp {
 
         let genesis = GenesisInfo {
             kolme_ident: "Cosmos bridge example".to_owned(),
-            processor: my_public_key,
-            listeners: set.clone(),
-            needed_listeners: 1,
-            approvers: set,
-            needed_approvers: 1,
+            validator_set: ValidatorSet {
+                processor: my_public_key,
+                listeners: set.clone(),
+                needed_listeners: 1,
+                approvers: set,
+                needed_approvers: 1,
+            },
             chains: ConfiguredChains::default(),
         };
 
@@ -155,14 +157,15 @@ pub async fn join_over_kademlia(kolme: Kolme<KademliaTestApp>, validator_addr: &
         .add_bootstrap(VALIDATOR_PEER_ID.parse()?, validator_addr.parse()?)
         .build(kolme.clone())
         .await?;
-    let mut last_seen = gossip.subscribe_last_seen();
+
+    let mut peers_connected = gossip.subscribe_network_ready();
     set.spawn(gossip.run());
 
     loop {
-        if last_seen.borrow().is_some() {
+        if *peers_connected.borrow() {
             break;
         }
-        last_seen.changed().await?;
+        peers_connected.changed().await?;
     }
 
     kolme.resync().await?;

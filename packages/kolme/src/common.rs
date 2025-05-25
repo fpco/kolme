@@ -1,5 +1,5 @@
 /// Common helper functions and utilities.
-use std::fmt::Display;
+use std::{fmt::Display, sync::OnceLock};
 
 use crate::*;
 
@@ -12,25 +12,28 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 /// debug messages for both the Kolme crate itself, and if provided
 /// the local crate, will be logged.
 pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
-    let env_filter = if verbose {
-        match local_crate_name {
-            None => format!("{}=debug,info", env!("CARGO_CRATE_NAME")),
-            Some(name) => format!("{}=debug,{name}=debug,info", env!("CARGO_CRATE_NAME")),
-        }
-        .parse()
-        .unwrap()
-    } else {
-        EnvFilter::from_default_env().add_directive(Level::INFO.into())
-    };
+    static LOGGER_SETUP: OnceLock<()> = OnceLock::new();
+    LOGGER_SETUP.get_or_init(|| {
+        let env_filter = if verbose {
+            match local_crate_name {
+                None => format!("{}=debug,info", env!("CARGO_CRATE_NAME")),
+                Some(name) => format!("{}=debug,{name}=debug,info", env!("CARGO_CRATE_NAME")),
+            }
+            .parse()
+            .unwrap()
+        } else {
+            EnvFilter::from_default_env().add_directive(Level::INFO.into())
+        };
 
-    tracing_subscriber::registry()
-        .with(
-            fmt::Layer::default()
-                .log_internal_errors(true)
-                .and_then(env_filter),
-        )
-        .init();
-    tracing::info!("Initialized Logging");
+        tracing_subscriber::registry()
+            .with(
+                fmt::Layer::default()
+                    .log_internal_errors(true)
+                    .and_then(env_filter),
+            )
+            .init();
+        tracing::info!("Initialized Logging");
+    });
 }
 /// Tagged, consistent-binary JSON
 ///
@@ -66,6 +69,15 @@ pub struct SignedTaggedJson<T> {
     pub message: TaggedJson<T>,
     pub signature: Signature,
     pub recovery_id: RecoveryId,
+}
+
+impl<T> SignedTaggedJson<T> {
+    pub fn signature_with_recovery(&self) -> SignatureWithRecovery {
+        SignatureWithRecovery {
+            recid: self.recovery_id,
+            sig: self.signature,
+        }
+    }
 }
 
 impl<T> MerkleSerialize for SignedTaggedJson<T> {

@@ -14,7 +14,7 @@ pub async fn instantiate(
     client: &SolanaClient,
     keypair: &Keypair,
     program_id: &str,
-    args: InstantiateArgs,
+    args: ValidatorSet,
 ) -> Result<()> {
     let needed_approvers = u8::try_from(args.needed_approvers)?;
     let mut executors = Vec::with_capacity(args.approvers.len());

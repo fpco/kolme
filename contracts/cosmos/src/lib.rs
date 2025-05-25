@@ -1,17 +1,19 @@
 mod signing;
 
-use std::num::TryFromIntError;
+use std::{collections::BTreeSet, num::TryFromIntError};
 
 use cosmwasm_std::{
-    entry_point, from_json, to_json_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo,
-    Response, Storage,
+    entry_point, from_json, to_json_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event,
+    MessageInfo, Response, Storage,
 };
 use cw_storage_plus::{Item, Map};
 use sha2::{Digest, Sha256};
 use shared::{
     cosmos::*,
     cryptography::{PublicKey, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId},
+    types::{
+        BridgeActionId, BridgeEventId, SelfReplace, ValidatorSet, ValidatorSetError, ValidatorType,
+    },
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -48,6 +50,15 @@ pub enum Error {
         expected: Box<PublicKey>,
         actual: Box<PublicKey>,
     },
+    #[error("Invalid self-replace. Signed by {signed_by} for validator type {validator_type}. Existing set: {expected:?}. Replacement provided: {replacement}.")]
+    InvalidSelfReplace {
+        signed_by: Box<PublicKey>,
+        replacement: Box<PublicKey>,
+        validator_type: ValidatorType,
+        expected: String,
+    },
+    #[error(transparent)]
+    ValidatorSetError { source: ValidatorSetError },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -67,26 +78,15 @@ pub fn instantiate(
     deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
-    InstantiateMsg {
-        processor,
-        approvers,
-        needed_approvers,
-    }: InstantiateMsg,
+    InstantiateMsg { set }: InstantiateMsg,
 ) -> Result<Response> {
-    if approvers.is_empty() {
+    set.validate()
+        .map_err(|source| Error::ValidatorSetError { source })?;
+    if set.approvers.is_empty() {
         return Err(Error::NoApproversProvided);
     }
-    let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
-    if approvers_len < needed_approvers {
-        return Err(Error::InsufficientApprovers {
-            needed: needed_approvers,
-            provided: approvers_len,
-        });
-    }
     let state = State {
-        processor,
-        approvers,
-        needed_approvers,
+        set,
         // We start events at ID 1, since the instantiation itself is event 0.
         next_event_id: BridgeEventId::start().next(),
         next_action_id: BridgeActionId::start(),
@@ -159,9 +159,9 @@ fn signed(
     info: MessageInfo,
     processor: SignatureWithRecovery,
     approvers: Vec<SignatureWithRecovery>,
-    payload: String,
+    payload_string: String,
 ) -> Result<Response> {
-    let Payload { id, messages } = from_json(&payload)?;
+    let PayloadWithId { id, action } = from_json(&payload_string)?;
 
     let mut state = STATE.load(deps.storage)?;
     if id != state.next_action_id {
@@ -174,25 +174,165 @@ fn signed(
     state.next_action_id.increment();
     let incoming_id = state.next_event_id;
     state.next_event_id.increment();
-    STATE.save(deps.storage, &state)?;
 
     let approvers_len = u16::try_from(approvers.len()).map_err(Error::TooManyApprovers)?;
-    if approvers_len < state.needed_approvers {
+    if approvers_len < state.set.needed_approvers {
         return Err(Error::InsufficientSignatures {
-            needed: state.needed_approvers,
+            needed: state.set.needed_approvers,
             provided: approvers_len,
         });
     }
 
     let mut hasher = Sha256::new();
-    hasher.update(&payload);
+    hasher.update(&payload_string);
     let hash = hasher.finalize();
+
+    enum ParsedAction {
+        Cosmos(Vec<CosmosMsg>),
+        SelfReplace {
+            validator_type: ValidatorType,
+            old: PublicKey,
+            new: PublicKey,
+        },
+        NewSet(ValidatorSet),
+    }
+
+    // Determine who the expected processor and approver signatures are.
+    // This is tricky because of key rotation. If we're recording a key rotation
+    // right now, validate that the signature on the key rotation itself is valid
+    // and then trust the new entries.
+    let (expected_processor, expected_approvers, needed_approvers, action) = match action {
+        CosmosAction::Cosmos(messages) => (
+            state.set.processor,
+            state.set.approvers.clone(),
+            state.set.needed_approvers,
+            ParsedAction::Cosmos(messages),
+        ),
+        CosmosAction::SelfReplace {
+            rendered,
+            signature,
+        } => {
+            let hash = Sha256::digest(&rendered);
+            let validator = signing::validate_signature(deps.api, &hash, &signature)?;
+            let SelfReplace {
+                validator_type,
+                replacement,
+            } = from_json(&rendered)?;
+            let mut expected_processor = state.set.processor;
+            let mut expected_approvers = state.set.approvers.clone();
+            match validator_type {
+                ValidatorType::Listener => {
+                    if !state.set.listeners.contains(&validator)
+                        || state.set.listeners.contains(&replacement)
+                    {
+                        return Err(Error::InvalidSelfReplace {
+                            signed_by: validator.into(),
+                            replacement: replacement.into(),
+                            validator_type,
+                            expected: format!("{:?}", state.set.listeners),
+                        });
+                    }
+                }
+                ValidatorType::Processor => {
+                    if validator != state.set.processor {
+                        return Err(Error::InvalidSelfReplace {
+                            signed_by: validator.into(),
+                            replacement: replacement.into(),
+                            validator_type,
+                            expected: state.set.processor.to_string(),
+                        });
+                    }
+                    expected_processor = replacement;
+                }
+                ValidatorType::Approver => {
+                    if !state.set.approvers.contains(&validator)
+                        || state.set.approvers.contains(&replacement)
+                    {
+                        return Err(Error::InvalidSelfReplace {
+                            signed_by: validator.into(),
+                            replacement: replacement.into(),
+                            validator_type,
+                            expected: format!("{:?}", state.set.approvers),
+                        });
+                    }
+                    expected_approvers.remove(&validator);
+                    expected_approvers.insert(replacement);
+                }
+            }
+            (
+                expected_processor,
+                expected_approvers,
+                state.set.needed_approvers,
+                ParsedAction::SelfReplace {
+                    validator_type,
+                    old: validator,
+                    new: replacement,
+                },
+            )
+        }
+        CosmosAction::NewSet {
+            rendered,
+            approvals,
+        } => {
+            let new_set = from_json::<ValidatorSet>(&rendered)?;
+            let hash = Sha256::digest(&rendered);
+
+            let mut processor = false;
+            let mut listeners = 0;
+            let mut approvers = 0;
+            let mut used = BTreeSet::new();
+
+            for signature in approvals {
+                let validator = signing::validate_signature(deps.api, &hash, &signature)?;
+                if used.contains(&validator) {
+                    return Err(Error::DuplicateKey { key: validator });
+                }
+                used.insert(validator);
+                if state.set.processor == validator {
+                    assert!(!processor);
+                    processor = true;
+                }
+                if state.set.listeners.contains(&validator) {
+                    listeners += 1;
+                }
+                if state.set.approvers.contains(&validator) {
+                    approvers += 1;
+                }
+            }
+
+            let count = if processor { 1 } else { 0 }
+                + if listeners >= state.set.needed_listeners {
+                    1
+                } else {
+                    0
+                }
+                + if approvers >= state.set.needed_approvers {
+                    1
+                } else {
+                    0
+                };
+
+            if count < 2 {
+                return Err(Error::InsufficientSignatures {
+                    needed: 2,
+                    provided: count,
+                });
+            }
+
+            (
+                new_set.processor,
+                new_set.approvers.clone(),
+                new_set.needed_approvers,
+                ParsedAction::NewSet(new_set),
+            )
+        }
+    };
 
     let processor = signing::validate_signature(deps.api, &hash, &processor)?;
 
-    if processor != state.processor {
+    if processor != expected_processor {
         return Err(Error::PublicKeyRecoveryMismatch {
-            expected: state.processor.into(),
+            expected: state.set.processor.into(),
             actual: processor.into(),
         });
     }
@@ -200,24 +340,55 @@ fn signed(
     let mut used = vec![];
     for approver in approvers {
         let key = signing::validate_signature(deps.api, &hash, &approver)?;
-        if !state.approvers.contains(&key) {
-            return Err(Error::NonApproverKey { key });
+        if !expected_approvers.contains(&key) {
+            continue;
         }
         if used.contains(&key) {
             return Err(Error::DuplicateKey { key });
         }
         used.push(key);
     }
+    if used.len() < needed_approvers as usize {
+        return Err(Error::InsufficientApprovers {
+            needed: state.set.needed_approvers,
+            provided: used.len() as u16,
+        });
+    }
 
-    Ok(bridge_event_message_to_response(
+    let mut event = bridge_event_message_to_response(
         &BridgeEventMessage::Signed {
             wallet: info.sender.into_string(),
             action_id: id,
         },
         incoming_id,
         deps.storage,
-    )?
-    .add_messages(messages))
+    )?;
+
+    match action {
+        ParsedAction::Cosmos(messages) => event = event.add_messages(messages),
+        ParsedAction::SelfReplace {
+            validator_type,
+            old,
+            new,
+        } => match validator_type {
+            ValidatorType::Listener => {
+                state.set.listeners.remove(&old);
+                state.set.listeners.insert(new);
+            }
+            ValidatorType::Processor => {
+                // Already checked above, but why not
+                assert_eq!(state.set.processor, old);
+                state.set.processor = new;
+            }
+            ValidatorType::Approver => {
+                state.set.approvers.remove(&old);
+                state.set.approvers.insert(new);
+            }
+        },
+        ParsedAction::NewSet(set) => state.set = set,
+    };
+    STATE.save(deps.storage, &state)?;
+    Ok(event)
 }
 
 #[entry_point]

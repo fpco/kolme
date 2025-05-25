@@ -1,0 +1,81 @@
+name: 'Setup System'
+description: 'Cache and install system dependencies'
+inputs:
+  github-token:
+    description: GitHub token used for the Docker registry
+  cache-prefix-key:
+    description: Prefix used for the Rust cache
+runs:
+  using: 'composite'
+  steps:
+    - name: Install apt packages
+      uses: awalsh128/cache-apt-pkgs-action@7ca5f46d061ad9aa95863cd9b214dd48edef361d
+      with:
+        packages: libudev-dev libusb-1.0-0-dev libhidapi-dev mold
+        version: 1.0
+
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y $(cat ${{ inputs.requirements-file }})
+
+    - name: Setup just
+      uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+    - name: Setup rust toolchain
+      uses: dtolnay/rust-toolchain@1.84.0
+      with:
+        components: clippy, rustfmt
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.github-token }}
+
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      with:
+        version: v0.10.0
+
+    - name: Configure sccache
+      uses: actions/github-script@v7
+      with:
+        script: |
+          core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+    - name: Set sccache environment variables
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+        echo "ACTION_RESULTS_URL=$ACTIONS_RESULTS_URL" >> $GITHUB_ENV
+        echo "ACTION_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" >> $GITHUB_ENV
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+      with:
+        android: true
+        dotnet: true
+        haskell: true
+        tool-cache: false
+        large-packages: false
+        docker-images: false
+        swap-storage: false
+
+    - name: Setup rust cache
+      uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # 2.7.7
+      with:
+        cache-all-crates: true
+        key: ci-test-v1
+
+    - name: Cache Rust dependencies
+      if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: ${{ inputs.cache-prefix-key }}
+        key: "${{ hashFiles('Cargo.lock') }}"
+        cache-on-failure: true

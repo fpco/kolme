@@ -4,7 +4,7 @@ use crate::core::*;
 pub enum KolmeError {
     #[error("Invalid nonce provided for pubkey {pubkey}, account {account_id}. Expected: {expected}. Received: {actual}.")]
     InvalidNonce {
-        pubkey: PublicKey,
+        pubkey: Box<PublicKey>,
         account_id: AccountId,
         expected: AccountNonce,
         actual: AccountNonce,
