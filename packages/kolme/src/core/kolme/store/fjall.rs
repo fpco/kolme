@@ -99,6 +99,10 @@ impl KolmeStoreFjall {
         }
         Ok(())
     }
+
+    pub(super) fn get_merkle_store(&self) -> FjallMerkleStore {
+        FjallMerkleStore(&self.handle)
+    }
 }
 
 fn block_key(height: BlockHeight) -> [u8; 14] {
@@ -121,7 +125,7 @@ fn tx_key(tx: TxHash) -> [u8; 35] {
     array
 }
 
-struct FjallMerkleStore<'a>(&'a fjall::PartitionHandle);
+pub(super) struct FjallMerkleStore<'a>(&'a fjall::PartitionHandle);
 
 impl MerkleStore for FjallMerkleStore<'_> {
     async fn load_by_hash(

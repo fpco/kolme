@@ -1,9 +1,17 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, LazyLock},
+};
 
 use anyhow::Result;
 
 use kolme::{testtasks::TestTasks, *};
 use tokio::time::{timeout, Duration};
+
+// We only want one copy of this test running at a time
+// to avoid mDNS Gossip confusion
+static P2P_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
@@ -99,7 +107,8 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test]
 async fn sanity() {
-    kolme::init_logger(false, None);
+    let _guard = P2P_TEST_LOCK.lock().await;
+    init_logger(true, None);
     TestTasks::start(sanity_inner, ()).await;
 }
 
@@ -122,6 +131,11 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     );
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
+            .set_sync_mode(
+                SyncMode::BlockTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+            .set_local_display_name("sanity-processor")
             .build(kolme_processor)
             .await
             .unwrap()
@@ -138,6 +152,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
+            .set_local_display_name("sanity-client")
             .build(kolme_client.clone())
             .await
             .unwrap()
@@ -152,10 +167,12 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap()
     .unwrap();
-    let tx = kolme_client
-        .read()
-        .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
-        .unwrap();
+    let tx = Arc::new(
+        kolme_client
+            .read()
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+            .unwrap(),
+    );
     let txhash = tx.hash();
     timeout(
         Duration::from_secs(5),

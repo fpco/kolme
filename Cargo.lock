@@ -4852,6 +4852,7 @@ name = "merkle-map"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
+ "base64 0.22.1",
  "jiff",
  "parameterized",
  "parking_lot",
@@ -11414,6 +11415,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
+]
+
+[[package]]
+name = "test-runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]

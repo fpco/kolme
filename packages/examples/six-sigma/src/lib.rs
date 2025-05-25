@@ -469,11 +469,7 @@ impl TxLogger {
         loop {
             let notification = receiver.recv().await?;
             let output = match notification.clone() {
-                Notification::Broadcast { .. } => {
-                    // we skip initial tx broadcast, only tx as a part of a block
-                    continue;
-                }
-                Notification::FailedTransaction { .. } => continue,
+                Notification::FailedTransaction(_) => continue,
                 Notification::NewBlock(msg) => {
                     let block = msg.0.message.as_inner();
                     let height = block.height;
@@ -741,7 +737,9 @@ mod tests {
         tracing::debug!("Checking executed transfer action with the award");
         (|| async {
             let resp = client
-                .get(format!("http://localhost:12345/actions/{bridge_action_id}"))
+                .get(format!(
+                    "http://localhost:12345/actions/{bridge_action_id}/wait"
+                ))
                 .send()
                 .await
                 .unwrap();

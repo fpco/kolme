@@ -50,11 +50,37 @@ pub(crate) struct TreeContents<K, V> {
 /// This includes the hash and payload which will be stored in the database.
 /// It also includes all direct children nodes encountered during serialization,
 /// so that they can be checked as present in the database and added if missing.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct MerkleContents {
     pub hash: Sha256Hash,
+    #[serde(
+        serialize_with = "serialize_base64",
+        deserialize_with = "deserialize_base64"
+    )]
     pub payload: Arc<[u8]>,
     pub children: Arc<[Arc<MerkleContents>]>,
+}
+
+fn serialize_base64<S>(data: &Arc<[u8]>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use base64::prelude::*;
+    let base64 = BASE64_STANDARD.encode(data);
+    serializer.serialize_str(&base64)
+}
+
+// Deserialize base64 string to Arc<[u8]>
+fn deserialize_base64<'de, D>(deserializer: D) -> Result<Arc<[u8]>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use base64::prelude::*;
+    let base64 = <String as serde::Deserialize>::deserialize(deserializer)?;
+    let bytes = BASE64_STANDARD
+        .decode(&base64)
+        .map_err(serde::de::Error::custom)?;
+    Ok(Arc::from(bytes))
 }
 
 /// Errors that can occur during serialization of data.

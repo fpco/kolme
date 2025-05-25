@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::OnceLock};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, OnceLock},
+};
 
 use kolme::*;
 use testtasks::TestTasks;
@@ -175,10 +178,12 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
 
     // Generate a new transaction then try to broadcast it. It should fail to land
     // because we don't have a valid processor running.
-    let tx = kolme
-        .read()
-        .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
-        .unwrap();
+    let tx = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
+            .unwrap(),
+    );
     let txhash = tx.hash();
     kolme.propose_transaction(tx.clone());
 
@@ -232,7 +237,9 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), orig_processor.clone()).run());
+    let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
+    processor.add_secret(new_processor.clone());
+    testtasks.try_spawn_persistent(processor.run());
 
     // Swap out the approver and listener right away. Since there's only one
     // key being used, we don't need to do any approving.
@@ -452,16 +459,6 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         &proposed_set1,
         kolme.read().get_framework_state().get_validator_set()
     );
-
-    // Need to switch over to a new Kolme and a new Processor...
-    let kolme = Kolme::new(
-        SampleKolmeApp::new(orig_processor.public_key()),
-        DUMMY_CODE_VERSION,
-        store,
-    )
-    .await
-    .unwrap();
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), new_processor.clone()).run());
 
     // Now that we have more than 1 approver, do a final check that we need
     // 2 members of the approver group before a change is approved.

@@ -698,6 +698,10 @@ impl BlockHeight {
         BlockHeight(self.0 + 1)
     }
 
+    pub fn prev(self) -> Option<Self> {
+        self.0.checked_sub(1).map(BlockHeight)
+    }
+
     pub fn start() -> BlockHeight {
         BlockHeight(0)
     }
@@ -1401,15 +1405,18 @@ pub enum Notification<AppMessage> {
         chain: ExternalChain,
         contract: String,
     },
-    /// Broadcast a transaction to be included in the chain.
-    Broadcast {
-        tx: Arc<SignedTransaction<AppMessage>>,
-    },
     /// A transaction failed in the processor.
-    FailedTransaction {
-        txhash: TxHash,
-        error: KolmeError,
-    },
+    ///
+    /// The message is signed by the processor. Only failed transactions
+    /// signed by the real processor should be respected for dropping
+    /// transactions from the mempool.
+    FailedTransaction(SignedTaggedJson<FailedTransaction>),
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct FailedTransaction {
+    pub txhash: TxHash,
+    pub error: KolmeError,
 }
 
 /// Represents distinct occurrences in the core of Kolme that could be relevant to users.

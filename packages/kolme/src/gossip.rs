@@ -1,62 +1,52 @@
+mod messages;
+
 use std::{
-    collections::VecDeque,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     time::Duration,
 };
 
 use crate::*;
+use messages::*;
 
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
     mdns, noise,
-    request_response::ProtocolSupport,
+    request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast::error::RecvError, Mutex};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
 
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
     kolme: Kolme<App>,
-    last_seen_watch: tokio::sync::watch::Sender<Option<BlockHeight>>,
     swarm: Mutex<Swarm<KolmeBehaviour<App::Message>>>,
-    notifications: IdentTopic,
-    find_peers: IdentTopic,
+    gossip_topic: IdentTopic,
+    sync_mode: SyncMode,
+    // FIXME resolve this when we implement data load validation logic
+    #[allow(dead_code)]
+    data_load_validation: DataLoadValidation,
     local_peer_id: PeerId,
+    // human-readable name for an instance
+    local_display_name: String,
+    /// Trigger a broadcast of our latest block height.
+    trigger_broadcast_height: tokio::sync::watch::Sender<u64>,
+    /// Switches to true once we have our first success received message
+    watch_network_ready: tokio::sync::watch::Sender<bool>,
 }
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
-struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + 'static> {
+struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 'static> {
     gossipsub: gossipsub::Behaviour,
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
     mdns: mdns::tokio::Behaviour,
     kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
-enum BlockRequest {
-    /// Return the height of the next block to be generated.
-    NextHeight,
-    /// Return the contents of a specific block.
-    BlockAtHeight(BlockHeight),
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-#[serde(bound(
-    serialize = "",
-    deserialize = "AppMessage: serde::de::DeserializeOwned"
-))]
-enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
-    Next(BlockHeight),
-    Block(SignedBlock<AppMessage>),
-    HeightNotFound(BlockHeight),
 }
 
 #[derive(Default)]
@@ -68,11 +58,48 @@ pub struct GossipBuilder {
     disable_ip4: bool,
     disable_ip6: bool,
     listen_ports: Vec<u16>,
+    sync_mode: SyncMode,
+    data_load_validation: DataLoadValidation,
+    local_display_name: Option<String>,
+}
+
+/// How block data is synchronized.
+///
+/// Default: [SyncMode::StateTransfer]
+#[derive(Default, Debug)]
+pub enum SyncMode {
+    /// Allow state transfer always (aka fast sync).
+    ///
+    /// Requires trust in the processor to only produce valid blocks, no verification occurs on our node.
+    #[default]
+    StateTransfer,
+    /// Allow state transfer for version upgrades, but otherwise use block sync.
+    StateTransferForUpgrade,
+    /// Always do block sync, verifying each new block
+    BlockTransfer,
+}
+
+/// Whether we validate data loads during block processing.
+///
+/// Default: [DataLoadValidation::ValidateDataLoads].
+#[derive(Default)]
+pub enum DataLoadValidation {
+    /// Validate that data loaded during a block is accurate.
+    ///
+    /// This may involve additional I/O, such as making HTTP requests.
+    #[default]
+    ValidateDataLoads,
+    /// Trust that the loaded data is accurate.
+    TrustDataLoads,
 }
 
 impl GossipBuilder {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            disable_ip6: true,
+            disable_quic: true,
+            ..Self::default()
+        }
     }
 
     pub fn add_bootstrap(mut self, peer: PeerId, address: Multiaddr) -> Self {
@@ -110,6 +137,22 @@ impl GossipBuilder {
     /// If none are provided, a random port is selected per interface
     pub fn add_listen_port(mut self, port: u16) -> Self {
         self.listen_ports.push(port);
+        self
+    }
+
+    /// Set the sync mode and data validation rules.
+    pub fn set_sync_mode(
+        mut self,
+        sync_mode: SyncMode,
+        data_load_validation: DataLoadValidation,
+    ) -> Self {
+        self.sync_mode = sync_mode;
+        self.data_load_validation = data_load_validation;
+        self
+    }
+
+    pub fn set_local_display_name(mut self, display_name: &str) -> Self {
+        self.local_display_name = Some(String::from(display_name));
         self
     }
 
@@ -188,14 +231,12 @@ impl GossipBuilder {
             .build();
 
         // Create the Gossipsub topics
-        let notifications = gossipsub::IdentTopic::new("/notifications/1.0");
-        let find_peers = gossipsub::IdentTopic::new("/find-peers/1.0");
-        // subscribes to our topics
-        swarm.behaviour_mut().gossipsub.subscribe(&notifications)?;
-        swarm.behaviour_mut().gossipsub.subscribe(&find_peers)?;
+        let gossip_topic = gossipsub::IdentTopic::new("/kolme-gossip/1.0");
+        // And subscribe
+        swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
         // Begin listening based on the config
-        fn add_listen<AppMessage: serde::de::DeserializeOwned + Send>(
+        fn add_listen<AppMessage: serde::de::DeserializeOwned + Send + Sync>(
             swarm: &mut Swarm<KolmeBehaviour<AppMessage>>,
             is_quic: bool,
             is_ip6: bool,
@@ -237,16 +278,20 @@ impl GossipBuilder {
             }
         }
 
-        let (last_seen_watch, _) = tokio::sync::watch::channel(None);
+        let (trigger_broadcast_height, _) = tokio::sync::watch::channel(0);
+        let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
 
         Ok(Gossip {
             kolme,
-            last_seen_watch,
             swarm: Mutex::new(swarm),
-            notifications,
-            find_peers,
+            gossip_topic,
+            sync_mode: self.sync_mode,
+            data_load_validation: self.data_load_validation,
             local_peer_id,
+            trigger_broadcast_height,
+            watch_network_ready,
+            local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
         })
     }
 }
@@ -256,32 +301,91 @@ impl<App: KolmeApp> Gossip<App> {
         self.local_peer_id
     }
 
-    pub fn subscribe_last_seen(&self) -> tokio::sync::watch::Receiver<Option<BlockHeight>> {
-        self.last_seen_watch.subscribe()
+    pub fn subscribe_network_ready(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.watch_network_ready.subscribe()
     }
 
     pub async fn run(self) -> Result<()> {
-        self.run_with_catch_up_interval(tokio::time::Duration::from_secs(5))
-            .await
-    }
-
-    pub async fn run_with_catch_up_interval(
-        self,
-        catch_up_interval: tokio::time::Duration,
-    ) -> Result<()> {
         let mut subscription = self.kolme.subscribe();
         let mut swarm = self.swarm.lock().await;
-        let mut event_state = EventState::default();
 
-        let mut interval = tokio::time::interval(catch_up_interval);
+        let mut network_ready = self.watch_network_ready.subscribe();
+
+        let (peers_with_blocks_tx, mut peers_with_blocks_rx) = tokio::sync::mpsc::channel(16);
+
+        // Interval for broadcasting our block height
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut trigger_broadcast_height = self.trigger_broadcast_height.subscribe();
+
+        let mut mempool_additions = self.kolme.subscribe_mempool_additions();
 
         loop {
             tokio::select! {
+                // When the network switches to ready, request everyone's block height.
+                _ = network_ready.changed() => self.request_block_heights(&mut swarm).await,
+                // Our local Kolme generated a notification to be sent through the
+                // rest of the p2p network
                 notification = subscription.recv() =>
-                    self.handle_notification(&mut swarm, notification? ).await?,
-                event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &mut event_state).await?,
-                _ = interval.tick() => self.catch_up(&mut swarm, &mut event_state).await,
+                    self.handle_notification(&mut swarm, notification).await,
+                // A new event was generated from the p2p network
+                event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &peers_with_blocks_tx).await,
+                // A peer reported a known height higher than we have, so
+                // try to synchronize with it
+                report_block_height = peers_with_blocks_rx.recv() => self.catch_up(&mut swarm,report_block_height).await,
+                // Periodically notify the p2p network of our latest block height
+                // Also use this time to broadcast any transactions from the mempool.
+                _ = interval.tick() => {
+                    self.broadcast_latest_block(&mut swarm).await;
+                    self.broadcast_mempool_entries(&mut swarm).await;
+                }
+                // When we're specifically triggered for it, also notify for latest block height
+                _ = trigger_broadcast_height.changed() => self.broadcast_latest_block(&mut swarm).await,
+                // And any time we add something new to the mempool, broadcast all items.
+                _ = mempool_additions.changed() => self.broadcast_mempool_entries(&mut swarm).await,
+            }
+        }
+    }
+
+    async fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        // First thing to do: ask the network to tell us about their latest
+        // block heights.
+        if let Err(e) = GossipMessage::RequestBlockHeights(jiff::Timestamp::now())
+            .publish(self, swarm)
+            .await
+        {
+            tracing::error!(
+                "{}: Unable to request block heights: {e:?}",
+                self.local_display_name
+            );
+        }
+    }
+
+    async fn broadcast_latest_block(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        if let Err(e) = GossipMessage::ReportBlockHeight(ReportBlockHeight {
+            next: self.kolme.read().get_next_height(),
+            peer: self.local_peer_id,
+            timestamp: jiff::Timestamp::now(),
+        })
+        .publish(self, swarm)
+        .await
+        {
+            tracing::error!(
+                "{}: Unable to broadcast latest block height: {e:?}",
+                self.local_display_name
+            )
+        }
+    }
+
+    async fn broadcast_mempool_entries(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        for tx in self.kolme.get_mempool_entries() {
+            let txhash = tx.hash();
+            let msg = GossipMessage::BroadcastTx { tx };
+            if let Err(e) = msg.publish(self, swarm).await {
+                tracing::error!(
+                    "{}: Unable to broadcast transaction {txhash}: {e:?}",
+                    self.local_display_name
+                )
             }
         }
     }
@@ -289,54 +393,61 @@ impl<App: KolmeApp> Gossip<App> {
     async fn handle_notification(
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-        notification: Notification<App::Message>,
-    ) -> Result<()> {
-        if let Err(e) = swarm.behaviour_mut().gossipsub.publish(
-            self.notifications.clone(),
-            serde_json::to_vec(&notification)?,
-        ) {
-            tracing::debug!("Error when handling notification: {e}");
+        notification: Result<Notification<App::Message>, RecvError>,
+    ) {
+        let notification = match notification {
+            Ok(notification) => notification,
+            Err(e) => {
+                tracing::warn!(
+                    "{}: Gossip::handle_notification: received an error: {e}",
+                    self.local_display_name
+                );
+                return;
+            }
+        };
+        if let Err(e) = GossipMessage::Notification(notification)
+            .publish(self, swarm)
+            .await
+        {
+            tracing::warn!(
+                "{}: Error when handling notification: {e}",
+                self.local_display_name
+            );
         }
-        Ok(())
     }
 
     async fn handle_event(
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         event: SwarmEvent<KolmeBehaviourEvent<App::Message>>,
-        state: &mut EventState,
-    ) -> Result<()> {
+        peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
+    ) {
+        let local_display_name = self.local_display_name.clone();
+
         match event {
+            SwarmEvent::ConnectionEstablished { .. } => {
+                self.watch_network_ready.send_if_modified(|value| {
+                    let ret = *value;
+                    *value = true;
+                    ret
+                });
+            }
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
             } => {
-                tracing::debug!("New listener {listener_id} on {address}");
-                let peer = *swarm.local_peer_id();
-                swarm.behaviour_mut().kademlia.add_address(&peer, address);
+                tracing::info!(
+                    "{local_display_name}: New listener {listener_id} on {address}, {:?}",
+                    swarm.local_peer_id()
+                );
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
                 for (peer, address) in peers {
-                    state.add_peer(peer);
+                    tracing::info!(
+                        "{local_display_name}: Discovered new peer over mDNS: {peer} @ {address}"
+                    );
+                    // TODO do we need to manually add mDNS peers to Kademlia?
                     swarm.behaviour_mut().kademlia.add_address(&peer, address);
-                }
-            }
-            SwarmEvent::Behaviour(KolmeBehaviourEvent::Kademlia(event)) => {
-                match event {
-                    libp2p::kad::Event::OutboundQueryProgressed { id: _, result, .. } => {
-                        // Handle query results (e.g., found peers)
-                        if let libp2p::kad::QueryResult::GetClosestPeers(Ok(peers)) = result {
-                            for peer in peers.peers {
-                                state.add_peer(peer.peer_id);
-                            }
-                        }
-                    }
-                    libp2p::kad::Event::RoutablePeer { peer, address } => {
-                        tracing::debug!("Routable peer: {} at {}", peer, address);
-                        state.add_peer(peer);
-                        swarm.dial(peer).ok();
-                    }
-                    _ => tracing::debug!("Kademlia event: {:?}", event),
                 }
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(gossipsub::Event::Message {
@@ -344,39 +455,22 @@ impl<App: KolmeApp> Gossip<App> {
                 message_id,
                 message,
             })) => {
-                if message.topic == self.notifications.hash() {
-                    tracing::debug!("Received a message {message_id} from {propagation_source}");
-                    match serde_json::from_slice::<Notification<App::Message>>(&message.data) {
-                        Ok(msg) => {
-                            match &msg {
-                                Notification::NewBlock(block) => {
-                                    state.observe_next_block_height(
-                                        block.0.message.as_inner().height.next(),
-                                    );
-                                    self.add_block(block.clone()).await;
-                                }
-                                Notification::GenesisInstantiation { .. } => (),
-                                Notification::Broadcast { .. } => (),
-                                Notification::FailedTransaction { .. } => (),
-                            }
-                            self.kolme.notify(msg);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Unable to parse content from {message_id}, sent by {propagation_source}: {e}")
-                        }
+                tracing::debug!(
+                    "{local_display_name}: Received a message {message_id} from {propagation_source}"
+                );
+                match GossipMessage::parse(self, message) {
+                    Err(e) => {
+                        tracing::warn!(
+                            "{local_display_name}: Received a gossipsub message we couldn't parse: {e}"
+                        );
                     }
-                } else if message.topic == self.find_peers.hash() {
-                    if message.data == FIND_PEER_REQUEST {
-                        if let Err(err) = swarm
-                            .behaviour_mut()
-                            .gossipsub
-                            .publish(self.find_peers.clone(), FIND_PEER_RESPONSE)
-                        {
-                            tracing::warn!("Couldn't send find_peer response: {err:#}")
+                    Ok(message) => {
+                        tracing::debug!("{local_display_name}: Received message: {message}");
+                        if let Err(e) = self.handle_message(message, peers_with_blocks).await {
+                            tracing::warn!(
+                                "{local_display_name}: Error while handling message: {e}"
+                            );
                         }
-                    } else if message.data == FIND_PEER_RESPONSE {
-                        // FIXME send these back via request/response instead
-                        state.add_peer(propagation_source);
                     }
                 }
             }
@@ -391,61 +485,169 @@ impl<App: KolmeApp> Gossip<App> {
                     request_id: _,
                     request,
                     channel,
-                } => match request {
-                    BlockRequest::NextHeight => {
-                        if let Err(e) = swarm.behaviour_mut().request_response.send_response(
-                            channel,
-                            BlockResponse::Next(self.kolme.read().get_next_height()),
-                        ) {
-                            tracing::warn!("Unable to answer Next request: {e:?}");
-                        }
-                    }
-                    BlockRequest::BlockAtHeight(height) => {
-                        let res = match self.kolme.read().get_block(height).await? {
-                            None => BlockResponse::HeightNotFound(height),
-                            Some(storable_block) => {
-                                BlockResponse::Block(Arc::unwrap_or_clone(storable_block.block))
-                            }
-                        };
-                        if let Err(e) = swarm
-                            .behaviour_mut()
-                            .request_response
-                            .send_response(channel, res)
-                        {
-                            tracing::warn!("Unable to answer GetHeight request: {e:?}");
-                        }
-                    }
-                },
+                } => self.handle_request(request, channel, swarm).await,
+
                 libp2p::request_response::Message::Response {
                     request_id: _,
                     response,
-                } => match response {
-                    BlockResponse::Next(next_height) => {
-                        let updated = state.observe_next_block_height(next_height);
-                        // event state starts with BlockHeight::start (equal to 0) and if max next height
-                        // was updated we should have received at least 1 but we do an extra check for safety
-                        if updated && !next_height.is_start() {
-                            let height = BlockHeight(next_height.0 - 1);
-                            if let Err(e) = self.last_seen_watch.send(Some(height)) {
+                } => self.handle_response(response).await,
+            },
+            _ => tracing::debug!(
+                "{local_display_name}: Received and ignoring libp2p event: {event:?}"
+            ),
+        }
+    }
+
+    async fn handle_message(
+        &self,
+        message: GossipMessage<App>,
+        peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
+    ) -> Result<()> {
+        let local_display_name = self.local_display_name.clone();
+        match message {
+            GossipMessage::Notification(msg) => {
+                tracing::debug!("{local_display_name}: got notification message");
+                match &msg {
+                    Notification::NewBlock(block) => {
+                        self.add_block(block.clone()).await;
+                    }
+                    Notification::GenesisInstantiation { .. } => (),
+                    // TODO should we validate that this has a proper signature from
+                    // the processor before accepting it?
+                    //
+                    // See propose_and_await_transaction for an example.
+                    Notification::FailedTransaction(_) => (),
+                }
+                self.kolme.notify(msg);
+            }
+            GossipMessage::RequestBlockHeights(_) => {
+                tracing::debug!("{local_display_name}: got block heights request message");
+                self.trigger_broadcast_height.send_modify(|old| *old += 1);
+            }
+            GossipMessage::ReportBlockHeight(report) => {
+                tracing::debug!("{local_display_name}: got block height report message");
+                let our_next = self.kolme.read().get_next_height();
+                tracing::debug!(
+                    "{local_display_name}: Received ReportBlockHeight: {report:?}, our_next: {our_next}"
+                );
+                // Check if this peer has new blocks that we'd want to request.
+                if our_next < report.next {
+                    peers_with_blocks.try_send(report).ok();
+                }
+            }
+            GossipMessage::BroadcastTx { tx } => {
+                self.kolme.propose_transaction(tx);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_request(
+        &self,
+        request: BlockRequest,
+        channel: ResponseChannel<BlockResponse<App::Message>>,
+        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
+    ) {
+        let local_display_name = self.local_display_name.clone();
+        match request {
+            BlockRequest::BlockAtHeight(height) => {
+                let res = match self.kolme.read().get_block(height).await {
+                    Err(e) => {
+                        tracing::warn!("{local_display_name}: Error querying block in gossip: {e}");
+                        return;
+                    }
+                    Ok(None) => BlockResponse::HeightNotFound(height),
+                    Ok(Some(storable_block)) => BlockResponse::Block(storable_block.block),
+                };
+                if let Err(e) = swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_response(channel, res)
+                {
+                    tracing::warn!(
+                        "{local_display_name}: Unable to answer BlockAtHeight request: {e:?}"
+                    );
+                }
+            }
+            BlockRequest::BlockWithStateAtHeight(height) => {
+                let res = match self.kolme.read().get_block(height).await {
+                    Err(e) => {
+                        tracing::warn!(
+                            "{local_display_name}: Error querying block (with state) in gossip: {e}"
+                        );
+                        return;
+                    }
+                    Ok(None) => BlockResponse::HeightNotFound(height),
+                    Ok(Some(storable_block)) => {
+                        let manager = self.kolme.get_merkle_manager();
+                        let framework_state = manager.serialize(&storable_block.framework_state);
+                        let app_state = manager.serialize(&storable_block.app_state);
+                        match (framework_state, app_state) {
+                            (Ok(framework_state), Ok(app_state)) => BlockResponse::BlockWithState {
+                                block: storable_block.block,
+                                framework_state,
+                                app_state,
+                                // FIXME should we store a hash of the logs in the block as well?
+                                logs: storable_block.logs,
+                            },
+                            (Err(e), _) => {
                                 tracing::warn!(
-                                    "Unable to notify about new last seen block height: {e}"
-                                )
+                                    "{local_display_name}: Unable to serialize framework state: {e}"
+                                );
+                                return;
+                            }
+                            (_, Err(e)) => {
+                                tracing::warn!(
+                                    "{local_display_name}: Unable to serialize app state: {e}"
+                                );
+                                return;
                             }
                         }
                     }
-                    BlockResponse::Block(block) => {
-                        self.add_block(Arc::new(block)).await;
-                    }
-                    BlockResponse::HeightNotFound(height) => {
-                        tracing::warn!(
-                            "Tried to find block height {height}, but peer didn't find it"
-                        );
-                    }
-                },
-            },
-            _ => tracing::debug!("Received and ignoring libp2p event: {event:?}"),
+                };
+                if let Err(e) = swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_response(channel, res)
+                {
+                    tracing::warn!(
+                        "{local_display_name}: Unable to answer BlockWithStateAtHeight request: {e:?}"
+                    );
+                }
+            }
         }
-        Ok(())
+    }
+
+    async fn handle_response(&self, response: BlockResponse<App::Message>) {
+        let local_display_name = self.local_display_name.clone();
+        tracing::debug!("{local_display_name}: response");
+        match response {
+            BlockResponse::Block(block) => {
+                self.add_block(block).await;
+            }
+            BlockResponse::BlockWithState {
+                block,
+                framework_state,
+                app_state,
+                logs,
+            } => {
+                if let Err(e) = self
+                    .kolme
+                    .add_block_with_state(block, framework_state, app_state, logs)
+                    .await
+                {
+                    tracing::warn!(
+                        "{local_display_name}: Unable to add block (with state) to chain: {e}"
+                    );
+                }
+            }
+            BlockResponse::HeightNotFound(height) => {
+                tracing::warn!(
+                    "{local_display_name}: Tried to find block height {height}, but peer didn't find it"
+                );
+            }
+        }
     }
 
     /// Catch up on the latest chain information, if needed.
@@ -454,96 +656,67 @@ impl<App: KolmeApp> Gossip<App> {
     async fn catch_up(
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-        state: &mut EventState,
+        report_block_height: Option<ReportBlockHeight>,
     ) {
-        if let Err(e) = swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(self.find_peers.clone(), FIND_PEER_REQUEST)
-        {
-            tracing::warn!("Error when trying to request peers: {e}")
+        let ReportBlockHeight {
+            next: their_next,
+            peer,
+            timestamp: _,
+        } = match report_block_height {
+            Some(report) => report,
+            None => return,
+        };
+
+        let our_next = self.kolme.read().get_next_height();
+
+        tracing::debug!(
+            "{}: In catch_up, their_node=={their_next}, peer=={peer}, our_next=={our_next}",
+            self.local_display_name
+        );
+
+        let their_highest = match their_next.prev() {
+            None => return,
+            Some(highest) => highest,
+        };
+
+        if their_highest < our_next {
+            // They don't have any new blocks for us.
+            return;
         }
 
-        // Kademlia: Start a query to find closest peers
-        let peer_id = *swarm.local_peer_id();
-        swarm.behaviour_mut().kademlia.get_closest_peers(peer_id);
+        let do_state = match self.sync_mode {
+            // Only do a state transfer if we've fallen more than 1 block behind.
+            SyncMode::StateTransfer => their_highest != our_next,
+            SyncMode::StateTransferForUpgrade => {
+                todo!("Holding off on StateTransferForUpgrade until we handle upgrades")
+            }
+            SyncMode::BlockTransfer => false,
+        };
 
-        if let Some(peer) = state.get_next_peer() {
+        if do_state {
             swarm
                 .behaviour_mut()
                 .request_response
-                .send_request(peer, BlockRequest::NextHeight);
-        }
-
-        let next = self.kolme.read().get_next_height();
-        if state.expected_next_block > next {
-            if let Some(peer) = state.get_next_peer() {
-                swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_request(peer, BlockRequest::BlockAtHeight(next));
-            }
+                .send_request(&peer, BlockRequest::BlockWithStateAtHeight(their_highest));
+        } else {
+            swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer, BlockRequest::BlockAtHeight(our_next));
         }
     }
 
     async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
         if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
             if let Err(e) = self.kolme.add_block(block).await {
-                tracing::warn!("Unable to add block to chain: {e}")
+                tracing::warn!(
+                    "{}: Unable to add block to chain: {e}",
+                    self.local_display_name
+                )
             }
         }
     }
 }
-
-const PEER_COUNT: usize = 16;
-struct EventState {
-    peers: VecDeque<PeerId>,
-    expected_next_block: BlockHeight,
-}
-
-impl Default for EventState {
-    fn default() -> Self {
-        EventState {
-            peers: VecDeque::with_capacity(PEER_COUNT),
-            expected_next_block: BlockHeight::start(),
-        }
-    }
-}
-
-impl EventState {
-    fn add_peer(&mut self, peer: PeerId) {
-        if !self.peers.contains(&peer) {
-            if self.peers.len() >= PEER_COUNT {
-                assert!(self.peers.len() == PEER_COUNT);
-                self.peers.pop_back();
-            }
-            self.peers.push_front(peer);
-        }
-        tracing::debug!("Current list of peers: {:?}", self.peers);
-    }
-
-    /// stores max next height and returns true if it was updated
-    fn observe_next_block_height(&mut self, next: BlockHeight) -> bool {
-        if next > self.expected_next_block {
-            self.expected_next_block = next;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn get_next_peer(&mut self) -> Option<&PeerId> {
-        if self.peers.is_empty() {
-            None
-        } else {
-            self.peers.rotate_left(1);
-            self.peers.back()
-        }
-    }
-}
-
-const FIND_PEER_REQUEST: &[u8] = b"request";
-const FIND_PEER_RESPONSE: &[u8] = b"response";
 
 /// Information on a bootstrap node to connect to over Kademlia.
 ///
