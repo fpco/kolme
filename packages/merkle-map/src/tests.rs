@@ -6,7 +6,9 @@ use std::{
     ops::Bound,
 };
 
-use crate::quickcheck_newtypes::{SerializableMerkleMap, SerializableSlice, SerializableTimestamp};
+use crate::quickcheck_newtypes::{
+    SerializableMerkleMap, SerializableSlice, SerializableSmallVec, SerializableTimestamp,
+};
 
 use crate::*;
 
@@ -800,6 +802,7 @@ serializing_idempotency_for_type!(usize, serializing_is_idempotent_for_usize);
 serializing_idempotency_for_type!(u8, serializing_is_idempotent_for_u8);
 serializing_idempotency_for_type!(u32, serializing_is_idempotent_for_u32);
 serializing_idempotency_for_type!(u64, serializing_is_idempotent_for_u64);
+serializing_idempotency_for_type!(u128, serializing_is_idempotent_for_u128);
 
 quickcheck! {
     fn serializing_is_idempotent_for_btreemap_string_u64(value: BTreeMap<String, u64>) -> quickcheck::TestResult {
@@ -824,6 +827,16 @@ quickcheck! {
         let manager = MerkleManager::default();
         let serialized = manager.serialize(&value.0).unwrap();
         let deserialized = SerializableTimestamp(manager
+            .deserialize(serialized.hash, serialized.payload.clone())
+            .unwrap());
+
+        quickcheck::TestResult::from_bool(value == deserialized)
+    }
+
+    fn serializing_is_idempotent_for_smallvec_u64_4 (value: SerializableSmallVec<[u64;4]>) -> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value.0).unwrap();
+        let deserialized = SerializableSmallVec(manager
             .deserialize(serialized.hash, serialized.payload.clone())
             .unwrap());
 
