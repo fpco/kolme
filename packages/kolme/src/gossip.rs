@@ -1,6 +1,7 @@
 mod messages;
 
 use std::{
+    fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     time::Duration,
@@ -215,7 +216,7 @@ impl GossipBuilder {
             .build();
 
         // Create the Gossipsub topics
-        let genesis_hash = kolme.get_genesis_hash()?;
+        let genesis_hash = FirstEightChars(kolme.get_genesis_hash()?);
         let gossip_topic = gossipsub::IdentTopic::new(format!("/kolme-gossip/{genesis_hash}/1.0"));
         // And subscribe
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
@@ -759,4 +760,34 @@ where
     <String as serde::Deserialize>::deserialize(deserializer)?
         .parse()
         .map_err(serde::de::Error::custom)
+}
+
+/// Helper data type that only displays the first 8 characters of a hash.
+struct FirstEightChars(Sha256Hash);
+
+impl Display for FirstEightChars {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0.as_array()[0..4]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use merkle_map::Sha256Hash;
+
+    use super::FirstEightChars;
+
+    quickcheck::quickcheck! {
+        fn first_eight_chars(input: Vec<u8>) -> bool {
+            first_eight_chars_helper(input);
+            true
+        }
+    }
+
+    fn first_eight_chars_helper(input: Vec<u8>) {
+        let hash = Sha256Hash::hash(&input);
+        let expected = hash.to_string().chars().take(8).collect::<String>();
+        let actual = FirstEightChars(hash).to_string();
+        assert_eq!(expected, actual);
+    }
 }
