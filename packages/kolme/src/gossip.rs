@@ -356,7 +356,7 @@ impl<App: KolmeApp> Gossip<App> {
         {
             Ok(_) => {
                 tracing::info!("Successfully sent a block height request, p2p network is ready");
-                self.watch_network_ready.send(true).ok();
+                self.watch_network_ready.send_replace(true);
             }
             Err(e) => {
                 tracing::warn!(
