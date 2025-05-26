@@ -417,6 +417,9 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
 
         match event {
+            SwarmEvent::ConnectionEstablished { .. } => {
+                self.request_block_heights(swarm).await;
+            }
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
