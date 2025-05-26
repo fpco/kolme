@@ -43,6 +43,7 @@ tokio-tungstenite = { version = "0.26.2", optional = true }
 futures-util = {version = "0.3", optional = true }
 fjall.workspace = true
 lru = "0.14.0"
+hex.workspace = true
 
 [dev-dependencies]
 quickcheck = { workspace = true }
