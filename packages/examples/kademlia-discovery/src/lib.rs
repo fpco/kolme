@@ -5,6 +5,7 @@ use anyhow::Result;
 use kolme::*;
 use libp2p::identity::Keypair;
 use tokio::task::JoinSet;
+use tokio::time::{timeout, Duration};
 
 #[derive(Clone, Debug)]
 pub struct KademliaTestApp {
@@ -165,7 +166,12 @@ pub async fn join_over_kademlia(kolme: Kolme<KademliaTestApp>, validator_addr: &
         if *peers_connected.borrow() {
             break;
         }
-        peers_connected.changed().await?;
+
+        timeout(Duration::from_secs(30), peers_connected.changed())
+            .await
+            .map_err(|_| "hit timeout while waiting for validators")
+            .unwrap()
+            .unwrap();
     }
 
     kolme.resync().await?;
