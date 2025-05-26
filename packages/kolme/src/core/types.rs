@@ -4,7 +4,7 @@ mod error;
 use crate::core::CoreStateError;
 use std::{collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
 
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Binary, CosmosMsg, Uint128};
 use shared::cosmos::PayloadWithId;
 
 use crate::*;
@@ -966,8 +966,7 @@ pub enum Message<AppMessage> {
     },
     Auth(AuthMessage),
     Bank(BankMessage),
-    KeyRotation(KeyRotationMessage),
-    // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
+    Admin(AdminMessage),
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
@@ -1020,10 +1019,10 @@ pub enum BankMessage {
     },
 }
 
-/// Messages for handling key rotation.
+/// Admin messages sent by validators.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum KeyRotationMessage {
+pub enum AdminMessage {
     /// The sending key is replacing itself with a new key.
     SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
     /// Replace the complete validator set.
@@ -1032,14 +1031,24 @@ pub enum KeyRotationMessage {
     NewSet {
         validator_set: Box<SignedTaggedJson<ValidatorSet>>,
     },
-    /// Vote to approve a proposed set change.
+    /// Initiate a contract migration.
+    MigrateContract(Box<SignedTaggedJson<MigrateContract>>),
+    // TODO: update code version
+    /// Vote to approve an admin proposal.
     Approve {
-        change_set_id: ChangeSetId,
+        admin_proposal_id: AdminProposalId,
         signature: SignatureWithRecovery,
     },
 }
 
-impl KeyRotationMessage {
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct MigrateContract {
+    pub chain: ExternalChain,
+    pub new_code_id: u64,
+    pub message: serde_json::Value,
+}
+
+impl AdminMessage {
     pub fn self_replace(
         validator_type: ValidatorType,
         replacement: PublicKey,
@@ -1051,27 +1060,42 @@ impl KeyRotationMessage {
         };
         let json = TaggedJson::new(self_replace)?;
         let signed = json.sign(current)?;
-        Ok(KeyRotationMessage::SelfReplace(Box::new(signed)))
+        Ok(AdminMessage::SelfReplace(Box::new(signed)))
     }
 
     pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self> {
         let json = TaggedJson::new(set)?;
         let signed = json.sign(proposer)?;
-        Ok(KeyRotationMessage::NewSet {
+        Ok(AdminMessage::NewSet {
             validator_set: Box::new(signed),
         })
     }
 
     pub fn approve(
-        change_set_id: ChangeSetId,
-        set: &TaggedJson<ValidatorSet>,
+        admin_proposal_id: AdminProposalId,
+        payload: &ProposalPayload,
         validator: &SecretKey,
     ) -> Result<Self> {
-        let signature = validator.sign_recoverable(set.as_bytes())?;
-        Ok(KeyRotationMessage::Approve {
-            change_set_id,
+        let signature = validator.sign_recoverable(payload.as_bytes())?;
+        Ok(AdminMessage::Approve {
+            admin_proposal_id,
             signature,
         })
+    }
+}
+
+/// The action that should be taken for this proposal.
+#[derive(Clone, Debug)]
+pub enum ProposalPayload {
+    NewSet(TaggedJson<ValidatorSet>),
+    MigrateContract(TaggedJson<MigrateContract>),
+}
+impl ProposalPayload {
+    pub(super) fn as_bytes(&self) -> &[u8] {
+        match self {
+            ProposalPayload::NewSet(set) => set.as_bytes(),
+            ProposalPayload::MigrateContract(migrate) => migrate.as_bytes(),
+        }
     }
 }
 
@@ -1089,26 +1113,26 @@ impl KeyRotationMessage {
     Debug,
     Default,
 )]
-pub struct ChangeSetId(pub u64);
+pub struct AdminProposalId(pub u64);
 
-impl ChangeSetId {
-    pub fn next(self) -> ChangeSetId {
-        ChangeSetId(self.0 + 1)
+impl AdminProposalId {
+    pub fn next(self) -> AdminProposalId {
+        AdminProposalId(self.0 + 1)
     }
 }
 
-impl Display for ChangeSetId {
+impl Display for AdminProposalId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl MerkleSerialize for ChangeSetId {
+impl MerkleSerialize for AdminProposalId {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         self.0.merkle_serialize(serializer)
     }
 }
-impl MerkleDeserialize for ChangeSetId {
+impl MerkleDeserialize for AdminProposalId {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -1268,6 +1292,9 @@ pub enum ExecAction {
         validator_set: TaggedJson<ValidatorSet>,
         approvals: Vec<SignatureWithRecovery>,
     },
+    MigrateContract {
+        migrate_contract: TaggedJson<MigrateContract>,
+    },
 }
 
 impl ExecAction {
@@ -1416,6 +1443,35 @@ impl ExecAction {
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
+            ExecAction::MigrateContract { migrate_contract } => {
+                match chain.name() {
+                    ChainName::Cosmos => {
+                        let contract_addr = match &config.bridge {
+                        BridgeContract::Deployed(addr) => addr.clone(),
+                        _ => anyhow::bail!("Unable to migrate contract for chain {chain}: contract isn't deployed")
+                    };
+                        let MigrateContract {
+                            chain: _,
+                            new_code_id,
+                            message,
+                        } = migrate_contract.as_inner();
+                        let msg = CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Migrate {
+                            contract_addr,
+                            new_code_id: *new_code_id,
+                            msg: Binary::from(serde_json::to_vec(message)?),
+                        });
+                        let payload = serde_json::to_string(&PayloadWithId {
+                            id,
+                            action: shared::cosmos::CosmosAction::Cosmos(vec![msg]),
+                        })?;
+
+                        Ok(payload)
+                    }
+                    ChainName::Solana => todo!(),
+                    #[cfg(feature = "pass_through")]
+                    ChainName::PassThrough => todo!(),
+                }
+            }
         }
     }
 }
@@ -1456,12 +1512,18 @@ pub struct FailedTransaction {
 }
 
 /// Represents distinct occurrences in the core of Kolme that could be relevant to users.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum LogEvent {
     ProcessedBridgeEvent(LogBridgeEvent),
+    NewAdminProposal(AdminProposalId),
+    AdminProposalApproved(AdminProposalId),
+    NewBridgeAction {
+        chain: ExternalChain,
+        id: BridgeActionId,
+    },
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum LogBridgeEvent {
     Regular {
         bridge_event_id: BridgeEventId,
