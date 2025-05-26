@@ -417,9 +417,6 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
 
         match event {
-            SwarmEvent::ConnectionEstablished { .. } => {
-                self.request_block_heights(swarm).await;
-            }
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
@@ -437,6 +434,11 @@ impl<App: KolmeApp> Gossip<App> {
                     // TODO do we need to manually add mDNS peers to Kademlia?
                     swarm.behaviour_mut().kademlia.add_address(&peer, address);
                 }
+            }
+            SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(
+                gossipsub::Event::Subscribed { topic: t, .. },
+            )) if t == self.gossip_topic.hash() => {
+                self.request_block_heights(swarm).await;
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                 propagation_source,
