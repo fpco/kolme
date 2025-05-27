@@ -10,6 +10,7 @@ use std::{
 use crate::*;
 use messages::*;
 
+use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
@@ -44,7 +45,7 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 's
     gossipsub: gossipsub::Behaviour,
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
-    mdns: mdns::tokio::Behaviour,
+    mdns: Toggle<mdns::tokio::Behaviour>,
     kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
 }
 
@@ -56,6 +57,7 @@ pub struct GossipBuilder {
     disable_tcp: bool,
     disable_ip4: bool,
     disable_ip6: bool,
+    disable_mdns: bool,
     listen_ports: Vec<u16>,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
@@ -114,6 +116,11 @@ impl GossipBuilder {
 
     pub fn disable_ip6(mut self) -> Self {
         self.disable_ip6 = true;
+        self
+    }
+
+    pub fn disable_mdns(mut self) -> Self {
+        self.disable_mdns = true;
         self
     }
 
@@ -182,10 +189,14 @@ impl GossipBuilder {
                     gossipsub_config,
                 )?;
 
-                let mdns = mdns::tokio::Behaviour::new(
-                    mdns::Config::default(),
-                    key.public().to_peer_id(),
-                )?;
+                let mdns = if !self.disable_mdns {
+                    Some(mdns::tokio::Behaviour::new(
+                        mdns::Config::default(),
+                        key.public().to_peer_id(),
+                    )?)
+                } else {
+                    None
+                };
                 let request_response = libp2p::request_response::cbor::Behaviour::new(
                     [(
                         StreamProtocol::new("/request-block/1"),
@@ -208,7 +219,7 @@ impl GossipBuilder {
 
                 Ok(KolmeBehaviour {
                     gossipsub,
-                    mdns,
+                    mdns: Toggle::from(mdns),
                     request_response,
                     kademlia,
                 })
