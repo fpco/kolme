@@ -1,0 +1,531 @@
+use anyhow::Result;
+use kolme::{
+    KolmeApp, SecretKey,
+    api::zkp_auth::{
+        OAuthStateManager, SessionManager, create_zkp_auth_router,
+        InitAuthRequest, CallbackRequest, ProveIdentityRequest, VerifyProofRequest,
+    },
+};
+use kolme_zkp_auth::{
+    SocialPlatform, SocialIdentity, SocialIdentityCommitment, ZkProof,
+    social::{ProviderRegistry, SocialProvider},
+    ZkpAuthError,
+};
+use axum::{
+    http::StatusCode,
+    body::to_bytes,
+};
+use tower::ServiceExt;
+use serde_json::json;
+use std::sync::Arc;
+use async_trait::async_trait;
+
+/// Mock social provider for testing
+struct MockSocialProvider {
+    platform: SocialPlatform,
+}
+
+#[async_trait]
+impl SocialProvider for MockSocialProvider {
+    async fn validate_token(&self, token: &str) -> Result<SocialIdentity, ZkpAuthError> {
+        if token == "valid_token" {
+            Ok(SocialIdentity {
+                platform: self.platform,
+                user_id: "test_user_123".to_string(),
+                username: Some("testuser".to_string()),
+                email: None,
+                verified: true,
+                attributes: Default::default(),
+            })
+        } else {
+            Err(ZkpAuthError::InvalidToken)
+        }
+    }
+
+    fn get_platform(&self) -> SocialPlatform {
+        self.platform
+    }
+
+    fn get_auth_url(&self, state: &str, redirect_uri: &str) -> String {
+        format!("https://mock.auth/{:?}/authorize?state={}&redirect_uri={}",
+                self.platform, state, redirect_uri)
+    }
+
+    async fn exchange_code(&self, code: &str, _state: &str) -> Result<String, ZkpAuthError> {
+        if code == "valid_code" {
+            Ok("valid_token".to_string())
+        } else {
+            Err(ZkpAuthError::InvalidCode)
+        }
+    }
+}
+
+/// Test app state
+#[derive(Clone)]
+struct TestAppState {
+    oauth_states: OAuthStateManager,
+    sessions: SessionManager,
+    provider_registry: Arc<ProviderRegistry>,
+}
+
+impl AsRef<OAuthStateManager> for TestAppState {
+    fn as_ref(&self) -> &OAuthStateManager {
+        &self.oauth_states
+    }
+}
+
+impl AsRef<SessionManager> for TestAppState {
+    fn as_ref(&self) -> &SessionManager {
+        &self.sessions
+    }
+}
+
+impl AsRef<Arc<ProviderRegistry>> for TestAppState {
+    fn as_ref(&self) -> &Arc<ProviderRegistry> {
+        &self.provider_registry
+    }
+}
+
+/// Initialize ZKP keys for testing
+fn setup_zkp_keys() {
+    use kolme_zkp_auth::keys::key_manager;
+
+    // Initialize the key manager with test keys
+    let key_manager = key_manager();
+
+    // Try to load keys, if they don't exist, generate them
+    if key_manager.load_proving_key().is_err() || key_manager.load_verifying_key().is_err() {
+        // For tests, we'll use a simple setup that doesn't require the full trusted setup
+        // This creates minimal keys that work for testing
+        if let Err(e) = key_manager.initialize_test_keys() {
+            eprintln!("Warning: Could not initialize test keys: {:?}", e);
+            eprintln!("ZKP tests will use mock verification");
+        }
+    }
+}
+
+/// Create test app
+fn create_test_app() -> axum::Router {
+    setup_zkp_keys();
+    let mut provider_registry = ProviderRegistry::new();
+
+    // Register mock providers
+    provider_registry.register(Box::new(MockSocialProvider {
+        platform: SocialPlatform::Twitter,
+    }));
+    provider_registry.register(Box::new(MockSocialProvider {
+        platform: SocialPlatform::GitHub,
+    }));
+
+    let state = TestAppState {
+        oauth_states: OAuthStateManager::new(),
+        sessions: SessionManager::new(),
+        provider_registry: Arc::new(provider_registry),
+    };
+
+    create_zkp_auth_router::<TestApp, _>().with_state(state)
+}
+
+/// Mock Kolme app for testing
+#[derive(Clone, Debug)]
+struct TestApp;
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct TestState {
+    counter: u32,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+enum TestMessage {
+    Increment,
+}
+
+impl merkle_map::MerkleSerialize for TestState {
+    fn merkle_serialize(&self, serializer: &mut merkle_map::MerkleSerializer) -> Result<(), merkle_map::MerkleSerialError> {
+        serializer.store(&self.counter)?;
+        Ok(())
+    }
+}
+
+impl merkle_map::MerkleDeserialize for TestState {
+    fn merkle_deserialize(deserializer: &mut merkle_map::MerkleDeserializer) -> Result<Self, merkle_map::MerkleSerialError> {
+        let counter = deserializer.load()?;
+        Ok(TestState { counter })
+    }
+}
+
+impl KolmeApp for TestApp {
+    type State = TestState;
+    type Message = TestMessage;
+
+    fn genesis_info() -> kolme::GenesisInfo {
+        use kolme::SecretKey;
+        let mut rng = rand::thread_rng();
+        let secret = SecretKey::random(&mut rng);
+        let public = secret.public_key();
+
+        let mut set = std::collections::BTreeSet::new();
+        set.insert(public);
+
+        kolme::GenesisInfo {
+            kolme_ident: "Test App".to_owned(),
+            processor: public,
+            listeners: set.clone(),
+            needed_listeners: 1,
+            approvers: set,
+            needed_approvers: 1,
+            chains: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn new_state() -> Result<Self::State> {
+        Ok(TestState { counter: 0 })
+    }
+
+    async fn execute(
+        &self,
+        ctx: &mut kolme::ExecutionContext<'_, Self>,
+        msg: &Self::Message,
+    ) -> Result<()> {
+        match msg {
+            TestMessage::Increment => {
+                ctx.state_mut().counter += 1;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_oauth_init_flow() -> Result<()> {
+    let app = create_test_app();
+
+    // Test initializing OAuth flow
+    let request = InitAuthRequest {
+        platform: SocialPlatform::Twitter,
+        redirect_uri: "http://localhost:3000/callback".to_string(),
+        public_key: None,
+    };
+
+    let response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/init")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&request)?)?
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let response_data: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert!(response_data["auth_url"].as_str().unwrap().contains("Twitter"));
+    assert!(response_data["state"].is_string());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_oauth_callback_flow() -> Result<()> {
+    let app = create_test_app();
+
+    // First, initialize OAuth flow
+    let mut rng = rand::thread_rng();
+    let secret = SecretKey::random(&mut rng);
+    let public_key = secret.public_key();
+
+    let init_request = InitAuthRequest {
+        platform: SocialPlatform::GitHub,
+        redirect_uri: "http://localhost:3000/callback".to_string(),
+        public_key: Some(public_key),
+    };
+
+    let init_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/init")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&init_request)?)?
+        )
+        .await?;
+
+    let body = to_bytes(init_response.into_body(), usize::MAX).await?;
+    let init_data: serde_json::Value = serde_json::from_slice(&body)?;
+    let state = init_data["state"].as_str().unwrap();
+
+    // Test callback with valid code
+    let callback_request = CallbackRequest {
+        code: "valid_code".to_string(),
+        state: state.to_string(),
+    };
+
+    let callback_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/callback")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&callback_request)?)?
+        )
+        .await?;
+
+    assert_eq!(callback_response.status(), StatusCode::OK);
+
+    let body = to_bytes(callback_response.into_body(), usize::MAX).await?;
+    let callback_data: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert_eq!(callback_data["success"], true);
+    assert!(callback_data["session_id"].is_string());
+    assert_eq!(callback_data["identity"]["user_id"], "test_user_123");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_prove_identity_flow() -> Result<()> {
+    let app = create_test_app();
+
+    // Setup: Create a session first
+    let mut rng = rand::thread_rng();
+    let secret = SecretKey::random(&mut rng);
+    let public_key = secret.public_key();
+
+    // Initialize OAuth
+    let init_request = InitAuthRequest {
+        platform: SocialPlatform::Twitter,
+        redirect_uri: "http://localhost:3000/callback".to_string(),
+        public_key: Some(public_key),
+    };
+
+    let init_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/init")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&init_request)?)?
+        )
+        .await?;
+
+    let body = to_bytes(init_response.into_body(), usize::MAX).await?;
+    let init_data: serde_json::Value = serde_json::from_slice(&body)?;
+    let state = init_data["state"].as_str().unwrap();
+
+    // Complete OAuth callback
+    let callback_request = CallbackRequest {
+        code: "valid_code".to_string(),
+        state: state.to_string(),
+    };
+
+    let callback_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/callback")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&callback_request)?)?
+        )
+        .await?;
+
+    let body = to_bytes(callback_response.into_body(), usize::MAX).await?;
+    let callback_data: serde_json::Value = serde_json::from_slice(&body)?;
+    let session_id = callback_data["session_id"].as_str().unwrap();
+
+    // Test proving identity
+    let message = b"test message";
+    let (signature, _recovery) = secret.sign_recoverable(message)?;
+
+    let prove_request = ProveIdentityRequest {
+        session_id: session_id.to_string(),
+        signature,
+    };
+
+    let prove_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/prove")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&prove_request)?)?
+        )
+        .await?;
+
+    assert_eq!(prove_response.status(), StatusCode::OK);
+
+    let body = to_bytes(prove_response.into_body(), usize::MAX).await?;
+    let prove_data: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert!(prove_data["commitment"].is_object());
+    assert!(prove_data["proof"].is_object());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_verify_proof() -> Result<()> {
+    let app = create_test_app();
+
+    // Create a mock proof
+    let commitment = SocialIdentityCommitment {
+        commitment: [0u8; 32],
+        platform: SocialPlatform::GitHub,
+    };
+
+    let proof = ZkProof {
+        proof_data: vec![1u8; 128],
+        public_inputs: vec![[0u8; 32]],
+        platform: SocialPlatform::GitHub,
+    };
+
+    let verify_request = VerifyProofRequest {
+        commitment,
+        proof,
+        platform: SocialPlatform::GitHub,
+    };
+
+    let verify_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/verify")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&verify_request)?)?
+        )
+        .await?;
+
+    assert_eq!(verify_response.status(), StatusCode::OK);
+
+    let body = to_bytes(verify_response.into_body(), usize::MAX).await?;
+    let verify_data: serde_json::Value = serde_json::from_slice(&body)?;
+
+    // Mock proof should be invalid, so verification should return false
+    assert_eq!(verify_data["valid"], false);
+    assert!(verify_data["platform"].is_null());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_status_endpoint() -> Result<()> {
+    let app = create_test_app();
+
+    // Test with non-existent session
+    let status_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/auth/social/status?session_id=invalid")
+                .body(axum::body::Body::empty())?
+        )
+        .await?;
+
+    assert_eq!(status_response.status(), StatusCode::OK);
+
+    let body = to_bytes(status_response.into_body(), usize::MAX).await?;
+    let status_data: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert_eq!(status_data["authenticated"], false);
+    assert!(status_data["identity"].is_null());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_invalid_platform() -> Result<()> {
+    let app = create_test_app();
+
+    // Test with non-configured platform
+    let request = json!({
+        "platform": "UnknownPlatform",
+        "redirect_uri": "http://localhost:3000/callback",
+        "public_key": null
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/init")
+                .header("content-type", "application/json")
+                .body(request.to_string())?
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_expired_oauth_state() -> Result<()> {
+    let app = create_test_app();
+
+    // Test callback with invalid state
+    let callback_request = CallbackRequest {
+        code: "valid_code".to_string(),
+        state: "invalid_state".to_string(),
+    };
+
+    let callback_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/callback")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&callback_request)?)?
+        )
+        .await?;
+
+    assert_eq!(callback_response.status(), StatusCode::BAD_REQUEST);
+
+    let body = to_bytes(callback_response.into_body(), usize::MAX).await?;
+    let error_data: serde_json::Value = serde_json::from_slice(&body)?;
+
+    assert!(error_data["error"].as_str().unwrap().contains("Invalid or expired"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_invalid_session() -> Result<()> {
+    let app = create_test_app();
+
+    // Test proving identity with invalid session
+    let mut rng = rand::thread_rng();
+    let secret = SecretKey::random(&mut rng);
+    let (signature, _recovery) = secret.sign_recoverable(b"test")?;
+
+    let prove_request = ProveIdentityRequest {
+        session_id: "invalid_session".to_string(),
+        signature,
+    };
+
+    let prove_response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/social/prove")
+                .header("content-type", "application/json")
+                .body(serde_json::to_string(&prove_request)?)?
+        )
+        .await?;
+
+    assert_eq!(prove_response.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}
