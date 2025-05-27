@@ -1,6 +1,7 @@
 mod messages;
 
 use std::{
+    fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     time::Duration,
@@ -27,8 +28,6 @@ pub struct Gossip<App: KolmeApp> {
     swarm: Mutex<Swarm<KolmeBehaviour<App::Message>>>,
     gossip_topic: IdentTopic,
     sync_mode: SyncMode,
-    // FIXME resolve this when we implement data load validation logic
-    #[allow(dead_code)]
     data_load_validation: DataLoadValidation,
     local_peer_id: PeerId,
     // human-readable name for an instance
@@ -77,20 +76,6 @@ pub enum SyncMode {
     StateTransferForUpgrade,
     /// Always do block sync, verifying each new block
     BlockTransfer,
-}
-
-/// Whether we validate data loads during block processing.
-///
-/// Default: [DataLoadValidation::ValidateDataLoads].
-#[derive(Default)]
-pub enum DataLoadValidation {
-    /// Validate that data loaded during a block is accurate.
-    ///
-    /// This may involve additional I/O, such as making HTTP requests.
-    #[default]
-    ValidateDataLoads,
-    /// Trust that the loaded data is accurate.
-    TrustDataLoads,
 }
 
 impl GossipBuilder {
@@ -231,7 +216,8 @@ impl GossipBuilder {
             .build();
 
         // Create the Gossipsub topics
-        let gossip_topic = gossipsub::IdentTopic::new("/kolme-gossip/1.0");
+        let genesis_hash = FirstEightChars(kolme.get_genesis_hash()?);
+        let gossip_topic = gossipsub::IdentTopic::new(format!("/kolme-gossip/{genesis_hash}/1.0"));
         // And subscribe
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
@@ -309,21 +295,18 @@ impl<App: KolmeApp> Gossip<App> {
         let mut subscription = self.kolme.subscribe();
         let mut swarm = self.swarm.lock().await;
 
-        let mut network_ready = self.watch_network_ready.subscribe();
-
         let (peers_with_blocks_tx, mut peers_with_blocks_rx) = tokio::sync::mpsc::channel(16);
 
         // Interval for broadcasting our block height
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.reset_immediately();
         let mut trigger_broadcast_height = self.trigger_broadcast_height.subscribe();
 
         let mut mempool_additions = self.kolme.subscribe_mempool_additions();
 
         loop {
             tokio::select! {
-                // When the network switches to ready, request everyone's block height.
-                _ = network_ready.changed() => self.request_block_heights(&mut swarm).await,
                 // Our local Kolme generated a notification to be sent through the
                 // rest of the p2p network
                 notification = subscription.recv() =>
@@ -336,6 +319,7 @@ impl<App: KolmeApp> Gossip<App> {
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
                 _ = interval.tick() => {
+                    self.request_block_heights(&mut swarm).await;
                     self.broadcast_latest_block(&mut swarm).await;
                     self.broadcast_mempool_entries(&mut swarm).await;
                 }
@@ -348,16 +332,24 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
-        // First thing to do: ask the network to tell us about their latest
-        // block heights.
-        if let Err(e) = GossipMessage::RequestBlockHeights(jiff::Timestamp::now())
+        if *self.watch_network_ready.borrow() {
+            // We already sent this request successfully, no need to repeat.
+            return;
+        }
+        match GossipMessage::RequestBlockHeights(jiff::Timestamp::now())
             .publish(self, swarm)
             .await
         {
-            tracing::error!(
-                "{}: Unable to request block heights: {e:?}",
-                self.local_display_name
-            );
+            Ok(_) => {
+                tracing::info!("Successfully sent a block height request, p2p network is ready");
+                self.watch_network_ready.send_replace(true);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "{}: Unable to request block heights: {e:?}",
+                    self.local_display_name
+                );
+            }
         }
     }
 
@@ -425,15 +417,6 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
 
         match event {
-            SwarmEvent::ConnectionEstablished { .. } => {
-                self.watch_network_ready.send_if_modified(|value| {
-                    if !(*value) {
-                        *value = true;
-                        return true;
-                    }
-                    false
-                });
-            }
             SwarmEvent::NewListenAddr {
                 listener_id,
                 address,
@@ -451,6 +434,11 @@ impl<App: KolmeApp> Gossip<App> {
                     // TODO do we need to manually add mDNS peers to Kademlia?
                     swarm.behaviour_mut().kademlia.add_address(&peer, address);
                 }
+            }
+            SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(
+                gossipsub::Event::Subscribed { topic: t, .. },
+            )) if t == self.gossip_topic.hash() => {
+                self.request_block_heights(swarm).await;
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                 propagation_source,
@@ -721,7 +709,11 @@ impl<App: KolmeApp> Gossip<App> {
 
     async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
         if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
-            if let Err(e) = self.kolme.add_block(block).await {
+            if let Err(e) = self
+                .kolme
+                .add_block_with(block, self.data_load_validation)
+                .await
+            {
                 tracing::warn!(
                     "{}: Unable to add block to chain: {e}",
                     self.local_display_name
@@ -773,4 +765,34 @@ where
     <String as serde::Deserialize>::deserialize(deserializer)?
         .parse()
         .map_err(serde::de::Error::custom)
+}
+
+/// Helper data type that only displays the first 8 characters of a hash.
+struct FirstEightChars(Sha256Hash);
+
+impl Display for FirstEightChars {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0.as_array()[0..4]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use merkle_map::Sha256Hash;
+
+    use super::FirstEightChars;
+
+    quickcheck::quickcheck! {
+        fn first_eight_chars(input: Vec<u8>) -> bool {
+            first_eight_chars_helper(input);
+            true
+        }
+    }
+
+    fn first_eight_chars_helper(input: Vec<u8>) {
+        let hash = Sha256Hash::hash(&input);
+        let expected = hash.to_string().chars().take(8).collect::<String>();
+        let actual = FirstEightChars(hash).to_string();
+        assert_eq!(expected, actual);
+    }
 }

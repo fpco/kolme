@@ -131,7 +131,7 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
             )?);
             kolme
                 .read()
-                .execute_transaction(&tx, Timestamp::now(), None)
+                .execute_transaction(&tx, Timestamp::now(), BlockDataHandling::NoPriorData)
                 .await?;
             let mut subscribe = kolme.subscribe();
             let next_height = kolme.read().get_next_height();

@@ -56,13 +56,13 @@ fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl Default for SampleKolmeApp {
-    fn default() -> Self {
+impl SampleKolmeApp {
+    fn new(ident: impl Into<String>) -> Self {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
         set.insert(my_public_key);
         let genesis = GenesisInfo {
-            kolme_ident: "p2p example".to_owned(),
+            kolme_ident: ident.into(),
             validator_set: ValidatorSet {
                 processor: my_public_key,
                 listeners: set.clone(),
@@ -112,9 +112,10 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     // We're going to launch a fully working cluster, then manually
     // delete some older blocks and confirm we can fast-sync
     // just the newest block.
+    const IDENT: &str = "p2p-fast";
     let store1 = KolmeStore::new_in_memory();
     let kolme1 = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new(IDENT),
         DUMMY_CODE_VERSION,
         store1.clone(),
     )
@@ -158,7 +159,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     // Launching a new Kolme with a new gossip set to BlockTransfer should fail
     // at syncing blocks, since the source gossip doesn't have the early blocks
     let kolme_block_transfer = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new(IDENT),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
@@ -179,7 +180,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     // We'll check at the end of the run to confirm that this never received the latest block.
     // First check that StateTransfer works
     let kolme_state_transfer = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new(IDENT),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )

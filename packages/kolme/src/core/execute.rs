@@ -9,8 +9,7 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     app_state: App::State,
     logs: Vec<Vec<String>>,
     loads: Vec<BlockDataLoad>,
-    /// If we're doing a validation run, these are the prior data loads.
-    validation_data_loads: Option<VecDeque<BlockDataLoad>>,
+    block_data_handling: BlockDataHandling,
     /// Who signed the transaction
     pubkey: PublicKey,
     /// ID of the account that signed the transaction
@@ -33,6 +32,38 @@ pub struct ExecutionResults<App: KolmeApp> {
     /// Logs collected from each message.
     pub logs: Vec<Vec<String>>,
     pub loads: Vec<BlockDataLoad>,
+}
+
+/// An already executed block that can be added to storage.
+///
+/// This is used by the processor to avoid the need to execute a transaction twice
+/// during processing.
+pub struct ExecutedBlock<App: KolmeApp> {
+    pub signed_block: Arc<SignedBlock<App::Message>>,
+    pub framework_state: FrameworkState,
+    pub app_state: App::State,
+    /// Logs collected from each message.
+    pub logs: Vec<Vec<String>>,
+}
+
+/// Specifies how block data should be handled during transaction execution.
+///
+/// - `NoPriorData`: Indicates that no prior block data is available or required.
+/// - `PriorData`: Indicates that prior block data is available and should be used.
+///   This variant includes additional fields for managing data loads and validation.
+pub enum BlockDataHandling {
+    /// No prior block data is available or required for this transaction.
+    NoPriorData,
+    /// Prior block data is available and should be used during execution.
+    ///
+    /// - `loads`: A queue of data loads that were retrieved from prior blocks.
+    /// - `validation`: Specifies the validation rules to apply to the loaded data.
+    PriorData {
+        /// A queue of data loads retrieved from prior blocks.
+        loads: VecDeque<BlockDataLoad>,
+        /// Validation rules to ensure the correctness of the loaded data.
+        validation: DataLoadValidation,
+    },
 }
 
 impl<App: KolmeApp> KolmeRead<App> {
@@ -58,7 +89,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         &self,
         signed_tx: &SignedTransaction<App::Message>,
         timestamp: Timestamp,
-        validation_data_loads: Option<Vec<BlockDataLoad>>,
+        block_data_handling: BlockDataHandling,
     ) -> Result<ExecutionResults<App>> {
         self.validate_tx(signed_tx).await?;
         let tx = signed_tx.0.message.as_inner();
@@ -69,7 +100,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         let mut execution_context = ExecutionContext::<App> {
             framework_state,
             app_state: self.get_app_state().clone(),
-            validation_data_loads: validation_data_loads.map(Into::into),
+            block_data_handling,
             pubkey: tx.pubkey,
             sender: sender_account_id,
             app: self.get_app(),
@@ -88,7 +119,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         let ExecutionContext {
             framework_state,
             app_state,
-            validation_data_loads,
+            block_data_handling,
             pubkey: _,
             sender: _,
             app: _,
@@ -98,10 +129,16 @@ impl<App: KolmeApp> KolmeRead<App> {
             loads,
         } = execution_context;
 
-        if let Some(loads) = validation_data_loads {
-            // For a proper validation, every piece of data loaded during execution
-            // must be used during validation.
-            anyhow::ensure!(loads.is_empty());
+        match block_data_handling {
+            BlockDataHandling::NoPriorData => (),
+            BlockDataHandling::PriorData {
+                loads,
+                validation: _,
+            } => {
+                // For a proper validation, every piece of data loaded during execution
+                // must be used during validation.
+                anyhow::ensure!(loads.is_empty());
+            }
         }
 
         Ok(ExecutionResults {
@@ -145,7 +182,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             Message::Bank(bank) => self.bank(bank).await?,
             Message::Auth(auth) => self.auth(auth).await?,
-            Message::KeyRotation(key_rotation) => self.key_rotation(key_rotation).await?,
+            Message::Admin(admin) => self.admin(admin).await?,
         }
         Ok(())
     }
@@ -450,6 +487,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             },
         );
         state.next_action_id = state.next_action_id.next();
+        self.log_event(LogEvent::NewBridgeAction { chain, id })?;
         Ok(id)
     }
 
@@ -537,19 +575,24 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         req: Req,
     ) -> Result<Req::Response> {
         let request_str = serde_json::to_string(&req)?;
-        let res = match self.validation_data_loads.as_mut() {
-            Some(loads) => {
+        let res = match &mut self.block_data_handling {
+            BlockDataHandling::PriorData { loads, validation } => {
                 let BlockDataLoad { request, response } = loads
                     .pop_front()
                     .context("Incorrect number of data loads")?;
                 let prev_req = serde_json::from_str::<Req>(&request)?;
                 let prev_res = serde_json::from_str(&response)?;
                 anyhow::ensure!(prev_req == req);
-                req.validate(self.app, &prev_res).await?;
+                match validation {
+                    DataLoadValidation::ValidateDataLoads => {
+                        req.validate(self.app, &prev_res).await?;
+                    }
+                    DataLoadValidation::TrustDataLoads => (),
+                }
 
                 prev_res
             }
-            None => req.load(self.app).await?,
+            BlockDataHandling::NoPriorData => req.load(self.app).await?,
         };
         self.loads.push(BlockDataLoad {
             request: request_str,
@@ -607,9 +650,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn key_rotation(&mut self, key_rotation: &KeyRotationMessage) -> Result<()> {
-        match key_rotation {
-            KeyRotationMessage::SelfReplace(self_replace) => {
+    async fn admin(&mut self, admin: &AdminMessage) -> Result<()> {
+        match admin {
+            AdminMessage::SelfReplace(self_replace) => {
                 let signer = self_replace.verify_signature()?;
                 anyhow::ensure!(signer == self.pubkey);
                 fn set_helper(
@@ -650,7 +693,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
                 self.add_action_all_chains(ExecAction::SelfReplace(self_replace.clone()))?;
             }
-            KeyRotationMessage::NewSet { validator_set } => {
+            AdminMessage::NewSet { validator_set } => {
                 let signer = validator_set.verify_signature()?;
                 anyhow::ensure!(signer == self.pubkey);
                 self.framework_state
@@ -658,13 +701,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
                 validator_set.message.as_inner().validate()?;
-                let state = self.framework_state.key_rotation_state.as_mut();
-                let id = state.next_change_set_id;
-                state.next_change_set_id = id.next();
-                state.change_sets.insert(
+                let id = self.get_next_admin_proposal_id()?;
+                let state = self.framework_state.admin_proposal_state.as_mut();
+                state.proposals.insert(
                     id,
-                    PendingChangeSet {
-                        validator_set: validator_set.message.clone(),
+                    PendingProposal {
+                        payload: ProposalPayload::NewSet(validator_set.message.clone()),
                         approvals: std::iter::once((
                             self.pubkey,
                             validator_set.signature_with_recovery(),
@@ -672,10 +714,32 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         .collect(),
                     },
                 );
-                self.check_pending_change_sets()?;
+                self.check_pending_proposals()?;
             }
-            KeyRotationMessage::Approve {
-                change_set_id,
+            AdminMessage::MigrateContract(migrate) => {
+                let signer = migrate.verify_signature()?;
+                anyhow::ensure!(signer == self.pubkey);
+                self.framework_state
+                    .validator_set
+                    .as_ref()
+                    .ensure_is_validator(self.pubkey)?;
+                let id = self.get_next_admin_proposal_id()?;
+                let state = self.framework_state.admin_proposal_state.as_mut();
+                state.proposals.insert(
+                    id,
+                    PendingProposal {
+                        payload: ProposalPayload::MigrateContract(migrate.message.clone()),
+                        approvals: std::iter::once((
+                            self.pubkey,
+                            migrate.signature_with_recovery(),
+                        ))
+                        .collect(),
+                    },
+                );
+                self.check_pending_proposals()?;
+            }
+            AdminMessage::Approve {
+                admin_proposal_id,
                 signature,
             } => {
                 self.framework_state
@@ -683,56 +747,62 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
 
-                let state = self.framework_state.key_rotation_state.as_mut();
-                let pending = state.change_sets.get_mut(change_set_id).with_context(|| {
-                    format!("Specified an unknown change set ID {change_set_id}")
-                })?;
+                let state = self.framework_state.admin_proposal_state.as_mut();
+                let pending = state
+                    .proposals
+                    .get_mut(admin_proposal_id)
+                    .with_context(|| {
+                        format!("Specified an unknown proposal ID {admin_proposal_id}")
+                    })?;
 
-                let pubkey = signature.validate(pending.validator_set.as_bytes())?;
+                let pubkey = signature.validate(pending.payload.as_bytes())?;
                 anyhow::ensure!(pubkey == self.pubkey);
 
                 let old_value = pending.approvals.insert(pubkey, *signature);
                 anyhow::ensure!(
                     old_value.is_none(),
-                    "{} already approved change set {change_set_id}",
+                    "{} already approved proposal {admin_proposal_id}",
                     self.pubkey
                 );
-                self.check_pending_change_sets()?;
+                self.check_pending_proposals()?;
             }
         }
         Ok(())
     }
 
-    fn check_pending_change_sets(&mut self) -> Result<()> {
-        if let Some(PendingChangeSet {
-            validator_set,
-            approvals,
-        }) = self.find_approved_change_set()
-        {
-            *self.framework_state.validator_set.as_mut() = validator_set.as_inner().clone();
+    fn check_pending_proposals(&mut self) -> Result<()> {
+        if let Some((id, PendingProposal { payload, approvals })) = self.find_approved_proposal() {
+            self.log_event(LogEvent::AdminProposalApproved(id))?;
+            match payload {
+                ProposalPayload::NewSet(validator_set) => {
+                    *self.framework_state.validator_set.as_mut() = validator_set.as_inner().clone();
+                    self.add_action_all_chains(ExecAction::NewSet {
+                        validator_set,
+                        approvals: approvals.values().copied().collect(),
+                    })?;
+                }
+                ProposalPayload::MigrateContract(migrate_contract) => {
+                    self.add_action(
+                        migrate_contract.as_inner().chain,
+                        ExecAction::MigrateContract { migrate_contract },
+                    )?;
+                }
+            }
+
+            // We always clear all pending proposals when an admin action completes.
             self.framework_state
-                .key_rotation_state
+                .admin_proposal_state
                 .as_mut()
-                .change_sets
+                .proposals
                 .clear();
-            self.add_action_all_chains(ExecAction::NewSet {
-                validator_set,
-                approvals: approvals.values().copied().collect(),
-            })?;
         }
         Ok(())
     }
 
-    fn find_approved_change_set(&self) -> Option<PendingChangeSet> {
-        for pending in self
-            .framework_state
-            .key_rotation_state
-            .as_ref()
-            .change_sets
-            .values()
-        {
+    fn find_approved_proposal(&self) -> Option<(AdminProposalId, PendingProposal)> {
+        for (id, pending) in &self.framework_state.admin_proposal_state.as_ref().proposals {
             if pending.has_sufficient_approvals(self.framework_state.validator_set.as_ref()) {
-                return Some(pending.clone());
+                return Some((*id, pending.clone()));
             }
         }
 
@@ -747,5 +817,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let json = serde_json::to_string(&event)?;
         self.log(json);
         Ok(())
+    }
+
+    fn get_next_admin_proposal_id(&mut self) -> Result<AdminProposalId> {
+        let state = self.framework_state.admin_proposal_state.as_mut();
+        let id = state.next_admin_proposal_id;
+        state.next_admin_proposal_id = id.next();
+        self.log_event(LogEvent::NewAdminProposal(id))?;
+        Ok(id)
     }
 }

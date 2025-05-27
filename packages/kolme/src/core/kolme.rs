@@ -92,6 +92,9 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Send a general purpose notification.
     pub fn notify(&self, note: Notification<App::Message>) {
+        if let Notification::FailedTransaction(ref failed) = note {
+            self.remove_from_mempool(failed.message.as_inner().txhash);
+        }
         // Ignore errors from notifications, it just means no one
         // is subscribed.
         self.inner.notify.send(note).ok();
@@ -254,6 +257,15 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Validate and append the given block.
     pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+        self.add_block_with(signed_block, DataLoadValidation::ValidateDataLoads)
+            .await
+    }
+
+    pub(crate) async fn add_block_with(
+        &self,
+        signed_block: Arc<SignedBlock<App::Message>>,
+        data_load_validation: DataLoadValidation,
+    ) -> Result<()> {
         // Make sure we're at the right height for this and the correct processor is signing this.
         let kolme = self.read();
         if kolme.get_next_height() != signed_block.height() {
@@ -267,7 +279,6 @@ impl<App: KolmeApp> Kolme<App> {
         let actual_processor = signed_block.0.message.as_inner().processor;
         anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
 
-        let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
         let ExecutionResults {
@@ -280,12 +291,36 @@ impl<App: KolmeApp> Kolme<App> {
             .execute_transaction(
                 &block.tx,
                 block.timestamp,
-                Some(signed_block.0.message.as_inner().loads.clone()),
+                BlockDataHandling::PriorData {
+                    loads: signed_block.0.message.as_inner().loads.clone().into(),
+                    validation: data_load_validation,
+                },
             )
             .await?;
-
         anyhow::ensure!(loads == block.loads);
 
+        self.add_executed_block(ExecutedBlock {
+            signed_block,
+            framework_state,
+            app_state,
+            logs,
+        })
+        .await
+    }
+
+    /// Add a block that has already been executed.
+    ///
+    /// This allows the processor to skip immediate revalidation when execution has already been performed.
+    pub(crate) async fn add_executed_block(
+        &self,
+        executed_block: ExecutedBlock<App>,
+    ) -> Result<()> {
+        let ExecutedBlock {
+            signed_block,
+            framework_state,
+            app_state,
+            logs,
+        } = executed_block;
         let framework_state = Arc::new(framework_state);
         let app_state = Arc::new(app_state);
         let logs: Arc<[_]> = logs.into();
@@ -306,7 +341,7 @@ impl<App: KolmeApp> Kolme<App> {
             )
             .await?;
 
-        self.inner.mempool.drop_tx(txhash);
+        self.inner.mempool.drop_tx(signed_block.tx().hash());
 
         // Now do the write lock
         let mut guard = self.inner.current_block.write();
@@ -599,6 +634,19 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    pub async fn get_log_events_for(&self, height: BlockHeight) -> Result<Vec<LogEvent>> {
+        let block = self
+            .get_block(height)
+            .await?
+            .with_context(|| format!("get_log_events_for({height}: block not available"))?;
+        Ok(block
+            .logs
+            .iter()
+            .flatten()
+            .flat_map(|s| serde_json::from_str::<LogEvent>(s).ok())
+            .collect())
+    }
+
     pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
@@ -690,6 +738,15 @@ impl<App: KolmeApp> Kolme<App> {
     /// Take a lock on constructing new blocks.
     pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
         self.inner.store.take_construct_lock().await
+    }
+
+    /// Returns a hash of the genesis info.
+    ///
+    /// Purpose: this provides a unique identifier for a chain.
+    pub fn get_genesis_hash(&self) -> Result<Sha256Hash> {
+        let info = self.inner.app.genesis_info();
+        let info = serde_json::to_vec(info)?;
+        Ok(Sha256Hash::hash(&info))
     }
 }
 
@@ -839,5 +896,17 @@ impl<App: KolmeApp> KolmeRead<App> {
             .accounts
             .get_account_for_key(key)
             .map_or_else(AccountNonce::start, |(_, account)| account.get_next_nonce())
+    }
+
+    pub fn get_admin_proposal_payload(
+        &self,
+        proposal_id: AdminProposalId,
+    ) -> Option<&ProposalPayload> {
+        self.get_framework_state()
+            .admin_proposal_state
+            .as_ref()
+            .proposals
+            .get(&proposal_id)
+            .map(|p| &p.payload)
     }
 }

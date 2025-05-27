@@ -96,8 +96,8 @@ impl<App: KolmeApp> Processor<App> {
             .read()
             .create_signed_transaction(secret, vec![Message::<App::Message>::Genesis(info)])?;
 
-        let block = self.construct_block(signed).await?;
-        if let Err(e) = self.kolme.add_block(Arc::new(block)).await {
+        let executed_block = self.construct_block(signed).await?;
+        if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
                 self.kolme.resync().await?;
             }
@@ -118,8 +118,8 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
         let res = async {
-            let block = self.construct_block(tx.clone()).await?;
-            self.kolme.add_block(Arc::new(block)).await
+            let executed_block = self.construct_block(tx.clone()).await?;
+            self.kolme.add_executed_block(executed_block).await
         }
         .await;
         if let Err(e) = &res {
@@ -154,7 +154,7 @@ impl<App: KolmeApp> Processor<App> {
     async fn construct_block(
         &self,
         tx: SignedTransaction<App::Message>,
-    ) -> Result<SignedBlock<App::Message>> {
+    ) -> Result<ExecutedBlock<App>> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
@@ -173,11 +173,9 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             logs,
             loads,
-        } = kolme.execute_transaction(&tx, now, None).await?;
-
-        let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
-        let app_state = kolme.get_merkle_manager().serialize(&app_state)?.hash;
-        let logs = kolme.get_merkle_manager().serialize(&logs)?.hash;
+        } = kolme
+            .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
+            .await?;
 
         let approved_block = Block {
             tx,
@@ -185,13 +183,19 @@ impl<App: KolmeApp> Processor<App> {
             processor: secret.public_key(),
             height: kolme.get_next_height(),
             parent: kolme.get_current_block_hash(),
+            framework_state: kolme.get_merkle_manager().serialize(&framework_state)?.hash,
+            app_state: kolme.get_merkle_manager().serialize(&app_state)?.hash,
+            loads,
+            logs: kolme.get_merkle_manager().serialize(&logs)?.hash,
+        };
+        let block = TaggedJson::new(approved_block)?;
+        let signed_block = Arc::new(SignedBlock(block.sign(secret)?));
+        Ok(ExecutedBlock {
+            signed_block,
             framework_state,
             app_state,
-            loads,
             logs,
-        };
-        let event = TaggedJson::new(approved_block)?;
-        Ok(SignedBlock(event.sign(secret)?))
+        })
     }
 
     async fn approve_actions_all(&self, chains: &[ExternalChain]) {

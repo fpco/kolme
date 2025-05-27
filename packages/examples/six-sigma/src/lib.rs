@@ -727,8 +727,9 @@ mod tests {
         .await
         .unwrap();
         tracing::info!("Landed as tx: {}", block.tx.hash());
-        let [log] = logs.as_slice() else {
-            panic!("Expected exactly one log line with withdrawal")
+        tracing::info!("Logs: {logs:#?}");
+        let [_new_bridge_action, log] = logs.as_slice() else {
+            panic!("Expected exactly two log lines with withdrawal")
         };
         let Event::Withdrawal { bridge_action_id } =
             serde_json::from_str(log).expect("log line should contain event JSON");
@@ -860,6 +861,7 @@ mod tests {
                             bridge_event_id: event_id,
                             account_id,
                         }) => (event_id == bridge_event_id).then_some(account_id),
+                        _ => unreachable!(),
                     })
             })
         })
