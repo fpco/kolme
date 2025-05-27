@@ -103,6 +103,9 @@ impl<App: KolmeApp> GossipMessage<App> {
         gossip: &Gossip<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) -> Result<()> {
+        if let Self::Notification(notification) = &self {
+            tracing::debug!("Got Notification message: {:?}", notification);
+        }
         tracing::debug!(
             "{}: Publishing message to gossipsub: {self}",
             gossip.local_display_name
