@@ -691,7 +691,7 @@ fn multiple_token_transfers_in_one_instruction() {
         .send()
         .unwrap();
 
-    let mint_amount = 10_00000000;
+    let mint_amount = 1_000_000_000;
     p.mint(&sender_ata_1, mint_amount);
     MintTo::new(
         &mut p.svm,
