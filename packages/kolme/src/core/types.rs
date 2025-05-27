@@ -1001,6 +1001,22 @@ pub enum AuthMessage {
     RemovePublicKey { key: PublicKey },
     AddWallet { wallet: Wallet },
     RemoveWallet { wallet: Wallet },
+    /// Add a social identity to the account using ZKP
+    AddSocialIdentity {
+        platform: shared::types::SocialPlatform,
+        identity_commitment: [u8; 32],
+        proof: shared::types::ZkProof,
+    },
+    /// Remove a social identity from the account
+    RemoveSocialIdentity {
+        platform: shared::types::SocialPlatform,
+    },
+    /// Prove ownership of a social identity
+    ProveSocialOwnership {
+        platform: shared::types::SocialPlatform,
+        challenge: [u8; 32],
+        proof: shared::types::ZkProof,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

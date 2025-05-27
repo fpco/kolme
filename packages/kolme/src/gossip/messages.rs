@@ -121,13 +121,6 @@ impl<App: KolmeApp> GossipMessage<App> {
                 );
                 Ok(())
             }
-            Err(PublishError::InsufficientPeers) => {
-                tracing::info!(
-                    "{}: Not enough peers to send this message to",
-                    gossip.local_display_name
-                );
-                Ok(())
-            }
             Err(err) => Err(err).with_context(|| {
                 format!(
                     "{}: Unable to publish a gossipsub message: {self}",

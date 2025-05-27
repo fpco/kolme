@@ -213,7 +213,13 @@ mod sigerr {
 
 pub use sigerr::SignatureError;
 
-use super::SignatureWithRecovery;
+#[derive(
+    serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct SignatureWithRecovery {
+    pub recid: RecoveryId,
+    pub sig: Signature,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Signature(k256::ecdsa::Signature);

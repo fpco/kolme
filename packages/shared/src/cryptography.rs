@@ -47,10 +47,4 @@ pub fn compress_public_key(uncompressed: &[u8]) -> Result<[u8; 33], CompressPubl
     Ok(res)
 }
 
-#[derive(
-    serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
-)]
-pub struct SignatureWithRecovery {
-    pub recid: RecoveryId,
-    pub sig: Signature,
-}
+

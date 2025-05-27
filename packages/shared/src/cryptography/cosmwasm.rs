@@ -83,3 +83,11 @@ impl<'de> serde::Deserialize<'de> for Signature {
         Ok(Signature(array))
     }
 }
+
+#[derive(
+    serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct SignatureWithRecovery {
+    pub recid: RecoveryId,
+    pub sig: Signature,
+}

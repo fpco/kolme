@@ -646,6 +646,25 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .accounts
                     .remove_wallet_from_account(self.get_sender_id(), wallet)?;
             }
+            AuthMessage::AddSocialIdentity { platform, identity_commitment: _, proof: _ } => {
+                // TODO: Implement ZKP verification for social identity
+                // For now, we'll just log the attempt
+                self.log(format!("ZKP social identity add attempted for platform: {:?}", platform));
+                // In a full implementation, we would:
+                // 1. Verify the ZKP proof
+                // 2. Add the social identity commitment to the account
+                anyhow::bail!("ZKP social identity authentication not yet implemented");
+            }
+            AuthMessage::RemoveSocialIdentity { platform } => {
+                // TODO: Implement social identity removal
+                self.log(format!("ZKP social identity removal attempted for platform: {:?}", platform));
+                anyhow::bail!("ZKP social identity removal not yet implemented");
+            }
+            AuthMessage::ProveSocialOwnership { platform, challenge: _, proof: _ } => {
+                // TODO: Implement ZKP verification for social ownership proof
+                self.log(format!("ZKP social ownership proof attempted for platform: {:?}", platform));
+                anyhow::bail!("ZKP social ownership proof not yet implemented");
+            }
         }
         Ok(())
     }
