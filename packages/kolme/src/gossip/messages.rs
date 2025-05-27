@@ -40,6 +40,7 @@ pub(super) enum GossipMessage<App: KolmeApp> {
     Notification(Notification<App::Message>),
     BroadcastTx {
         tx: Arc<SignedTransaction<App::Message>>,
+        timestamp: jiff::Timestamp,
     },
 }
 
@@ -55,8 +56,8 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
             GossipMessage::Notification(notification) => {
                 write!(f, "Notification: {notification:?}")
             }
-            GossipMessage::BroadcastTx { tx } => {
-                write!(f, "Broadcast {}", tx.hash())
+            GossipMessage::BroadcastTx { tx, timestamp } => {
+                write!(f, "Broadcast {}, {timestamp}", tx.hash())
             }
         }
     }
@@ -103,6 +104,9 @@ impl<App: KolmeApp> GossipMessage<App> {
         gossip: &Gossip<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) -> Result<()> {
+        if let Self::Notification(notification) = &self {
+            tracing::debug!("Got Notification message: {:?}", notification);
+        }
         tracing::debug!(
             "{}: Publishing message to gossipsub: {self}",
             gossip.local_display_name

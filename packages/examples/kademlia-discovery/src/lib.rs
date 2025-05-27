@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use kolme::*;
 use libp2p::identity::Keypair;
@@ -41,6 +41,7 @@ impl MerkleDeserialize for State {
 #[serde(rename_all = "snake_case")]
 pub enum KademliaTestMessage {
     SayHi {},
+    RejectMe {},
 }
 
 // Another keypair for client testing:
@@ -94,6 +95,7 @@ impl KolmeApp for KademliaTestApp {
     ) -> Result<()> {
         match msg {
             KademliaTestMessage::SayHi {} => ctx.state_mut().hi_count += 1,
+            KademliaTestMessage::RejectMe {} => bail!("Avada Kedavra!"),
         }
         Ok(())
     }
@@ -204,7 +206,7 @@ pub async fn client(validator_addr: &str) -> Result<()> {
     let block = kolme
         .sign_propose_await_transaction(
             &SecretKey::random(&mut rand::thread_rng()),
-            vec![Message::App(KademliaTestMessage::SayHi {})],
+            vec![Message::App(KademliaTestMessage::RejectMe {})],
         )
         .await?;
     println!("New block landed: {}", block.height());
