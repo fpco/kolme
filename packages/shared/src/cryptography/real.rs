@@ -1,6 +1,6 @@
 pub use rand::rngs::ThreadRng;
 
-use std::{fmt::Display, str::FromStr, ops::Deref};
+use std::{fmt::Display, str::FromStr};
 
 /// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -92,6 +92,8 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
 impl borsh::ser::BorshSerialize for PublicKey {
     #[inline]
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        use std::ops::Deref;
+
         // Serialize as an array instead of a Vec/slice because the chain version has that format.
         let arr: [u8; 33] = self.as_bytes().deref().try_into().unwrap();
 
@@ -108,7 +110,7 @@ impl borsh::de::BorshDeserialize for PublicKey {
         let bytes: [u8; 33] = borsh::de::BorshDeserialize::try_from_reader(reader)?;
         match Self::from_bytes(&bytes) {
             Ok(sig) => Ok(sig),
-            Err(e) => Err(Error::new(ErrorKind::Other, e))
+            Err(e) => Err(Error::new(ErrorKind::Other, e)),
         }
     }
 }
@@ -288,6 +290,8 @@ impl Signature {
 impl borsh::ser::BorshSerialize for Signature {
     #[inline]
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        use std::ops::Deref;
+
         // Serialize as an array instead of a Vec/slice because the chain version has that format.
         let arr: [u8; 64] = self.to_bytes().deref().try_into().unwrap();
 
@@ -304,7 +308,7 @@ impl borsh::de::BorshDeserialize for Signature {
         let bytes: [u8; 64] = borsh::de::BorshDeserialize::try_from_reader(reader)?;
         match Self::from_slice(&bytes) {
             Ok(sig) => Ok(sig),
-            Err(e) => Err(Error::new(ErrorKind::Other, e))
+            Err(e) => Err(Error::new(ErrorKind::Other, e)),
         }
     }
 }
@@ -387,7 +391,7 @@ impl borsh::de::BorshDeserialize for RecoveryId {
 
         match Self::from_byte(byte) {
             Ok(id) => Ok(id),
-            Err(e) => Err(Error::new(ErrorKind::Other, e))
+            Err(e) => Err(Error::new(ErrorKind::Other, e)),
         }
     }
 }

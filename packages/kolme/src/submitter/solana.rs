@@ -2,11 +2,10 @@ use std::str::FromStr;
 
 use base64::Engine;
 use borsh::BorshDeserialize;
-use shared::solana::{InitializeIxData, SignedMsgIxData, Payload, SignedAction};
 use kolme_solana_bridge_client::{
-    init_tx, instruction::account_meta::AccountMeta,
-    keypair::Keypair, pubkey::Pubkey, signed_tx
+    init_tx, instruction::account_meta::AccountMeta, keypair::Keypair, pubkey::Pubkey, signed_tx,
 };
+use shared::solana::{InitializeIxData, Payload, SignedAction, SignedMsgIxData};
 
 use super::*;
 

@@ -14,7 +14,9 @@ pub use chain::*;
 compile_error!("Only one of the following features must be enabled: \"realcryptography\", \"chaincryptography\".");
 
 #[cfg(all(not(feature = "realcryptography"), not(feature = "chaincryptography")))]
-compile_error!("Must select one of the following features: \"realcryptography\", \"chaincryptography\".");
+compile_error!(
+    "Must select one of the following features: \"realcryptography\", \"chaincryptography\"."
+);
 
 #[derive(Debug, thiserror::Error)]
 pub enum CompressPublicKeyError {
@@ -55,7 +57,7 @@ pub fn compress_public_key(uncompressed: &[u8]) -> Result<[u8; 33], CompressPubl
 
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(
     serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,

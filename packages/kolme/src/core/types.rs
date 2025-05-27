@@ -1306,8 +1306,8 @@ impl ExecAction {
         config: &ChainConfig,
         id: BridgeActionId,
     ) -> Result<String> {
-        use shared::{cosmos, solana};
         use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
+        use shared::{cosmos, solana};
 
         match self {
             Self::Transfer {
@@ -1417,12 +1417,12 @@ impl ExecAction {
                             signature: SignatureWithRecovery {
                                 recid: self_replace.recovery_id,
                                 sig: self_replace.signature,
-                            }
-                        }
+                            },
+                        },
                     };
 
                     serialize_solana_payload(&payload)
-                },
+                }
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
@@ -1447,7 +1447,7 @@ impl ExecAction {
                         action: solana::SignedAction::NewSet {
                             rendered: validator_set.as_str().to_owned(),
                             approvals: approvals.clone(),
-                        }
+                        },
                     };
 
                     serialize_solana_payload(&payload)
@@ -1489,14 +1489,12 @@ impl ExecAction {
 }
 
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String> {
-    let len = borsh::object_length(&payload).map_err(|x| {
-        anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
-    })?;
+    let len = borsh::object_length(&payload)
+        .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
 
     let mut buf = Vec::with_capacity(len);
-    borsh::BorshSerialize::serialize(&payload, &mut buf).map_err(|x| {
-        anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
-    })?;
+    borsh::BorshSerialize::serialize(&payload, &mut buf)
+        .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
 
     let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
 

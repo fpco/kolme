@@ -9,8 +9,8 @@ authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 anyhow = { workspace = true }
 cosmos = { workspace = true }
 serde_json = { workspace = true }
-shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
 tokio = { workspace = true }
+shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
 
 [dev-dependencies]
 example-six-sigma = { path = "../examples/six-sigma" }
@@ -23,8 +23,6 @@ tracing = "0.1.41"
 backon = "1.4.1"
 kolme = { workspace = true, features = ["pass_through"] }
 serde = "1.0.219"
-cosmos = { workspace = true }
-shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
 hex = { workspace = true }
 cosmwasm-std = "2.2.2"
 rust_decimal = { workspace = true }

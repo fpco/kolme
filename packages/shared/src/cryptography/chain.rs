@@ -11,7 +11,7 @@ pub enum PublicKeyError {}
 
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct PublicKey(pub [u8; 33]);
@@ -28,7 +28,6 @@ impl Display for PublicKey {
         HexBinary::from(&self.0).fmt(f)
     }
 }
-
 
 #[cfg(all(feature = "solana", not(feature = "cosmwasm")))]
 impl Display for PublicKey {
@@ -80,7 +79,7 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
 
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct PublicKeyUncompressed(pub [u8; 64]);
@@ -132,7 +131,6 @@ impl serde::Serialize for PublicKeyUncompressed {
     }
 }
 
-
 #[cfg(feature = "cosmwasm")]
 impl<'de> serde::Deserialize<'de> for PublicKeyUncompressed {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -162,7 +160,7 @@ impl<'de> serde::Deserialize<'de> for PublicKeyUncompressed {
 
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(
     serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord,
@@ -183,7 +181,7 @@ impl Display for RecoveryId {
 
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct Signature([u8; 64]);

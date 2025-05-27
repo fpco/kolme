@@ -2,7 +2,7 @@ use cosmwasm_std::{Binary, Coin, CosmosMsg};
 
 use crate::{
     cryptography::{PublicKey, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId, ValidatorSet, KeyRegistration},
+    types::{BridgeActionId, BridgeEventId, KeyRegistration, ValidatorSet},
 };
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

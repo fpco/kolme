@@ -13,8 +13,8 @@ use shared::{
     cosmos::*,
     cryptography::{PublicKey, SignatureWithRecovery},
     types::{
-        BridgeActionId, BridgeEventId, SelfReplace, ValidatorSet,
-        ValidatorSetError, ValidatorType, KeyRegistration
+        BridgeActionId, BridgeEventId, KeyRegistration, SelfReplace, ValidatorSet,
+        ValidatorSetError, ValidatorType,
     },
 };
 

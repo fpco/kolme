@@ -1,10 +1,10 @@
-use std::{ops::Deref, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use base64::Engine;
 use borsh::BorshDeserialize;
-use shared::solana::{BridgeMessage, Message as ContractMessage, State as BridgeState};
 use kolme_solana_bridge_client::pubkey::Pubkey;
 use libp2p::futures::StreamExt;
+use shared::solana::{BridgeMessage, Message as ContractMessage, State as BridgeState};
 use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_signature::Signature;
@@ -51,19 +51,11 @@ pub async fn sanity_check_contract(
     let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..])
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
 
-    anyhow::ensure!(
-        info.validator_set.processor.as_bytes().deref() == state.processor.0.as_slice()
-    );
-    anyhow::ensure!(info.validator_set.approvers.len() == state.executors.len());
-
-    for a in &state.executors {
-        anyhow::ensure!(info
-            .validator_set
-            .approvers
-            .contains(&PublicKey::try_from_bytes(a.0.as_slice())?));
-    }
-
-    anyhow::ensure!(info.validator_set.needed_approvers == u16::from(state.needed_executors));
+    anyhow::ensure!(info.validator_set.processor == state.set.processor);
+    anyhow::ensure!(info.validator_set.listeners == state.set.listeners);
+    anyhow::ensure!(info.validator_set.approvers == state.set.approvers);
+    anyhow::ensure!(info.validator_set.needed_listeners == state.set.needed_listeners);
+    anyhow::ensure!(info.validator_set.needed_approvers == state.set.needed_approvers);
 
     Ok(())
 }
@@ -281,7 +273,6 @@ fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
     let event = match msg.ty {
         ContractMessage::Regular { funds, keys } => {
             let mut new_funds = Vec::with_capacity(funds.len());
-            let mut new_keys = Vec::with_capacity(keys.len());
 
             for coin in funds {
                 new_funds.push(BridgedAssetAmount {
@@ -290,17 +281,11 @@ fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
                 });
             }
 
-            for key in keys {
-                if let Ok(key) = PublicKey::try_from_bytes(key.0.as_slice()) {
-                    new_keys.push(key);
-                }
-            }
-
             // TODO: Do we still need to emit if both funds and keys are empty?
             BridgeEvent::Regular {
                 wallet: Wallet(wallet),
                 funds: new_funds,
-                keys: new_keys,
+                keys,
             }
         }
         ContractMessage::Signed { action_id } => BridgeEvent::Signed {

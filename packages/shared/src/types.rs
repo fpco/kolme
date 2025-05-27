@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, fmt::Display, num::TryFromIntError};
 
+use crate::cryptography::{PublicKey, SignatureWithRecovery};
 #[cfg(feature = "realcryptography")]
 use crate::cryptography::{SecretKey, SecretKeyError};
-use crate::cryptography::{PublicKey, SignatureWithRecovery};
 
 /// Monotonically increasing identifier for actions sent to a bridge contract.
 #[derive(
@@ -162,7 +162,7 @@ impl<'de> serde::Deserialize<'de> for Sha256Hash {
 
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -188,7 +188,7 @@ impl Display for ValidatorType {
 /// pass along this message with its signature to the contracts.
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct SelfReplace {
@@ -199,7 +199,7 @@ pub struct SelfReplace {
 /// Definition of the validator set for a chain.
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ValidatorSet {
@@ -269,7 +269,7 @@ impl ValidatorSet {
 
 #[cfg_attr(
     feature = "solana",
-    derive(borsh::BorshSerialize, borsh::BorshDeserialize),
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
 )]
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct KeyRegistration {

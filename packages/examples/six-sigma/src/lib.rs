@@ -18,7 +18,7 @@ use cosmos::SeedPhrase;
 
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)] // It's not unused...
-use shared::cosmos::KeyRegistration;
+use shared::types::KeyRegistration;
 
 use kolme::*;
 use rust_decimal::{dec, Decimal};

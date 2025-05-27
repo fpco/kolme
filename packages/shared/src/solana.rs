@@ -1,8 +1,8 @@
-use borsh::{BorshDeserialize, BorshSerialize};
 use crate::{
-    types::{ValidatorSet, KeyRegistration},
-    cryptography::{PublicKey, SignatureWithRecovery}
+    cryptography::{PublicKey, SignatureWithRecovery},
+    types::{KeyRegistration, ValidatorSet},
 };
+use borsh::{BorshDeserialize, BorshSerialize};
 
 pub type Pubkey = [u8; 32];
 
@@ -14,7 +14,7 @@ pub const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct InitializeIxData {
-    pub set: ValidatorSet
+    pub set: ValidatorSet,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
