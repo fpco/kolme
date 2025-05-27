@@ -7,6 +7,8 @@ use libp2p::identity::Keypair;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
 
+const DUMMY_CODE_VERSION: &str = "dummy code version";
+
 #[derive(Clone, Debug)]
 pub struct KademliaTestApp {
     pub genesis: GenesisInfo,
@@ -113,8 +115,19 @@ impl<App> KolmeDataRequest<App> for RandomU32 {
     }
 }
 
-pub async fn validators(kolme: Kolme<KademliaTestApp>, port: u16) -> Result<()> {
+pub async fn validators(port: u16) -> Result<()> {
     const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
+
+    const DB_PATH: &str = "kademlia-test.fjall";
+
+    kolme::init_logger(true, None);
+    let kolme = Kolme::new(
+        KademliaTestApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_fjall(DB_PATH)?,
+    )
+    .await?;
+
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
@@ -150,8 +163,16 @@ pub async fn validators(kolme: Kolme<KademliaTestApp>, port: u16) -> Result<()> 
     Ok(())
 }
 
-pub async fn join_over_kademlia(kolme: Kolme<KademliaTestApp>, validator_addr: &str) -> Result<()> {
+pub async fn client(validator_addr: &str) -> Result<()> {
     const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
+
+    kolme::init_logger(true, None);
+    let kolme = Kolme::new(
+        KademliaTestApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await?;
 
     let mut set = JoinSet::new();
 
