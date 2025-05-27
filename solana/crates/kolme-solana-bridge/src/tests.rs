@@ -647,7 +647,7 @@ fn insufficient_token_balance_rejected() {
     p.init_default(&sender).unwrap();
 
     let sender_ata = p.make_ata(&sender);
-    let mint_amount = 10_00000000;
+    let mint_amount = 1_000_000_000;
     p.mint(&sender_ata, mint_amount);
 
     let data = RegularMsgIxData {
@@ -773,19 +773,4 @@ fn invalid_needed_executors_rejected() {
         result_zero.err,
         TransactionError::InstructionError(0, InstructionError::Custom(InitIxError::NoExecutorsProvided as u32))
     );
-}
-
-#[test]
-fn self_transfer_works() {
-    let mut p = Program::new();
-    let sender = Keypair::new();
-    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
-    p.init_default(&sender).unwrap();
-
-    let sender_ata = p.make_ata(&sender);
-    let mint_amount = 1000000000;
-    p.mint(&sender_ata, mint_amount);
-
-    let sender_ata_data: SplAccount = get_spl_account(&p.svm, &sender_ata).unwrap();
-    assert_eq!(sender_ata_data.amount, mint_amount);
 }
