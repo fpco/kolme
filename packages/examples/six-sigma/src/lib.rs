@@ -3,11 +3,14 @@ mod types;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt,
     fs::File,
     io::Write,
     net::SocketAddr,
+    ops::Deref,
     path::PathBuf,
     str::FromStr,
+    sync::Arc,
 };
 
 use anyhow::Result;
@@ -19,16 +22,17 @@ use shared::cosmos::KeyRegistration;
 
 use kolme::*;
 use rust_decimal::{dec, Decimal};
-use tokio::task::JoinSet;
+use solana_keypair::Keypair as SolanaKeypair;
+use tokio::task::{AbortHandle, JoinSet};
 
 pub use state::*;
 pub use types::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SixSigmaApp {
     pub genesis: GenesisInfo,
     pub chain: ExternalChain,
-    make_submitter: MakeSubmitterFn,
+    make_submitter: Arc<MakeSubmitterFn>,
 }
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
@@ -42,7 +46,7 @@ const LOCALOSMOSIS_CODE_ID: u64 = 1;
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
-type MakeSubmitterFn = fn(Kolme<SixSigmaApp>) -> Submitter<SixSigmaApp>;
+type MakeSubmitterFn = dyn Fn(Kolme<SixSigmaApp>) -> Submitter<SixSigmaApp> + Send + Sync;
 
 fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
@@ -91,11 +95,44 @@ impl SixSigmaApp {
             )
             .unwrap();
 
-        let make_submitter = |kolme: Kolme<SixSigmaApp>| {
+        let make_submitter = Arc::new(|kolme: Kolme<SixSigmaApp>| {
             Submitter::new_cosmos(kolme, SeedPhrase::from_str(SUBMITTER_SEED_PHRASE).unwrap())
-        };
+        });
 
         Self::new(chains, ExternalChain::OsmosisLocal, make_submitter)
+    }
+
+    pub fn new_solana(submitter: SolanaKeypair) -> Self {
+        let mut chains = ConfiguredChains::default();
+
+        let mut assets = BTreeMap::new();
+        assets.insert(
+            AssetName("osmof7hTFAuNjwMCcxVNThBDDftMNjiLR2cidDQzvwQ".to_owned()),
+            AssetConfig {
+                decimals: 6,
+                asset_id: AssetId(1),
+            },
+        );
+
+        chains
+            .insert_solana(
+                SolanaChain::Local,
+                ChainConfig {
+                    assets,
+                    bridge: BridgeContract::NeededSolanaBridge {
+                        program_id: "7Y2ftN9nSf4ubzRDiUvcENMeV4S695JEFpYtqdt836pW".into(),
+                    },
+                },
+            )
+            .unwrap();
+
+        let submitter = Arc::new(submitter.to_bytes());
+        let make_submitter = Arc::new(move |kolme: Kolme<SixSigmaApp>| {
+            let submitter = SolanaKeypair::from_bytes(submitter.deref()).unwrap();
+            Submitter::new_solana(kolme, submitter)
+        });
+
+        Self::new(chains, ExternalChain::SolanaLocal, make_submitter)
     }
 
     pub fn new_passthrough() -> Self {
@@ -118,7 +155,7 @@ impl SixSigmaApp {
             .unwrap();
 
         let make_submitter =
-            |kolme: Kolme<SixSigmaApp>| Submitter::new_pass_through(kolme.clone(), 12345);
+            Arc::new(|kolme: Kolme<SixSigmaApp>| Submitter::new_pass_through(kolme.clone(), 12345));
 
         Self::new(chains, ExternalChain::PassThrough, make_submitter)
     }
@@ -126,7 +163,7 @@ impl SixSigmaApp {
     fn new(
         chains: ConfiguredChains,
         chain: ExternalChain,
-        make_submitter: MakeSubmitterFn,
+        make_submitter: Arc<MakeSubmitterFn>,
     ) -> Self {
         let my_public_key = my_secret_key().public_key();
         let mut set = BTreeSet::new();
@@ -218,6 +255,15 @@ impl KolmeApp for SixSigmaApp {
     }
 }
 
+impl fmt::Debug for SixSigmaApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SixSigmaApp")
+            .field("genesis", &self.genesis)
+            .field("chain", &self.chain)
+            .finish()
+    }
+}
+
 fn change_balance(
     ctx: &mut ExecutionContext<'_, SixSigmaApp>,
     change: &BalanceChange,
@@ -272,6 +318,48 @@ impl<App> KolmeDataRequest<App> for OddsSource {
     }
 }
 
+pub struct Tasks {
+    pub set: JoinSet<Result<()>>,
+    pub processor: Option<AbortHandle>,
+    pub listener: Option<AbortHandle>,
+    pub approver: Option<AbortHandle>,
+    pub submitter: Option<AbortHandle>,
+    pub api_server: Option<AbortHandle>,
+    kolme: Kolme<SixSigmaApp>,
+    bind: SocketAddr,
+}
+
+impl Tasks {
+    pub fn spawn_processor(&mut self) {
+        let processor = Processor::new(self.kolme.clone(), my_secret_key().clone());
+        self.processor = Some(self.set.spawn(processor.run()));
+    }
+
+    pub fn spawn_listener(&mut self) {
+        let chain = self.kolme.get_app().chain;
+        let listener = Listener::new(self.kolme.clone(), my_secret_key().clone());
+
+        self.listener = Some(self.set.spawn(listener.run(chain.name())));
+    }
+
+    pub fn spawn_approver(&mut self) {
+        let approver = Approver::new(self.kolme.clone(), my_secret_key().clone());
+        self.approver = Some(self.set.spawn(approver.run()));
+    }
+
+    pub fn spawn_submitter(&mut self) {
+        let make_submitter = self.kolme.get_app().make_submitter.clone();
+        let submitter = (make_submitter)(self.kolme.clone());
+
+        self.submitter = Some(self.set.spawn(submitter.run()));
+    }
+
+    pub fn spawn_api_server(&mut self) {
+        let api_server = ApiServer::new(self.kolme.clone());
+        self.api_server = Some(self.set.spawn(api_server.run(self.bind)));
+    }
+}
+
 pub async fn serve(
     app: SixSigmaApp,
     bind: SocketAddr,
@@ -280,66 +368,16 @@ pub async fn serve(
     component: Option<AppComponent>,
 ) -> Result<()> {
     tracing::info!("starting");
-    let chain_name = app.chain.name();
-    let make_submitter = app.make_submitter;
-    let kolme = Kolme::new(app, DUMMY_CODE_VERSION, KolmeStore::new_fjall(db_path)?).await?;
 
-    let mut set = JoinSet::new();
-
-    if let Some(tx_log_path) = tx_log_path {
-        let logger = TxLogger::new(kolme.clone(), tx_log_path);
-        set.spawn(logger.run());
-    }
-
-    match component {
-        Some(AppComponent::Processor) => {
-            tracing::info!("Running processor ...");
-            let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(processor.run());
-        }
-        Some(AppComponent::Listener) => {
-            tracing::info!("Running listener ...");
-            let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(listener.run(chain_name));
-        }
-        Some(AppComponent::Approver) => {
-            tracing::info!("Running approver ...");
-            let approver = Approver::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(approver.run());
-        }
-        Some(AppComponent::Submitter) => {
-            tracing::info!("Running submitter ...");
-            let submitter = (make_submitter)(kolme.clone());
-            set.spawn(submitter.run());
-        }
-        Some(AppComponent::ApiServer) => {
-            tracing::info!("Running api-server ...");
-            let api_server = ApiServer::new(kolme);
-            set.spawn(api_server.run(bind));
-        }
-        None => {
-            tracing::info!("Running in monolith mode ...");
-            let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(processor.run());
-            let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(listener.run(chain_name));
-            let approver = Approver::new(kolme.clone(), my_secret_key().clone());
-            set.spawn(approver.run());
-            let submitter = (make_submitter)(kolme.clone());
-            set.spawn(submitter.run());
-            let api_server = ApiServer::new(kolme);
-            set.spawn(api_server.run(bind));
-        }
-    }
-
-    while let Some(res) = set.join_next().await {
+    let mut tasks = run_tasks(app, bind, db_path, tx_log_path, component).await?;
+    while let Some(res) = tasks.set.join_next().await {
         match res {
             Err(e) => {
-                set.abort_all();
+                tasks.set.abort_all();
                 return Err(anyhow::anyhow!("Task panicked: {e}"));
             }
             Ok(Err(e)) => {
-                set.abort_all();
+                tasks.set.abort_all();
                 return Err(e);
             }
             Ok(Ok(())) => (),
@@ -347,6 +385,65 @@ pub async fn serve(
     }
 
     Ok(())
+}
+
+pub async fn run_tasks(
+    app: SixSigmaApp,
+    bind: SocketAddr,
+    db_path: PathBuf,
+    tx_log_path: Option<PathBuf>,
+    component: Option<AppComponent>,
+) -> Result<Tasks> {
+    let kolme = Kolme::new(app, DUMMY_CODE_VERSION, KolmeStore::new_fjall(db_path)?).await?;
+
+    let mut tasks = Tasks {
+        set: JoinSet::new(),
+        processor: None,
+        listener: None,
+        approver: None,
+        submitter: None,
+        api_server: None,
+        kolme: kolme.clone(),
+        bind,
+    };
+
+    if let Some(tx_log_path) = tx_log_path {
+        let logger = TxLogger::new(kolme.clone(), tx_log_path);
+        tasks.set.spawn(logger.run());
+    }
+
+    match component {
+        Some(AppComponent::Processor) => {
+            tracing::info!("Running processor ...");
+            tasks.spawn_processor();
+        }
+        Some(AppComponent::Listener) => {
+            tracing::info!("Running listener ...");
+            tasks.spawn_listener();
+        }
+        Some(AppComponent::Approver) => {
+            tracing::info!("Running approver ...");
+            tasks.spawn_approver();
+        }
+        Some(AppComponent::Submitter) => {
+            tracing::info!("Running submitter ...");
+            tasks.spawn_submitter();
+        }
+        Some(AppComponent::ApiServer) => {
+            tracing::info!("Running api-server ...");
+            tasks.spawn_api_server();
+        }
+        None => {
+            tracing::info!("Running in monolith mode ...");
+            tasks.spawn_processor();
+            tasks.spawn_listener();
+            tasks.spawn_approver();
+            tasks.spawn_submitter();
+            tasks.spawn_api_server();
+        }
+    }
+
+    Ok(tasks)
 }
 
 pub async fn state(app: SixSigmaApp, db_path: PathBuf) -> Result<State> {
@@ -372,11 +469,7 @@ impl TxLogger {
         loop {
             let notification = receiver.recv().await?;
             let output = match notification.clone() {
-                Notification::Broadcast { .. } => {
-                    // we skip initial tx broadcast, only tx as a part of a block
-                    continue;
-                }
-                Notification::FailedTransaction { .. } => continue,
+                Notification::FailedTransaction(_) => continue,
                 Notification::NewBlock(msg) => {
                     let block = msg.0.message.as_inner();
                     let height = block.height;
@@ -634,8 +727,9 @@ mod tests {
         .await
         .unwrap();
         tracing::info!("Landed as tx: {}", block.tx.hash());
-        let [log] = logs.as_slice() else {
-            panic!("Expected exactly one log line with withdrawal")
+        tracing::info!("Logs: {logs:#?}");
+        let [_new_bridge_action, log] = logs.as_slice() else {
+            panic!("Expected exactly two log lines with withdrawal")
         };
         let Event::Withdrawal { bridge_action_id } =
             serde_json::from_str(log).expect("log line should contain event JSON");
@@ -644,7 +738,9 @@ mod tests {
         tracing::debug!("Checking executed transfer action with the award");
         (|| async {
             let resp = client
-                .get(format!("http://localhost:12345/actions/{bridge_action_id}"))
+                .get(format!(
+                    "http://localhost:12345/actions/{bridge_action_id}/wait"
+                ))
                 .send()
                 .await
                 .unwrap();
@@ -765,6 +861,7 @@ mod tests {
                             bridge_event_id: event_id,
                             account_id,
                         }) => (event_id == bridge_event_id).then_some(account_id),
+                        _ => unreachable!(),
                     })
             })
         })

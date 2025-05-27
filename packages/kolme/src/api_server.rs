@@ -79,14 +79,14 @@ async fn broadcast<App: KolmeApp>(
     let txhash = tx.0.message_hash();
     if let Err(e) = kolme
         .read()
-        .execute_transaction(&tx, Timestamp::now(), None)
+        .execute_transaction(&tx, Timestamp::now(), BlockDataHandling::NoPriorData)
         .await
     {
         let mut res = e.to_string().into_response();
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         return res;
     }
-    kolme.propose_transaction(tx);
+    kolme.propose_transaction(Arc::new(tx));
     Json(serde_json::json!({"txhash":txhash})).into_response()
 }
 
@@ -174,10 +174,7 @@ async fn handle_websocket<App: KolmeApp>(
             Notification::GenesisInstantiation { chain, contract } => {
                 ApiNotification::GenesisInstantiation { chain, contract }
             }
-            Notification::Broadcast { tx } => ApiNotification::Broadcast { tx },
-            Notification::FailedTransaction { txhash, error } => {
-                ApiNotification::FailedTransaction { txhash, error }
-            }
+            Notification::FailedTransaction(failed) => ApiNotification::FailedTransaction(failed),
         };
         let msg = match serde_json::to_string(&notification) {
             Ok(msg) => msg,
@@ -210,10 +207,6 @@ pub enum ApiNotification<AppMessage> {
         chain: ExternalChain,
         contract: String,
     },
-    /// Broadcast a transaction to be included in the chain.
-    Broadcast {
-        tx: Arc<SignedTransaction<AppMessage>>,
-    },
     /// A transaction failed in the processor.
-    FailedTransaction { txhash: TxHash, error: KolmeError },
+    FailedTransaction(SignedTaggedJson<FailedTransaction>),
 }

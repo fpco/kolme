@@ -74,4 +74,14 @@ impl<AppMessage> Mempool<AppMessage> {
         self.txs.write().push_back((tx.hash(), tx));
         self.notify.send_modify(|x| *x += 1);
     }
+
+    pub(super) fn subscribe_additions(&self) -> tokio::sync::watch::Receiver<usize> {
+        // NOTE: For now, this also notifies on removals, which is fine for our
+        // use cases. If that becomes a problem in the future, we can tweak this.
+        self.notify.subscribe()
+    }
+
+    pub(super) fn get_entries(&self) -> Vec<Arc<SignedTransaction<AppMessage>>> {
+        self.txs.read().iter().map(|(_, tx)| tx.clone()).collect()
+    }
 }

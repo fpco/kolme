@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use kolme_store::KolmeStoreError;
-use rand::Rng;
 
 use crate::*;
 
@@ -97,8 +96,8 @@ impl<App: KolmeApp> Processor<App> {
             .read()
             .create_signed_transaction(secret, vec![Message::<App::Message>::Genesis(info)])?;
 
-        let block = self.construct_block(signed).await?;
-        if let Err(e) = self.kolme.add_block(Arc::new(block)).await {
+        let executed_block = self.construct_block(signed).await?;
+        if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
                 self.kolme.resync().await?;
             }
@@ -113,56 +112,41 @@ impl<App: KolmeApp> Processor<App> {
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
         let txhash = tx.hash();
-        let mut attempts = 0;
-        const MAX_ATTEMPTS: u32 = 50;
-        let res = loop {
-            if self.kolme.read().get_tx_height(txhash).await?.is_some() {
-                break Ok(());
-            }
-            attempts += 1;
-            let res = async {
-                let _construct_lock = self.kolme.take_construct_lock().await?;
-                self.kolme.resync().await?;
-                let block = self.construct_block(tx.clone()).await?;
-                self.kolme.add_block(Arc::new(block)).await
-            }
-            .await;
-            match res {
-                Ok(()) => {
-                    break Ok(());
-                }
-                Err(e) => {
-                    if attempts >= MAX_ATTEMPTS {
-                        break Err(e);
-                    }
-                    if let Some(KolmeStoreError::BlockAlreadyInDb { height }) = e.downcast_ref() {
-                        if let Err(e) = self.kolme.resync().await {
-                            tracing::error!("Error while resyncing with database: {e}");
-                        }
-                        tracing::warn!("Block {height} already in DB, retrying, attempt {attempts}/{MAX_ATTEMPTS}...");
-
-                        // Introduce a random delay to help with processor contention.
-                        let millis = {
-                            let mut rng = rand::thread_rng();
-                            rng.gen_range(200..600)
-                        };
-                        tokio::time::sleep(tokio::time::Duration::from_millis(millis)).await;
-
-                        continue;
-                    }
-                    break Err(e);
-                }
-            }
-        };
+        let _construct_lock = self.kolme.take_construct_lock().await?;
+        self.kolme.resync().await?;
+        if self.kolme.read().get_tx_height(txhash).await?.is_some() {
+            return Ok(());
+        }
+        let res = async {
+            let executed_block = self.construct_block(tx.clone()).await?;
+            self.kolme.add_executed_block(executed_block).await
+        }
+        .await;
         if let Err(e) = &res {
-            tracing::warn!("Giving up on adding transaction {txhash}: {e}");
-            self.kolme.notify(Notification::FailedTransaction {
-                txhash,
-                error: match e.downcast_ref::<KolmeError>() {
-                    Some(e) => e.clone(),
-                    None => KolmeError::Other(e.to_string()),
-                },
-            });
+            if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
+                tracing::warn!("Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this");
+            } else {
+                tracing::warn!("Giving up on adding transaction {txhash}: {e}");
+                let failed = (|| {
+                    let failed = FailedTransaction {
+                        txhash,
+                        error: match e.downcast_ref::<KolmeError>() {
+                            Some(e) => e.clone(),
+                            None => KolmeError::Other(e.to_string()),
+                        },
+                    };
+                    let failed = TaggedJson::new(failed)?;
+                    let key = self.get_correct_secret(&self.kolme.read())?;
+                    failed.sign(key)
+                })();
+
+                match failed {
+                    Ok(failed) => self.kolme.notify(Notification::FailedTransaction(failed)),
+                    Err(e) => {
+                        tracing::error!("Unable to generate failed transaction notification: {e}")
+                    }
+                }
+            }
         }
         res
     }
@@ -170,7 +154,7 @@ impl<App: KolmeApp> Processor<App> {
     async fn construct_block(
         &self,
         tx: SignedTransaction<App::Message>,
-    ) -> Result<SignedBlock<App::Message>> {
+    ) -> Result<ExecutedBlock<App>> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
@@ -187,12 +171,11 @@ impl<App: KolmeApp> Processor<App> {
         let ExecutionResults {
             framework_state,
             app_state,
-            logs: _,
+            logs,
             loads,
-        } = kolme.execute_transaction(&tx, now, None).await?;
-
-        let framework_state = kolme.get_merkle_manager().serialize(&framework_state)?.hash;
-        let app_state = kolme.get_merkle_manager().serialize(&app_state)?.hash;
+        } = kolme
+            .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
+            .await?;
 
         let approved_block = Block {
             tx,
@@ -200,12 +183,19 @@ impl<App: KolmeApp> Processor<App> {
             processor: secret.public_key(),
             height: kolme.get_next_height(),
             parent: kolme.get_current_block_hash(),
+            framework_state: kolme.get_merkle_manager().serialize(&framework_state)?.hash,
+            app_state: kolme.get_merkle_manager().serialize(&app_state)?.hash,
+            loads,
+            logs: kolme.get_merkle_manager().serialize(&logs)?.hash,
+        };
+        let block = TaggedJson::new(approved_block)?;
+        let signed_block = Arc::new(SignedBlock(block.sign(secret)?));
+        Ok(ExecutedBlock {
+            signed_block,
             framework_state,
             app_state,
-            loads,
-        };
-        let event = TaggedJson::new(approved_block)?;
-        Ok(SignedBlock(event.sign(secret)?))
+            logs,
+        })
     }
 
     async fn approve_actions_all(&self, chains: &[ExternalChain]) {

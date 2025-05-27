@@ -2,12 +2,27 @@ pub(crate) mod cosmos;
 mod solana;
 
 use crate::*;
-use cosmos::get_next_bridge_event_id;
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {
     kolme: Kolme<App>,
     secret: SecretKey,
+}
+
+pub(crate) fn get_next_bridge_event_id<App: KolmeApp>(
+    kolme: &KolmeRead<App>,
+    public: PublicKey,
+    chain: ExternalChain,
+) -> BridgeEventId {
+    let state = kolme.get_bridge_contracts().get(chain).unwrap();
+
+    for (event_id, pending) in &state.pending_events {
+        if !pending.attestations.contains(&public) {
+            return *event_id;
+        }
+    }
+
+    state.next_event_id
 }
 
 impl<App: KolmeApp> Listener<App> {

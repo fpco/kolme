@@ -2,10 +2,10 @@ mod accounts;
 mod error;
 
 use crate::core::CoreStateError;
-use std::{fmt::Display, str::FromStr, sync::OnceLock};
+use std::{collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
 
 use base64::Engine;
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Binary, CosmosMsg, Uint128};
 
 use crate::*;
 
@@ -131,32 +131,63 @@ impl CosmosChain {
     }
 }
 
+#[derive(Default)]
+pub struct SolanaEndpoints {
+    pub regular: HashMap<SolanaChain, Arc<str>>,
+    pub pubsub: HashMap<SolanaChain, Arc<str>>,
+}
+
+pub enum SolanaClientEndpoint {
+    Static(&'static str),
+    Arc(Arc<str>),
+}
+
+impl SolanaEndpoints {
+    pub fn get_regular_endpoint(&self, chain: SolanaChain) -> SolanaClientEndpoint {
+        self.regular.get(&chain).map_or(
+            SolanaClientEndpoint::Static(match chain {
+                SolanaChain::Mainnet => "https://api.mainnet-beta.solana.com",
+                SolanaChain::Testnet => "https://api.testnet.solana.com",
+                SolanaChain::Devnet => "https://api.devnet.solana.com",
+                SolanaChain::Local => "http://localhost:8899",
+            }),
+            |s| SolanaClientEndpoint::Arc(s.clone()),
+        )
+    }
+
+    pub fn get_pubsub_endpoint(&self, chain: SolanaChain) -> SolanaClientEndpoint {
+        self.pubsub.get(&chain).map_or(
+            SolanaClientEndpoint::Static(match chain {
+                SolanaChain::Mainnet => "wss://api.mainnet-beta.solana.com",
+                SolanaChain::Testnet => "wss://api.testnet.solana.com",
+                SolanaChain::Devnet => "wss://api.devnet.solana.com/",
+                SolanaChain::Local => "ws://localhost:8900",
+            }),
+            |s| SolanaClientEndpoint::Arc(s.clone()),
+        )
+    }
+}
+
+impl SolanaClientEndpoint {
+    pub fn make_client(self) -> SolanaClient {
+        SolanaClient::new(match self {
+            SolanaClientEndpoint::Static(url) => url.to_owned(),
+            SolanaClientEndpoint::Arc(url) => (*url).to_owned(),
+        })
+    }
+
+    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
+        match self {
+            SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
+            SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
+        }
+        .map_err(anyhow::Error::from)
+    }
+}
+
 impl SolanaChain {
     pub const fn name() -> ChainName {
         ChainName::Solana
-    }
-
-    pub fn make_client(self) -> SolanaClient {
-        let url = match self {
-            Self::Mainnet => "https://api.mainnet-beta.solana.com",
-            Self::Testnet => "https://api.testnet.solana.com",
-            Self::Devnet => "https://api.devnet.solana.com",
-            Self::Local => "http://localhost:8899",
-        };
-
-        SolanaClient::new(url.into())
-    }
-
-    // TODO: We should have a way to configure those endpoints - the public ones are not suitable for production use.
-    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
-        let url = match self {
-            Self::Mainnet => "wss://api.mainnet-beta.solana.com",
-            Self::Testnet => "wss://api.testnet.solana.com",
-            Self::Devnet => "wss://api.devnet.solana.com/",
-            Self::Local => "ws://localhost:8900",
-        };
-
-        Ok(SolanaPubsubClient::new(url).await?)
     }
 }
 
@@ -698,6 +729,10 @@ impl BlockHeight {
         BlockHeight(self.0 + 1)
     }
 
+    pub fn prev(self) -> Option<Self> {
+        self.0.checked_sub(1).map(BlockHeight)
+    }
+
     pub fn start() -> BlockHeight {
         BlockHeight(0)
     }
@@ -844,6 +879,11 @@ pub struct Block<AppMessage> {
     pub framework_state: Sha256Hash,
     /// New app state at the end of execution
     pub app_state: Sha256Hash,
+    /// The log messages generated when executing this block.
+    ///
+    /// This will be a `Vec<Vec<String>>`, where the outer Vec
+    /// is per-message and the inner contains each log.
+    pub logs: Sha256Hash,
     /// Any data loads that were used for execution.
     pub loads: Vec<BlockDataLoad>,
 }
@@ -926,8 +966,7 @@ pub enum Message<AppMessage> {
     },
     Auth(AuthMessage),
     Bank(BankMessage),
-    KeyRotation(KeyRotationMessage),
-    // TODO: admin actions: update code version, change processor/listeners/approvers (need to update contracts too), modification to chain values (like asset definitions)
+    Admin(AdminMessage),
 }
 
 /// An event emitted by a bridge contract and reported by a listener.
@@ -980,10 +1019,10 @@ pub enum BankMessage {
     },
 }
 
-/// Messages for handling key rotation.
+/// Admin messages sent by validators.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum KeyRotationMessage {
+pub enum AdminMessage {
     /// The sending key is replacing itself with a new key.
     SelfReplace(Box<SignedTaggedJson<SelfReplace>>),
     /// Replace the complete validator set.
@@ -992,14 +1031,24 @@ pub enum KeyRotationMessage {
     NewSet {
         validator_set: Box<SignedTaggedJson<ValidatorSet>>,
     },
-    /// Vote to approve a proposed set change.
+    /// Initiate a contract migration.
+    MigrateContract(Box<SignedTaggedJson<MigrateContract>>),
+    // TODO: update code version
+    /// Vote to approve an admin proposal.
     Approve {
-        change_set_id: ChangeSetId,
+        admin_proposal_id: AdminProposalId,
         signature: SignatureWithRecovery,
     },
 }
 
-impl KeyRotationMessage {
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct MigrateContract {
+    pub chain: ExternalChain,
+    pub new_code_id: u64,
+    pub message: serde_json::Value,
+}
+
+impl AdminMessage {
     pub fn self_replace(
         validator_type: ValidatorType,
         replacement: PublicKey,
@@ -1011,27 +1060,42 @@ impl KeyRotationMessage {
         };
         let json = TaggedJson::new(self_replace)?;
         let signed = json.sign(current)?;
-        Ok(KeyRotationMessage::SelfReplace(Box::new(signed)))
+        Ok(AdminMessage::SelfReplace(Box::new(signed)))
     }
 
     pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self> {
         let json = TaggedJson::new(set)?;
         let signed = json.sign(proposer)?;
-        Ok(KeyRotationMessage::NewSet {
+        Ok(AdminMessage::NewSet {
             validator_set: Box::new(signed),
         })
     }
 
     pub fn approve(
-        change_set_id: ChangeSetId,
-        set: &TaggedJson<ValidatorSet>,
+        admin_proposal_id: AdminProposalId,
+        payload: &ProposalPayload,
         validator: &SecretKey,
     ) -> Result<Self> {
-        let signature = validator.sign_recoverable(set.as_bytes())?;
-        Ok(KeyRotationMessage::Approve {
-            change_set_id,
+        let signature = validator.sign_recoverable(payload.as_bytes())?;
+        Ok(AdminMessage::Approve {
+            admin_proposal_id,
             signature,
         })
+    }
+}
+
+/// The action that should be taken for this proposal.
+#[derive(Clone, Debug)]
+pub enum ProposalPayload {
+    NewSet(TaggedJson<ValidatorSet>),
+    MigrateContract(TaggedJson<MigrateContract>),
+}
+impl ProposalPayload {
+    pub(super) fn as_bytes(&self) -> &[u8] {
+        match self {
+            ProposalPayload::NewSet(set) => set.as_bytes(),
+            ProposalPayload::MigrateContract(migrate) => migrate.as_bytes(),
+        }
     }
 }
 
@@ -1049,26 +1113,26 @@ impl KeyRotationMessage {
     Debug,
     Default,
 )]
-pub struct ChangeSetId(pub u64);
+pub struct AdminProposalId(pub u64);
 
-impl ChangeSetId {
-    pub fn next(self) -> ChangeSetId {
-        ChangeSetId(self.0 + 1)
+impl AdminProposalId {
+    pub fn next(self) -> AdminProposalId {
+        AdminProposalId(self.0 + 1)
     }
 }
 
-impl Display for ChangeSetId {
+impl Display for AdminProposalId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl MerkleSerialize for ChangeSetId {
+impl MerkleSerialize for AdminProposalId {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         self.0.merkle_serialize(serializer)
     }
 }
-impl MerkleDeserialize for ChangeSetId {
+impl MerkleDeserialize for AdminProposalId {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -1227,6 +1291,9 @@ pub enum ExecAction {
     NewSet {
         validator_set: TaggedJson<ValidatorSet>,
         approvals: Vec<SignatureWithRecovery>,
+    },
+    MigrateContract {
+        migrate_contract: TaggedJson<MigrateContract>,
     },
 }
 
@@ -1388,6 +1455,35 @@ impl ExecAction {
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
+            ExecAction::MigrateContract { migrate_contract } => {
+                match chain.name() {
+                    ChainName::Cosmos => {
+                        let contract_addr = match &config.bridge {
+                        BridgeContract::Deployed(addr) => addr.clone(),
+                        _ => anyhow::bail!("Unable to migrate contract for chain {chain}: contract isn't deployed")
+                    };
+                        let MigrateContract {
+                            chain: _,
+                            new_code_id,
+                            message,
+                        } = migrate_contract.as_inner();
+                        let msg = CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Migrate {
+                            contract_addr,
+                            new_code_id: *new_code_id,
+                            msg: Binary::from(serde_json::to_vec(message)?),
+                        });
+                        let payload = serde_json::to_string(&cosmos::PayloadWithId {
+                            id,
+                            action: shared::cosmos::CosmosAction::Cosmos(vec![msg]),
+                        })?;
+
+                        Ok(payload)
+                    }
+                    ChainName::Solana => todo!(),
+                    #[cfg(feature = "pass_through")]
+                    ChainName::PassThrough => todo!(),
+                }
+            }
         }
     }
 }
@@ -1428,29 +1524,52 @@ pub enum Notification<AppMessage> {
         chain: ExternalChain,
         contract: String,
     },
-    /// Broadcast a transaction to be included in the chain.
-    Broadcast {
-        tx: Arc<SignedTransaction<AppMessage>>,
-    },
     /// A transaction failed in the processor.
-    FailedTransaction {
-        txhash: TxHash,
-        error: KolmeError,
-    },
+    ///
+    /// The message is signed by the processor. Only failed transactions
+    /// signed by the real processor should be respected for dropping
+    /// transactions from the mempool.
+    FailedTransaction(SignedTaggedJson<FailedTransaction>),
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct FailedTransaction {
+    pub txhash: TxHash,
+    pub error: KolmeError,
 }
 
 /// Represents distinct occurrences in the core of Kolme that could be relevant to users.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum LogEvent {
     ProcessedBridgeEvent(LogBridgeEvent),
+    NewAdminProposal(AdminProposalId),
+    AdminProposalApproved(AdminProposalId),
+    NewBridgeAction {
+        chain: ExternalChain,
+        id: BridgeActionId,
+    },
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum LogBridgeEvent {
     Regular {
         bridge_event_id: BridgeEventId,
         account_id: AccountId,
     },
+}
+
+/// Whether we validate data loads during block processing.
+///
+/// Default: [DataLoadValidation::ValidateDataLoads].
+#[derive(Default, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+pub enum DataLoadValidation {
+    /// Validate that data loaded during a block is accurate.
+    ///
+    /// This may involve additional I/O, such as making HTTP requests.
+    #[default]
+    ValidateDataLoads,
+    /// Trust that the loaded data is accurate.
+    TrustDataLoads,
 }
 
 #[cfg(test)]

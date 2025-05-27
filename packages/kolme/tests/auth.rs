@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::OnceLock};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, OnceLock},
+};
 
 use jiff::Timestamp;
 use testtasks::TestTasks;
@@ -122,13 +125,13 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
         let signer = signer.clone();
         let kolme = kolme.clone();
         async move {
-            let tx = kolme.read().create_signed_transaction(
+            let tx = Arc::new(kolme.read().create_signed_transaction(
                 &signer,
                 msgs.into_iter().map(Message::Auth).collect(),
-            )?;
+            )?);
             kolme
                 .read()
-                .execute_transaction(&tx, Timestamp::now(), None)
+                .execute_transaction(&tx, Timestamp::now(), BlockDataHandling::NoPriorData)
                 .await?;
             let mut subscribe = kolme.subscribe();
             let next_height = kolme.read().get_next_height();
@@ -141,7 +144,6 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
                         }
                     }
                     Notification::GenesisInstantiation { .. } => (),
-                    Notification::Broadcast { .. } => (),
                     Notification::FailedTransaction { .. } => (),
                 }
             }

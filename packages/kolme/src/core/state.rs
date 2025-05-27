@@ -17,7 +17,7 @@ pub struct FrameworkState {
     pub(super) validator_set: MerkleLockable<ValidatorSet>,
     pub(super) chains: ChainStates,
     pub(super) accounts: Accounts,
-    pub(super) key_rotation_state: MerkleLockable<KeyRotationState>,
+    pub(super) admin_proposal_state: MerkleLockable<AdminProposalState>,
 }
 
 impl MerkleSerialize for FrameworkState {
@@ -26,7 +26,7 @@ impl MerkleSerialize for FrameworkState {
             validator_set: config,
             chains,
             accounts,
-            key_rotation_state,
+            admin_proposal_state: key_rotation_state,
         } = self;
         serializer.store(config)?;
         serializer.store(chains)?;
@@ -44,27 +44,28 @@ impl MerkleDeserialize for FrameworkState {
             validator_set: deserializer.load()?,
             chains: deserializer.load()?,
             accounts: deserializer.load()?,
-            key_rotation_state: deserializer.load()?,
+            admin_proposal_state: deserializer.load()?,
         })
     }
 }
 
-/// Manages the state of key rotation activities.
+/// Manages the state of admin proposals.
 #[derive(Default, Clone, Debug)]
-pub struct KeyRotationState {
-    /// Next change set ID to be issued.
-    pub next_change_set_id: ChangeSetId,
+pub struct AdminProposalState {
+    /// Next admin proposal ID to be issued.
+    pub next_admin_proposal_id: AdminProposalId,
     /// Currently in-flight proposals
-    pub change_sets: BTreeMap<ChangeSetId, PendingChangeSet>,
+    pub proposals: BTreeMap<AdminProposalId, PendingProposal>,
 }
 
-/// Status of an in-flight key rotation.
+/// Status of an in-flight admin proposals.
 #[derive(Clone, Debug)]
-pub struct PendingChangeSet {
-    pub validator_set: TaggedJson<ValidatorSet>,
+pub struct PendingProposal {
+    pub payload: ProposalPayload,
     pub approvals: BTreeMap<PublicKey, SignatureWithRecovery>,
 }
-impl PendingChangeSet {
+
+impl PendingProposal {
     /// Do we have enough approvals to meet the current validator set rules?
     pub(crate) fn has_sufficient_approvals(&self, validator_set: &ValidatorSet) -> bool {
         let mut group_approvals = 0;
@@ -92,47 +93,71 @@ impl PendingChangeSet {
     }
 }
 
-impl MerkleSerialize for KeyRotationState {
+impl MerkleSerialize for AdminProposalState {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let Self {
-            next_change_set_id,
-            change_sets,
+            next_admin_proposal_id,
+            proposals,
         } = self;
-        serializer.store(next_change_set_id)?;
-        serializer.store(change_sets)?;
+        serializer.store(next_admin_proposal_id)?;
+        serializer.store(proposals)?;
         Ok(())
     }
 }
-impl MerkleDeserialize for KeyRotationState {
+impl MerkleDeserialize for AdminProposalState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
-            next_change_set_id: deserializer.load()?,
-            change_sets: deserializer.load()?,
+            next_admin_proposal_id: deserializer.load()?,
+            proposals: deserializer.load()?,
         })
     }
 }
 
-impl MerkleSerialize for PendingChangeSet {
+impl MerkleSerialize for PendingProposal {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        let Self {
-            validator_set,
-            approvals,
-        } = self;
-        serializer.store(validator_set)?;
+        let Self { payload, approvals } = self;
+        serializer.store(payload)?;
         serializer.store(approvals)?;
         Ok(())
     }
 }
-impl MerkleDeserialize for PendingChangeSet {
+impl MerkleDeserialize for PendingProposal {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
-            validator_set: deserializer.load()?,
+            payload: deserializer.load()?,
             approvals: deserializer.load()?,
         })
+    }
+}
+
+impl MerkleSerialize for ProposalPayload {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        match self {
+            ProposalPayload::NewSet(new_set) => {
+                serializer.store_byte(0);
+                serializer.store(new_set)?;
+            }
+            ProposalPayload::MigrateContract(migrate) => {
+                serializer.store_byte(1);
+                serializer.store(migrate)?;
+            }
+        }
+        Ok(())
+    }
+}
+impl MerkleDeserialize for ProposalPayload {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        match deserializer.pop_byte()? {
+            0 => Ok(ProposalPayload::NewSet(deserializer.load()?)),
+            1 => Ok(ProposalPayload::MigrateContract(deserializer.load()?)),
+            byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
+        }
     }
 }
 
@@ -148,7 +173,7 @@ impl FrameworkState {
             validator_set: MerkleLockable::new(validator_set.clone()),
             chains: ChainStates::from(chains.clone()),
             accounts: Accounts::default(),
-            key_rotation_state: MerkleLockable::new(KeyRotationState::default()),
+            admin_proposal_state: MerkleLockable::new(AdminProposalState::default()),
         }
     }
 
@@ -156,8 +181,8 @@ impl FrameworkState {
         self.validator_set.as_ref()
     }
 
-    pub fn get_key_rotation_state(&self) -> &KeyRotationState {
-        self.key_rotation_state.as_ref()
+    pub fn get_admin_proposal_state(&self) -> &AdminProposalState {
+        self.admin_proposal_state.as_ref()
     }
 
     pub fn get_chain_states(&self) -> &ChainStates {

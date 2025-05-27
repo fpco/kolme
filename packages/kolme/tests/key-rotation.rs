@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::OnceLock};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, OnceLock},
+};
 
 use kolme::*;
 use testtasks::TestTasks;
@@ -117,8 +120,8 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &secret1,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::self_replace(
+            vec![Message::Admin(
+                AdminMessage::self_replace(
                     ValidatorType::Listener,
                     fake_validator.public_key(),
                     &secret1,
@@ -148,8 +151,8 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &secret1,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::self_replace(
+            vec![Message::Admin(
+                AdminMessage::self_replace(
                     ValidatorType::Processor,
                     secret2.public_key(),
                     &secret1,
@@ -175,10 +178,12 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
 
     // Generate a new transaction then try to broadcast it. It should fail to land
     // because we don't have a valid processor running.
-    let tx = kolme
-        .read()
-        .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
-        .unwrap();
+    let tx = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
+            .unwrap(),
+    );
     let txhash = tx.hash();
     kolme.propose_transaction(tx.clone());
 
@@ -232,7 +237,9 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), orig_processor.clone()).run());
+    let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
+    processor.add_secret(new_processor.clone());
+    testtasks.try_spawn_persistent(processor.run());
 
     // Swap out the approver and listener right away. Since there's only one
     // key being used, we don't need to do any approving.
@@ -246,8 +253,8 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &orig_processor,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::new_set(expected_new_set.clone(), &orig_processor).unwrap(),
+            vec![Message::Admin(
+                AdminMessage::new_set(expected_new_set.clone(), &orig_processor).unwrap(),
             )],
         )
         .await
@@ -261,8 +268,8 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         kolme
             .read()
             .get_framework_state()
-            .get_key_rotation_state()
-            .change_sets
+            .get_admin_proposal_state()
+            .proposals
             .len(),
         0
     );
@@ -278,8 +285,8 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &orig_processor,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::new_set(proposed_set1.clone(), &orig_processor).unwrap(),
+            vec![Message::Admin(
+                AdminMessage::new_set(proposed_set1.clone(), &orig_processor).unwrap(),
             )],
         )
         .await
@@ -296,8 +303,8 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &temp_approver,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::new_set(proposed_set2.clone(), &temp_approver).unwrap(),
+            vec![Message::Admin(
+                AdminMessage::new_set(proposed_set2.clone(), &temp_approver).unwrap(),
             )],
         )
         .await
@@ -314,8 +321,8 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &client,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::new_set(rejected_set, &client).unwrap(),
+            vec![Message::Admin(
+                AdminMessage::new_set(rejected_set, &client).unwrap(),
             )],
         )
         .await
@@ -330,27 +337,23 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     // And make sure the new proposals are waiting
     let (change_id_1, change_id_2) = {
         let kolme = kolme.read();
-        let proposals = kolme.get_framework_state().get_key_rotation_state();
-        assert_eq!(proposals.change_sets.len(), 2);
-        let first_id = ChangeSetId(proposals.next_change_set_id.0 - 2);
+        let proposals = kolme.get_framework_state().get_admin_proposal_state();
+        assert_eq!(proposals.proposals.len(), 2);
+        let first_id = AdminProposalId(proposals.next_admin_proposal_id.0 - 2);
         let second_id = first_id.next();
         assert_eq!(
             &proposed_set1,
-            proposals
-                .change_sets
-                .get(&first_id)
-                .unwrap()
-                .validator_set
-                .as_inner(),
+            match &proposals.proposals.get(&first_id).unwrap().payload {
+                ProposalPayload::NewSet(set) => set.as_inner(),
+                _ => unreachable!(),
+            }
         );
         assert_eq!(
             &proposed_set2,
-            proposals
-                .change_sets
-                .get(&second_id)
-                .unwrap()
-                .validator_set
-                .as_inner(),
+            match &proposals.proposals.get(&second_id).unwrap().payload {
+                ProposalPayload::NewSet(set) => set.as_inner(),
+                _ => unreachable!(),
+            }
         );
         (first_id, second_id)
     };
@@ -360,10 +363,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &client,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_id_1,
-                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(proposed_set1.clone()).unwrap()),
                     &client,
                 )
                 .unwrap(),
@@ -374,10 +377,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &new_processor,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_id_1,
-                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(proposed_set1.clone()).unwrap()),
                     &new_processor,
                 )
                 .unwrap(),
@@ -388,10 +391,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &orig_processor,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_id_1,
-                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(proposed_set1.clone()).unwrap()),
                     &orig_processor,
                 )
                 .unwrap(),
@@ -404,10 +407,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &temp_approver,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_id_1,
-                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(proposed_set1.clone()).unwrap()),
                     &temp_approver,
                 )
                 .unwrap(),
@@ -421,10 +424,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &listener,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_id_1,
-                    &TaggedJson::new(proposed_set1.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(proposed_set1.clone()).unwrap()),
                     &listener,
                 )
                 .unwrap(),
@@ -435,10 +438,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &listener,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_id_2,
-                    &TaggedJson::new(proposed_set2).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(proposed_set2.clone()).unwrap()),
                     &listener,
                 )
                 .unwrap(),
@@ -453,23 +456,13 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         kolme.read().get_framework_state().get_validator_set()
     );
 
-    // Need to switch over to a new Kolme and a new Processor...
-    let kolme = Kolme::new(
-        SampleKolmeApp::new(orig_processor.public_key()),
-        DUMMY_CODE_VERSION,
-        store,
-    )
-    .await
-    .unwrap();
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), new_processor.clone()).run());
-
     // Now that we have more than 1 approver, do a final check that we need
     // 2 members of the approver group before a change is approved.
     kolme
         .sign_propose_await_transaction(
             &new_approvers[0],
-            vec![Message::KeyRotation(
-                KeyRotationMessage::new_set(expected_new_set.clone(), &new_approvers[0]).unwrap(),
+            vec![Message::Admin(
+                AdminMessage::new_set(expected_new_set.clone(), &new_approvers[0]).unwrap(),
             )],
         )
         .await
@@ -477,18 +470,18 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     let change_set_id = *kolme
         .read()
         .get_framework_state()
-        .get_key_rotation_state()
-        .change_sets
+        .get_admin_proposal_state()
+        .proposals
         .first_key_value()
         .unwrap()
         .0;
     kolme
         .sign_propose_await_transaction(
             &new_processor,
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_set_id,
-                    &TaggedJson::new(expected_new_set.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(expected_new_set.clone()).unwrap()),
                     &new_processor,
                 )
                 .unwrap(),
@@ -499,10 +492,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &new_approvers[1],
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_set_id,
-                    &TaggedJson::new(expected_new_set.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(expected_new_set.clone()).unwrap()),
                     &new_approvers[1],
                 )
                 .unwrap(),
@@ -513,10 +506,10 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     kolme
         .sign_propose_await_transaction(
             &new_approvers[2],
-            vec![Message::KeyRotation(
-                KeyRotationMessage::approve(
+            vec![Message::Admin(
+                AdminMessage::approve(
                     change_set_id,
-                    &TaggedJson::new(expected_new_set.clone()).unwrap(),
+                    &ProposalPayload::NewSet(TaggedJson::new(expected_new_set.clone()).unwrap()),
                     &new_approvers[2],
                 )
                 .unwrap(),
@@ -534,8 +527,8 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
         kolme
             .read()
             .get_framework_state()
-            .get_key_rotation_state()
-            .change_sets
+            .get_admin_proposal_state()
+            .proposals
             .len(),
         0
     );

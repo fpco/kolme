@@ -19,6 +19,7 @@ const BLOCK_CACHE_SIZE: usize = 60;
 pub struct KolmeStore<App: KolmeApp> {
     inner: KolmeStoreInner,
     block_cache: Arc<RwLock<BlockCacheMap<App>>>,
+    notify: tokio::sync::watch::Sender<usize>,
 }
 
 #[allow(type_alias_bounds)]
@@ -35,10 +36,12 @@ enum KolmeStoreInner {
 impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
     fn from(inner: KolmeStoreInner) -> Self {
         let cache = BlockCacheMap::<App>::new(NonZeroUsize::new(BLOCK_CACHE_SIZE).unwrap());
+        let notify = tokio::sync::watch::Sender::new(0);
 
         Self {
             inner,
             block_cache: Arc::new(RwLock::new(cache)),
+            notify,
         }
     }
 }
@@ -109,6 +112,23 @@ impl<App: KolmeApp> KolmeStore<App> {
                 kolme_store_in_memory.clear_blocks().await
             }
             KolmeStoreInner::Fjall(kolme_store_fjall) => kolme_store_fjall.clear_blocks(),
+        }
+    }
+
+    /// Delete the given block height.
+    ///
+    /// Currently only implemented for the in-memory store, since this is intended
+    /// exclusively for test cases.
+    pub async fn delete_block(&self, height: BlockHeight) -> Result<()> {
+        match &self.inner {
+            KolmeStoreInner::Fjall(_) | KolmeStoreInner::Postgres(_) => Err(anyhow::anyhow!(
+                "KolmeStore::delete_block only supports InMemory"
+            )),
+            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
+                self.block_cache.write().pop(&height);
+                kolme_store_in_memory.delete_block(height).await;
+                Ok(())
+            }
         }
     }
 
@@ -242,11 +262,59 @@ impl<App: KolmeApp> KolmeStore<App> {
                     .await?
             }
         }
-        let old = self
-            .block_cache
+        self.block_cache
             .write()
             .put(BlockHeight(block.height), block);
-        debug_assert!(old.is_none());
+        self.trigger_notify();
         Ok(())
     }
+
+    /// Store merkle contents then reload the data as a serializable type.
+    pub(super) async fn store_and_load<T: MerkleDeserialize>(
+        &self,
+        merkle_manager: &MerkleManager,
+        hash: Sha256Hash,
+        contents: Arc<MerkleContents>,
+    ) -> Result<T> {
+        anyhow::ensure!(hash == contents.hash);
+
+        let x = match &self.inner {
+            KolmeStoreInner::Fjall(kolme_store_fjall) => {
+                let mut store = kolme_store_fjall.get_merkle_store();
+                store_and_load_helper(merkle_manager, &mut store, &contents).await
+            }
+            KolmeStoreInner::Postgres(kolme_store_postgres) => {
+                let mut store = kolme_store_postgres.get_merkle_store();
+                store_and_load_helper(merkle_manager, &mut store, &contents).await
+            }
+            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
+                let mut store = kolme_store_in_memory.get_merkle_store().await;
+                store_and_load_helper(merkle_manager, &mut store, &contents).await
+            }
+        }?;
+
+        self.trigger_notify();
+        Ok(x)
+    }
+
+    fn trigger_notify(&self) {
+        self.notify.send_modify(|x| *x += 1);
+    }
+
+    /// Subscribe to receive notifications of new data becoming available in the store.
+    pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<usize> {
+        self.notify.subscribe()
+    }
+}
+
+async fn store_and_load_helper<T: MerkleDeserialize, Store: MerkleStore>(
+    merkle_manager: &MerkleManager,
+    store: &mut Store,
+    contents: &MerkleContents,
+) -> Result<T> {
+    merkle_manager.save_merkle_contents(store, contents).await?;
+    merkle_manager
+        .load(store, contents.hash)
+        .await
+        .map_err(Into::into)
 }

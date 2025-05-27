@@ -80,6 +80,10 @@ pub enum QueryMsg {
     GetEvent { id: BridgeEventId },
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct MigrateMsg {}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GetEventResp {

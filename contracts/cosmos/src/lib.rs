@@ -6,6 +6,7 @@ use cosmwasm_std::{
     entry_point, from_json, to_json_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event,
     MessageInfo, Response, Storage,
 };
+use cw2::{get_contract_version, set_contract_version};
 use cw_storage_plus::{Item, Map};
 use sha2::{Digest, Sha256};
 use shared::{
@@ -58,6 +59,18 @@ pub enum Error {
     },
     #[error(transparent)]
     ValidatorSetError { source: ValidatorSetError },
+    #[error(transparent)]
+    SemverParse { source: semver::Error },
+    #[error("mismatched contract migration name (from {saved} to {proposed})")]
+    MismatchedContractMigrationName {
+        saved: String,
+        proposed: &'static str,
+    },
+    #[error("cannot migrate contract from newer to older (from {saved} to {proposed})")]
+    MigrateToOlder {
+        saved: String,
+        proposed: &'static str,
+    },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -72,6 +85,10 @@ const STATE: Item<shared::cosmos::State> = Item::new("s");
 /// work correctly, so I'm cheating a bit.
 const EVENTS: Map<BridgeEventId, Binary> = Map::new("t");
 
+// version info for migration info
+const CONTRACT_NAME: &str = "kolme.fpblock.com:bridge";
+const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[entry_point]
 pub fn instantiate(
     deps: DepsMut,
@@ -79,6 +96,8 @@ pub fn instantiate(
     _info: MessageInfo,
     InstantiateMsg { set }: InstantiateMsg,
 ) -> Result<Response> {
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
     set.validate()
         .map_err(|source| Error::ValidatorSetError { source })?;
     if set.approvers.is_empty() {
@@ -397,5 +416,37 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary> {
             };
             to_json_binary(&resp).map_err(Into::into)
         }
+    }
+}
+
+#[entry_point]
+pub fn migrate(deps: DepsMut, _env: Env, MigrateMsg {}: MigrateMsg) -> Result<Response> {
+    let old_cw2 = get_contract_version(deps.storage)?;
+    let old_version: semver::Version = old_cw2
+        .version
+        .parse()
+        .map_err(|source| Error::SemverParse { source })?;
+    let new_version: semver::Version = CONTRACT_VERSION
+        .parse()
+        .map_err(|source| Error::SemverParse { source })?;
+
+    if old_cw2.contract != CONTRACT_NAME {
+        Err(Error::MismatchedContractMigrationName {
+            saved: old_cw2.contract,
+            proposed: CONTRACT_NAME,
+        })
+    } else if old_version > new_version {
+        Err(Error::MigrateToOlder {
+            saved: old_cw2.version,
+            proposed: CONTRACT_VERSION,
+        })
+    } else {
+        set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+        let response = Response::new()
+            .add_attribute("old_contract_name", old_cw2.contract)
+            .add_attribute("old_contract_version", old_cw2.version)
+            .add_attribute("new_contract_name", CONTRACT_NAME)
+            .add_attribute("new_contract_version", CONTRACT_VERSION);
+        Ok(response)
     }
 }

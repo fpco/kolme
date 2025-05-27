@@ -14,6 +14,8 @@ cw-storage-plus = "2.0.0"
 shared = { workspace = true, features = ["chaincryptography", "cosmwasm"] }
 sha2 = "0.10.8"
 thiserror = "2.0.12"
+cw2 = "2.0.0"
+semver = "1.0.26"
 
 [dev-dependencies]
 hex = { workspace = true }
