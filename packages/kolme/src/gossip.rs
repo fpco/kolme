@@ -161,6 +161,7 @@ impl GossipBuilder {
                 yamux::Config::default,
             )?
             .with_quic()
+            .with_dns()?
             .with_behaviour(|key| {
                 tracing::info!(
                     "Creating new gossip, running as peer ID: {}",
