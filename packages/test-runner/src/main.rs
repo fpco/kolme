@@ -1,15 +1,14 @@
 mod join_set;
 
+use std::process::Child;
+
 use anyhow::{Context, Result};
 use join_set::try_join;
 
 const DOCKER_COMPOSE_DIR: &str = "packages/integration-tests";
+const KADEMLIA_PORT: u16 = 5400;
 
 fn main() -> Result<()> {
-    println!("Killing Kademlia validators Docker container (if running)");
-    kill_kademlia_validators();
-    let _kill_kademlia = KillKademliaOnDrop;
-
     println!("In parallel: building tests, building contracts, launching local Osmosis");
     try_join(|s| {
         s.spawn(build_tests);
@@ -20,8 +19,8 @@ fn main() -> Result<()> {
     println!("Running test suite");
     run_test_suite()?;
 
-    println!("Launching Kademlia validators Docker container");
-    launch_kademlia_validators()?;
+    println!("Launching Kademlia validators");
+    let _kill_kademlia = KillKademliaOnDrop(launch_kademlia_validators().unwrap());
 
     println!("Running Kademlia test case");
     run_kademlia_test()?;
@@ -114,65 +113,36 @@ fn run_test_suite() -> Result<()> {
     .context("Error while running test suite")
 }
 
-struct KillKademliaOnDrop;
+struct KillKademliaOnDrop(Child);
 
 impl Drop for KillKademliaOnDrop {
     fn drop(&mut self) {
-        kill_kademlia_validators();
+        self.0.kill().unwrap()
     }
 }
 
-// We do this on a "best effort" basis. Always succeed.
-fn kill_kademlia_validators() {
-    if let Err(e) = kill_kademlia_validators_inner() {
-        eprintln!("Error killing Kademlia validators: {e:?}");
-    }
-}
-
-fn kill_kademlia_validators_inner() -> Result<()> {
-    let status = std::process::Command::new("docker")
-        .arg("compose")
-        .arg("stop")
-        .arg("kademlia-validators")
-        .current_dir(DOCKER_COMPOSE_DIR)
-        .spawn()?
-        .wait()
-        .context("Error while launching Docker Compose")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "Kill Kademlia validators failed with exit status: {status}"
-        ))
-    }
-}
-
-fn launch_kademlia_validators() -> Result<()> {
-    let status = std::process::Command::new("docker")
-        .arg("compose")
-        .arg("up")
-        .arg("-d")
-        .arg("kademlia-validators")
-        .current_dir(DOCKER_COMPOSE_DIR)
-        .spawn()?
-        .wait()
-        .context("Error while launching Docker Compose")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "Launch Kademlia validators failed with exit status: {status}"
-        ))
-    }
+fn launch_kademlia_validators() -> Result<Child, String> {
+    std::process::Command::new("cargo")
+        .arg("run")
+        .arg("--release")
+        .arg("-p")
+        .arg("kademlia-discovery")
+        .arg("--")
+        .arg("validators")
+        .arg(format!("{KADEMLIA_PORT}"))
+        .spawn()
+        .map_err(|e| format!("Error launching kademlia-discovery validators: {e:?}"))
 }
 
 fn run_kademlia_test() -> Result<()> {
-    let status = std::process::Command::new("docker")
-        .arg("compose")
+    let status = std::process::Command::new("cargo")
         .arg("run")
-        .arg("--rm")
-        .arg("kademlia-client")
-        .current_dir(DOCKER_COMPOSE_DIR)
+        .arg("--release")
+        .arg("-p")
+        .arg("kademlia-discovery")
+        .arg("--")
+        .arg("client")
+        .arg(format!("/ip4/127.0.0.1/tcp/{KADEMLIA_PORT}"))
         .spawn()?
         .wait()?;
     if status.success() {

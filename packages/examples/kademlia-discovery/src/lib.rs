@@ -128,6 +128,7 @@ pub async fn validators(kolme: Kolme<KademliaTestApp>, port: u16) -> Result<()> 
         .set_keypair(Keypair::rsa_from_pkcs8(
             &mut VALIDATOR_KEYPAIR_BYTES.to_owned(),
         )?)
+        .disable_mdns()
         .build(kolme.clone())
         .await?;
     set.spawn(gossip.run());
@@ -156,6 +157,7 @@ pub async fn join_over_kademlia(kolme: Kolme<KademliaTestApp>, validator_addr: &
 
     let gossip = GossipBuilder::new()
         .add_bootstrap(VALIDATOR_PEER_ID.parse()?, validator_addr.parse()?)
+        .disable_mdns()
         .build(kolme.clone())
         .await?;
 
