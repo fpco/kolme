@@ -1,0 +1,72 @@
+[package]
+name = "kolme-zkp-sdk"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kolme Team <team@kolme.io>"]
+description = "Rust SDK for Kolme ZKP Social Authentication"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fpco/kolme"
+keywords = ["zkp", "zero-knowledge", "authentication", "social", "oauth"]
+categories = ["authentication", "cryptography", "web-programming"]
+
+[dependencies]
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async traits
+async-trait = "0.1"
+
+# UUID for session management
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# URL handling
+url = "2.4"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging
+log = "0.4"
+
+# Cryptography (for signature verification)
+ed25519-dalek = { version = "2.0", features = ["serde", "rand_core"] }
+hex = "0.4"
+rand = "0.8"
+
+# ZKP types (reuse from zkp-auth package)
+kolme-zkp-auth = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1.2"
+env_logger = "0.10"
+
+[features]
+default = ["rustls-tls"]
+rustls-tls = ["reqwest/rustls-tls"]
+native-tls = ["reqwest/native-tls"]
+
+[[example]]
+name = "basic_auth_flow"
+path = "examples/basic_auth_flow.rs"
+
+[[example]]
+name = "proof_generation"
+path = "examples/proof_generation.rs"
+
+[[example]]
+name = "proof_verification"
+path = "examples/proof_verification.rs"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
