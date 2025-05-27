@@ -11,6 +11,8 @@ members = [
   "packages/merkle-store-fjall",
   "packages/shared",
   "packages/test-runner",
+  "packages/zkp-auth",
+  "packages/kolme-zkp-sdk-rust",
 ]
 
 [workspace.dependencies]
