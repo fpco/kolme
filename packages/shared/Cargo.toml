@@ -6,7 +6,6 @@ license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [features]
-default = ["realcryptography"]
 realcryptography = ["dep:k256", "dep:hex", "dep:rand", "borsh?/std"]
 chaincryptography = []
 

@@ -4,8 +4,8 @@ mod error;
 use crate::core::CoreStateError;
 use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
+use base64::Engine;
 use cosmwasm_std::Uint128;
-use shared::cosmos::PayloadWithId;
 
 use crate::*;
 
@@ -1239,7 +1239,7 @@ impl ExecAction {
         config: &ChainConfig,
         id: BridgeActionId,
     ) -> Result<String> {
-        use base64::Engine;
+        use shared::{cosmos, solana};
         use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
 
         match self {
@@ -1273,7 +1273,7 @@ impl ExecAction {
                             amount: coins,
                         });
 
-                        let payload = serde_json::to_string(&PayloadWithId {
+                        let payload = serde_json::to_string(&cosmos::PayloadWithId {
                             id,
                             action: shared::cosmos::CosmosAction::Cosmos(vec![message]),
                         })?;
@@ -1314,18 +1314,7 @@ impl ExecAction {
                             amount,
                         );
 
-                        let len = borsh::object_length(&payload).map_err(|x| {
-                            anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
-                        })?;
-
-                        let mut buf = Vec::with_capacity(len);
-                        borsh::BorshSerialize::serialize(&payload, &mut buf).map_err(|x| {
-                            anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
-                        })?;
-
-                        let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
-
-                        Ok(payload)
+                        serialize_solana_payload(&payload)
                     }
                     #[cfg(feature = "pass_through")]
                     ChainName::PassThrough => {
@@ -1340,9 +1329,9 @@ impl ExecAction {
             }
             ExecAction::SelfReplace(self_replace) => match chain.name() {
                 ChainName::Cosmos => {
-                    let payload = serde_json::to_string(&PayloadWithId {
+                    let payload = serde_json::to_string(&cosmos::PayloadWithId {
                         id,
-                        action: shared::cosmos::CosmosAction::SelfReplace {
+                        action: cosmos::CosmosAction::SelfReplace {
                             rendered: self_replace.message.as_str().to_owned(),
                             signature: SignatureWithRecovery {
                                 recid: self_replace.recovery_id,
@@ -1353,7 +1342,20 @@ impl ExecAction {
 
                     Ok(payload)
                 }
-                ChainName::Solana => todo!(),
+                ChainName::Solana => {
+                    let payload = solana::Payload {
+                        id: id.0,
+                        action: solana::SignedAction::SelfReplace {
+                            rendered: self_replace.message.as_str().to_owned(),
+                            signature: SignatureWithRecovery {
+                                recid: self_replace.recovery_id,
+                                sig: self_replace.signature,
+                            }
+                        }
+                    };
+
+                    serialize_solana_payload(&payload)
+                },
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
@@ -1362,7 +1364,7 @@ impl ExecAction {
                 approvals,
             } => match chain.name() {
                 ChainName::Cosmos => {
-                    let payload = serde_json::to_string(&PayloadWithId {
+                    let payload = serde_json::to_string(&cosmos::PayloadWithId {
                         id,
                         action: shared::cosmos::CosmosAction::NewSet {
                             rendered: validator_set.as_str().to_owned(),
@@ -1372,12 +1374,37 @@ impl ExecAction {
 
                     Ok(payload)
                 }
-                ChainName::Solana => todo!(),
+                ChainName::Solana => {
+                    let payload = solana::Payload {
+                        id: id.0,
+                        action: solana::SignedAction::NewSet {
+                            rendered: validator_set.as_str().to_owned(),
+                            approvals: approvals.clone(),
+                        }
+                    };
+
+                    serialize_solana_payload(&payload)
+                }
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
         }
     }
+}
+
+fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String> {
+    let len = borsh::object_length(&payload).map_err(|x| {
+        anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
+    })?;
+
+    let mut buf = Vec::with_capacity(len);
+    borsh::BorshSerialize::serialize(&payload, &mut buf).map_err(|x| {
+        anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x)
+    })?;
+
+    let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
+
+    Ok(payload)
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

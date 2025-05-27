@@ -1,6 +1,6 @@
 mod signing;
 
-use std::{collections::BTreeSet, num::TryFromIntError};
+use std::collections::BTreeSet;
 
 use cosmwasm_std::{
     entry_point, from_json, to_json_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event,
@@ -12,7 +12,8 @@ use shared::{
     cosmos::*,
     cryptography::{PublicKey, SignatureWithRecovery},
     types::{
-        BridgeActionId, BridgeEventId, SelfReplace, ValidatorSet, ValidatorSetError, ValidatorType,
+        BridgeActionId, BridgeEventId, SelfReplace, ValidatorSet,
+        ValidatorSetError, ValidatorType, KeyRegistration
     },
 };
 

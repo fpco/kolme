@@ -2,9 +2,8 @@ use std::{ops::Deref, str::FromStr};
 
 use base64::Engine;
 use borsh::BorshDeserialize;
-use kolme_solana_bridge_client::{
-    pubkey::Pubkey, BridgeMessage, Message as ContractMessage, State as BridgeState,
-};
+use shared::solana::{BridgeMessage, Message as ContractMessage, State as BridgeState};
+use kolme_solana_bridge_client::pubkey::Pubkey;
 use libp2p::futures::StreamExt;
 use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
 

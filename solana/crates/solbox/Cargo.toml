@@ -6,8 +6,8 @@ license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [dependencies]
-pinocchio = "0.8.0"
-pinocchio-system = "0.2.2"
+pinocchio = "0.8.4"
+pinocchio-system = "0.2.3"
 pinocchio-token = "0.3.0"
 pinocchio-pubkey = "0.2.4"
 bitflags = "2.9.0"

@@ -19,6 +19,6 @@ default = []
 [dependencies]
 borsh = { version = "1.5.7", default-features = false }
 solbox = { path = "../solbox" }
-shared = { path = "../../../packages/shared", default-features = false, features = ["chaincryptography", "solana"] }
+shared = { path = "../../../packages/shared", features = ["chaincryptography", "solana"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 serde_json = "1"

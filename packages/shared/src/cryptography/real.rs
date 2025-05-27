@@ -1,6 +1,6 @@
 pub use rand::rngs::ThreadRng;
 
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr, ops::Deref};
 
 /// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -92,7 +92,10 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
 impl borsh::ser::BorshSerialize for PublicKey {
     #[inline]
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
-        borsh::ser::BorshSerialize::serialize(&self.as_bytes(), writer)
+        // Serialize as an array instead of a Vec/slice because the chain version has that format.
+        let arr: [u8; 33] = self.as_bytes().deref().try_into().unwrap();
+
+        borsh::ser::BorshSerialize::serialize(&arr, writer)
     }
 }
 
@@ -285,8 +288,10 @@ impl Signature {
 impl borsh::ser::BorshSerialize for Signature {
     #[inline]
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
-        let bytes = self.0.to_bytes();
-        borsh::ser::BorshSerialize::serialize(bytes.as_slice(), writer)
+        // Serialize as an array instead of a Vec/slice because the chain version has that format.
+        let arr: [u8; 64] = self.to_bytes().deref().try_into().unwrap();
+
+        borsh::ser::BorshSerialize::serialize(&arr, writer)
     }
 }
 

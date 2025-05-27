@@ -7,7 +7,7 @@ authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [dependencies]
 borsh = { version = "1.5.7", default-features = false, features = ["derive"] }
-shared = { path = "../../../packages/shared", features = ["solana"] }
+shared = { path = "../../../packages/shared", features = ["realcryptography", "solana"] }
 solana-transaction = { version = "2.2", features = ["bincode"] }
 solana-pubkey = { version = "2.2", default-features = false, features = ["std", "curve25519"] }
 solana-keypair = { version = "2.2" }

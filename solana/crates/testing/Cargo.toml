@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 litesvm = "0.6.0"
 litesvm-token = "0.6.0"
-shared = { path = "../../../packages/shared", features = ["solana"] }
+shared = { path = "../../../packages/shared", features = ["realcryptography", "solana"] }
 kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client" }
 solana-transaction-error = "2.2.1"
 solana-account = "2.2"
