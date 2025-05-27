@@ -40,6 +40,7 @@ pub(super) enum GossipMessage<App: KolmeApp> {
     Notification(Notification<App::Message>),
     BroadcastTx {
         tx: Arc<SignedTransaction<App::Message>>,
+        timestamp: jiff::Timestamp,
     },
 }
 
@@ -55,8 +56,8 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
             GossipMessage::Notification(notification) => {
                 write!(f, "Notification: {notification:?}")
             }
-            GossipMessage::BroadcastTx { tx } => {
-                write!(f, "Broadcast {}", tx.hash())
+            GossipMessage::BroadcastTx { tx, timestamp } => {
+                write!(f, "Broadcast {}, {timestamp}", tx.hash())
             }
         }
     }
