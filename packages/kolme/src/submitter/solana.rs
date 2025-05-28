@@ -1,7 +1,7 @@
 use std::{ops::Deref, str::FromStr};
 
 use base64::Engine;
-use borsh::BorshDeserialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 use kolme_solana_bridge_client::{
     init_tx, instruction::account_meta::AccountMeta, keypair::Keypair, pubkey::Pubkey, signed_tx,
     InitializeIxData, Payload, Secp256k1PubkeyCompressed, Secp256k1Signature, Signature,
@@ -28,6 +28,11 @@ pub async fn instantiate(
         processor: Secp256k1PubkeyCompressed(args.processor.as_bytes().deref().try_into()?),
         executors,
     };
+
+    let mut bytes =
+        Vec::with_capacity(1 + borsh::object_length(&data).map_err(|e| anyhow::anyhow!(e))?);
+    data.serialize(&mut bytes).map_err(|e| anyhow::anyhow!(e))?;
+    tracing::info!("Sending initialize instruction. Data: {:?}", bytes);
 
     let program_pubkey = Pubkey::from_str(program_id)?;
     let blockhash = client.get_latest_blockhash().await?;
@@ -83,6 +88,11 @@ pub async fn execute(
         executors,
         payload: payload_b64,
     };
+
+    let mut bytes =
+        Vec::with_capacity(1 + borsh::object_length(&data).map_err(|e| anyhow::anyhow!(e))?);
+    data.serialize(&mut bytes).map_err(|e| anyhow::anyhow!(e))?;
+    tracing::info!("Sending signed instruction. Data: {:?}", bytes);
 
     let blockhash = client.get_latest_blockhash().await?;
     let tx =
