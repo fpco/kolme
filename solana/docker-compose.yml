@@ -8,7 +8,7 @@ networks:
 
 services:
   kolme-app:
-    image: ghcr.io/saage-tech/six-sigma-kolme-app:4ca0e88f28963753a64f0e1c40ea87e1a23d73f3
+    image: ghcr.io/saage-tech/six-sigma-kolme-app:87ff1e39335fae658aabd4287a671020f3d9c4e1
     container_name: kolme-app
     networks:
       kolme-network:
