@@ -44,7 +44,7 @@ use solbox::pinocchio::entrypoint;
 entrypoint!(process_instruction);
 
 // PDAs
-const STATE_DERIVATION: PdaDerivation = PdaDerivation::with_bump(&[b"state"], 254);
+const STATE_DERIVATION: PdaDerivation = PdaDerivation::new(&[b"state"]);
 type StatePda = PdaData<State, 0>;
 
 type TokenHolderPda = PdaData<TokenHolder, 1>;
