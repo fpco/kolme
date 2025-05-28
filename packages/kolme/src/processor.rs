@@ -96,7 +96,9 @@ impl<App: KolmeApp> Processor<App> {
             .read()
             .create_signed_transaction(secret, vec![Message::<App::Message>::Genesis(info)])?;
 
-        let executed_block = self.construct_block(signed).await?;
+        let executed_block = self
+            .construct_block(signed, kolme.get_next_height())
+            .await?;
         if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
                 self.kolme.resync().await?;
@@ -117,8 +119,9 @@ impl<App: KolmeApp> Processor<App> {
         if self.kolme.read().get_tx_height(txhash).await?.is_some() {
             return Ok(());
         }
+        let proposed_height = self.kolme.read().get_next_height();
         let res = async {
-            let executed_block = self.construct_block(tx.clone()).await?;
+            let executed_block = self.construct_block(tx.clone(), proposed_height).await?;
             self.kolme.add_executed_block(executed_block).await
         }
         .await;
@@ -130,6 +133,7 @@ impl<App: KolmeApp> Processor<App> {
                 let failed = (|| {
                     let failed = FailedTransaction {
                         txhash,
+                        proposed_height,
                         error: match e.downcast_ref::<KolmeError>() {
                             Some(e) => e.clone(),
                             None => KolmeError::Other(e.to_string()),
@@ -154,6 +158,7 @@ impl<App: KolmeApp> Processor<App> {
     async fn construct_block(
         &self,
         tx: SignedTransaction<App::Message>,
+        proposed_height: BlockHeight,
     ) -> Result<ExecutedBlock<App>> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
@@ -181,7 +186,7 @@ impl<App: KolmeApp> Processor<App> {
             tx,
             timestamp: now,
             processor: secret.public_key(),
-            height: kolme.get_next_height(),
+            height: proposed_height,
             parent: kolme.get_current_block_hash(),
             framework_state: kolme.get_merkle_manager().serialize(&framework_state)?.hash,
             app_state: kolme.get_merkle_manager().serialize(&app_state)?.hash,

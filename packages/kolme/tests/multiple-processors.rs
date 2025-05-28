@@ -182,8 +182,14 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
             Notification::NewBlock(_) => (),
             Notification::GenesisInstantiation { .. } => (),
             Notification::FailedTransaction(failed) => {
-                let FailedTransaction { txhash, error } = failed.message.into_inner();
-                anyhow::bail!("Error with transaction {txhash}: {error}")
+                let FailedTransaction {
+                    txhash,
+                    error,
+                    proposed_height,
+                } = failed.message.into_inner();
+                anyhow::bail!(
+                    "Error with transaction {txhash} for block {proposed_height}: {error}"
+                )
             }
         }
     }

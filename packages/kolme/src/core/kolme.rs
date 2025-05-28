@@ -174,7 +174,11 @@ impl<App: KolmeApp> Kolme<App> {
                         tracing::warn!("Received a FailedTransaction notification from {pubkey}, which is not the processor, ignoring");
                         continue;
                     }
-                    let FailedTransaction { txhash, error } = failed.message.into_inner();
+                    let FailedTransaction {
+                        txhash,
+                        proposed_height: _,
+                        error,
+                    } = failed.message.into_inner();
                     if txhash_orig == txhash {
                         break Err(error.into());
                     }

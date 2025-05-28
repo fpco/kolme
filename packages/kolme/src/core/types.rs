@@ -1508,6 +1508,8 @@ pub enum Notification<AppMessage> {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FailedTransaction {
     pub txhash: TxHash,
+    /// Block height we attempted to generate.
+    pub proposed_height: BlockHeight,
     pub error: KolmeError,
 }
 
