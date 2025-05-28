@@ -20,18 +20,3 @@ services:
       POSTGRES_DB: postgres
     ports:
       - "127.0.0.1:45921:5432"
-
-  kademlia-validators:
-    image: ubuntu:noble
-    volumes:
-      - ../../target/release:/host:ro
-    command: ["/host/kademlia-discovery", "validators", "5400"]
-
-  kademlia-client:
-    image: ubuntu:noble
-    volumes:
-      - ../../target/release:/host:ro
-    depends_on:
-      - kademlia-validators
-    command:
-      ["/host/kademlia-discovery", "client", "/ip4/127.0.0.1/udp/5400/quic-v1"]

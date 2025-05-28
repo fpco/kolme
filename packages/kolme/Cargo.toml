@@ -48,3 +48,4 @@ hex.workspace = true
 [dev-dependencies]
 quickcheck = { workspace = true }
 tempfile = "3.18.0"
+kademlia-discovery = { path = "../examples/kademlia-discovery" }
