@@ -8,6 +8,7 @@ pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
     secrets: HashMap<PublicKey, SecretKey>,
     ready: tokio::sync::watch::Sender<bool>,
+    latest_block_delay: tokio::time::Duration,
 }
 
 impl<App: KolmeApp> Processor<App> {
@@ -16,11 +17,16 @@ impl<App: KolmeApp> Processor<App> {
             kolme,
             secrets: std::iter::once((secret.public_key(), secret)).collect(),
             ready: tokio::sync::watch::channel(false).0,
+            latest_block_delay: tokio::time::Duration::from_secs(10),
         }
     }
 
     pub fn add_secret(&mut self, secret: SecretKey) {
         self.secrets.insert(secret.public_key(), secret);
+    }
+
+    pub fn set_latest_block_delay(&mut self, latest_block_delay: tokio::time::Duration) {
+        self.latest_block_delay = latest_block_delay;
     }
 
     pub async fn run(self) -> Result<()> {
@@ -43,26 +49,43 @@ impl<App: KolmeApp> Processor<App> {
 
         self.approve_actions_all(&chains).await;
 
-        loop {
-            let tx = self.kolme.wait_on_mempool().await;
-            let txhash = tx.hash();
-            let tx = Arc::unwrap_or_clone(tx);
+        let producer_loop = async {
+            loop {
+                let tx = self.kolme.wait_on_mempool().await;
+                let txhash = tx.hash();
+                let tx = Arc::unwrap_or_clone(tx);
 
-            // Remove the transaction from the mempool. Either it will succeed, in
-            // which case it's been added, or it will fail, in which case we want
-            // to give up.
-            self.kolme.remove_from_mempool(txhash);
+                // Remove the transaction from the mempool. Either it will succeed, in
+                // which case it's been added, or it will fail, in which case we want
+                // to give up.
+                self.kolme.remove_from_mempool(txhash);
 
-            match self.add_transaction(tx).await {
-                Ok(()) => {
-                    // TODO See https://github.com/fpco/kolme/issues/122
-                    self.approve_actions_all(&chains).await;
-                }
-                Err(e) => {
-                    tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
+                match self.add_transaction(tx).await {
+                    Ok(()) => {
+                        // TODO See https://github.com/fpco/kolme/issues/122
+                        self.approve_actions_all(&chains).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
+                    }
                 }
             }
-        }
+        };
+
+        let latest_loop = async {
+            loop {
+                if let Err(e) = self.emit_latest().await {
+                    tracing::error!("Error emitting latest block: {e}");
+                }
+
+                tokio::time::sleep(self.latest_block_delay).await;
+            }
+        };
+
+        tokio::join!(producer_loop, latest_loop);
+
+        // TODO: this function shouldn't return Result
+        Ok(())
     }
 
     async fn ensure_genesis_event(&self) -> Result<()> {
@@ -256,6 +279,25 @@ impl<App: KolmeApp> Processor<App> {
         std::mem::drop(kolme);
         self.add_transaction(tx).await?;
 
+        Ok(())
+    }
+
+    async fn emit_latest(&self) -> Result<()> {
+        let height = self
+            .kolme
+            .read()
+            .get_next_height()
+            .prev()
+            .context("Emit latest block: no blocks available")?;
+        let latest = LatestBlock {
+            height,
+            when: jiff::Timestamp::now(),
+        };
+        let json = TaggedJson::new(latest)?;
+        let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
+        let signed = json.sign(secret)?;
+        self.kolme.notify(Notification::LatestBlock(signed));
         Ok(())
     }
 }

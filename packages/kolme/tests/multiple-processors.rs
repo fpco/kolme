@@ -191,6 +191,7 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
                     "Error with transaction {txhash} for block {proposed_height}: {error}"
                 )
             }
+            Notification::LatestBlock(_) => (),
         }
     }
 }

@@ -71,6 +71,7 @@ pub(super) struct ReportBlockHeight {
     )]
     pub(super) peer: PeerId,
     pub(super) timestamp: jiff::Timestamp,
+    pub(super) latest_block: Option<Arc<SignedTaggedJson<LatestBlock>>>,
 }
 fn serialize_peer_id<S>(peer_id: &PeerId, serializer: S) -> Result<S::Ok, S::Error>
 where

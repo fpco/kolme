@@ -50,6 +50,8 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     pub(super) pass_through_conn: OnceLock<reqwest::Client>,
     pub(super) merkle_manager: MerkleManager,
     current_block: RwLock<Arc<MaybeBlockInfo<App>>>,
+    /// Latest block reported by the processor
+    pub(super) latest_block: RwLock<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
 }
 
 /// Access to a specific block height.
@@ -92,12 +94,72 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Send a general purpose notification.
     pub fn notify(&self, note: Notification<App::Message>) {
-        if let Notification::FailedTransaction(ref failed) = note {
-            self.remove_from_mempool(failed.message.as_inner().txhash);
+        match &note {
+            Notification::NewBlock(_) => (),
+            Notification::GenesisInstantiation { .. } => (),
+            Notification::FailedTransaction(failed) => {
+                self.remove_from_mempool(failed.message.as_inner().txhash);
+            }
+            Notification::LatestBlock(latest_block) => {
+                if !self.update_latest_block(latest_block) {
+                    return;
+                }
+            }
         }
         // Ignore errors from notifications, it just means no one
         // is subscribed.
         self.inner.notify.send(note).ok();
+    }
+
+    /// Returns true if this notification should be propagated
+    fn update_latest_block(&self, latest_block: &SignedTaggedJson<LatestBlock>) -> bool {
+        // Validate the signature
+        let pubkey = match latest_block.verify_signature() {
+            Ok(pubkey) => pubkey,
+            Err(e) => {
+                tracing::warn!("Invalid signature for latest block: {e}");
+                return false;
+            }
+        };
+
+        let processor = self
+            .read()
+            .get_framework_state()
+            .validator_set
+            .as_ref()
+            .processor;
+        if pubkey != processor {
+            tracing::warn!("Latest block was signed by {pubkey}, but processor is {processor}");
+            return false;
+        }
+
+        // Is it new information?
+        if let Some(old_latest) = self.inner.latest_block.read().clone() {
+            let old_latest = old_latest.message.as_inner();
+            let old_height = old_latest.height;
+            let old_when = old_latest.when;
+
+            let new_latest = latest_block.message.as_inner();
+            let new_height = new_latest.height;
+            let new_when = new_latest.when;
+
+            if new_height < old_height {
+                tracing::warn!("Got a latest block of {new_height}, which is less than last known value of {old_height}");
+                return false;
+            }
+
+            if new_height > old_height {
+                return true;
+            }
+
+            if old_when >= new_when {
+                return false;
+            }
+        }
+
+        let latest_block = Some(Arc::new(latest_block.clone()));
+        *self.inner.latest_block.write() = latest_block;
+        true
     }
 
     /// Propose a new transaction for the processor to add to the chain.
@@ -183,6 +245,7 @@ impl<App: KolmeApp> Kolme<App> {
                         break Err(error.into());
                     }
                 }
+                Notification::LatestBlock(_) => continue,
             }
 
             // Just in case we jumped some blocks, check if it landed in the interim.
@@ -518,6 +581,7 @@ impl<App: KolmeApp> Kolme<App> {
             mempool: Mempool::new(),
             current_block: RwLock::new(Arc::new(current_block)),
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
+            latest_block: parking_lot::RwLock::new(None),
         };
 
         let kolme = Kolme {
@@ -589,6 +653,7 @@ impl<App: KolmeApp> Kolme<App> {
                         }
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::FailedTransaction { .. } => (),
+                        Notification::LatestBlock(_) => (),
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
@@ -751,6 +816,16 @@ impl<App: KolmeApp> Kolme<App> {
         let info = self.inner.app.genesis_info();
         let info = serde_json::to_vec(info)?;
         Ok(Sha256Hash::hash(&info))
+    }
+
+    /// Returns the latest block information from the processor.
+    ///
+    /// This may be different from the latest block known on this node if we
+    /// haven't completed syncing yet. The processor generates these messages
+    /// regularly to keep the rest of the chain aware of what the latest known
+    /// height is at various timestamps to avoid drift.
+    pub fn get_latest_block(&self) -> Option<Arc<SignedTaggedJson<LatestBlock>>> {
+        self.inner.latest_block.read().clone()
     }
 }
 

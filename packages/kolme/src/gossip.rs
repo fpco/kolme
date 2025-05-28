@@ -370,6 +370,7 @@ impl<App: KolmeApp> Gossip<App> {
             next: self.kolme.read().get_next_height(),
             peer: self.local_peer_id,
             timestamp: jiff::Timestamp::now(),
+            latest_block: self.kolme.get_latest_block(),
         })
         .publish(self, swarm)
         .await
@@ -519,6 +520,7 @@ impl<App: KolmeApp> Gossip<App> {
                     //
                     // See propose_and_await_transaction for an example.
                     Notification::FailedTransaction(_) => (),
+                    Notification::LatestBlock(_) => (),
                 }
                 self.kolme.notify(msg);
             }
@@ -675,6 +677,7 @@ impl<App: KolmeApp> Gossip<App> {
             next: their_next,
             peer,
             timestamp: _,
+            latest_block: _,
         } = match report_block_height {
             Some(report) => report,
             None => return,

@@ -1503,6 +1503,8 @@ pub enum Notification<AppMessage> {
     /// signed by the real processor should be respected for dropping
     /// transactions from the mempool.
     FailedTransaction(SignedTaggedJson<FailedTransaction>),
+    /// Notification from the processor of the latest known block.
+    LatestBlock(SignedTaggedJson<LatestBlock>),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1511,6 +1513,13 @@ pub struct FailedTransaction {
     /// Block height we attempted to generate.
     pub proposed_height: BlockHeight,
     pub error: KolmeError,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct LatestBlock {
+    pub height: BlockHeight,
+    /// When this message was generated.
+    pub when: jiff::Timestamp,
 }
 
 /// Represents distinct occurrences in the core of Kolme that could be relevant to users.
