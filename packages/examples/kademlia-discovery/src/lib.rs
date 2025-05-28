@@ -163,7 +163,7 @@ pub async fn validators(port: u16) -> Result<()> {
     Ok(())
 }
 
-pub async fn client(validator_addr: &str) -> Result<()> {
+pub async fn client(validator_addr: &str, signing_secret: SecretKey) -> Result<()> {
     const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
 
     kolme::init_logger(true, None);
@@ -203,7 +203,7 @@ pub async fn client(validator_addr: &str) -> Result<()> {
 
     let block = kolme
         .sign_propose_await_transaction(
-            &SecretKey::random(&mut rand::thread_rng()),
+            &signing_secret,
             vec![Message::App(KademliaTestMessage::SayHi {})],
         )
         .await?;

@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use kademlia_discovery::{client, validators};
+use kolme::SecretKey;
 
 #[derive(clap::Parser)]
 struct Opt {
@@ -31,6 +32,8 @@ async fn main() -> Result<()> {
 async fn main_inner() -> Result<()> {
     match Opt::parse().cmd {
         Cmd::Validators { port } => validators(port).await,
-        Cmd::Client { validator } => client(&validator).await,
+        Cmd::Client { validator } => {
+            client(&validator, SecretKey::random(&mut rand::thread_rng())).await
+        }
     }
 }
