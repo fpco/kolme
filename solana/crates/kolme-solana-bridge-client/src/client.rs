@@ -18,6 +18,7 @@ const TOKEN: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9S
 const TOKEN_2022: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
+#[repr(C)]
 pub enum TokenProgram {
     Legacy,
     Token2022,

@@ -27,15 +27,19 @@ pub const SIGNED_IX: u8 = 2;
 pub const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
+#[repr(C)]
 pub struct Secp256k1Pubkey(pub [u8; Self::LEN]);
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
+#[repr(C)]
 pub struct Secp256k1PubkeyCompressed(pub [u8; Self::LEN]);
 
 #[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
+#[repr(C)]
 pub struct Secp256k1Signature(pub [u8; Self::LEN]);
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct InitializeIxData {
     pub needed_executors: u8,
     pub processor: Secp256k1PubkeyCompressed,
@@ -43,12 +47,14 @@ pub struct InitializeIxData {
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct RegularMsgIxData {
     pub keys: Vec<KeyRegistration>,
     pub transfer_amounts: Vec<u64>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct SignedMsgIxData {
     /// Signature from the processor
     pub processor: Signature,
@@ -59,18 +65,21 @@ pub struct SignedMsgIxData {
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct Signature {
     pub signature: Secp256k1Signature,
     pub recovery_id: u8,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct KeyRegistration {
     pub signature: Signature,
     pub key: Secp256k1PubkeyCompressed,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct Payload {
     /// Monotonically increasing ID to ensure messages are sent in the correct order.
     /// It must be included in the payload in order to prevent anyone to from re-submitting
@@ -83,18 +92,21 @@ pub struct Payload {
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct InstructionAccount {
     pub pubkey: Pubkey,
     pub is_writable: bool,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct SignerAccount {
     pub index: u8,
     pub seeds: Vec<Vec<u8>>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct BridgeMessage {
     pub id: u64,
     pub wallet: Pubkey,
@@ -102,6 +114,7 @@ pub struct BridgeMessage {
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub enum Message {
     Regular {
         funds: Vec<Token>,
@@ -113,12 +126,14 @@ pub enum Message {
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct Token {
     pub mint: Pubkey,
     pub amount: u64,
 }
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[repr(C)]
 pub struct State {
     pub processor: Secp256k1PubkeyCompressed,
     pub executors: Vec<Secp256k1PubkeyCompressed>,
