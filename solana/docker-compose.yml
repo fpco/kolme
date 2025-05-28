@@ -1,0 +1,23 @@
+networks:
+  kolme-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+
+services:
+  kolme-app:
+    image: ghcr.io/saage-tech/six-sigma-kolme-app:4ca0e88f28963753a64f0e1c40ea87e1a23d73f3
+    container_name: kolme-app
+    networks:
+      kolme-network:
+        ipv4_address: 172.28.0.4
+    command:
+      - kolme-app
+      - serve
+    volumes: 
+      - ./kolme-app-data:/data/db
+    env_file:
+    - path: ./env/kolme-app.env.values
+      required: true
