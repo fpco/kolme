@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use futures_util::future::join_all;
 use futures_util::StreamExt;
+use kolme::ApiNotification;
 use kolme::{
     testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
     ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
@@ -124,14 +125,23 @@ async fn next_message_as_json<S>(ws_stream: &mut S) -> Result<Value>
 where
     S: StreamExt<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
 {
-    let message = timeout(Duration::from_secs(5), ws_stream.next())
-        .await?
-        .context("WebSocket stream terminated")??;
+    // Tests were written assuming some notifications don't yet exist.
+    // Loop here is to strip that out.
+    loop {
+        let message = timeout(Duration::from_secs(5), ws_stream.next())
+            .await?
+            .context("WebSocket stream terminated")??;
 
-    let notification: Value = serde_json::from_slice(&message.into_data()).unwrap();
-    tracing::info!("Received genesis notification: {}", notification);
+        let notification: ApiNotification<TestMessage> =
+            serde_json::from_slice(&message.into_data()).unwrap();
+        if let ApiNotification::LatestBlock(_) = &notification {
+            continue;
+        }
+        let notification = serde_json::to_value(notification)?;
+        tracing::info!("Received genesis notification: {}", notification);
 
-    Ok(notification)
+        break Ok(notification);
+    }
 }
 
 #[tokio::test]
