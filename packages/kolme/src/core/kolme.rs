@@ -14,7 +14,7 @@ pub use store::KolmeStore;
 use std::sync::OnceLock;
 use std::{collections::HashMap, ops::Deref};
 
-use mempool::Mempool;
+use mempool::{Mempool, MempoolEntry};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::core::*;
@@ -103,8 +103,12 @@ impl<App: KolmeApp> Kolme<App> {
     /// Propose a new transaction for the processor to add to the chain.
     ///
     /// Note that this will not detect any issues if the transaction is rejected.
-    pub fn propose_transaction(&self, tx: Arc<SignedTransaction<App::Message>>) {
-        self.inner.mempool.add(tx);
+    pub fn propose_transaction(
+        &self,
+        tx: Arc<SignedTransaction<App::Message>>,
+        proposed_height: Option<BlockHeight>,
+    ) {
+        self.inner.mempool.add(tx, proposed_height);
     }
 
     /// How long should we wait for a transaction to land before giving up?
@@ -123,11 +127,12 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn propose_and_await_transaction(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
+        proposed_height: Option<BlockHeight>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let txhash = tx.hash();
         match tokio::time::timeout(
             self.tx_await_duration,
-            self.propose_and_await_transaction_inner(tx),
+            self.propose_and_await_transaction_inner(tx, proposed_height),
         )
         .await
         {
@@ -141,10 +146,11 @@ impl<App: KolmeApp> Kolme<App> {
     async fn propose_and_await_transaction_inner(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
+        proposed_height: Option<BlockHeight>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut recv = self.subscribe();
         let txhash_orig = tx.hash();
-        self.propose_transaction(tx);
+        self.propose_transaction(tx, proposed_height);
         loop {
             let note = recv.recv().await?;
             match note {
@@ -218,7 +224,8 @@ impl<App: KolmeApp> Kolme<App> {
                 self.read()
                     .create_signed_transaction(secret, messages.clone())?,
             );
-            match self.propose_and_await_transaction_inner(tx).await {
+            let next_height = self.read().get_next_height();
+            match self.propose_and_await_transaction_inner(tx, Some(next_height)).await {
                 Ok(block) => break Ok(block),
                 Err(e) => {
                     if let Some(KolmeError::InvalidNonce {
@@ -459,13 +466,13 @@ impl<App: KolmeApp> Kolme<App> {
         Ok(())
     }
 
-    pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
+    pub async fn wait_on_mempool(&self) -> (Option<BlockHeight>, Arc<SignedTransaction<App::Message>>) {
         loop {
-            let (txhash, tx) = self.inner.mempool.peek().await;
-            match self.get_tx_height(txhash).await {
-                Ok(Some(_)) => self.inner.mempool.drop_tx(txhash),
+            let entry = self.inner.mempool.peek().await;
+            match self.get_tx_height(entry.hash).await {
+                Ok(Some(_)) => self.inner.mempool.drop_tx(entry.hash),
                 Ok(None) => {
-                    break tx;
+                    break (entry.proposed_height, entry.tx);
                 }
                 Err(e) => {
                     tracing::warn!("Error checking for transaction in database: {e}");
@@ -541,7 +548,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Get all entries currently in the mempool
-    pub fn get_mempool_entries(&self) -> Vec<Arc<SignedTransaction<App::Message>>> {
+    pub fn get_mempool_entries(&self) -> Vec<MempoolEntry<App::Message>> {
         self.inner.mempool.get_entries()
     }
 

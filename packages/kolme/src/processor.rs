@@ -44,7 +44,7 @@ impl<App: KolmeApp> Processor<App> {
         self.approve_actions_all(&chains).await;
 
         loop {
-            let tx = self.kolme.wait_on_mempool().await;
+            let (proposed_height, tx) = self.kolme.wait_on_mempool().await;
             let txhash = tx.hash();
             let tx = Arc::unwrap_or_clone(tx);
 
@@ -118,7 +118,12 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
         let res = async {
-            let executed_block = self.construct_block(tx.clone()).await?;
+            if let Some(proposed) = todo!("proposed_height") {
+                if self.kolme.read().get_next_height() != proposed {
+                    todo!()
+                }
+            }
+            let executed_block = self.construct_block(tx.clone()).await?};
             self.kolme.add_executed_block(executed_block).await
         }
         .await;

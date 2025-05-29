@@ -86,7 +86,7 @@ async fn broadcast<App: KolmeApp>(
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         return res;
     }
-    kolme.propose_transaction(Arc::new(tx));
+    kolme.propose_transaction(Arc::new(tx), None);
     Json(serde_json::json!({"txhash":txhash})).into_response()
 }
 

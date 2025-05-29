@@ -9,7 +9,14 @@ pub struct Mempool<AppMessage> {
     notify: Arc<tokio::sync::watch::Sender<usize>>,
 }
 
-type Queue<AppMessage> = VecDeque<(TxHash, Arc<SignedTransaction<AppMessage>>)>;
+#[derive(Clone)]
+pub struct MempoolEntry<AppMessage> {
+    pub hash: TxHash,
+    pub proposed_height: Option<BlockHeight>,
+    pub tx: Arc<SignedTransaction<AppMessage>>
+}
+
+type Queue<AppMessage> = VecDeque<MempoolEntry<AppMessage>>;
 
 impl<AppMessage> Clone for Mempool<AppMessage> {
     fn clone(&self) -> Self {
@@ -20,7 +27,7 @@ impl<AppMessage> Clone for Mempool<AppMessage> {
     }
 }
 
-impl<AppMessage> Mempool<AppMessage> {
+impl<AppMessage: Clone> Mempool<AppMessage> {
     pub(super) fn new() -> Self {
         Self {
             txs: Default::default(),
@@ -38,9 +45,9 @@ impl<AppMessage> Mempool<AppMessage> {
         }
     }
 
-    pub(super) async fn peek(&self) -> (TxHash, Arc<SignedTransaction<AppMessage>>) {
-        if let Some(pair) = self.txs.read().front() {
-            return pair.clone();
+    pub(super) async fn peek(&self) -> MempoolEntry<AppMessage> {
+        if let Some(entry) = self.txs.read().front() {
+            return entry.clone();
         }
 
         let mut recv = self.notify.subscribe();
@@ -58,7 +65,7 @@ impl<AppMessage> Mempool<AppMessage> {
         let mut modified = false;
         let mut i = 0;
         while i < guard.len() {
-            if guard[i].0 == hash {
+            if guard[i].hash == hash {
                 modified = true;
                 guard.remove(i);
             } else {
@@ -70,8 +77,8 @@ impl<AppMessage> Mempool<AppMessage> {
         }
     }
 
-    pub(super) fn add(&self, tx: Arc<SignedTransaction<AppMessage>>) {
-        self.txs.write().push_back((tx.hash(), tx));
+    pub(super) fn add(&self, tx: Arc<SignedTransaction<AppMessage>>, proposed_height: Option<BlockHeight>) {
+        self.txs.write().push_back(MempoolEntry{hash: tx.hash(), proposed_height, tx});
         self.notify.send_modify(|x| *x += 1);
     }
 
@@ -81,7 +88,7 @@ impl<AppMessage> Mempool<AppMessage> {
         self.notify.subscribe()
     }
 
-    pub(super) fn get_entries(&self) -> Vec<Arc<SignedTransaction<AppMessage>>> {
-        self.txs.read().iter().map(|(_, tx)| tx.clone()).collect()
+    pub(super) fn get_entries(&self) -> Vec<MempoolEntry<AppMessage>> {
+        self.txs.read().iter().cloned().collect()
     }
 }

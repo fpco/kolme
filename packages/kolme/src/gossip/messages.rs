@@ -40,6 +40,7 @@ pub(super) enum GossipMessage<App: KolmeApp> {
     Notification(Notification<App::Message>),
     BroadcastTx {
         tx: Arc<SignedTransaction<App::Message>>,
+        proposed_height: Option<BlockHeight>,
     },
 }
 
@@ -55,8 +56,12 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
             GossipMessage::Notification(notification) => {
                 write!(f, "Notification: {notification:?}")
             }
-            GossipMessage::BroadcastTx { tx } => {
-                write!(f, "Broadcast {}", tx.hash())
+            GossipMessage::BroadcastTx { tx, proposed_height } => {
+                if let Some(proposed) = proposed_height {
+                    write!(f, "Broadcast {}, proposed height: {proposed}", tx.hash())
+                } else {
+                    write!(f, "Broadcast {}", tx.hash())
+                }
             }
         }
     }

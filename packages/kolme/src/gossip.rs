@@ -382,9 +382,9 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn broadcast_mempool_entries(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
-        for tx in self.kolme.get_mempool_entries() {
-            let txhash = tx.hash();
-            let msg = GossipMessage::BroadcastTx { tx };
+        for entry in self.kolme.get_mempool_entries() {
+            let txhash = entry.hash;
+            let msg = GossipMessage::BroadcastTx { tx: entry.tx, proposed_height: entry.proposed_height };
             if let Err(e) = msg.publish(self, swarm).await {
                 tracing::error!(
                     "{}: Unable to broadcast transaction {txhash}: {e:?}",
@@ -537,8 +537,8 @@ impl<App: KolmeApp> Gossip<App> {
                     peers_with_blocks.try_send(report).ok();
                 }
             }
-            GossipMessage::BroadcastTx { tx } => {
-                self.kolme.propose_transaction(tx);
+            GossipMessage::BroadcastTx { tx, proposed_height } => {
+                self.kolme.propose_transaction(tx, proposed_height);
             }
         }
 
