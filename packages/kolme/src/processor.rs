@@ -128,6 +128,7 @@ impl<App: KolmeApp> Processor<App> {
             }
             Err(e)
         } else {
+            self.emit_latest().await.ok();
             Ok(())
         }
     }
@@ -175,6 +176,7 @@ impl<App: KolmeApp> Processor<App> {
                 }
             }
         }
+        self.emit_latest().await.ok();
         res
     }
 
@@ -204,6 +206,17 @@ impl<App: KolmeApp> Processor<App> {
         } = kolme
             .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
             .await?;
+
+        if let Some(max_height) = tx.0.message.as_inner().max_height {
+            if max_height < proposed_height {
+                return Err(KolmeError::PastMaxHeight {
+                    txhash,
+                    max_height,
+                    proposed_height,
+                }
+                .into());
+            }
+        }
 
         let approved_block = Block {
             tx,

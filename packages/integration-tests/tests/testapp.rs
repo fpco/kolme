@@ -286,6 +286,7 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
         nonce: AccountNonce(2),
         created: jiff::Timestamp::now(),
         messages: vec![Message::App(TestMessage::Increment)],
+        max_height: None,
     };
     let signed_tx = Arc::new(tx.sign(&secret).unwrap());
 
@@ -435,6 +436,7 @@ async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
                 nonce: next_nonce,
                 created: jiff::Timestamp::now(),
                 messages: vec![Message::App(TestMessage::Increment)],
+                max_height: None,
             };
 
             let signed_tx = Arc::new(tx.sign(&secret).unwrap());

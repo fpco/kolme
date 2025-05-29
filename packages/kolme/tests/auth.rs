@@ -127,7 +127,7 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
         async move {
             let tx = Arc::new(kolme.read().create_signed_transaction(
                 &signer,
-                msgs.into_iter().map(Message::Auth).collect(),
+                msgs.into_iter().map(Message::Auth).collect::<Vec<_>>(),
             )?);
             kolme
                 .read()

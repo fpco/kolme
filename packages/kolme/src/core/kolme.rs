@@ -148,8 +148,8 @@ impl<App: KolmeApp> Kolme<App> {
                 return false;
             }
 
-            if new_height > old_height {
-                return true;
+            if new_height < old_height {
+                return false;
             }
 
             if old_when >= new_when {
@@ -258,14 +258,14 @@ impl<App: KolmeApp> Kolme<App> {
     /// Signed and propose a transaction.
     ///
     /// Automatically resigns with a new nonce if necessary.
-    pub async fn sign_propose_await_transaction(
+    pub async fn sign_propose_await_transaction<T: Into<TxBuilder<App::Message>>>(
         &self,
         secret: &SecretKey,
-        messages: Vec<Message<App::Message>>,
+        tx_builder: T,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         match tokio::time::timeout(
             self.tx_await_duration,
-            self.sign_propose_await_transaction_inner(secret, messages),
+            self.sign_propose_await_transaction_inner(secret, tx_builder.into()),
         )
         .await
         {
@@ -278,12 +278,12 @@ impl<App: KolmeApp> Kolme<App> {
     async fn sign_propose_await_transaction_inner(
         &self,
         secret: &SecretKey,
-        messages: Vec<Message<App::Message>>,
+        tx_builder: TxBuilder<App::Message>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         loop {
             let tx = Arc::new(
                 self.read()
-                    .create_signed_transaction(secret, messages.clone())?,
+                    .create_signed_transaction(secret, tx_builder.clone())?,
             );
             match self.propose_and_await_transaction_inner(tx).await {
                 Ok(block) => break Ok(block),
@@ -345,6 +345,18 @@ impl<App: KolmeApp> Kolme<App> {
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
         anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+
+        // Ensure the max height is respected if present
+        if let Some(max_height) = signed_block.tx().0.message.as_inner().max_height {
+            if max_height < signed_block.height() {
+                return Err(KolmeError::PastMaxHeight {
+                    txhash: signed_block.tx().hash(),
+                    max_height,
+                    proposed_height: signed_block.height(),
+                }
+                .into());
+            }
+        }
 
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
@@ -949,18 +961,23 @@ impl<App: KolmeApp> KolmeRead<App> {
         self.get_framework_state().accounts.get_assets(account_id)
     }
 
-    pub fn create_signed_transaction(
+    pub fn create_signed_transaction<T: Into<TxBuilder<App::Message>>>(
         &self,
         secret: &SecretKey,
-        messages: Vec<Message<App::Message>>,
+        tx_builder: T,
     ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key();
         let nonce = self.get_next_nonce(pubkey);
+        let TxBuilder {
+            messages,
+            max_height,
+        } = tx_builder.into();
         let tx = Transaction::<App::Message> {
             pubkey,
             nonce,
             created: Timestamp::now(),
             messages,
+            max_height,
         };
         tx.sign(secret)
     }

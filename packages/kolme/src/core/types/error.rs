@@ -9,6 +9,12 @@ pub enum KolmeError {
         expected: AccountNonce,
         actual: AccountNonce,
     },
+    #[error("Transaction {txhash} has max height of {max_height}, but proposed block height is {proposed_height}")]
+    PastMaxHeight {
+        txhash: TxHash,
+        max_height: BlockHeight,
+        proposed_height: BlockHeight,
+    },
     #[error("{0}")]
     Other(String),
 }
