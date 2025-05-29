@@ -74,7 +74,7 @@ pub async fn execute(
     for a in approvals.values() {
         let sig = Signature {
             signature: Secp256k1Signature(a.sig.to_bytes().deref().try_into()?),
-            recovery_id: processor.recid.to_byte(),
+            recovery_id: a.recid.to_byte(),
         };
 
         executors.push(sig);
