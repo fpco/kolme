@@ -61,3 +61,25 @@ jobs:
           # RUSTSEC-2023-0071: timing attack looks to be inapplicable
           # Taken from the six-sigma-v2 repository.
           ignore: "RUSTSEC-2023-0071,RUSTSEC-2025-0009,RUSTSEC-2022-0093,RUSTSEC-2024-0344"
+
+  solana-contract:
+    name: Build & Test the Solana bridge contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+      - name: Setup system
+        uses: ./.github/actions/setup-system
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache-prefix-key: solana
+      - name: Install build tools
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSfL https://solana-install.solana.workers.dev | bash
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      - name: Test
+        working-directory: solana
+        run: just test
