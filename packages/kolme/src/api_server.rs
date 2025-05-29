@@ -175,6 +175,7 @@ async fn handle_websocket<App: KolmeApp>(
                 ApiNotification::GenesisInstantiation { chain, contract }
             }
             Notification::FailedTransaction(failed) => ApiNotification::FailedTransaction(failed),
+            Notification::LatestBlock(latest_block) => ApiNotification::LatestBlock(latest_block),
         };
         let msg = match serde_json::to_string(&notification) {
             Ok(msg) => msg,
@@ -209,4 +210,5 @@ pub enum ApiNotification<AppMessage> {
     },
     /// A transaction failed in the processor.
     FailedTransaction(SignedTaggedJson<FailedTransaction>),
+    LatestBlock(SignedTaggedJson<LatestBlock>),
 }
