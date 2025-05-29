@@ -522,6 +522,7 @@ pub async fn broadcast(message: String, secret: String, host: String) -> Result<
         nonce,
         created: jiff::Timestamp::now(),
         messages: vec![Message::App(message)],
+        max_height: None,
     }
     .sign(&secret)?;
     #[derive(serde::Deserialize)]

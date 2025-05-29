@@ -194,6 +194,7 @@ pub async fn say_hi(secret: Option<String>, host: String) -> Result<()> {
         nonce,
         created: jiff::Timestamp::now(),
         messages: vec![Message::App(SampleMessage::SayHi {})],
+        max_height: None,
     }
     .sign(&secret)?;
     #[derive(serde::Deserialize)]
