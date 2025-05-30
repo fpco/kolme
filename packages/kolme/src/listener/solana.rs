@@ -79,10 +79,15 @@ async fn listen_internal<App: KolmeApp>(
 
     let client = kolme.get_solana_client(chain).await;
     let pubsub_client = kolme.get_solana_pubsub_client(chain).await?;
-    let mut next_bridge_event_id =
-        get_next_bridge_event_id(&kolme.read(), secret.public_key(), chain.into());
 
     loop {
+        let mut next_bridge_event_id =
+            get_next_bridge_event_id(&kolme.read(), secret.public_key(), chain.into());
+
+        let last_seen = next_bridge_event_id
+            .prev()
+            .unwrap_or(BridgeEventId::start());
+
         let filter = RpcTransactionLogsFilter::Mentions(vec![contract.into()]);
         let config = RpcTransactionLogsConfig {
             commitment: Some(CommitmentConfig {
@@ -97,15 +102,13 @@ async fn listen_internal<App: KolmeApp>(
                 tracing::error!(
                     "Encountered an error while trying to subscribe to logs WS endpoint: {e}"
                 );
+
                 time::sleep(Duration::from_secs(5)).await;
+                catch_up(&kolme, &client, secret, last_seen, chain, &contract_pubkey).await?;
 
                 continue;
             }
         };
-
-        let last_seen = next_bridge_event_id
-            .prev()
-            .unwrap_or(BridgeEventId::start());
 
         if let Some(latest_id) =
             catch_up(&kolme, &client, secret, last_seen, chain, &contract_pubkey).await?
