@@ -107,8 +107,10 @@ impl borsh::de::BorshDeserialize for PublicKey {
     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
         use borsh::io::{Error, ErrorKind};
 
-        let bytes: [u8; 33] = borsh::de::BorshDeserialize::try_from_reader(reader)?;
-        match Self::from_bytes(&bytes) {
+        // We are forced to use the internal API because using the [T; N] array impl returns
+        // a "Not all bytes read" error even though the binary representation is correct...
+        let bytes: [u8; 33] = u8::array_from_reader(reader)?.unwrap(); // This always returns Some
+        match Self::from_bytes(bytes) {
             Ok(sig) => Ok(sig),
             Err(e) => Err(Error::new(ErrorKind::Other, e)),
         }
@@ -305,7 +307,9 @@ impl borsh::de::BorshDeserialize for Signature {
     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
         use borsh::io::{Error, ErrorKind};
 
-        let bytes: [u8; 64] = borsh::de::BorshDeserialize::try_from_reader(reader)?;
+        // We are forced to use the internal API because using the [T; N] array impl returns
+        // a "Not all bytes read" error even though the binary representation is correct...
+        let bytes: [u8; 64] = u8::array_from_reader(reader)?.unwrap(); // This always returns Some
         match Self::from_slice(&bytes) {
             Ok(sig) => Ok(sig),
             Err(e) => Err(Error::new(ErrorKind::Other, e)),
