@@ -279,9 +279,16 @@ pub struct KeyRegistration {
 
 #[cfg(feature = "realcryptography")]
 impl KeyRegistration {
-    pub fn new(address: &str, key: &SecretKey) -> Result<Self, SecretKeyError> {
+    pub fn cosmos(address: &str, key: &SecretKey) -> Result<Self, SecretKeyError> {
         Ok(Self {
             signature: key.sign_recoverable(address)?,
+            key: key.public_key(),
+        })
+    }
+
+    pub fn solana(pubkey: [u8; 32], key: &SecretKey) -> Result<Self, SecretKeyError> {
+        Ok(Self {
+            signature: key.sign_prehash_recoverable(pubkey)?,
             key: key.public_key(),
         })
     }

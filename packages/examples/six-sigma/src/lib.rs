@@ -781,7 +781,7 @@ mod tests {
         const SR_BALANCE: Decimal = dec!(123_456);
         let wallet = sr_wallet()?;
         let secret_key = SecretKey::from_str(FUNDER_SECRET_KEY)?;
-        let registration = KeyRegistration::new(&wallet.get_address_string(), &secret_key)?;
+        let registration = KeyRegistration::cosmos(&wallet.get_address_string(), &secret_key)?;
 
         send_funds_with_key_and_find_account_pass_through(
             client,
@@ -819,7 +819,7 @@ mod tests {
     ) -> Result<(cosmos::Wallet, AccountId)> {
         let new_wallet = wallet_from_seed(SeedPhrase::random())?;
         let secret_key = SecretKey::from_str(secret_key)?;
-        let registration = KeyRegistration::new(&new_wallet.get_address_string(), &secret_key)?;
+        let registration = KeyRegistration::cosmos(&new_wallet.get_address_string(), &secret_key)?;
 
         let account_id = send_funds_with_key_and_find_account_pass_through(
             client,

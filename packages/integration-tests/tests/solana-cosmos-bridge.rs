@@ -11,9 +11,9 @@ use kolme_solana_bridge_client::{keypair::Keypair, signer::Signer};
 use setup::{
     airdrop, cosmos_deposit_and_register, cosmos_send_osmo, deploy_solana_bridge, kolme_state,
     make_cosmos_client, make_osmo_token, make_solana_client, solana_deposit_and_register,
-    solana_key_registration, solana_mint_to, wait_until, wait_until_init,
+    solana_mint_to, wait_until, wait_until_init,
 };
-use shared::cosmos::KeyRegistration as CosmosKeyRegistration;
+use shared::types::KeyRegistration;
 
 const DB_PATH: &str = "solana-single-test-store.fjall";
 const DUMMY_CODE_VERSION: &str = "dummy code version";
@@ -109,7 +109,7 @@ async fn bridge_transfer() {
         &user_solana,
         &osmo,
         send_amount,
-        vec![solana_key_registration(&user_solana.pubkey(), &key_solana)],
+        vec![KeyRegistration::solana(user_solana.pubkey().to_bytes(), &key_solana).unwrap()],
     )
     .await
     .unwrap();
@@ -168,7 +168,7 @@ async fn bridge_transfer() {
         cosmos_bridge_addr,
         &user_cosmos,
         send_amount as u128,
-        vec![CosmosKeyRegistration::new(&user_cosmos.get_address_string(), &key_cosmos).unwrap()],
+        vec![KeyRegistration::cosmos(&user_cosmos.get_address_string(), &key_cosmos).unwrap()],
     )
     .await
     .unwrap();
@@ -277,7 +277,7 @@ async fn solana_listener_catchup() {
         &user,
         &osmo,
         send_amount,
-        vec![solana_key_registration(&user.pubkey(), &user_key)],
+        vec![KeyRegistration::solana(user.pubkey().to_bytes(), &user_key).unwrap()],
     )
     .await
     .unwrap();

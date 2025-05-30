@@ -1,22 +1,14 @@
 #[cfg(feature = "realcryptography")]
 mod real;
 
-#[cfg(feature = "chaincryptography")]
+#[cfg(all(not(feature = "realcryptography"), feature = "chaincryptography"))]
 mod chain;
 
 #[cfg(feature = "realcryptography")]
 pub use real::*;
 
-#[cfg(feature = "chaincryptography")]
+#[cfg(all(not(feature = "realcryptography"), feature = "chaincryptography"))]
 pub use chain::*;
-
-#[cfg(all(feature = "realcryptography", feature = "chaincryptography"))]
-compile_error!("Only one of the following features must be enabled: \"realcryptography\", \"chaincryptography\".");
-
-#[cfg(all(not(feature = "realcryptography"), not(feature = "chaincryptography")))]
-compile_error!(
-    "Must select one of the following features: \"realcryptography\", \"chaincryptography\"."
-);
 
 #[derive(Debug, thiserror::Error)]
 pub enum CompressPublicKeyError {

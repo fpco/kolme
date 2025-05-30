@@ -11,7 +11,7 @@ use backon::{ExponentialBuilder, Retryable};
 use cosmos::{AddressHrp, Coin, Contract, Cosmos, HasAddress, SeedPhrase};
 use pretty_assertions::assert_eq;
 use rust_decimal::{dec, Decimal};
-use shared::cosmos::{ExecuteMsg, KeyRegistration};
+use shared::{cosmos::ExecuteMsg, types::KeyRegistration};
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
@@ -336,7 +336,7 @@ async fn send_funds_with_key_and_find_account(
             wallet,
             vec![coin(to_send)],
             ExecuteMsg::Regular {
-                keys: vec![KeyRegistration::new(
+                keys: vec![KeyRegistration::cosmos(
                     &wallet.get_address_string(),
                     secret_key,
                 )?],

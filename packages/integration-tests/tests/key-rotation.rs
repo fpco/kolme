@@ -6,7 +6,7 @@ use cosmos::{
 };
 use integration_tests::prepare_local_contract;
 use kolme::*;
-use shared::cosmos::{ExecuteMsg, KeyRegistration};
+use shared::{cosmos::ExecuteMsg, types::KeyRegistration};
 use testtasks::TestTasks;
 
 /// In the future, move to an example and convert the binary to a library.
@@ -243,7 +243,7 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
             }],
             ExecuteMsg::Regular {
                 keys: vec![
-                    KeyRegistration::new(&client_wallet.get_address_string(), &client).unwrap(),
+                    KeyRegistration::cosmos(&client_wallet.get_address_string(), &client).unwrap(),
                 ],
             },
         )
