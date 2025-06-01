@@ -37,11 +37,41 @@ impl<K, V> Node<K, V> {
     pub(crate) fn sanity_checks(&self) {
         match self {
             Node::Leaf(leaf) => {
-                // FIXME validate hashes
+                let stored_hash = leaf.hash();
+                let mut hasher = Sha256::new();
+                hasher.update(leaf.key().as_ref());
+                hasher.update(leaf.value().as_ref());
+                let calculated_hash = hasher.finalize();
+
+                assert_eq!(
+                    stored_hash.as_ref(),
+                    calculated_hash.as_ref(),
+                    "Leaf hash mismatch: expected {:?}, got {:?}", 
+                    calculated_hash, stored_hash
+                );
+
                 leaf.as_ref().sanity_checks();
             }
             Node::Tree(tree) => {
-                // FIXME validate hashes
+                let stored_hash = tree.hash();
+                let mut hasher = Sha256::new();
+                for child in tree.children() {
+                    hasher.update(child.hash().as_ref());
+                }
+
+                let calculated_hash = hasher.finalize();
+
+                assert_eq!(
+                    stored_hash.as_ref(),
+                    calculated_hash.as_ref(),
+                    "Tree hash mismatch: expected {:?}, got {:?}", 
+                    calculated_hash, stored_hash
+                );
+
+                for child in tree.children() {
+                    child.sanity_checks();
+                }
+
                 tree.as_ref().sanity_checks();
             }
         }
