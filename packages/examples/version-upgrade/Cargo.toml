@@ -1,0 +1,12 @@
+[package]
+name = "version-upgrade"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true }
+kolme.workspace = true
+merkle-map.workspace = true
+serde = { version = "1.0.219", features = ["derive"] }
+tokio = { workspace = true }
