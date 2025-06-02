@@ -29,7 +29,7 @@ parking_lot = "0.12.3"
 rand = "0.8"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }
 rust_decimal = { workspace = true, features = ["macros"] }
-serde = { version = "1.0.218", features = ["derive", "rc"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
 strum = { version = "0.27.1", features = ["derive"] }
