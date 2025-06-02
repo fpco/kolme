@@ -1,21 +1,18 @@
-mod setup;
-
-use std::{net::SocketAddr, path::PathBuf, str::FromStr, time::Duration};
+use std::{net::SocketAddr, str::FromStr, time::Duration};
 
 use cosmos::{Address, AddressHrp, HasAddress, SeedPhrase, Wallet};
 use rust_decimal::{dec, Decimal};
 use tokio::task;
 
-use kolme::*;
-use kolme_solana_bridge_client::{keypair::Keypair, signer::Signer};
-use setup::{
+use integration_tests::setup::{
     airdrop, cosmos_deposit_and_register, cosmos_send_osmo, deploy_solana_bridge, kolme_state,
     make_cosmos_client, make_osmo_token, make_solana_client, solana_deposit_and_register,
     solana_mint_to, wait_until, wait_until_init,
 };
+use kolme::*;
+use kolme_solana_bridge_client::{keypair::Keypair, signer::Signer};
 use shared::types::KeyRegistration;
 
-const DB_PATH: &str = "solana-single-test-store.fjall";
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 const COSMOS_SUBMITTER_SEED: &str = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
 
@@ -55,7 +52,7 @@ async fn bridge_transfer() {
         },
     );
 
-    let store = KolmeStore::new_fjall(DB_PATH).unwrap();
+    let store = KolmeStore::new_in_memory();
     let kolme = Kolme::new(SolanaCosmosBridgeApp::default(), DUMMY_CODE_VERSION, store)
         .await
         .unwrap();
@@ -220,9 +217,9 @@ async fn bridge_transfer() {
 }
 
 #[test_log::test(tokio::test)]
-#[ignore = "depends on local Solana validator and localosmosis thus hidden from default tests"]
+#[ignore = "depends on local Solana validator which needs to be restarted after each test thus hidden from default tests"]
 async fn solana_listener_catchup() {
-    use example_six_sigma::SixSigmaApp;
+    use example_six_sigma::{SixSigmaApp, StoreType};
 
     deploy_solana_bridge().await.unwrap();
 
@@ -247,7 +244,7 @@ async fn solana_listener_catchup() {
     let mut tasks = example_six_sigma::run_tasks(
         SixSigmaApp::new_solana(submitter),
         socket_addr,
-        PathBuf::from(String::from(DB_PATH)),
+        StoreType::InMemory,
         None,
         None,
     )
@@ -272,6 +269,7 @@ async fn solana_listener_catchup() {
         }
     );
 
+    tracing::info!("Depositing and registering");
     solana_deposit_and_register(
         &client,
         &user,

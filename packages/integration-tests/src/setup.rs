@@ -26,7 +26,7 @@ pub type SolanaToken = Token<ProgramRpcClientSendTransaction>;
 
 const API_SERVER_ADDR: &str = "http://localhost:3000";
 
-const BRIDGE_PUBKEY: Pubkey =
+pub const BRIDGE_PUBKEY: Pubkey =
     Pubkey::from_str_const("7Y2ftN9nSf4ubzRDiUvcENMeV4S695JEFpYtqdt836pW");
 // const BRIDGE_SEED: &str = "artist output bronze steak monkey bachelor nephew october noble title else matter";
 
@@ -236,11 +236,12 @@ pub async fn solana_deposit_and_register(
     amount: u64,
     keys: Vec<KeyRegistration>,
 ) -> Result<()> {
-    let holder = derive_token_holder_acc(&BRIDGE_PUBKEY, token.get_address(), &sender.pubkey());
+    let holder = derive_token_holder_acc(&BRIDGE_PUBKEY, token.get_address());
     let holder_acc = token
         .get_or_create_associated_account_info(&holder)
         .await?
         .base;
+
     assert_eq!(holder_acc.owner, holder);
     assert_eq!(holder_acc.mint, *token.get_address());
 

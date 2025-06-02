@@ -360,16 +360,22 @@ impl Tasks {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum StoreType {
+    InMemory,
+    Fjall(PathBuf),
+}
+
 pub async fn serve(
     app: SixSigmaApp,
     bind: SocketAddr,
-    db_path: PathBuf,
+    store: StoreType,
     tx_log_path: Option<PathBuf>,
     component: Option<AppComponent>,
 ) -> Result<()> {
     tracing::info!("starting");
 
-    let mut tasks = run_tasks(app, bind, db_path, tx_log_path, component).await?;
+    let mut tasks = run_tasks(app, bind, store, tx_log_path, component).await?;
     while let Some(res) = tasks.set.join_next().await {
         match res {
             Err(e) => {
@@ -390,11 +396,16 @@ pub async fn serve(
 pub async fn run_tasks(
     app: SixSigmaApp,
     bind: SocketAddr,
-    db_path: PathBuf,
+    store: StoreType,
     tx_log_path: Option<PathBuf>,
     component: Option<AppComponent>,
 ) -> Result<Tasks> {
-    let kolme = Kolme::new(app, DUMMY_CODE_VERSION, KolmeStore::new_fjall(db_path)?).await?;
+    let store = match store {
+        StoreType::InMemory => KolmeStore::new_in_memory(),
+        StoreType::Fjall(db_path) => KolmeStore::new_fjall(db_path)?,
+    };
+
+    let kolme = Kolme::new(app, DUMMY_CODE_VERSION, store).await?;
 
     let mut tasks = Tasks {
         set: JoinSet::new(),
@@ -436,7 +447,9 @@ pub async fn run_tasks(
         None => {
             tracing::info!("Running in monolith mode ...");
             tasks.spawn_processor();
+            tracing::info!("Running listener ...");
             tasks.spawn_listener();
+            tracing::info!("Running approver ...");
             tasks.spawn_approver();
             tasks.spawn_submitter();
             tasks.spawn_api_server();
@@ -577,7 +590,7 @@ mod tests {
         let app = tokio::task::spawn(serve(
             SixSigmaApp::new_passthrough(),
             SocketAddr::from_str("[::]:3001").unwrap(),
-            db_path.clone(),
+            StoreType::Fjall(db_path.clone()),
             Some(log_file.path().to_path_buf()),
             None,
         ));

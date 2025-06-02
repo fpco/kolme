@@ -7,12 +7,13 @@ use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use sha_256::Sha256;
 
 use kolme_solana_bridge_client::{
+    derive_token_holder_acc,
     instruction::{account_meta::AccountMeta, Instruction},
     keypair::Keypair,
     message::Message,
     pubkey::{declare_id, Pubkey},
+    regular_tx, signed_tx,
     signer::Signer,
-    spl_client,
     transaction::Transaction,
     transfer_payload, TokenProgram,
 };
@@ -20,7 +21,6 @@ use shared::{
     cryptography::{SecretKey, ThreadRng},
     solana::{
         InitializeIxData, Payload, RegularMsgIxData, SignedAction, SignedMsgIxData, INITIALIZE_IX,
-        REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
     },
     types::ValidatorSet,
 };
@@ -71,6 +71,13 @@ impl Program {
         svm.airdrop(&token_owner.pubkey(), 1000000000).unwrap();
 
         let token = CreateMint::new(&mut svm, &token_owner).send().unwrap();
+
+        // Create the program holder for this token.
+        let holder = token_holder_acc(&token);
+        CreateAssociatedTokenAccount::new(&mut svm, &token_owner, &token)
+            .owner(&holder)
+            .send()
+            .unwrap();
 
         Self {
             svm,
@@ -129,51 +136,17 @@ impl Program {
         data: &RegularMsgIxData,
         token_mints: &[Pubkey],
     ) -> TransactionResult {
-        assert_eq!(data.transfer_amounts.len(), token_mints.len());
+        let blockhash = self.svm.latest_blockhash();
+        let tx = regular_tx(
+            ID,
+            TokenProgram::Legacy,
+            blockhash,
+            sender,
+            data,
+            token_mints,
+        )
+        .unwrap();
 
-        let mut bytes = Vec::with_capacity(1 + borsh::object_length(data).unwrap());
-        bytes.push(REGULAR_IX);
-        data.serialize(&mut bytes).unwrap();
-
-        let accounts = if token_mints.is_empty() {
-            vec![
-                AccountMeta::new(sender.pubkey(), true),
-                AccountMeta::new(STATE_PDA, false),
-            ]
-        } else {
-            let mut accounts = Vec::with_capacity(4 + token_mints.len() * 4);
-            accounts.push(AccountMeta::new(sender.pubkey(), true));
-            accounts.push(AccountMeta::new(STATE_PDA, false));
-            accounts.push(AccountMeta::new(SYSTEM, false));
-            accounts.push(AccountMeta::new(TOKEN, false));
-
-            let sender_pk = sender.pubkey();
-
-            for mint in token_mints {
-                accounts.push(AccountMeta::new_readonly(*mint, false));
-
-                let sender_ata =
-                    spl_client::address::get_associated_token_address(&sender_pk, mint);
-                accounts.push(AccountMeta::new(sender_ata, false));
-
-                let holder = token_holder_acc(mint, &sender_pk);
-                accounts.push(AccountMeta::new(holder, false));
-
-                let holder_ata = spl_client::address::get_associated_token_address(&holder, mint);
-                accounts.push(AccountMeta::new(holder_ata, false));
-
-                if self.svm.get_account(&holder).is_none() {
-                    CreateAssociatedTokenAccount::new(&mut self.svm, sender, mint)
-                        .owner(&holder)
-                        .send()
-                        .unwrap();
-                }
-            }
-
-            accounts
-        };
-
-        let tx = self.make_tx(sender, accounts, bytes);
         let res = self.svm.send_transaction(tx);
 
         if res.is_ok() {
@@ -190,19 +163,9 @@ impl Program {
         data: &SignedMsgIxData,
         additional: &[AccountMeta],
     ) -> TransactionResult {
-        let mut bytes = Vec::with_capacity(1 + borsh::object_length(data).unwrap());
-        bytes.push(SIGNED_IX);
-        data.serialize(&mut bytes).unwrap();
+        let blockhash = self.svm.latest_blockhash();
+        let tx = signed_tx(ID, blockhash, sender, data, additional).unwrap();
 
-        let mut accounts = vec![
-            AccountMeta::new(sender.pubkey(), true),
-            AccountMeta::new(STATE_PDA, false),
-            AccountMeta::new(SYSTEM, false),
-        ];
-
-        accounts.extend_from_slice(additional);
-
-        let tx = self.make_tx(sender, accounts, bytes);
         let res = self.svm.send_transaction(tx);
 
         if res.is_ok() {
@@ -304,13 +267,6 @@ impl Program {
     }
 }
 
-pub fn token_holder_acc(mint: &Pubkey, sender: &Pubkey) -> Pubkey {
-    let seeds = &[
-        TOKEN_HOLDER_SEED,
-        mint.as_array().as_slice(),
-        sender.as_array().as_slice(),
-    ];
-    let (holder, _) = Pubkey::find_program_address(seeds, &ID.into());
-
-    holder
+pub fn token_holder_acc(mint: &Pubkey) -> Pubkey {
+    derive_token_holder_acc(&ID, mint)
 }

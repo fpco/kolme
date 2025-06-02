@@ -169,7 +169,7 @@ pub fn regular_ix(
             );
             accounts.push(AccountMeta::new(sender_ata, false));
 
-            let holder = derive_token_holder_acc(&program_id, mint, &sender);
+            let holder = derive_token_holder_acc(&program_id, mint);
             accounts.push(AccountMeta::new(holder, false));
 
             let holder_ata = spl_client::address::get_associated_token_address_with_program_id(
@@ -200,8 +200,8 @@ pub fn derive_state_pda(program_id: &Pubkey) -> Pubkey {
     pubkey
 }
 
-pub fn derive_token_holder_acc(program_id: &Pubkey, mint: &Pubkey, user: &Pubkey) -> Pubkey {
-    let seeds = token_holder_seeds(mint, user);
+pub fn derive_token_holder_acc(program_id: &Pubkey, mint: &Pubkey) -> Pubkey {
+    let seeds = token_holder_seeds(mint);
     let (holder, _) = Pubkey::find_program_address(&seeds, program_id);
 
     holder
@@ -215,13 +215,12 @@ pub fn transfer_payload(
     to: Pubkey,
     amount: u64,
 ) -> Payload {
-    let holder_seeds = token_holder_seeds(&mint, &to);
+    let holder_seeds = token_holder_seeds(&mint);
 
     let (authority, bump) = Pubkey::find_program_address(&holder_seeds, &program_id);
     let seeds = vec![
         Vec::from(holder_seeds[0]),
         Vec::from(holder_seeds[1]),
-        Vec::from(holder_seeds[2]),
         Vec::from(&[bump]),
     ];
 
@@ -271,12 +270,8 @@ pub fn transfer_payload(
     }
 }
 
-fn token_holder_seeds<'a>(mint: &'a Pubkey, user: &'a Pubkey) -> [&'a [u8]; 3] {
-    [
-        TOKEN_HOLDER_SEED,
-        mint.as_array().as_slice(),
-        user.as_array().as_slice(),
-    ]
+fn token_holder_seeds(mint: &Pubkey) -> [&[u8]; 2] {
+    [TOKEN_HOLDER_SEED, mint.as_array().as_slice()]
 }
 
 impl TokenProgram {

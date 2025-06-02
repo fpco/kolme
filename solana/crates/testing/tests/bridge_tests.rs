@@ -51,7 +51,7 @@ fn sending_funds_works() {
     p.init_default(&sender).unwrap();
 
     let sender_ata_acc = p.make_ata(&sender);
-    let holder_acc = token_holder_acc(&p.token, &sender.pubkey());
+    let holder_acc = token_holder_acc(&p.token);
     let holder_ata_acc = spl_client::address::get_associated_token_address(&holder_acc, &p.token);
 
     let mint_amount = 10_00000000; // 10
@@ -108,6 +108,11 @@ fn signing_multiple_tokens_work() {
         .send()
         .unwrap();
 
+    CreateAssociatedTokenAccount::new(&mut p.svm, &sender, &token_2)
+        .owner(&token_holder_acc(&token_2))
+        .send()
+        .unwrap();
+
     MintTo::new(
         &mut p.svm,
         &p.token_owner,
@@ -117,6 +122,7 @@ fn signing_multiple_tokens_work() {
     )
     .send()
     .unwrap();
+
     MintTo::new(
         &mut p.svm,
         &token_owner,
@@ -136,7 +142,7 @@ fn signing_multiple_tokens_work() {
     p.regular(&sender, &data, &[p.token, token_2]).unwrap();
 
     for (i, token) in [p.token, token_2].iter().enumerate() {
-        let holder_acc = token_holder_acc(token, &sender.pubkey());
+        let holder_acc = token_holder_acc(token);
         let holder_ata_acc = spl_client::address::get_associated_token_address(&holder_acc, token);
 
         let holder_ata: SplAccount = get_spl_account(&p.svm, &holder_ata_acc).unwrap();
@@ -176,7 +182,7 @@ fn signed_transfer() {
     p.init_default(&sender).unwrap();
 
     let sender_ata_acc = p.make_ata(&sender);
-    let holder_acc = token_holder_acc(&p.token, &sender.pubkey());
+    let holder_acc = token_holder_acc(&p.token);
     let holder_ata_acc = spl_client::address::get_associated_token_address(&holder_acc, &p.token);
 
     let mint_amount = 10_00000000; // 10

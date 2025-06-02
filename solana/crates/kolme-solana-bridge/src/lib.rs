@@ -238,11 +238,8 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             }
 
             let mut was_init = false;
-            let seeds = &[
-                TOKEN_HOLDER_SEED,
-                mint_acc.key().as_slice(),
-                sender_acc.key().as_slice(),
-            ];
+            let seeds = &[TOKEN_HOLDER_SEED, mint_acc.key().as_slice()];
+
             let holder: TokenHolderPda =
                 ctx.load_or_init_pda(&sender_acc, &holder_acc, PdaDerivation::new(seeds), || {
                     was_init = true;

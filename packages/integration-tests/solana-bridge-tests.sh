@@ -12,4 +12,3 @@ echo "Shutting down solana-test-validator"
 kill $SOL_VALIDATOR_PID
 
 rm -rf test-ledger/
-rm -rf solana-single-test-store.fjall
