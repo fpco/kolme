@@ -2,11 +2,12 @@ use std::collections::BTreeSet;
 
 use anyhow::Result;
 use kolme::{
-    ConfiguredChains, ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, Processor,
-    SecretKey, ValidatorSet,
+    ConfiguredChains, ExecutionContext, GenesisInfo, GossipBuilder, Kolme, KolmeApp, KolmeStore,
+    Processor, SecretKey, ValidatorSet,
 };
 mod serializers;
 use sha2::{Digest, Sha256};
+use tokio::task::JoinSet;
 
 #[derive(Clone)]
 struct VersionUpgradeTestApp {
@@ -86,8 +87,20 @@ pub async fn processor() -> Result<()> {
 
     let secret = kolme.clone().get_app().secret.clone();
 
-    let processor = Processor::new(kolme, secret);
-    processor.run().await?;
+    let processor = Processor::new(kolme.clone(), secret);
+    let mut tasks = JoinSet::new();
+    tasks.spawn(processor.run());
+
+    let gossip = GossipBuilder::new()
+        .add_listen_port(4546)
+        .disable_mdns()
+        .build(kolme)
+        .await?;
+    tasks.spawn(gossip.run());
+
+    while let Some(result) = tasks.join_next().await {
+        result.unwrap()?;
+    }
 
     Ok(())
 }

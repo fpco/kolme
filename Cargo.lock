@@ -12221,9 +12221,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.5.37",
+ "hex",
  "kolme",
  "merkle-map",
+ "rand 0.8.5",
  "serde",
+ "sha2 0.10.9",
  "tokio",
 ]
 
