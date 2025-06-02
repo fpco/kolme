@@ -15,6 +15,7 @@ struct Opt {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    kolme::init_logger(true, None);
     match Opt::parse().cmd {
         Cmd::Processor => processor().await?,
     }

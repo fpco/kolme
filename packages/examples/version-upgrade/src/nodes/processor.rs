@@ -6,7 +6,6 @@ use crate::VersionUpgradeTestApp;
 use tokio::task::JoinSet;
 
 pub async fn processor() -> Result<()> {
-    kolme::init_logger(true, None);
     let kolme = Kolme::new(
         VersionUpgradeTestApp::default(),
         "1",
