@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::Parser;
 use version_upgrade::processor;
 
@@ -13,8 +14,9 @@ struct Opt {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     match Opt::parse().cmd {
-        Cmd::Processor => processor().await,
+        Cmd::Processor => processor().await?,
     }
+    Ok(())
 }

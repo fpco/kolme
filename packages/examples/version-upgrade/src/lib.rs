@@ -1,9 +1,51 @@
+use std::collections::BTreeSet;
+
 use anyhow::Result;
-use kolme::{ExecutionContext, KolmeApp};
+use kolme::{
+    ConfiguredChains, ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, Processor,
+    SecretKey, ValidatorSet,
+};
 mod serializers;
+use sha2::{Digest, Sha256};
 
 #[derive(Clone)]
-struct VersionUpgradeTestApp {}
+struct VersionUpgradeTestApp {
+    secret: SecretKey,
+    genesis: GenesisInfo,
+}
+
+impl VersionUpgradeTestApp {
+    fn get_secret() -> SecretKey {
+        // long hex string is boring, its better to use human-readable one!
+        let mut hasher = Sha256::new();
+        hasher.update("version upgrade test app");
+        let hashed = hex::encode(hasher.finalize());
+        SecretKey::from_hex(&hashed).unwrap()
+    }
+}
+
+impl Default for VersionUpgradeTestApp {
+    fn default() -> Self {
+        let secret = Self::get_secret();
+        let public_key = secret.public_key();
+
+        let keys = BTreeSet::from([public_key]);
+
+        let genesis = GenesisInfo {
+            kolme_ident: String::from("version upgrade test genesis"),
+            validator_set: ValidatorSet {
+                processor: public_key,
+                listeners: keys.clone(),
+                needed_listeners: 1,
+                approvers: keys,
+                needed_approvers: 1,
+            },
+            chains: ConfiguredChains::default(),
+        };
+
+        Self { secret, genesis }
+    }
+}
 
 #[derive(Clone, Debug)]
 struct VersionUpgradeTestState {}
@@ -16,8 +58,8 @@ impl KolmeApp for VersionUpgradeTestApp {
 
     type Message = VersionUpgradeTestMessage;
 
-    fn genesis_info(&self) -> &kolme::GenesisInfo {
-        todo!()
+    fn genesis_info(&self) -> &GenesisInfo {
+        &self.genesis
     }
 
     fn new_state() -> Result<Self::State> {
@@ -33,6 +75,19 @@ impl KolmeApp for VersionUpgradeTestApp {
     }
 }
 
-pub async fn processor() {
-    println!("I'm a processor, yay!")
+pub async fn processor() -> Result<()> {
+    kolme::init_logger(true, None);
+    let kolme = Kolme::new(
+        VersionUpgradeTestApp::default(),
+        "1",
+        KolmeStore::new_fjall("version-upgrade-test.fjall")?,
+    )
+    .await?;
+
+    let secret = kolme.clone().get_app().secret.clone();
+
+    let processor = Processor::new(kolme, secret);
+    processor.run().await?;
+
+    Ok(())
 }

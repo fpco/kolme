@@ -6,7 +6,11 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true }
+hex.workspace = true
 kolme.workspace = true
 merkle-map.workspace = true
+rand = "0.8"
 serde = { version = "1.0.219", features = ["derive"] }
+sha2 = "0.10.9"
 tokio = { workspace = true }
+
