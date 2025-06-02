@@ -9,7 +9,7 @@ base64 = "0.22.1"
 parameterized = "2.0.0"
 parking_lot = "0.12.3"
 rust_decimal = { workspace = true }
-serde = "1.0.218"
+serde = { workspace = true }
 serde_json = { workspace = true }
 shared = { workspace = true, features = ["realcryptography"] }
 thiserror = "2.0.12"
