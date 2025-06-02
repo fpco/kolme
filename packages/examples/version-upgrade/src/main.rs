@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use version_upgrade::processor;
+use version_upgrade::nodes::processor::processor;
 
 #[derive(Parser)]
 enum Cmd {
