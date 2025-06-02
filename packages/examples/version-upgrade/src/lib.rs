@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use kolme::{ConfiguredChains, ExecutionContext, GenesisInfo, KolmeApp, SecretKey, ValidatorSet};
 mod serializers;
-use sha2::{Digest, Sha256};
+
+use crate::keys::application_secret;
+pub mod keys;
 pub mod nodes;
 
 #[derive(Clone)]
@@ -14,11 +16,7 @@ struct VersionUpgradeTestApp {
 
 impl VersionUpgradeTestApp {
     fn get_secret() -> SecretKey {
-        // long hex string is boring, its better to use human-readable one!
-        let mut hasher = Sha256::new();
-        hasher.update("version upgrade test app");
-        let hashed = hex::encode(hasher.finalize());
-        SecretKey::from_hex(&hashed).unwrap()
+        application_secret()
     }
 }
 

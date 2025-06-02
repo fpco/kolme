@@ -34,7 +34,6 @@ merkle-store-fjall = { path = "packages/merkle-store-fjall" }
 quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
 test-log = { version = "0.2", features = ["trace"] }
-thiserror = "2.0.12"
 
 [profile.release]
 debug = 0
