@@ -6,12 +6,13 @@ use crate::{VersionUpgradeTestApp, BOOTSTRAP_ADDRESS};
 use tokio::task::JoinSet;
 
 pub async fn processor(bootstrap: bool, version: &str) -> Result<()> {
-    let kolme = Kolme::new(
-        VersionUpgradeTestApp::default(),
-        version,
-        KolmeStore::new_fjall("version-upgrade-test.fjall")?,
-    )
-    .await?;
+    // persistent store is only for bootstrap node
+    let store = if bootstrap {
+        KolmeStore::new_fjall(format!("version-upgrade-test-v{version}.fjall"))?
+    } else {
+        KolmeStore::new_in_memory()
+    };
+    let kolme = Kolme::new(VersionUpgradeTestApp::default(), version, store).await?;
 
     let secret = kolme.clone().get_app().secret.clone();
 
