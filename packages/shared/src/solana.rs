@@ -17,13 +17,13 @@ pub struct InitializeIxData {
     pub set: ValidatorSet,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct RegularMsgIxData {
     pub keys: Vec<KeyRegistration>,
     pub transfer_amounts: Vec<u64>,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct SignedMsgIxData {
     /// Signature from the processor
     pub processor: SignatureWithRecovery,
@@ -33,7 +33,7 @@ pub struct SignedMsgIxData {
     pub payload: String,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct Payload {
     /// Monotonically increasing ID to ensure messages are sent in the correct order.
     /// It must be included in the payload in order to prevent anyone to from re-submitting
@@ -42,7 +42,7 @@ pub struct Payload {
     pub action: SignedAction,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub enum SignedAction {
     Execute(ExecuteAction),
     SelfReplace {
@@ -57,7 +57,7 @@ pub enum SignedAction {
     },
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct ExecuteAction {
     pub program_id: Pubkey,
     pub accounts: Vec<InstructionAccount>,
@@ -65,26 +65,26 @@ pub struct ExecuteAction {
     pub signer: Option<SignerAccount>,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct InstructionAccount {
     pub pubkey: Pubkey,
     pub is_writable: bool,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct SignerAccount {
     pub index: u8,
     pub seeds: Vec<Vec<u8>>,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct BridgeMessage {
     pub id: u64,
     pub wallet: Pubkey,
     pub ty: Message,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub enum Message {
     Regular {
         funds: Vec<Token>,
@@ -95,7 +95,7 @@ pub enum Message {
     },
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct Token {
     pub mint: Pubkey,
     pub amount: u64,

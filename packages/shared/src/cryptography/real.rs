@@ -391,7 +391,7 @@ impl borsh::de::BorshDeserialize for RecoveryId {
     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
         use borsh::io::{Error, ErrorKind};
 
-        let byte: u8 = borsh::de::BorshDeserialize::try_from_reader(reader)?;
+        let byte = u8::deserialize_reader(reader)?;
 
         match Self::from_byte(byte) {
             Ok(id) => Ok(id),
