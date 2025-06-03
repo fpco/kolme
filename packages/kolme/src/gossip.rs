@@ -677,7 +677,7 @@ impl<App: KolmeApp> Gossip<App> {
             next: their_next,
             peer,
             timestamp: _,
-            latest_block: _,
+            latest_block,
         } = match report_block_height {
             Some(report) => report,
             None => return,
@@ -698,6 +698,13 @@ impl<App: KolmeApp> Gossip<App> {
         if their_highest < our_next {
             // They don't have any new blocks for us.
             return;
+        }
+
+        if let Some(latest_block) = latest_block {
+            self.kolme
+                .notify(Notification::LatestBlock(Arc::unwrap_or_clone(
+                    latest_block,
+                )));
         }
 
         let do_state = match self.sync_mode {
