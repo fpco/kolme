@@ -4,17 +4,17 @@ use tokio::task::JoinSet;
 
 use crate::{keys::processor_peer_id, VersionUpgradeTestApp, BOOTSTRAP_ADDRESS};
 
-pub async fn client() -> Result<()> {
+pub async fn client(version: &str) -> Result<()> {
     let kolme = Kolme::new(
         VersionUpgradeTestApp::default(),
-        "1",
+        version,
         KolmeStore::new_in_memory(),
     )
     .await?;
 
     let gossip = GossipBuilder::new()
         .add_bootstrap(processor_peer_id(), BOOTSTRAP_ADDRESS.parse()?)
-        .set_local_display_name("version-upgrade-client")
+        .set_local_display_name(&format!("version-upgrade-client-{version}"))
         .build(kolme.clone())
         .await?;
 

@@ -5,10 +5,10 @@ use crate::keys::{processor_keypair, processor_peer_id};
 use crate::{VersionUpgradeTestApp, BOOTSTRAP_ADDRESS};
 use tokio::task::JoinSet;
 
-pub async fn processor(bootstrap: bool) -> Result<()> {
+pub async fn processor(bootstrap: bool, version: &str) -> Result<()> {
     let kolme = Kolme::new(
         VersionUpgradeTestApp::default(),
-        "1",
+        version,
         KolmeStore::new_fjall("version-upgrade-test.fjall")?,
     )
     .await?;
@@ -20,7 +20,7 @@ pub async fn processor(bootstrap: bool) -> Result<()> {
     tasks.spawn(processor.run());
 
     let gossip_builder = GossipBuilder::new()
-        .set_local_display_name("version-upgrade-processor")
+        .set_local_display_name(&format!("version-upgrade-processor-{version}"))
         .disable_mdns();
 
     let gossip_builder = if bootstrap {

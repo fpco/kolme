@@ -16,14 +16,18 @@ enum Cmd {
 struct Opt {
     #[clap(subcommand)]
     cmd: Cmd,
+    #[arg(long, default_value_t = String::from("1"))]
+    version: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     kolme::init_logger(true, None);
-    match Opt::parse().cmd {
-        Cmd::Processor { bootstrap } => processor(bootstrap).await?,
-        Cmd::Client => client().await?,
+    let opts = Opt::parse();
+
+    match opts.cmd {
+        Cmd::Processor { bootstrap } => processor(bootstrap, &opts.version).await?,
+        Cmd::Client => client(&opts.version).await?,
     }
     Ok(())
 }
