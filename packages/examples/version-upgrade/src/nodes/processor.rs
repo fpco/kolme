@@ -1,11 +1,11 @@
 use anyhow::Result;
 use kolme::{GossipBuilder, Kolme, KolmeStore, Processor};
 
-use crate::keys::processor_keypair;
-use crate::VersionUpgradeTestApp;
+use crate::keys::{processor_keypair, processor_peer_id};
+use crate::{VersionUpgradeTestApp, BOOTSTRAP_ADDRESS};
 use tokio::task::JoinSet;
 
-pub async fn processor() -> Result<()> {
+pub async fn processor(bootstrap: bool) -> Result<()> {
     let kolme = Kolme::new(
         VersionUpgradeTestApp::default(),
         "1",
@@ -19,13 +19,19 @@ pub async fn processor() -> Result<()> {
     let mut tasks = JoinSet::new();
     tasks.spawn(processor.run());
 
-    let gossip = GossipBuilder::new()
-        .add_listen_port(4546)
+    let gossip_builder = GossipBuilder::new()
         .set_local_display_name("version-upgrade-processor")
-        .set_keypair(processor_keypair())
-        .disable_mdns()
-        .build(kolme)
-        .await?;
+        .disable_mdns();
+
+    let gossip_builder = if bootstrap {
+        gossip_builder
+            .add_listen_port(4546)
+            .set_keypair(processor_keypair())
+    } else {
+        gossip_builder.add_bootstrap(processor_peer_id(), BOOTSTRAP_ADDRESS.parse()?)
+    };
+
+    let gossip = gossip_builder.build(kolme).await?;
     tasks.spawn(gossip.run());
 
     while let Some(result) = tasks.join_next().await {

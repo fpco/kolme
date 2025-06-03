@@ -2,7 +2,7 @@ use anyhow::Result;
 use kolme::{GossipBuilder, Kolme, KolmeStore};
 use tokio::task::JoinSet;
 
-use crate::{keys::processor_peer_id, VersionUpgradeTestApp};
+use crate::{keys::processor_peer_id, VersionUpgradeTestApp, BOOTSTRAP_ADDRESS};
 
 pub async fn client() -> Result<()> {
     let kolme = Kolme::new(
@@ -13,7 +13,7 @@ pub async fn client() -> Result<()> {
     .await?;
 
     let gossip = GossipBuilder::new()
-        .add_bootstrap(processor_peer_id(), "/dns4/localhost/tcp/4546".parse()?)
+        .add_bootstrap(processor_peer_id(), BOOTSTRAP_ADDRESS.parse()?)
         .set_local_display_name("version-upgrade-client")
         .build(kolme.clone())
         .await?;

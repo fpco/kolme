@@ -8,6 +8,8 @@ use crate::keys::application_secret;
 pub mod keys;
 pub mod nodes;
 
+pub const BOOTSTRAP_ADDRESS: &str = "/dns4/localhost/tcp/4546";
+
 #[derive(Clone)]
 struct VersionUpgradeTestApp {
     secret: SecretKey,
