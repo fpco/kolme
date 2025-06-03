@@ -237,6 +237,7 @@ pub async fn broadcast(
         nonce,
         created: jiff::Timestamp::now(),
         messages: vec![Message::App(message)],
+        max_height: None,
     }
     .sign(&secret)?;
 

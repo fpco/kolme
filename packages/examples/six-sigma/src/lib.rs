@@ -499,6 +499,7 @@ impl TxLogger {
                     LogOutput::NewBlock { height, messages }
                 }
                 Notification::GenesisInstantiation { .. } => LogOutput::GenesisInstantiation,
+                Notification::LatestBlock(_) => continue,
             };
             serde_json::to_writer(&file, &output)?;
             writeln!(file)?;
@@ -534,6 +535,7 @@ pub async fn broadcast(message: String, secret: String, host: String) -> Result<
         nonce,
         created: jiff::Timestamp::now(),
         messages: vec![Message::App(message)],
+        max_height: None,
     }
     .sign(&secret)?;
     #[derive(serde::Deserialize)]

@@ -4099,6 +4099,7 @@ dependencies = [
  "futures-util",
  "hex",
  "jiff",
+ "kademlia-discovery",
  "kolme-solana-bridge-client",
  "kolme-store",
  "kolme-store-postgresql",

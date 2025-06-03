@@ -933,11 +933,53 @@ pub struct Transaction<AppMessage> {
     pub nonce: AccountNonce,
     pub created: Timestamp,
     pub messages: Vec<Message<AppMessage>>,
+    pub max_height: Option<BlockHeight>,
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
     pub fn sign(self, key: &SecretKey) -> Result<SignedTransaction<AppMessage>> {
         Ok(SignedTransaction(TaggedJson::new(self)?.sign(key)?))
+    }
+}
+
+/// A helper struct for building transactions.
+#[derive(Debug, Clone)]
+pub struct TxBuilder<AppMessage> {
+    pub messages: Vec<Message<AppMessage>>,
+    pub max_height: Option<BlockHeight>,
+}
+
+impl<AppMessage> Default for TxBuilder<AppMessage> {
+    fn default() -> Self {
+        TxBuilder {
+            messages: vec![],
+            max_height: None,
+        }
+    }
+}
+
+impl<AppMessage> TxBuilder<AppMessage> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_message(mut self, message: Message<AppMessage>) -> Self {
+        self.messages.push(message);
+        self
+    }
+
+    pub fn with_max_height(mut self, max_height: BlockHeight) -> Self {
+        self.max_height = Some(max_height);
+        self
+    }
+}
+
+impl<AppMessage> From<Vec<Message<AppMessage>>> for TxBuilder<AppMessage> {
+    fn from(messages: Vec<Message<AppMessage>>) -> Self {
+        TxBuilder {
+            messages,
+            max_height: None,
+        }
     }
 }
 
@@ -1528,12 +1570,23 @@ pub enum Notification<AppMessage> {
     /// signed by the real processor should be respected for dropping
     /// transactions from the mempool.
     FailedTransaction(SignedTaggedJson<FailedTransaction>),
+    /// Notification from the processor of the latest known block.
+    LatestBlock(SignedTaggedJson<LatestBlock>),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FailedTransaction {
     pub txhash: TxHash,
+    /// Block height we attempted to generate.
+    pub proposed_height: BlockHeight,
     pub error: KolmeError,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct LatestBlock {
+    pub height: BlockHeight,
+    /// When this message was generated.
+    pub when: jiff::Timestamp,
 }
 
 /// Represents distinct occurrences in the core of Kolme that could be relevant to users.

@@ -14,7 +14,7 @@ tokio = { workspace = true }
 shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
 rust_decimal = { workspace = true }
 reqwest = { version = "0.12.15", features = ["json"] }
-serde = "1.0.219"
+serde = { workspace = true }
 tracing = "0.1.41"
 kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-client" }
 solana-client = "2.2.7"

@@ -13,4 +13,4 @@ sqlx = { version = "0.8.5", features = ["macros", "migrate", "runtime-tokio", "p
 tracing = "0.1.41"
 tokio.workspace = true
 serde_json.workspace = true
-serde = "1.0.219"
+serde = { workspace = true }

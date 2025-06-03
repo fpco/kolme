@@ -8,6 +8,7 @@ pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
     secrets: HashMap<PublicKey, SecretKey>,
     ready: tokio::sync::watch::Sender<bool>,
+    latest_block_delay: tokio::time::Duration,
 }
 
 impl<App: KolmeApp> Processor<App> {
@@ -16,11 +17,16 @@ impl<App: KolmeApp> Processor<App> {
             kolme,
             secrets: std::iter::once((secret.public_key(), secret)).collect(),
             ready: tokio::sync::watch::channel(false).0,
+            latest_block_delay: tokio::time::Duration::from_secs(10),
         }
     }
 
     pub fn add_secret(&mut self, secret: SecretKey) {
         self.secrets.insert(secret.public_key(), secret);
+    }
+
+    pub fn set_latest_block_delay(&mut self, latest_block_delay: tokio::time::Duration) {
+        self.latest_block_delay = latest_block_delay;
     }
 
     pub async fn run(self) -> Result<()> {
@@ -43,26 +49,43 @@ impl<App: KolmeApp> Processor<App> {
 
         self.approve_actions_all(&chains).await;
 
-        loop {
-            let tx = self.kolme.wait_on_mempool().await;
-            let txhash = tx.hash();
-            let tx = Arc::unwrap_or_clone(tx);
+        let producer_loop = async {
+            loop {
+                let tx = self.kolme.wait_on_mempool().await;
+                let txhash = tx.hash();
+                let tx = Arc::unwrap_or_clone(tx);
 
-            // Remove the transaction from the mempool. Either it will succeed, in
-            // which case it's been added, or it will fail, in which case we want
-            // to give up.
-            self.kolme.remove_from_mempool(txhash);
+                // Remove the transaction from the mempool. Either it will succeed, in
+                // which case it's been added, or it will fail, in which case we want
+                // to give up.
+                self.kolme.remove_from_mempool(txhash);
 
-            match self.add_transaction(tx).await {
-                Ok(()) => {
-                    // TODO See https://github.com/fpco/kolme/issues/122
-                    self.approve_actions_all(&chains).await;
-                }
-                Err(e) => {
-                    tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
+                match self.add_transaction(tx).await {
+                    Ok(()) => {
+                        // TODO See https://github.com/fpco/kolme/issues/122
+                        self.approve_actions_all(&chains).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
+                    }
                 }
             }
-        }
+        };
+
+        let latest_loop = async {
+            loop {
+                if let Err(e) = self.emit_latest().await {
+                    tracing::error!("Error emitting latest block: {e}");
+                }
+
+                tokio::time::sleep(self.latest_block_delay).await;
+            }
+        };
+
+        tokio::join!(producer_loop, latest_loop);
+
+        // TODO: this function shouldn't return Result
+        Ok(())
     }
 
     async fn ensure_genesis_event(&self) -> Result<()> {
@@ -96,13 +119,16 @@ impl<App: KolmeApp> Processor<App> {
             .read()
             .create_signed_transaction(secret, vec![Message::<App::Message>::Genesis(info)])?;
 
-        let executed_block = self.construct_block(signed).await?;
+        let executed_block = self
+            .construct_block(signed, kolme.get_next_height())
+            .await?;
         if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
                 self.kolme.resync().await?;
             }
             Err(e)
         } else {
+            self.emit_latest().await.ok();
             Ok(())
         }
     }
@@ -117,8 +143,9 @@ impl<App: KolmeApp> Processor<App> {
         if self.kolme.read().get_tx_height(txhash).await?.is_some() {
             return Ok(());
         }
+        let proposed_height = self.kolme.read().get_next_height();
         let res = async {
-            let executed_block = self.construct_block(tx.clone()).await?;
+            let executed_block = self.construct_block(tx.clone(), proposed_height).await?;
             self.kolme.add_executed_block(executed_block).await
         }
         .await;
@@ -130,6 +157,7 @@ impl<App: KolmeApp> Processor<App> {
                 let failed = (|| {
                     let failed = FailedTransaction {
                         txhash,
+                        proposed_height,
                         error: match e.downcast_ref::<KolmeError>() {
                             Some(e) => e.clone(),
                             None => KolmeError::Other(e.to_string()),
@@ -148,12 +176,14 @@ impl<App: KolmeApp> Processor<App> {
                 }
             }
         }
+        self.emit_latest().await.ok();
         res
     }
 
     async fn construct_block(
         &self,
         tx: SignedTransaction<App::Message>,
+        proposed_height: BlockHeight,
     ) -> Result<ExecutedBlock<App>> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
@@ -177,11 +207,22 @@ impl<App: KolmeApp> Processor<App> {
             .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
             .await?;
 
+        if let Some(max_height) = tx.0.message.as_inner().max_height {
+            if max_height < proposed_height {
+                return Err(KolmeError::PastMaxHeight {
+                    txhash,
+                    max_height,
+                    proposed_height,
+                }
+                .into());
+            }
+        }
+
         let approved_block = Block {
             tx,
             timestamp: now,
             processor: secret.public_key(),
-            height: kolme.get_next_height(),
+            height: proposed_height,
             parent: kolme.get_current_block_hash(),
             framework_state: kolme.get_merkle_manager().serialize(&framework_state)?.hash,
             app_state: kolme.get_merkle_manager().serialize(&app_state)?.hash,
@@ -251,6 +292,25 @@ impl<App: KolmeApp> Processor<App> {
         std::mem::drop(kolme);
         self.add_transaction(tx).await?;
 
+        Ok(())
+    }
+
+    async fn emit_latest(&self) -> Result<()> {
+        let height = self
+            .kolme
+            .read()
+            .get_next_height()
+            .prev()
+            .context("Emit latest block: no blocks available")?;
+        let latest = LatestBlock {
+            height,
+            when: jiff::Timestamp::now(),
+        };
+        let json = TaggedJson::new(latest)?;
+        let kolme = self.kolme.read();
+        let secret = self.get_correct_secret(&kolme)?;
+        let signed = json.sign(secret)?;
+        self.kolme.notify(Notification::LatestBlock(signed));
         Ok(())
     }
 }

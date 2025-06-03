@@ -9,5 +9,5 @@ rand = "0.8"
 tokio = { workspace = true }
 clap = { workspace = true }
 kolme = { workspace = true }
-libp2p = { workspace = true, features = ["rsa"] }
+libp2p = { workspace = true, features = ["rsa", "dns"] }
 anyhow = { workspace = true }

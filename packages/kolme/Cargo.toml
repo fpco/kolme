@@ -23,13 +23,13 @@ base64 = "0.22.1"
 jiff = { workspace = true }
 kolme-store.workspace = true
 kolme-store-postgresql.workspace = true
-libp2p = { workspace = true, features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "gossipsub", "macros", "quic", "request-response", "cbor", "rsa"] }
+libp2p = { workspace = true, features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "dns", "gossipsub", "macros", "quic", "request-response", "cbor", "rsa"] }
 merkle-map = { workspace = true }
 parking_lot = "0.12.3"
 rand = "0.8"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }
 rust_decimal = { workspace = true, features = ["macros"] }
-serde = { version = "1.0.218", features = ["derive", "rc"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
 strum = { version = "0.27.1", features = ["derive"] }
@@ -48,3 +48,4 @@ hex.workspace = true
 [dev-dependencies]
 quickcheck = { workspace = true }
 tempfile = "3.18.0"
+kademlia-discovery = { path = "../examples/kademlia-discovery" }
