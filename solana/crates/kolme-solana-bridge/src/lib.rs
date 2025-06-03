@@ -134,7 +134,7 @@ fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError>
         .map_err(|_| ProgramError::BorshIoError)?;
 
     if let Err(e) = ix.set.validate() {
-        log!("Validator set validation error: {}", e.to_string());
+        log!("Validator set validation error: {}", e);
 
         return Err(InitIxError::ValidatorSetError.into());
     }

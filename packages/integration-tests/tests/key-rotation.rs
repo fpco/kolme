@@ -443,11 +443,6 @@ async fn test_solana_contract_update(self_replace: bool) {
                 .await
                 .unwrap()
         },
-        // async {
-        //     airdrop(&solana, &withdrawal_dest.pubkey(), 10000000)
-        //         .await
-        //         .unwrap()
-        // },
     );
 
     let osmo = result.0;
