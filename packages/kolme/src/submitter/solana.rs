@@ -1,12 +1,11 @@
-use std::{ops::Deref, str::FromStr};
+use std::str::FromStr;
 
 use base64::Engine;
 use borsh::BorshDeserialize;
 use kolme_solana_bridge_client::{
     init_tx, instruction::account_meta::AccountMeta, keypair::Keypair, pubkey::Pubkey, signed_tx,
-    InitializeIxData, Payload, Secp256k1PubkeyCompressed, Secp256k1Signature, Signature,
-    SignedMsgIxData,
 };
+use shared::solana::{InitializeIxData, Payload, SignedAction, SignedMsgIxData};
 
 use super::*;
 
@@ -14,20 +13,9 @@ pub async fn instantiate(
     client: &SolanaClient,
     keypair: &Keypair,
     program_id: &str,
-    args: ValidatorSet,
+    set: ValidatorSet,
 ) -> Result<()> {
-    let needed_approvers = u8::try_from(args.needed_approvers)?;
-    let mut executors = Vec::with_capacity(args.approvers.len());
-
-    for a in args.approvers {
-        executors.push(Secp256k1PubkeyCompressed(a.as_bytes().deref().try_into()?));
-    }
-
-    let data = InitializeIxData {
-        needed_executors: needed_approvers,
-        processor: Secp256k1PubkeyCompressed(args.processor.as_bytes().deref().try_into()?),
-        executors,
-    };
+    let data = InitializeIxData { set };
 
     let program_pubkey = Pubkey::from_str(program_id)?;
     let blockhash = client.get_latest_blockhash().await?;
@@ -51,36 +39,28 @@ pub async fn execute(
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
 
     let program_id = Pubkey::from_str(program_id)?;
-    let mut metas: Vec<AccountMeta> = Vec::with_capacity(1 + payload.accounts.len());
-    metas.push(AccountMeta {
-        pubkey: Pubkey::new_from_array(payload.program_id),
-        is_writable: true,
-        is_signer: false,
-    });
+    let metas = if let SignedAction::Execute(ref action) = payload.action {
+        let mut metas: Vec<AccountMeta> = Vec::with_capacity(1 + action.accounts.len());
+        metas.push(AccountMeta {
+            pubkey: Pubkey::new_from_array(action.program_id),
+            is_writable: true,
+            is_signer: false,
+        });
 
-    metas.extend(payload.accounts.iter().map(|x| AccountMeta {
-        pubkey: Pubkey::new_from_array(x.pubkey),
-        is_writable: x.is_writable,
-        is_signer: false,
-    }));
+        metas.extend(action.accounts.iter().map(|x| AccountMeta {
+            pubkey: Pubkey::new_from_array(x.pubkey),
+            is_writable: x.is_writable,
+            is_signer: false,
+        }));
 
-    let mut executors = Vec::with_capacity(approvals.len());
-
-    for a in approvals.values() {
-        let sig = Signature {
-            signature: Secp256k1Signature(a.sig.to_bytes().deref().try_into()?),
-            recovery_id: a.recid.to_byte(),
-        };
-
-        executors.push(sig);
-    }
+        metas
+    } else {
+        vec![]
+    };
 
     let data = SignedMsgIxData {
-        processor: Signature {
-            signature: Secp256k1Signature(processor.sig.to_bytes().deref().try_into()?),
-            recovery_id: processor.recid.to_byte(),
-        },
-        executors,
+        processor,
+        approvers: approvals.values().copied().collect(),
         payload: payload_b64,
     };
 

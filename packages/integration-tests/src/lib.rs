@@ -1,3 +1,5 @@
+pub mod setup;
+
 use std::{
     path::{Path, PathBuf},
     sync::LazyLock,

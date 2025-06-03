@@ -1,4 +1,4 @@
-use std::{collections::btree_map::BTreeMap, ops::Deref, sync::Arc, time::Duration};
+use std::{collections::btree_map::BTreeMap, sync::Arc, time::Duration};
 
 use anyhow::{ensure, Result};
 use cosmos::{
@@ -7,14 +7,11 @@ use cosmos::{
 };
 use kolme::*;
 use kolme_solana_bridge_client::{
-    derive_token_holder_acc, keypair::Keypair, pubkey::Pubkey, signer::Signer,
-    KeyRegistration as SolanaKeyRegistration, RegularMsgIxData, Secp256k1PubkeyCompressed,
-    Secp256k1Signature, Signature, TokenProgram,
+    derive_token_holder_acc, keypair::Keypair, pubkey::Pubkey, signer::Signer, TokenProgram,
 };
 use rust_decimal::Decimal;
 use shared::{
-    cosmos::{ExecuteMsg as CosmosExecute, KeyRegistration as CosmosKeyRegistration},
-    cryptography::PublicKey,
+    cosmos::ExecuteMsg as CosmosExecute, solana::RegularMsgIxData, types::KeyRegistration,
 };
 use solana_client::nonblocking::rpc_client::RpcClient as SolanaClient;
 use solana_commitment_config::CommitmentConfig;
@@ -29,7 +26,7 @@ pub type SolanaToken = Token<ProgramRpcClientSendTransaction>;
 
 const API_SERVER_ADDR: &str = "http://localhost:3000";
 
-const BRIDGE_PUBKEY: Pubkey =
+pub const BRIDGE_PUBKEY: Pubkey =
     Pubkey::from_str_const("7Y2ftN9nSf4ubzRDiUvcENMeV4S695JEFpYtqdt836pW");
 // const BRIDGE_SEED: &str = "artist output bronze steak monkey bachelor nephew october noble title else matter";
 
@@ -237,13 +234,14 @@ pub async fn solana_deposit_and_register(
     sender: &Keypair,
     token: &SolanaToken,
     amount: u64,
-    keys: Vec<SolanaKeyRegistration>,
+    keys: Vec<KeyRegistration>,
 ) -> Result<()> {
-    let holder = derive_token_holder_acc(&BRIDGE_PUBKEY, token.get_address(), &sender.pubkey());
+    let holder = derive_token_holder_acc(&BRIDGE_PUBKEY, token.get_address());
     let holder_acc = token
         .get_or_create_associated_account_info(&holder)
         .await?
         .base;
+
     assert_eq!(holder_acc.owner, holder);
     assert_eq!(holder_acc.mint, *token.get_address());
 
@@ -276,7 +274,7 @@ pub async fn cosmos_deposit_and_register(
     contract: &str,
     sender: &Wallet,
     amount: u128,
-    keys: Vec<CosmosKeyRegistration>,
+    keys: Vec<KeyRegistration>,
 ) -> Result<()> {
     tracing::info!(
         "{} depositing to Cosmos bridge contract.",
@@ -296,28 +294,6 @@ pub async fn cosmos_deposit_and_register(
         .await?;
 
     Ok(())
-}
-
-pub fn solana_key_registration(sender: &Pubkey, key: &SecretKey) -> SolanaKeyRegistration {
-    let signature = key.sign_prehash_recoverable(sender.to_bytes()).unwrap();
-    let signature = Signature {
-        signature: Secp256k1Signature(signature.sig.to_bytes().deref().try_into().unwrap()),
-        recovery_id: signature.recid.to_byte(),
-    };
-
-    let key = solana_pubkey(&key.public_key());
-
-    SolanaKeyRegistration { signature, key }
-}
-
-pub fn solana_pubkey(pubkey: &PublicKey) -> Secp256k1PubkeyCompressed {
-    Secp256k1PubkeyCompressed(
-        pubkey
-            .as_bytes()
-            .deref()
-            .try_into()
-            .expect("Invalid Secp256k1 pubkey"),
-    )
 }
 
 pub async fn kolme_state(client: &reqwest::Client) -> Result<KolmeState> {

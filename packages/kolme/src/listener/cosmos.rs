@@ -112,15 +112,10 @@ pub(crate) fn to_kolme_message<T>(
             keys,
         } => {
             let mut new_funds = Vec::with_capacity(funds.len());
-            let mut new_keys = Vec::with_capacity(keys.len());
 
             for Coin { denom, amount } in funds {
                 let amount = amount.u128();
                 new_funds.push(BridgedAssetAmount { denom, amount });
-            }
-
-            for key in keys {
-                new_keys.push(key);
             }
 
             Message::Listener {
@@ -129,7 +124,7 @@ pub(crate) fn to_kolme_message<T>(
                 event: BridgeEvent::Regular {
                     wallet: Wallet(wallet),
                     funds: new_funds,
-                    keys: new_keys,
+                    keys,
                 },
             }
         }

@@ -1,14 +1,14 @@
 #[cfg(feature = "realcryptography")]
 mod real;
 
-#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm"))]
-mod cosmwasm;
+#[cfg(all(not(feature = "realcryptography"), feature = "chaincryptography"))]
+mod chain;
 
 #[cfg(feature = "realcryptography")]
 pub use real::*;
 
-#[cfg(all(not(feature = "realcryptography"), feature = "cosmwasm"))]
-pub use cosmwasm::*;
+#[cfg(all(not(feature = "realcryptography"), feature = "chaincryptography"))]
+pub use chain::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CompressPublicKeyError {
@@ -47,6 +47,10 @@ pub fn compress_public_key(uncompressed: &[u8]) -> Result<[u8; 33], CompressPubl
     Ok(res)
 }
 
+#[cfg_attr(
+    feature = "solana",
+    derive(borsh::BorshSerialize, borsh::BorshDeserialize)
+)]
 #[derive(
     serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord,
 )]

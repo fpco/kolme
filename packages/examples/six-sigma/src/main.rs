@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
-use example_six_sigma::{broadcast, serve, state, AppComponent, SixSigmaApp};
+use example_six_sigma::{broadcast, serve, state, AppComponent, SixSigmaApp, StoreType};
 use kolme::SecretKey;
 
 #[derive(clap::Parser)]
@@ -55,7 +55,7 @@ async fn main_inner() -> Result<()> {
             serve(
                 SixSigmaApp::new_cosmos(),
                 bind,
-                db_path,
+                StoreType::Fjall(db_path),
                 tx_log_path,
                 component,
             )

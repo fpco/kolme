@@ -1,215 +1,285 @@
-#[cfg(feature = "client")]
-mod client;
-
-#[cfg(feature = "client")]
-pub use client::*;
-
-#[cfg(feature = "client")]
-pub use solana_pubkey as pubkey;
-
-#[cfg(feature = "client")]
-pub use solana_keypair as keypair;
-
-#[cfg(feature = "client")]
-pub use solana_signer as signer;
-
-#[cfg(feature = "client")]
+pub use solana_hash as hash;
 pub use solana_instruction as instruction;
+pub use solana_keypair as keypair;
+pub use solana_message as message;
+pub use solana_pubkey as pubkey;
+pub use solana_signer as signer;
+pub use solana_transaction as transaction;
+pub use spl_associated_token_account_client as spl_client;
 
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshSerialize;
+use hash::Hash;
+use instruction::{account_meta::AccountMeta, Instruction};
+use keypair::Keypair;
+use message::Message;
+use pubkey::Pubkey;
+use signer::Signer;
+use transaction::Transaction;
 
-pub type Pubkey = [u8; 32];
+use shared::solana::{
+    ExecuteAction, InitializeIxData, InstructionAccount, Payload, RegularMsgIxData, SignedAction,
+    SignedMsgIxData, SignerAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
+};
 
-pub const INITIALIZE_IX: u8 = 0;
-pub const REGULAR_IX: u8 = 1;
-pub const SIGNED_IX: u8 = 2;
+const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
+const TOKEN: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
-pub const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
-
-#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
-pub struct Secp256k1Pubkey(pub [u8; Self::LEN]);
-
-#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
-pub struct Secp256k1PubkeyCompressed(pub [u8; Self::LEN]);
-
-#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq)]
-pub struct Secp256k1Signature(pub [u8; Self::LEN]);
-
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct InitializeIxData {
-    pub needed_executors: u8,
-    pub processor: Secp256k1PubkeyCompressed,
-    pub executors: Vec<Secp256k1PubkeyCompressed>,
+#[derive(Clone, Copy, PartialEq, Hash, Debug)]
+pub enum TokenProgram {
+    Legacy,
+    Token2022,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct RegularMsgIxData {
-    pub keys: Vec<KeyRegistration>,
-    pub transfer_amounts: Vec<u64>,
+pub fn init_tx(
+    program_id: Pubkey,
+    blockhash: Hash,
+    sender: &Keypair,
+    data: &InitializeIxData,
+) -> borsh::io::Result<Transaction> {
+    let msg = init_ix(program_id, &blockhash, sender.pubkey(), data)?;
+
+    Ok(Transaction::new(&[sender], msg, blockhash))
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct SignedMsgIxData {
-    /// Signature from the processor
-    pub processor: Signature,
-    /// Signatures from the executors
-    pub executors: Vec<Signature>,
-    /// The raw payload to execute
-    pub payload: String,
+pub fn init_ix(
+    program_id: Pubkey,
+    blockhash: &Hash,
+    sender: Pubkey,
+    data: &InitializeIxData,
+) -> borsh::io::Result<Message> {
+    let mut bytes = Vec::with_capacity(1 + borsh::object_length(data)?);
+    bytes.push(INITIALIZE_IX);
+    data.serialize(&mut bytes)?;
+
+    let state_pda = derive_state_pda(&program_id);
+    let accounts = vec![
+        AccountMeta::new(sender, true),
+        AccountMeta::new(SYSTEM, false),
+        AccountMeta::new(state_pda, false),
+    ];
+
+    Ok(Message::new_with_blockhash(
+        &[Instruction {
+            program_id,
+            accounts,
+            data: bytes,
+        }],
+        Some(&sender),
+        blockhash,
+    ))
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct Signature {
-    pub signature: Secp256k1Signature,
-    pub recovery_id: u8,
+pub fn signed_tx(
+    program_id: Pubkey,
+    blockhash: Hash,
+    sender: &Keypair,
+    data: &SignedMsgIxData,
+    additional: &[AccountMeta],
+) -> borsh::io::Result<Transaction> {
+    let msg = signed_ix(program_id, &blockhash, sender.pubkey(), data, additional)?;
+
+    Ok(Transaction::new(&[sender], msg, blockhash))
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct KeyRegistration {
-    pub signature: Signature,
-    pub key: Secp256k1PubkeyCompressed,
+pub fn signed_ix(
+    program_id: Pubkey,
+    blockhash: &Hash,
+    sender: Pubkey,
+    data: &SignedMsgIxData,
+    additional: &[AccountMeta],
+) -> borsh::io::Result<Message> {
+    let mut bytes = Vec::with_capacity(1 + borsh::object_length(data)?);
+    bytes.push(SIGNED_IX);
+    data.serialize(&mut bytes)?;
+
+    let state_pda = derive_state_pda(&program_id);
+    let mut accounts = vec![
+        AccountMeta::new(sender, true),
+        AccountMeta::new(state_pda, false),
+        AccountMeta::new(SYSTEM, false),
+    ];
+
+    accounts.extend_from_slice(additional);
+
+    Ok(Message::new_with_blockhash(
+        &[Instruction {
+            program_id,
+            accounts,
+            data: bytes,
+        }],
+        Some(&sender),
+        blockhash,
+    ))
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct Payload {
-    /// Monotonically increasing ID to ensure messages are sent in the correct order.
-    /// It must be included in the payload in order to prevent anyone to from re-submitting
-    /// a previously successfully executed message but with a different ID.
-    pub id: u64,
-    pub program_id: Pubkey,
-    pub accounts: Vec<InstructionAccount>,
-    pub instruction_data: Vec<u8>,
-    pub signer: Option<SignerAccount>,
+pub fn regular_tx(
+    program_id: Pubkey,
+    token_program: TokenProgram,
+    blockhash: Hash,
+    sender: &Keypair,
+    data: &RegularMsgIxData,
+    token_mints: &[Pubkey],
+) -> borsh::io::Result<Transaction> {
+    let msg = regular_ix(
+        program_id,
+        token_program,
+        &blockhash,
+        sender.pubkey(),
+        data,
+        token_mints,
+    )?;
+
+    Ok(Transaction::new(&[sender], msg, blockhash))
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct InstructionAccount {
-    pub pubkey: Pubkey,
-    pub is_writable: bool,
-}
+pub fn regular_ix(
+    program_id: Pubkey,
+    token_program: TokenProgram,
+    blockhash: &Hash,
+    sender: Pubkey,
+    data: &RegularMsgIxData,
+    token_mints: &[Pubkey],
+) -> borsh::io::Result<Message> {
+    let mut bytes = Vec::with_capacity(1 + borsh::object_length(data)?);
+    bytes.push(REGULAR_IX);
+    data.serialize(&mut bytes)?;
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct SignerAccount {
-    pub index: u8,
-    pub seeds: Vec<Vec<u8>>,
-}
+    let accounts = if token_mints.is_empty() {
+        vec![
+            AccountMeta::new(sender, true),
+            AccountMeta::new(derive_state_pda(&program_id), false),
+        ]
+    } else {
+        let token_program = token_program.program_id();
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct BridgeMessage {
-    pub id: u64,
-    pub wallet: Pubkey,
-    pub ty: Message,
-}
+        let mut accounts = Vec::with_capacity(4 + token_mints.len() * 4);
+        accounts.push(AccountMeta::new(sender, true));
+        accounts.push(AccountMeta::new(derive_state_pda(&program_id), false));
+        accounts.push(AccountMeta::new(SYSTEM, false));
+        accounts.push(AccountMeta::new(TOKEN, false));
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub enum Message {
-    Regular {
-        funds: Vec<Token>,
-        keys: Vec<Secp256k1PubkeyCompressed>,
-    },
-    Signed {
-        action_id: u64,
-    },
-}
+        for mint in token_mints {
+            accounts.push(AccountMeta::new_readonly(*mint, false));
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct Token {
-    pub mint: Pubkey,
-    pub amount: u64,
-}
+            let sender_ata = spl_client::address::get_associated_token_address_with_program_id(
+                &sender,
+                mint,
+                &token_program,
+            );
+            accounts.push(AccountMeta::new(sender_ata, false));
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct State {
-    pub processor: Secp256k1PubkeyCompressed,
-    pub executors: Vec<Secp256k1PubkeyCompressed>,
-    pub needed_executors: u8,
-    /// IDs for bridge events.
-    pub next_event_id: u64,
-    /// IDs for actions generated by Kolme and submitted to this contract.
-    pub next_action_id: u64,
-}
+            let holder = derive_token_holder_acc(&program_id, mint);
+            accounts.push(AccountMeta::new(holder, false));
 
-impl Secp256k1Pubkey {
-    pub const LEN: usize = 64;
-}
-
-impl Secp256k1PubkeyCompressed {
-    pub const LEN: usize = 33;
-}
-
-impl Secp256k1Signature {
-    pub const LEN: usize = 64;
-
-    // Ported from: https://github.com/cryspen/hacl-packages/blob/05c3d8fb321ed65e3db3a6a8b853019e86fb40a2/src/msvc/Hacl_K256_ECDSA.c#L1772
-    /// Returns `true` if S is low-S normalized and `false` otherwise.
-    pub fn is_normalized(&self) -> bool {
-        // Signature consists of R and S components respectively, each 32 bytes big.
-        const OFFSET: usize = 32;
-
-        let mut a: [u64; 4] = [0; 4];
-
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..4 {
-            let offset = OFFSET + (4 - i - 1) * 8;
-            let bytes: [u8; 8] = self.0.as_slice()[offset..offset + 8].try_into().unwrap();
-            a[i] = u64::from_be_bytes(bytes);
+            let holder_ata = spl_client::address::get_associated_token_address_with_program_id(
+                &holder,
+                mint,
+                &token_program,
+            );
+            accounts.push(AccountMeta::new(holder_ata, false));
         }
 
-        let [a0, a1, a2, a3] = a;
+        accounts
+    };
 
-        if a0 == 0 && a1 == 0 && a2 == 0 && a3 == 0 {
-            return false;
-        }
+    Ok(Message::new_with_blockhash(
+        &[Instruction {
+            program_id,
+            accounts,
+            data: bytes,
+        }],
+        Some(&sender),
+        blockhash,
+    ))
+}
 
-        #[allow(clippy::if_same_then_else)]
-        let is_lt_q_b = if a3 < 0xffffffffffffffff {
-            true
-        } else if a2 < 0xfffffffffffffffe {
-            true
-        } else if a2 > 0xfffffffffffffffe {
-            false
-        } else if a1 < 0xbaaedce6af48a03b {
-            true
-        } else if a1 > 0xbaaedce6af48a03b {
-            false
-        } else {
-            a0 < 0xbfd25e8cd0364141
-        };
+pub fn derive_state_pda(program_id: &Pubkey) -> Pubkey {
+    let (pubkey, _) = Pubkey::find_program_address(&[b"state"], program_id);
 
-        #[allow(clippy::if_same_then_else)]
-        let is_s_lt_q_halved = if a3 < 0x7fffffffffffffff {
-            true
-        } else if a3 > 0x7fffffffffffffff {
-            false
-        } else if a2 < 0xffffffffffffffff {
-            true
-        } else if a1 < 0x5d576e7357a4501d {
-            true
-        } else if a1 > 0x5d576e7357a4501d {
-            false
-        } else {
-            a0 <= 0xdfe92f46681b20a0
-        };
+    pubkey
+}
 
-        is_lt_q_b && is_s_lt_q_halved
+pub fn derive_token_holder_acc(program_id: &Pubkey, mint: &Pubkey) -> Pubkey {
+    let seeds = token_holder_seeds(mint);
+    let (holder, _) = Pubkey::find_program_address(&seeds, program_id);
+
+    holder
+}
+
+pub fn transfer_payload(
+    id: u64,
+    program_id: Pubkey,
+    token_program: TokenProgram,
+    mint: Pubkey,
+    to: Pubkey,
+    amount: u64,
+) -> Payload {
+    let holder_seeds = token_holder_seeds(&mint);
+
+    let (authority, bump) = Pubkey::find_program_address(&holder_seeds, &program_id);
+    let seeds = vec![
+        Vec::from(holder_seeds[0]),
+        Vec::from(holder_seeds[1]),
+        Vec::from(&[bump]),
+    ];
+
+    let token_program = token_program.program_id();
+    let from_ata = spl_client::address::get_associated_token_address_with_program_id(
+        &authority,
+        &mint,
+        &token_program,
+    );
+    let to_ata = spl_client::address::get_associated_token_address_with_program_id(
+        &to,
+        &mint,
+        &token_program,
+    );
+
+    let accounts = vec![
+        InstructionAccount {
+            pubkey: from_ata.to_bytes(),
+            is_writable: true,
+        },
+        InstructionAccount {
+            pubkey: to_ata.to_bytes(),
+            is_writable: true,
+        },
+        InstructionAccount {
+            pubkey: authority.to_bytes(),
+            is_writable: false,
+        },
+    ];
+
+    let bytes = amount.to_le_bytes();
+    let instruction_data = vec![
+        3, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ];
+
+    Payload {
+        id,
+        action: SignedAction::Execute(ExecuteAction {
+            program_id: TOKEN.to_bytes(),
+            accounts,
+            instruction_data,
+            signer: Some(SignerAccount {
+                index: 2, // authority must be the signer
+                seeds,
+            }),
+        }),
     }
 }
 
-impl Secp256k1Pubkey {
-    /// Returns `0x02` if y-coordinate is even and `0x03` if odd.
-    pub fn y_parity(&self) -> u8 {
-        if self.0[Self::LEN - 1] & 1 == 1 {
-            0x03
-        } else {
-            0x02
+fn token_holder_seeds(mint: &Pubkey) -> [&[u8]; 2] {
+    [TOKEN_HOLDER_SEED, mint.as_array().as_slice()]
+}
+
+impl TokenProgram {
+    #[inline]
+    pub fn program_id(&self) -> Pubkey {
+        match self {
+            Self::Legacy => TOKEN,
+            Self::Token2022 => TOKEN_2022,
         }
-    }
-
-    pub fn to_sec1_bytes(&self) -> Secp256k1PubkeyCompressed {
-        let mut res = [0u8; 33];
-        res[0] = self.y_parity();
-        res[1..].copy_from_slice(&self.0.as_slice()[..32]);
-
-        Secp256k1PubkeyCompressed(res)
     }
 }

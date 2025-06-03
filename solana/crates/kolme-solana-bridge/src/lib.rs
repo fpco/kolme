@@ -1,35 +1,33 @@
+use std::collections::BTreeSet;
+
 use base64::Engine;
 use borsh::{BorshDeserialize, BorshSerialize};
-use kolme_solana_bridge_client::{
-    InitializeIxData,  RegularMsgIxData, SignedMsgIxData,
-    State, Token, Message, BridgeMessage, Secp256k1Pubkey,
-    Secp256k1Signature, Payload, INITIALIZE_IX, REGULAR_IX,
-    SIGNED_IX, TOKEN_HOLDER_SEED
+use shared::{
+    cryptography::{PublicKey, PublicKeyUncompressed, SignatureWithRecovery},
+    solana::{
+        BridgeMessage, ExecuteAction, InitializeIxData, Message, Payload, RegularMsgIxData,
+        SignedAction, SignedMsgIxData, State, Token, INITIALIZE_IX, REGULAR_IX, SIGNED_IX,
+        TOKEN_HOLDER_SEED,
+    },
+    types::{SelfReplace, ValidatorSet, ValidatorType},
 };
 use solbox::{
-    token::{self, state::{TokenAccount, Mint}},
-    token2022,
-    pubkey::declare_id,
+    log, log_base64,
     pinocchio::{
         account_info::{AccountInfo, Ref},
-        instruction::{AccountMeta, Instruction, Seed, Signer},
-        pubkey::{Pubkey, find_program_address},
-        program_error::ProgramError,
-        ProgramResult,
-        syscalls,
         cpi,
+        instruction::{AccountMeta, Instruction, Seed, Signer},
+        program_error::ProgramError,
+        pubkey::{find_program_address, Pubkey},
+        syscalls, ProgramResult,
     },
-    AccountReq,
-    Context,
-    PdaData,
-    PdaDerivation,
-    log, log_base64
+    pubkey::declare_id,
+    token::{
+        self,
+        state::{Mint, TokenAccount},
+    },
+    token2022, AccountReq, Context, PdaData, PdaDerivation,
 };
-
-#[cfg(test)]
-mod tests;
-
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
 mod ata_program {
     use super::declare_id;
@@ -53,9 +51,8 @@ const SHA256_DIGEST_SIZE: usize = 32;
 
 #[repr(u32)]
 pub enum InitIxError {
-    NoExecutorsProvided = 0,
-    TooManyExecutors = 1,
-    InsufficientExecutors = 2,
+    NoApproversProvided = 0,
+    ValidatorSetError = 1,
 }
 
 #[repr(u32)]
@@ -64,19 +61,20 @@ pub enum RegularIxError {
     TransferAmountsMismatch = 1,
     CannotHaveCloseAuthorityOrDelegate = 2,
     ProgramIsNotOwner = 3,
-    PubkeySignatureMismatch = 4
+    PubkeySignatureMismatch = 4,
 }
 
 #[repr(u32)]
 pub enum SignedIxError {
     InsufficientSignatures = 0,
-    TooManyExecutors = 1,
-    NonExecutorKey = 2,
-    DuplicateExecutorKey = 3,
-    ProcessorKeyMismatch = 4,
-    IncorrectOutgoingId = 5,
-    AccountMetaAndPassedAccountsMismatch = 6,
-    InvalidBase64Payload = 7
+    TooManyApprovers = 1,
+    DuplicateApproverKey = 2,
+    ProcessorKeyMismatch = 3,
+    IncorrectOutgoingId = 4,
+    AccountMetaAndPassedAccountsMismatch = 5,
+    InvalidBase64Payload = 6,
+    InvalidSelfReplace = 7,
+    JsonDeserialize = 8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -86,7 +84,7 @@ struct Sha256([u8; SHA256_DIGEST_SIZE]);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Secp256k1RecoverError {
     InvalidHash = 1000,
-    InvalidRecoveryId  = 1001,
+    InvalidRecoveryId = 1001,
     InvalidSignature = 1002,
     SignatureNotNormalized = 1003,
 }
@@ -132,24 +130,21 @@ fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError>
     ctx.assert_is_system_program(1)?;
     let state_acc = ctx.account(2, AccountReq::WRITABLE)?;
 
-    let ix = InitializeIxData::try_from_slice(instruction_data).map_err(|_| ProgramError::BorshIoError)?;
+    let ix = InitializeIxData::try_from_slice(instruction_data)
+        .map_err(|_| ProgramError::BorshIoError)?;
+
+    if let Err(e) = ix.set.validate() {
+        log!("Validator set validation error: {}", e);
+
+        return Err(InitIxError::ValidatorSetError.into());
+    }
+
     let state = State {
-        processor: ix.processor,
-        executors: ix.executors,
-        needed_executors: ix.needed_executors,
+        set: ix.set,
         // We start events at ID 1, since the instantiation itself is event 0.
         next_event_id: 1,
         next_action_id: 0,
     };
-
-    if state.executors.is_empty() {
-        return Err(InitIxError::NoExecutorsProvided.into());
-    }
-
-    let executors_len = u8::try_from(state.executors.len()).map_err(|_| InitIxError::TooManyExecutors)?;
-    if executors_len < state.needed_executors {
-        return Err(InitIxError::InsufficientExecutors.into());
-    }
 
     let state_pda: StatePda = ctx.init_pda(&payer_acc, &state_acc, STATE_DERIVATION, state)?;
     state_pda.serialize_into(&state_acc)?;
@@ -158,7 +153,8 @@ fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError>
 }
 
 fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
-    let data = RegularMsgIxData::try_from_slice(instruction_data).map_err(|_| ProgramError::BorshIoError)?;
+    let data = RegularMsgIxData::try_from_slice(instruction_data)
+        .map_err(|_| ProgramError::BorshIoError)?;
 
     let (sender_acc, state_acc, funds) = if ctx.accounts.len() == 2 {
         let sender_acc = ctx.account(0, AccountReq::SIGNER)?;
@@ -207,11 +203,11 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
 
             let (holder_ata_acc_address, _) = find_program_address(
                 &[
-                    &holder_acc.key().as_slice(),
-                    &token_program.as_slice(),
-                    &mint_acc.key().as_slice(),
+                    holder_acc.key().as_slice(),
+                    token_program.as_slice(),
+                    mint_acc.key().as_slice(),
                 ],
-                &ata_program::ID
+                &ata_program::ID,
             );
 
             if holder_ata_acc.key() != &holder_ata_acc_address {
@@ -242,16 +238,13 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             }
 
             let mut was_init = false;
-            let seeds = &[TOKEN_HOLDER_SEED, mint_acc.key().as_slice(), sender_acc.key().as_slice()];
-            let holder: TokenHolderPda = ctx.load_or_init_pda(
-                &sender_acc,
-                &holder_acc,
-                PdaDerivation::new(seeds),
-                || {
+            let seeds = &[TOKEN_HOLDER_SEED, mint_acc.key().as_slice()];
+
+            let holder: TokenHolderPda =
+                ctx.load_or_init_pda(&sender_acc, &holder_acc, PdaDerivation::new(seeds), || {
                     was_init = true;
                     TokenHolder
-                }
-            )?;
+                })?;
 
             if was_init {
                 holder.serialize_into(&holder_acc)?;
@@ -272,7 +265,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             let amount = data.transfer_amounts[i];
             funds.push(Token {
                 mint: *mint_acc.key(),
-                amount
+                amount,
             });
 
             let decimals = mint_data(&mint_acc)?.decimals();
@@ -282,7 +275,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
                 to: &holder_ata_acc,
                 authority: &sender_acc,
                 amount,
-                decimals
+                decimals,
             };
 
             execute_transfer(transfer, &token_program)?;
@@ -299,7 +292,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     let hash = Sha256(*sender_acc.key());
 
     for r in &data.keys {
-        let recovered_key = secp256k1_recover(&hash, r.signature.recovery_id, &r.signature.signature)?;
+        let recovered_key = secp256k1_recover(&hash, &r.signature)?;
 
         if recovered_key.to_sec1_bytes() != r.key {
             return Err(RegularIxError::PubkeySignatureMismatch.into());
@@ -318,11 +311,13 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         ty: Message::Regular {
             keys: data.keys.into_iter().map(|x| x.key).collect(),
             funds,
-        }
+        },
     };
 
-    let mut bytes = Vec::with_capacity(borsh::object_length(&msg).map_err(|_| ProgramError::BorshIoError)?);
-    msg.serialize(&mut bytes).map_err(|_| ProgramError::BorshIoError)?;
+    let mut bytes =
+        Vec::with_capacity(borsh::object_length(&msg).map_err(|_| ProgramError::BorshIoError)?);
+    msg.serialize(&mut bytes)
+        .map_err(|_| ProgramError::BorshIoError)?;
 
     log_base64(&[bytes.as_slice()]);
 
@@ -330,20 +325,26 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
 }
 
 fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
-    if ctx.accounts.len() < 3 {
+    const BASE_ACCOUNTS_LEN: usize = 3;
+
+    if ctx.accounts.len() < BASE_ACCOUNTS_LEN {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
     let sender_acc = ctx.account(0, AccountReq::SIGNER)?;
     let state_acc = ctx.account(1, AccountReq::WRITABLE)?;
+    ctx.assert_is_system_program(2)?;
 
-    let data = SignedMsgIxData::try_from_slice(instruction_data).map_err(|_| ProgramError::BorshIoError)?;
+    let data = SignedMsgIxData::try_from_slice(instruction_data)
+        .map_err(|_| ProgramError::BorshIoError)?;
     let mut state_pda: StatePda = ctx.load_pda(&state_acc, STATE_DERIVATION.seeds)?;
 
-    let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&data.payload)
+    let payload_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data.payload)
         .map_err(|_| SignedIxError::InvalidBase64Payload)?;
 
-    let payload = Payload::try_from_slice(&payload_bytes).map_err(|_| ProgramError::BorshIoError)?;
+    let payload =
+        Payload::try_from_slice(&payload_bytes).map_err(|_| ProgramError::BorshIoError)?;
 
     if payload.id != state_pda.data.next_action_id {
         return Err(SignedIxError::IncorrectOutgoingId.into());
@@ -353,85 +354,279 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
     let incoming_id = state_pda.data.next_event_id;
     state_pda.data.next_event_id += 1;
 
-    state_pda.serialize_into(&state_acc)?;
-
-    let executors_len = u8::try_from(data.executors.len()).map_err(|_| SignedIxError::TooManyExecutors)?;
-    if executors_len < state_pda.data.needed_executors {
-        return Err(SignedIxError::InsufficientSignatures.into());
-    }
-
     let hash = sha256(data.payload.as_bytes());
-    let recovered_key = secp256k1_recover(&hash, data.processor.recovery_id, &data.processor.signature)?;
 
-    if recovered_key.to_sec1_bytes() != state_pda.data.processor {
-        return Err(SignedIxError::ProcessorKeyMismatch.into());
-    }
+    match payload.action {
+        SignedAction::Execute(action) => {
+            verify_signatures(
+                &hash,
+                &data.processor,
+                &state_pda.data.set.processor,
+                &data.approvers,
+                &state_pda.data.set.approvers,
+                state_pda.data.set.needed_approvers,
+            )?;
 
-    let mut keys = Vec::with_capacity(data.executors.len());
+            // We skip on account which is assumed to be the pubkey of the program to be invoked.
+            // The rest of the accounts provided should be 0 or more depending on the instruction being invoked.
+            if ctx.accounts.len() < BASE_ACCOUNTS_LEN + 1 {
+                return Err(ProgramError::NotEnoughAccountKeys);
+            }
 
-    for e in data.executors {
-        let key = secp256k1_recover(&hash, e.recovery_id, &e.signature)?.to_sec1_bytes();
-
-        if !state_pda.data.executors.contains(&key) {
-            return Err(SignedIxError::NonExecutorKey.into());
+            execute_action(action, &ctx.accounts[BASE_ACCOUNTS_LEN + 1..])?;
         }
+        SignedAction::SelfReplace {
+            rendered,
+            signature,
+        } => {
+            let SelfReplace {
+                validator_type,
+                replacement,
+            } = serde_json::from_str(&rendered)
+                .map_err(|_| ProgramError::from(SignedIxError::JsonDeserialize))?;
 
-        keys.push(key);
-    }
+            let rendered_hash = sha256(rendered.as_bytes());
+            let validator = secp256k1_recover(&rendered_hash, &signature)?.to_sec1_bytes();
 
-    for (i, key) in keys.iter().enumerate() {
-        if keys.iter().skip(i + 1).any(|x| x == key) {
-            return Err(SignedIxError::DuplicateExecutorKey.into());
+            match validator_type {
+                ValidatorType::Processor => {
+                    if validator != state_pda.data.set.processor {
+                        log!("Invalid self-replace for processor.");
+
+                        return Err(SignedIxError::InvalidSelfReplace.into());
+                    }
+
+                    verify_signatures(
+                        &hash,
+                        &data.processor,
+                        &replacement,
+                        &data.approvers,
+                        &state_pda.data.set.approvers,
+                        state_pda.data.set.needed_approvers,
+                    )?;
+
+                    state_pda.data.set.processor = replacement;
+                }
+                ValidatorType::Listener => {
+                    if !state_pda.data.set.listeners.contains(&validator)
+                        || state_pda.data.set.listeners.contains(&replacement)
+                    {
+                        log!("Invalid self-replace for listener.");
+
+                        return Err(SignedIxError::InvalidSelfReplace.into());
+                    }
+
+                    verify_signatures(
+                        &hash,
+                        &data.processor,
+                        &state_pda.data.set.processor,
+                        &data.approvers,
+                        &state_pda.data.set.approvers,
+                        state_pda.data.set.needed_approvers,
+                    )?;
+
+                    state_pda.data.set.listeners.remove(&validator);
+                    state_pda.data.set.listeners.insert(replacement);
+                }
+                ValidatorType::Approver => {
+                    if !state_pda.data.set.approvers.contains(&validator)
+                        || state_pda.data.set.approvers.contains(&replacement)
+                    {
+                        log!("Invalid self-replace for approver.");
+
+                        return Err(SignedIxError::InvalidSelfReplace.into());
+                    }
+
+                    state_pda.data.set.listeners.remove(&validator);
+                    state_pda.data.set.listeners.insert(replacement);
+
+                    verify_signatures(
+                        &hash,
+                        &data.processor,
+                        &state_pda.data.set.processor,
+                        &data.approvers,
+                        &state_pda.data.set.approvers,
+                        state_pda.data.set.needed_approvers,
+                    )?;
+                }
+            }
+        }
+        SignedAction::NewSet {
+            rendered,
+            approvals,
+        } => {
+            let new_set: ValidatorSet = serde_json::from_str(&rendered)
+                .map_err(|_| ProgramError::from(SignedIxError::JsonDeserialize))?;
+
+            let rendered_hash = sha256(rendered.as_bytes());
+
+            let mut processor = false;
+            let mut listeners = 0;
+            let mut approvers = 0;
+            let mut used = Vec::with_capacity(approvals.len());
+
+            for signature in &approvals {
+                let validator = secp256k1_recover(&rendered_hash, &signature)?.to_sec1_bytes();
+
+                if state_pda.data.set.processor == validator {
+                    assert!(!processor);
+                    processor = true;
+                }
+
+                if state_pda.data.set.listeners.contains(&validator) {
+                    listeners += 1;
+                }
+
+                if state_pda.data.set.approvers.contains(&validator) {
+                    approvers += 1;
+                }
+
+                used.push(validator);
+            }
+
+            if !is_distinct(&used) {
+                return Err(SignedIxError::DuplicateApproverKey.into());
+            }
+
+            let count = u8::from(processor)
+                + u8::from(listeners >= state_pda.data.set.needed_listeners)
+                + u8::from(approvers >= state_pda.data.set.needed_approvers);
+
+            if count < 2 {
+                log!("Insufficient signatures for changing to new validator set. Provided: {} Needed: 2", count);
+
+                return Err(SignedIxError::InsufficientSignatures.into());
+            }
+
+            verify_signatures(
+                &hash,
+                &data.processor,
+                &new_set.processor,
+                &data.approvers,
+                &new_set.approvers,
+                new_set.needed_approvers,
+            )?;
+
+            state_pda.data.set = new_set;
         }
     }
 
-    let ix_accounts = &ctx.accounts[3..];
-
-    if payload.accounts.len() != ix_accounts.len() {
-        return Err(SignedIxError::AccountMetaAndPassedAccountsMismatch.into());
-    }
-
-    let mut accounts = Vec::with_capacity(payload.accounts.len());
-
-    for (i, a) in payload.accounts.iter().enumerate() {
-        accounts.push(AccountMeta {
-            pubkey: &a.pubkey,
-            is_writable: a.is_writable,
-            is_signer: payload.signer.as_ref().map_or(false, |x| usize::from(x.index) == i)
-        });
-    }
-
-    let ix = Instruction {
-        program_id: &payload.program_id,
-        data: &payload.instruction_data,
-        accounts: &accounts
-    };
-
-    let ix_accounts: Vec<&AccountInfo> = ix_accounts.iter().map(|x| x).collect();
-
-    if let Some(signer) = payload.signer {
-        let seeds: Vec<Seed> = signer.seeds.iter().map(|x| Seed::from(x.as_slice())).collect();
-        let signer = Signer::from(seeds.as_slice());
-
-        cpi::slice_invoke_signed(&ix, &ix_accounts, &[signer])?;
-    } else {
-        cpi::slice_invoke(&ix, &ix_accounts)?;
-    }
+    state_pda.serialize_into_growable(&state_acc, &sender_acc, &ctx.rent()?, false)?;
 
     let msg = BridgeMessage {
         id: incoming_id,
         wallet: *sender_acc.key(),
         ty: Message::Signed {
-            action_id: payload.id
-        }
+            action_id: payload.id,
+        },
     };
 
-    let mut bytes = Vec::with_capacity(borsh::object_length(&msg).map_err(|_| ProgramError::BorshIoError)?);
-    msg.serialize(&mut bytes).map_err(|_| ProgramError::BorshIoError)?;
+    let mut bytes =
+        Vec::with_capacity(borsh::object_length(&msg).map_err(|_| ProgramError::BorshIoError)?);
+    msg.serialize(&mut bytes)
+        .map_err(|_| ProgramError::BorshIoError)?;
 
     log_base64(&[bytes.as_slice()]);
 
     Ok(())
+}
+
+fn execute_action(action: ExecuteAction, ix_accounts: &[AccountInfo]) -> Result<(), ProgramError> {
+    if action.accounts.len() != ix_accounts.len() {
+        log!(
+            "Execute action: mismatch between provided accounts and configured accounts. Provided: {} Configured: {}",
+            ix_accounts.len(),
+            action.accounts.len(),
+        );
+
+        return Err(SignedIxError::AccountMetaAndPassedAccountsMismatch.into());
+    }
+
+    let mut accounts = Vec::with_capacity(action.accounts.len());
+
+    for (i, a) in action.accounts.iter().enumerate() {
+        accounts.push(AccountMeta {
+            pubkey: &a.pubkey,
+            is_writable: a.is_writable,
+            is_signer: action
+                .signer
+                .as_ref()
+                .is_some_and(|x| usize::from(x.index) == i),
+        });
+    }
+
+    let ix = Instruction {
+        program_id: &action.program_id,
+        data: &action.instruction_data,
+        accounts: &accounts,
+    };
+
+    let ix_accounts: Vec<&AccountInfo> = ix_accounts.iter().collect();
+
+    if let Some(signer) = action.signer {
+        let seeds: Vec<Seed> = signer
+            .seeds
+            .iter()
+            .map(|x| Seed::from(x.as_slice()))
+            .collect();
+        let signer = Signer::from(seeds.as_slice());
+
+        cpi::slice_invoke_signed(&ix, &ix_accounts, &[signer])
+    } else {
+        cpi::slice_invoke(&ix, &ix_accounts)
+    }
+}
+
+fn verify_signatures(
+    hash: &Sha256,
+    processor: &SignatureWithRecovery,
+    expected_processor: &PublicKey,
+    approvers: &[SignatureWithRecovery],
+    expected_approvers: &BTreeSet<PublicKey>,
+    needed_approvers: u16,
+) -> Result<(), ProgramError> {
+    let recovered_key = secp256k1_recover(hash, &processor)?;
+
+    if recovered_key.to_sec1_bytes() != *expected_processor {
+        return Err(SignedIxError::ProcessorKeyMismatch.into());
+    }
+
+    let mut keys = Vec::with_capacity(approvers.len());
+
+    for a in approvers {
+        let key = secp256k1_recover(hash, &a)?.to_sec1_bytes();
+
+        if expected_approvers.contains(&key) {
+            keys.push(key);
+        }
+    }
+
+    if !is_distinct(&keys) {
+        return Err(SignedIxError::DuplicateApproverKey.into());
+    }
+
+    if keys.len() < usize::from(needed_approvers) {
+        log!(
+            "Insufficient valid approver signatures. Provided: {} Needed: {}",
+            keys.len(),
+            needed_approvers
+        );
+
+        return Err(SignedIxError::InsufficientSignatures.into());
+    }
+
+    Ok(())
+}
+
+#[inline]
+fn is_distinct(keys: &[PublicKey]) -> bool {
+    for (i, key) in keys.iter().enumerate() {
+        if keys.iter().skip(i + 1).any(|x| x == key) {
+            return false;
+        }
+    }
+
+    true
 }
 
 // A slightly modified version of TokenAccount::from_account_info to support Token 2022.
@@ -440,8 +635,7 @@ fn ata_data(account_info: &AccountInfo) -> Result<Ref<TokenAccount>, ProgramErro
         return Err(ProgramError::InvalidAccountData);
     }
 
-    if !account_info.is_owned_by(&token::ID) &&
-        !account_info.is_owned_by(&token2022::ID) {
+    if !account_info.is_owned_by(&token::ID) && !account_info.is_owned_by(&token2022::ID) {
         return Err(ProgramError::InvalidAccountData);
     }
 
@@ -451,15 +645,14 @@ fn ata_data(account_info: &AccountInfo) -> Result<Ref<TokenAccount>, ProgramErro
 }
 
 // A slightly modified version of Mint::from_account_info to support Token 2022.
-pub fn mint_data(account_info: &AccountInfo) -> Result<Ref<Mint>, ProgramError> {
+fn mint_data(account_info: &AccountInfo) -> Result<Ref<Mint>, ProgramError> {
     if account_info.data_len() != Mint::LEN {
         log!("Invalid mint data len.");
 
         return Err(ProgramError::InvalidAccountData);
     }
 
-    if !account_info.is_owned_by(&token::ID) &&
-        !account_info.is_owned_by(&token2022::ID) {
+    if !account_info.is_owned_by(&token::ID) && !account_info.is_owned_by(&token2022::ID) {
         log!("Invalid mint data");
         return Err(ProgramError::InvalidAccountData);
     }
@@ -467,11 +660,13 @@ pub fn mint_data(account_info: &AccountInfo) -> Result<Ref<Mint>, ProgramError> 
     Ok(Ref::map(account_info.try_borrow_data()?, |data| unsafe {
         Mint::from_bytes(data)
     }))
-
 }
 
 // A slightly modified version of TransferChecked::invoke to support Token 2022.
-fn execute_transfer(transfer: token::instructions::TransferChecked<'_>, token_program: &Pubkey) -> ProgramResult {
+fn execute_transfer(
+    transfer: token::instructions::TransferChecked<'_>,
+    token_program: &Pubkey,
+) -> ProgramResult {
     use std::mem::MaybeUninit;
 
     const UNINIT_BYTE: MaybeUninit<u8> = MaybeUninit::<u8>::uninit();
@@ -511,31 +706,35 @@ fn execute_transfer(transfer: token::instructions::TransferChecked<'_>, token_pr
 
     cpi::invoke(
         &instruction,
-        &[transfer.from, transfer.mint, transfer.to, transfer.authority],
+        &[
+            transfer.from,
+            transfer.mint,
+            transfer.to,
+            transfer.authority,
+        ],
     )
 }
 
 fn secp256k1_recover(
     hash: &Sha256,
-    recovery_id: u8,
-    signature: &Secp256k1Signature,
-) -> Result<Secp256k1Pubkey, Secp256k1RecoverError> {
-    if !signature.is_normalized() {
+    signature: &SignatureWithRecovery,
+) -> Result<PublicKeyUncompressed, Secp256k1RecoverError> {
+    if !signature.sig.is_normalized() {
         return Err(Secp256k1RecoverError::SignatureNotNormalized);
     }
 
-    let mut buf = std::mem::MaybeUninit::<[u8; Secp256k1Pubkey::LEN]>::uninit();
+    let mut buf = std::mem::MaybeUninit::<[u8; 64]>::uninit();
 
     unsafe {
         let errno = syscalls::sol_secp256k1_recover(
             hash.0.as_ptr(),
-            recovery_id as u64,
-            signature.0.as_ptr(),
+            signature.recid.to_byte() as u64,
+            signature.sig.to_bytes().as_ptr(),
             buf.as_mut_ptr() as *mut u8,
         );
 
         match errno {
-            0 => Ok(Secp256k1Pubkey(buf.assume_init())),
+            0 => Ok(PublicKeyUncompressed(buf.assume_init())),
             1 => Err(Secp256k1RecoverError::InvalidHash),
             2 => Err(Secp256k1RecoverError::InvalidRecoveryId),
             3 => Err(Secp256k1RecoverError::InvalidSignature),

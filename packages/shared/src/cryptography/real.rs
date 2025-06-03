@@ -1,3 +1,5 @@
+pub use rand::rngs::ThreadRng;
+
 use std::{fmt::Display, str::FromStr};
 
 /// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
@@ -83,6 +85,35 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::ser::BorshSerialize for PublicKey {
+    #[inline]
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        use std::ops::Deref;
+
+        // Serialize as an array instead of a Vec/slice because the chain version has that format.
+        let arr: [u8; 33] = self.as_bytes().deref().try_into().unwrap();
+
+        borsh::ser::BorshSerialize::serialize(&arr, writer)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::de::BorshDeserialize for PublicKey {
+    #[inline]
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        use borsh::io::{Error, ErrorKind};
+
+        // We are forced to use the internal API because using the [T; N] array impl returns
+        // a "Not all bytes read" error even though the binary representation is correct...
+        let bytes: [u8; 33] = u8::array_from_reader(reader)?.unwrap(); // This always returns Some
+        match Self::from_bytes(bytes) {
+            Ok(sig) => Ok(sig),
+            Err(e) => Err(Error::new(ErrorKind::Other, e)),
+        }
     }
 }
 
@@ -257,6 +288,35 @@ impl Signature {
     }
 }
 
+#[cfg(feature = "solana")]
+impl borsh::ser::BorshSerialize for Signature {
+    #[inline]
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        use std::ops::Deref;
+
+        // Serialize as an array instead of a Vec/slice because the chain version has that format.
+        let arr: [u8; 64] = self.to_bytes().deref().try_into().unwrap();
+
+        borsh::ser::BorshSerialize::serialize(&arr, writer)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::de::BorshDeserialize for Signature {
+    #[inline]
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        use borsh::io::{Error, ErrorKind};
+
+        // We are forced to use the internal API because using the [T; N] array impl returns
+        // a "Not all bytes read" error even though the binary representation is correct...
+        let bytes: [u8; 64] = u8::array_from_reader(reader)?.unwrap(); // This always returns Some
+        match Self::from_slice(&bytes) {
+            Ok(sig) => Ok(sig),
+            Err(e) => Err(Error::new(ErrorKind::Other, e)),
+        }
+    }
+}
+
 impl From<k256::ecdsa::Signature> for Signature {
     fn from(sig: k256::ecdsa::Signature) -> Self {
         Signature(sig)
@@ -313,6 +373,29 @@ impl<'de> serde::Deserialize<'de> for RecoveryId {
         match k256::ecdsa::RecoveryId::from_byte(recid) {
             None => Err(serde::de::Error::custom("Invalid recovery ID provided")),
             Some(recid) => Ok(RecoveryId(recid)),
+        }
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::ser::BorshSerialize for RecoveryId {
+    #[inline]
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        borsh::ser::BorshSerialize::serialize(&self.to_byte(), writer)
+    }
+}
+
+#[cfg(feature = "solana")]
+impl borsh::de::BorshDeserialize for RecoveryId {
+    #[inline]
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        use borsh::io::{Error, ErrorKind};
+
+        let byte = u8::deserialize_reader(reader)?;
+
+        match Self::from_byte(byte) {
+            Ok(id) => Ok(id),
+            Err(e) => Err(Error::new(ErrorKind::Other, e)),
         }
     }
 }

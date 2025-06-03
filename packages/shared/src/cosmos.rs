@@ -2,11 +2,8 @@ use cosmwasm_std::{Binary, Coin, CosmosMsg};
 
 use crate::{
     cryptography::{PublicKey, SignatureWithRecovery},
-    types::{BridgeActionId, BridgeEventId, ValidatorSet},
+    types::{BridgeActionId, BridgeEventId, KeyRegistration, ValidatorSet},
 };
-
-#[cfg(feature = "realcryptography")]
-use crate::cryptography::{SecretKey, SecretKeyError};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct State {
@@ -77,17 +74,15 @@ pub enum ExecuteMsg {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct KeyRegistration {
-    pub signature: SignatureWithRecovery,
-    pub key: PublicKey,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
     GetEvent { id: BridgeEventId },
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct MigrateMsg {}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -109,17 +104,3 @@ pub enum BridgeEventMessage {
         action_id: BridgeActionId,
     },
 }
-
-#[cfg(feature = "realcryptography")]
-impl KeyRegistration {
-    pub fn new(address: &str, key: &SecretKey) -> Result<Self, SecretKeyError> {
-        Ok(Self {
-            signature: key.sign_recoverable(address)?,
-            key: key.public_key(),
-        })
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub struct MigrateMsg {}
