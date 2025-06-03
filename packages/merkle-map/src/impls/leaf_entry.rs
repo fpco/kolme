@@ -1,3 +1,5 @@
+use sha2::{Digest, Sha256};
+
 use crate::*;
 
 impl<K, V: MerkleSerialize> MerkleSerialize for LeafEntry<K, V> {
@@ -21,5 +23,15 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for LeafEntry<K, 
             key,
             value,
         })
+    }
+}
+
+impl<K: AsRef<[u8]> + FromMerkleKey + MerkleSerialize, V: AsRef<[u8]> + MerkleSerialize> LeafEntry<K, V> {
+    pub(crate) fn hash(&self) -> Sha256Hash {
+        let mut hasher = Sha256::new();
+        hasher.update(self.key_bytes.as_slice());
+        let mut serializer = MerkleSerializer::new(MerkleManager::default());
+        self.value.merkle_serialize(&mut serializer).expect("Serialization failed");
+        Sha256Hash::from_array(hasher.finalize().into())
     }
 }

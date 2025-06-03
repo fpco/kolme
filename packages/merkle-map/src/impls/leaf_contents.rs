@@ -1,3 +1,5 @@
+use sha2::{Digest, Sha256};
+
 use crate::*;
 
 impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
@@ -101,6 +103,14 @@ impl<K, V> LeafContents<K, V> {
         entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>,
     ) {
         entries.extend(&mut self.values.drain(..));
+    }
+
+    pub(crate) fn hash(&self) -> Sha256Hash {
+        let mut hasher = Sha256::new();
+        for entry in &self.values {
+            hasher.update(entry.hash().as_array());
+        }
+        Sha256Hash::from_array(hasher.finalize().into())
     }
 }
 

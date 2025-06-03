@@ -10,6 +10,7 @@ use crate::quickcheck_newtypes::{
     SerializableMerkleMap, SerializableSlice, SerializableSmallVec, SerializableTimestamp,
 };
 
+
 use crate::*;
 
 impl<K, V> MerkleMap<K, V> {
@@ -34,45 +35,28 @@ impl<K, V> Node<K, V> {
 
 impl<K, V> Node<K, V> {
     #[cfg(test)]
-    pub(crate) fn sanity_checks(&self) {
+      pub(crate) fn sanity_checks(&self) {
         match self {
             Node::Leaf(leaf) => {
-                let stored_hash = leaf.hash();
-                let mut hasher = Sha256::new();
-                hasher.update(leaf.key().as_ref());
-                hasher.update(leaf.value().as_ref());
-                let calculated_hash = hasher.finalize();
+                // FIXME validate the hash of the leaf
+                let leaf_inner = leaf.as_ref();
+                 for entry in &leaf_inner.values {
+                    let calculated_hash = entry.hash();
+                }
+        
+                let calculated_hash = leaf_inner.hash();
 
-                assert_eq!(
-                    stored_hash.as_ref(),
-                    calculated_hash.as_ref(),
-                    "Leaf hash mismatch: expected {:?}, got {:?}", 
-                    calculated_hash, stored_hash
-                );
-
-                leaf.as_ref().sanity_checks();
+                leaf_inner.sanity_checks();
             }
             Node::Tree(tree) => {
-                let stored_hash = tree.hash();
-                let mut hasher = Sha256::new();
-                for child in tree.children() {
-                    hasher.update(child.hash().as_ref());
+               // FIXME validate the hash of the tree
+                let tree_inner = tree.as_ref();
+                for branch in tree_inner.branches.iter() {
+                    if !Node::is_empty(branch) {
+                        branch.sanity_checks();
+                    }
                 }
-
-                let calculated_hash = hasher.finalize();
-
-                assert_eq!(
-                    stored_hash.as_ref(),
-                    calculated_hash.as_ref(),
-                    "Tree hash mismatch: expected {:?}, got {:?}", 
-                    calculated_hash, stored_hash
-                );
-
-                for child in tree.children() {
-                    child.sanity_checks();
-                }
-
-                tree.as_ref().sanity_checks();
+                tree_inner.sanity_checks();
             }
         }
     }

@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use sha2::{Digest, Sha256};
+
 use crate::*;
 
 impl<K, V> TreeContents<K, V> {
@@ -45,6 +47,18 @@ impl<K, V> TreeContents<K, V> {
         debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
         self.branches[index].get(depth + 1, key_bytes)
+    }
+    pub(crate) fn hash(&self) -> Sha256Hash {
+        let mut hasher = Sha256::new();
+        if let Some(leaf) = &self.leaf {
+            hasher.update(leaf.hash().as_array());
+        }
+        for branch in self.branches.iter() {
+            if !Node::is_empty(branch) {
+                hasher.update(branch.hash().as_array());
+            }
+        }
+        Sha256Hash::from_array(hasher.finalize().into())
     }
 }
 
