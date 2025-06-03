@@ -43,6 +43,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     mempool: Mempool<App::Message>,
     pub(super) store: store::KolmeStore<App>,
     pub(super) app: App,
+    pub(super) code_version: String,
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
     pub(super) solana_endpoints: parking_lot::RwLock<SolanaEndpoints>,
@@ -587,7 +588,7 @@ impl<App: KolmeApp> Kolme<App> {
 
     pub async fn new(
         app: App,
-        _code_version: impl AsRef<str>,
+        code_version: impl AsRef<str>,
         store: KolmeStore<App>,
     ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
@@ -598,6 +599,7 @@ impl<App: KolmeApp> Kolme<App> {
         let inner = KolmeInner {
             store,
             app,
+            code_version: code_version.as_ref().to_string(),
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "pass_through")]
@@ -885,6 +887,11 @@ impl<App: KolmeApp> Kolme<App> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
+    }
+
+    //returns current version
+    pub async fn get_code_version(&self) -> &str {
+        self.inner.code_version.as_str()
     }
 }
 

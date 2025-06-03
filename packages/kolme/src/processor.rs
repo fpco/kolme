@@ -226,6 +226,7 @@ impl<App: KolmeApp> Processor<App> {
             processor: secret.public_key(),
             height: proposed_height,
             parent: kolme.get_current_block_hash(),
+            block_version: kolme.get_code_version().await.to_string(),
             framework_state: kolme.get_merkle_manager().serialize(&framework_state)?.hash,
             app_state: kolme.get_merkle_manager().serialize(&app_state)?.hash,
             loads,
