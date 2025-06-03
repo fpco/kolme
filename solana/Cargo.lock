@@ -4501,7 +4501,6 @@ dependencies = [
  "litesvm-token",
  "sha_256",
  "shared",
- "solana-account",
  "solana-transaction-error",
 ]
 
