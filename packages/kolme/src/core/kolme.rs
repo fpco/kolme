@@ -342,6 +342,11 @@ impl<App: KolmeApp> Kolme<App> {
                 kolme.get_next_height()
             );
         }
+
+        let actual_parent = kolme.get_current_block_hash();
+        let block_parent = signed_block.0.message.as_inner().parent;
+        anyhow::ensure!(actual_parent == block_parent, "Tried to add block height {}, but actual parent has block hash {actual_parent} and block specifies {block_parent}", signed_block.height());
+
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
         anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
@@ -404,6 +409,17 @@ impl<App: KolmeApp> Kolme<App> {
         let app_state = Arc::new(app_state);
         let logs: Arc<[_]> = logs.into();
 
+        let framework_state_contents = self.get_merkle_manager().serialize(&framework_state)?;
+        anyhow::ensure!(
+            framework_state_contents.hash == signed_block.0.message.as_inner().framework_state
+        );
+
+        let app_state_contents = self.get_merkle_manager().serialize(&app_state)?;
+        anyhow::ensure!(app_state_contents.hash == signed_block.0.message.as_inner().app_state);
+
+        let logs_contents = self.get_merkle_manager().serialize(&logs)?;
+        anyhow::ensure!(logs_contents.hash == signed_block.0.message.as_inner().logs);
+
         self.inner
             .store
             .add_block(
@@ -413,6 +429,9 @@ impl<App: KolmeApp> Kolme<App> {
                     blockhash: signed_block.hash().0,
                     txhash: signed_block.tx().hash().0,
                     block: signed_block.clone(),
+                    // TODO possible future optimization, either use MerkleLockable
+                    // around these fields or pass in the _contents values from
+                    // above to avoid double-serialization
                     framework_state: framework_state.clone(),
                     app_state: app_state.clone(),
                     logs: logs.clone(),
