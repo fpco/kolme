@@ -38,23 +38,10 @@ impl<K, V> Node<K, V> {
         match self {
             Node::Leaf(leaf) => {
                 // FIXME validate the hash of the leaf
-                let leaf_inner = leaf.as_ref();
-                for entry in &leaf_inner.values {
-                    //   let calculated_hash = entry.hash();
-                }
-
-                // let calculated_hash = leaf_inner.hash();
-
                 leaf_inner.sanity_checks();
             }
             Node::Tree(tree) => {
                 // FIXME validate the hash of the tree
-                let tree_inner = tree.as_ref();
-                for branch in tree_inner.branches.iter() {
-                    if !Node::is_empty(branch) {
-                        branch.sanity_checks();
-                    }
-                }
                 tree_inner.sanity_checks();
             }
         }

@@ -73,15 +73,6 @@ impl<K: Clone, V: Clone> Node<K, V> {
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleSerialize> Node<K, V> {
-    pub(crate) fn hash(&self) -> Sha256Hash {
-        match self {
-            Node::Leaf(leaf) => leaf.as_ref().hash(),
-            Node::Tree(tree) => tree.as_ref().hash(),
-        }
-    }
-}
-
 impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for Node<K, V> {
     fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
         match self {

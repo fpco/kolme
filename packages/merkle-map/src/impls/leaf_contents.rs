@@ -1,5 +1,3 @@
-use sha2::{Digest, Sha256};
-
 use crate::*;
 
 impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
@@ -123,22 +121,6 @@ impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
         }
 
         Ok(())
-    }
-}
-
-impl<K, V: MerkleSerialize> LeafContents<K, V> {
-    pub(crate) fn hash(&self) -> Sha256Hash {
-        let mut hasher = Sha256::new();
-        hasher.update([0u8]);
-        for entry in &self.values {
-            let mut serializer = MerkleSerializer::new(MerkleManager::default());
-            entry
-                .merkle_serialize(&mut serializer)
-                .expect("Serialization should not fail in hash");
-            let bytes = serializer.finish().payload;
-            hasher.update(&bytes);
-        }
-        Sha256Hash::from_array(hasher.finalize().into())
     }
 }
 

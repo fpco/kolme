@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use sha2::{Digest, Sha256};
-
 use crate::*;
 
 impl<K, V> TreeContents<K, V> {
@@ -47,36 +45,6 @@ impl<K, V> TreeContents<K, V> {
         debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
         self.branches[index].get(depth + 1, key_bytes)
-    }
-}
-
-impl<K: FromMerkleKey, V: MerkleSerialize> TreeContents<K, V> {
-    pub(crate) fn hash(&self) -> Sha256Hash {
-        let mut hasher = Sha256::new();
-
-        hasher.update([1u8]);
-
-        let mut serializer = MerkleSerializer::new(MerkleManager::default());
-        serializer.store_usize(self.len);
-        let bytes = serializer.finish().payload;
-        hasher.update(&bytes);
-
-        if let Some(leaf) = &self.leaf {
-            let mut serializer = MerkleSerializer::new(MerkleManager::default());
-            leaf.merkle_serialize(&mut serializer)
-                .expect("Serialization should not fail in hash");
-            let bytes = serializer.finish().payload;
-            hasher.update(&bytes);
-        } else {
-            hasher.update([0u8]);
-        }
-
-        for branch in &self.branches {
-            if !branch.is_empty() {
-                hasher.update(branch.hash().as_array());
-            }
-        }
-        Sha256Hash::from_array(hasher.finalize().into())
     }
 }
 
