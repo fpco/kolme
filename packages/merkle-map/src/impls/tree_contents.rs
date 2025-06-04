@@ -53,14 +53,14 @@ impl<K, V> TreeContents<K, V> {
 impl<K: FromMerkleKey, V: MerkleSerialize> TreeContents<K, V> {
     pub(crate) fn hash(&self) -> Sha256Hash {
         let mut hasher = Sha256::new();
-        // Magic byte for Tree
+
         hasher.update([1u8]);
-        // Serialize len
+
         let mut serializer = MerkleSerializer::new(MerkleManager::default());
         serializer.store_usize(self.len);
         let bytes = serializer.finish().payload;
         hasher.update(&bytes);
-        // Serialize leaf (Option<LeafEntry<K, V>>)
+
         if let Some(leaf) = &self.leaf {
             let mut serializer = MerkleSerializer::new(MerkleManager::default());
             leaf.merkle_serialize(&mut serializer)
@@ -68,12 +68,12 @@ impl<K: FromMerkleKey, V: MerkleSerialize> TreeContents<K, V> {
             let bytes = serializer.finish().payload;
             hasher.update(&bytes);
         } else {
-            hasher.update([0u8]); // Sentinel for None
+            hasher.update([0u8]);
         }
-        // Hash non-empty branches
+
         for branch in &self.branches {
             if !branch.is_empty() {
-                hasher.update(branch.hash().as_array()); // Uses Node::hash
+                hasher.update(branch.hash().as_array());
             }
         }
         Sha256Hash::from_array(hasher.finalize().into())
