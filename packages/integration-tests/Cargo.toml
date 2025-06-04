@@ -24,7 +24,7 @@ solana-commitment-config = "2.2.1"
 [dev-dependencies]
 example-six-sigma = { path = "../examples/six-sigma" }
 example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
-test-log = { version = "0.2", features = ["trace"] }
+test-log = { workspace = true }
 strum = { version = "0.27.1", features = ["derive"] }
 futures = "0.3.31"
 backon = "1.4.1"
