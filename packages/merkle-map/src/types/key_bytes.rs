@@ -1,5 +1,5 @@
 /// A key used in a [MerkleMap].
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
 pub struct MerkleKey(tinyvec::TinyVec<[u8; 32]>);
 
 impl MerkleKey {

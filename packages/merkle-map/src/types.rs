@@ -19,7 +19,7 @@ pub(crate) use crate::impls::MerkleLockable;
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct MerkleMap<K, V>(pub(crate) Node<K, V>);
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct LeafEntry<K, V> {
     pub(crate) key_bytes: MerkleKey,
     pub(crate) key: K,

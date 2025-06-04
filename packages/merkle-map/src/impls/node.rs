@@ -73,7 +73,7 @@ impl<K: Clone, V: Clone> Node<K, V> {
     }
 }
 
-impl<K: AsRef<[u8]>, V: AsRef<[u8]>> Node<K, V> {
+impl<K: FromMerkleKey, V: MerkleSerialize> Node<K, V> {
     pub(crate) fn hash(&self) -> Sha256Hash {
         match self {
             Node::Leaf(leaf) => leaf.as_ref().hash(),

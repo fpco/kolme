@@ -10,7 +10,6 @@ use crate::quickcheck_newtypes::{
     SerializableMerkleMap, SerializableSlice, SerializableSmallVec, SerializableTimestamp,
 };
 
-
 use crate::*;
 
 impl<K, V> MerkleMap<K, V> {
@@ -35,21 +34,21 @@ impl<K, V> Node<K, V> {
 
 impl<K, V> Node<K, V> {
     #[cfg(test)]
-      pub(crate) fn sanity_checks(&self) {
+    pub(crate) fn sanity_checks(&self) {
         match self {
             Node::Leaf(leaf) => {
                 // FIXME validate the hash of the leaf
                 let leaf_inner = leaf.as_ref();
-                 for entry in &leaf_inner.values {
-                    let calculated_hash = entry.hash();
+                for entry in &leaf_inner.values {
+                    //   let calculated_hash = entry.hash();
                 }
-        
-                let calculated_hash = leaf_inner.hash();
+
+                // let calculated_hash = leaf_inner.hash();
 
                 leaf_inner.sanity_checks();
             }
             Node::Tree(tree) => {
-               // FIXME validate the hash of the tree
+                // FIXME validate the hash of the tree
                 let tree_inner = tree.as_ref();
                 for branch in tree_inner.branches.iter() {
                     if !Node::is_empty(branch) {

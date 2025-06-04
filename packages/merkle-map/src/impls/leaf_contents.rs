@@ -104,14 +104,6 @@ impl<K, V> LeafContents<K, V> {
     ) {
         entries.extend(&mut self.values.drain(..));
     }
-
-    pub(crate) fn hash(&self) -> Sha256Hash {
-        let mut hasher = Sha256::new();
-        for entry in &self.values {
-            hasher.update(entry.hash().as_array());
-        }
-        Sha256Hash::from_array(hasher.finalize().into())
-    }
 }
 
 impl<K, V> Default for LeafContents<K, V> {
@@ -131,6 +123,22 @@ impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
         }
 
         Ok(())
+    }
+}
+
+impl<K, V: MerkleSerialize> LeafContents<K, V> {
+    pub(crate) fn hash(&self) -> Sha256Hash {
+        let mut hasher = Sha256::new();
+        hasher.update([0u8]);
+        for entry in &self.values {
+            let mut serializer = MerkleSerializer::new(MerkleManager::default());
+            entry
+                .merkle_serialize(&mut serializer)
+                .expect("Serialization should not fail in hash");
+            let bytes = serializer.finish().payload;
+            hasher.update(&bytes);
+        }
+        Sha256Hash::from_array(hasher.finalize().into())
     }
 }
 
