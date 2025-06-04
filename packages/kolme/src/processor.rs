@@ -169,7 +169,9 @@ impl<App: KolmeApp> Processor<App> {
                 })();
 
                 match failed {
-                    Ok(failed) => self.kolme.notify(Notification::FailedTransaction(failed)),
+                    Ok(failed) => self
+                        .kolme
+                        .notify(Notification::FailedTransaction(Arc::new(failed))),
                     Err(e) => {
                         tracing::error!("Unable to generate failed transaction notification: {e}")
                     }
@@ -310,7 +312,8 @@ impl<App: KolmeApp> Processor<App> {
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
         let signed = json.sign(secret)?;
-        self.kolme.notify(Notification::LatestBlock(signed));
+        self.kolme
+            .notify(Notification::LatestBlock(Arc::new(signed)));
         Ok(())
     }
 }
