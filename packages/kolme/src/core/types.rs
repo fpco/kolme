@@ -875,7 +875,6 @@ pub struct Block<AppMessage> {
     pub processor: PublicKey,
     pub height: BlockHeight,
     pub parent: BlockHash,
-    pub block_version: String,
     /// New framework state at the end of execution
     pub framework_state: Sha256Hash,
     /// New app state at the end of execution
