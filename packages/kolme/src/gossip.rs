@@ -49,7 +49,6 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 's
     kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
 }
 
-#[derive(Default)]
 pub struct GossipBuilder {
     keypair: Option<Keypair>,
     bootstrap: Vec<(PeerId, Multiaddr)>,
@@ -59,9 +58,31 @@ pub struct GossipBuilder {
     disable_ip6: bool,
     disable_mdns: bool,
     listen_ports: Vec<u16>,
+    /// See [libp2p::gossipsub::Configbuilder::heartbeat_interval]
+    heartbeat_interval: Duration,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
     local_display_name: Option<String>,
+}
+
+impl Default for GossipBuilder {
+    fn default() -> Self {
+        Self {
+            keypair: Default::default(),
+            bootstrap: Default::default(),
+            disable_quic: Default::default(),
+            disable_tcp: Default::default(),
+            disable_ip4: Default::default(),
+            disable_ip6: Default::default(),
+            disable_mdns: Default::default(),
+            listen_ports: Default::default(),
+            // This is set to aid debugging by not cluttering the log space
+            heartbeat_interval: Duration::from_secs(10),
+            sync_mode: Default::default(),
+            data_load_validation: Default::default(),
+            local_display_name: Default::default(),
+        }
+    }
 }
 
 /// How block data is synchronized.
@@ -132,6 +153,12 @@ impl GossipBuilder {
         self
     }
 
+    /// Set time between each heartbeat (default is 10 seconds).
+    pub fn heartbeat_interval(mut self, heartbeat_interval: Duration) -> Self {
+        self.heartbeat_interval = heartbeat_interval;
+        self
+    }
+
     /// Set the sync mode and data validation rules.
     pub fn set_sync_mode(
         mut self,
@@ -177,7 +204,7 @@ impl GossipBuilder {
 
                 // Set a custom gossipsub configuration
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
-                    .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
+                    .heartbeat_interval(self.heartbeat_interval)
                     .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message
                     // signing)
                     .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
