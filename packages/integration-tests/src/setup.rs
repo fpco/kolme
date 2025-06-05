@@ -106,6 +106,24 @@ pub async fn make_osmo_token(client: Arc<SolanaClient>) -> Result<SolanaToken> {
     make_token(client, Keypair::from_bytes(OSMO_SEED_BYTES).unwrap(), 6).await
 }
 
+pub fn make_token_client(
+    program_id: &Pubkey,
+    client: Arc<SolanaClient>,
+    token_signer: &Keypair,
+    decimals: u8,
+) -> SolanaToken {
+    let client = ProgramRpcClient::new(client, ProgramRpcClientSendTransaction);
+    let token = SolanaToken::new(
+        Arc::new(client),
+        &TOKEN_PROGRAM.program_id(),
+        program_id,
+        Some(decimals),
+        Arc::new(token_signer.insecure_clone()),
+    );
+
+    token
+}
+
 pub async fn make_token(
     client: Arc<SolanaClient>,
     token_signer: Keypair,
@@ -225,6 +243,47 @@ pub async fn solana_mint_to(token: &SolanaToken, to: &Pubkey, amount: u64) -> Re
         amount_to_ui_amount_string(amount, info.decimals),
         token.get_address().to_string()
     );
+
+    Ok(())
+}
+
+pub async fn solana_deposit_and_register2(
+    bridge: Pubkey,
+    client: &SolanaClient,
+    sender: &Keypair,
+    token: &SolanaToken,
+    amount: u64,
+    keys: Vec<KeyRegistration>,
+) -> Result<()> {
+    let holder = derive_token_holder_acc(&bridge, token.get_address());
+    let holder_acc = token
+        .get_or_create_associated_account_info(&holder)
+        .await?
+        .base;
+
+    assert_eq!(holder_acc.owner, holder);
+    assert_eq!(holder_acc.mint, *token.get_address());
+
+    let data = RegularMsgIxData {
+        keys,
+        transfer_amounts: vec![amount],
+    };
+
+    tracing::info!(
+        "{} depositing to Solana bridge contract.",
+        sender.pubkey().to_string()
+    );
+
+    let blockhash = client.get_latest_blockhash().await?;
+    let tx = kolme_solana_bridge_client::regular_tx(
+        bridge,
+        TOKEN_PROGRAM,
+        blockhash,
+        sender,
+        &data,
+        &[*token.get_address()],
+    )?;
+    client.send_and_confirm_transaction(&tx).await?;
 
     Ok(())
 }

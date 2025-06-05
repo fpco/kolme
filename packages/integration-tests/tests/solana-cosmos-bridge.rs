@@ -7,7 +7,7 @@ use tokio::task;
 use integration_tests::setup::{
     airdrop, cosmos_deposit_and_register, cosmos_send_osmo, deploy_solana_bridge, kolme_state,
     make_cosmos_client, make_osmo_token, make_solana_client, solana_deposit_and_register,
-    solana_mint_to, wait_until, wait_until_init,
+    solana_mint_to, wait_until, wait_until_init, make_token_client
 };
 use kolme::*;
 use kolme_solana_bridge_client::{keypair::Keypair, signer::Signer};
@@ -17,6 +17,43 @@ const DUMMY_CODE_VERSION: &str = "dummy code version";
 const COSMOS_SUBMITTER_SEED: &str = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
 
 const LOCALHOST: &str = "http://localhost:3000";
+
+#[test_log::test(tokio::test)]
+#[ignore = "depends on local Solana validator and localosmosis thus hidden from default tests"]
+async fn bridge_deposit() {
+    use integration_tests::setup::solana_deposit_and_register2;
+    use kolme_solana_bridge_client::{signer::EncodableKey, pubkey::Pubkey};
+    use solana_client::nonblocking::rpc_client::RpcClient as SolanaClient;
+
+    // let mut rng = rand::thread_rng();
+    // let key = SecretKey::random(&mut rng);
+
+    let key = SecretKey::from_hex("<SECRET_KEY_HERE>").unwrap();
+
+    let client = std::sync::Arc::new(SolanaClient::new("https://api.devnet.solana.com".into()));
+    let keypair = Keypair::read_from_file("address.json").unwrap();
+    println!("{}", keypair.pubkey());
+
+    let token = make_token_client(
+        &Pubkey::from_str_const("8U9bV3Gtaxeeqk9nRuUAZFEGW8WCxEm9oiGbPbNvp4BK"),
+        client.clone(),
+        &keypair,
+        6
+    );
+    let ata = token.get_associated_token_address(&keypair.pubkey());
+
+    let balance = token.get_account_info(&ata).await.unwrap().base.amount;
+    println!("Balance: {}", balance);
+
+    solana_deposit_and_register2(
+        Pubkey::from_str_const("2jY6ZjU8ZzDYf5XkxVsvioq6wwUBVMxeJvst7n6sTDXF"),
+        &client,
+        &keypair,
+        &token,
+        10000,
+        vec![KeyRegistration::solana(keypair.pubkey().to_bytes(), &key).unwrap()]
+    ).await.unwrap();
+}
 
 #[test_log::test(tokio::test)]
 #[ignore = "depends on local Solana validator and localosmosis thus hidden from default tests"]
