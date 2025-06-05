@@ -18,6 +18,7 @@ pub struct FrameworkState {
     pub(super) chains: ChainStates,
     pub(super) accounts: Accounts,
     pub(super) admin_proposal_state: MerkleLockable<AdminProposalState>,
+    pub(super) network_version: String,
 }
 
 impl MerkleSerialize for FrameworkState {
