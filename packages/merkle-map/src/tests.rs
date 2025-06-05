@@ -34,15 +34,57 @@ impl<K, V> Node<K, V> {
 
 impl<K, V> Node<K, V> {
     #[cfg(test)]
-    pub(crate) fn sanity_checks(&self) {
+    pub(crate) fn sanity_checks(&self)
+    where
+        K: ToMerkleKey,
+        V: MerkleSerialize,
+    {
+        let manager = MerkleManager::default();
         match self {
             Node::Leaf(leaf) => {
-                // FIXME validate the hash of the leaf
-                leaf_inner.sanity_checks();
+                leaf.assert_locked_status(!leaf.as_ref().is_empty());
+                let recalculated_contents = manager
+                    .serialize(leaf)
+                    .expect("Serialization should succeed in sanity checks");
+
+                if let Some(cached_contents) = leaf.get_merkle_contents() {
+                    assert_eq!(
+                        cached_contents.hash, recalculated_contents.hash,
+                        "Hash mismatch in Leaf node: cached={:?}, recalculated={:?}",
+                        cached_contents.hash, recalculated_contents.hash
+                    );
+                    assert_eq!(
+                        cached_contents.payload, recalculated_contents.payload,
+                        "Payload mismatch in Leaf node"
+                    );
+                }
+
+                leaf.as_ref().sanity_checks();
             }
             Node::Tree(tree) => {
-                // FIXME validate the hash of the tree
-                tree_inner.sanity_checks();
+                tree.assert_locked_status(true);
+
+                let recalculated_contents = manager
+                    .serialize(tree.as_ref())
+                    .expect("Serialization should succeed in sanity checks");
+
+                if let Some(cached_contents) = tree.get_merkle_contents() {
+                    assert_eq!(
+                        cached_contents.hash, recalculated_contents.hash,
+                        "Hash mismatch in Tree node: cached={:?}, recalculated={:?}",
+                        cached_contents.hash, recalculated_contents.hash
+                    );
+                    assert_eq!(
+                        cached_contents.payload, recalculated_contents.payload,
+                        "Payload mismatch in Tree node"
+                    );
+                }
+
+                for branch in tree.as_ref().branches.iter() {
+                    branch.sanity_checks();
+                }
+
+                tree.as_ref().sanity_checks();
             }
         }
     }
