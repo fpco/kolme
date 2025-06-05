@@ -448,11 +448,6 @@ impl<App: KolmeApp> Gossip<App> {
                     swarm.behaviour_mut().kademlia.add_address(&peer, address);
                 }
             }
-            SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(
-                gossipsub::Event::Subscribed { topic: t, .. },
-            )) if t == self.gossip_topic.hash() => {
-                self.request_block_heights(swarm).await;
-            }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                 propagation_source,
                 message_id,
