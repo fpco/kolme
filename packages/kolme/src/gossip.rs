@@ -352,9 +352,14 @@ impl<App: KolmeApp> Gossip<App> {
             .publish(self, swarm)
             .await
         {
-            Ok(_) => {
-                tracing::info!("Successfully sent a block height request, p2p network is ready");
-                self.watch_network_ready.send_replace(true);
+            Ok(sent) => {
+                if sent {
+                    tracing::info!(
+                        "{}: Successfully sent a block height request, p2p network is ready",
+                        self.local_display_name
+                    );
+                    self.watch_network_ready.send_replace(true);
+                }
             }
             Err(e) => {
                 tracing::warn!(

@@ -99,11 +99,13 @@ impl<App: KolmeApp> GossipMessage<App> {
         serde_json::from_slice(&message.data).context("Unable to parse gossipsub message")
     }
 
+    /// returns true if this message was sent (including the case when it was a duplicate)
+    /// returns false in the case of the muted error InsufficientPeers
     pub(super) async fn publish(
         self,
         gossip: &Gossip<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         tracing::debug!(
             "{}: Publishing message to gossipsub: {self}",
             gossip.local_display_name
@@ -114,20 +116,20 @@ impl<App: KolmeApp> GossipMessage<App> {
             .gossipsub
             .publish(gossip.gossip_topic.clone(), serde_json::to_vec(&self)?);
         match result {
-            Ok(_id) => Ok(()),
+            Ok(_id) => Ok(true),
             Err(PublishError::Duplicate) => {
                 tracing::info!(
                     "{}: Skipping sending duplicate message",
                     gossip.local_display_name
                 );
-                Ok(())
+                Ok(true)
             }
             Err(PublishError::InsufficientPeers) => {
                 tracing::info!(
                     "{}: Not enough peers to send this message to",
                     gossip.local_display_name
                 );
-                Ok(())
+                Ok(false)
             }
             Err(err) => Err(err).with_context(|| {
                 format!(
