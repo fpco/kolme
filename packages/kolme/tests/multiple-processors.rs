@@ -186,7 +186,7 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
                     txhash,
                     error,
                     proposed_height,
-                } = failed.message.into_inner();
+                } = failed.message.as_inner();
                 anyhow::bail!(
                     "Error with transaction {txhash} for block {proposed_height}: {error}"
                 )

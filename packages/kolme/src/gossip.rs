@@ -701,10 +701,7 @@ impl<App: KolmeApp> Gossip<App> {
         }
 
         if let Some(latest_block) = latest_block {
-            self.kolme
-                .notify(Notification::LatestBlock(Arc::unwrap_or_clone(
-                    latest_block,
-                )));
+            self.kolme.notify(Notification::LatestBlock(latest_block));
         }
 
         let do_state = match self.sync_mode {

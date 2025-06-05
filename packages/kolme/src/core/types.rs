@@ -1569,9 +1569,9 @@ pub enum Notification<AppMessage> {
     /// The message is signed by the processor. Only failed transactions
     /// signed by the real processor should be respected for dropping
     /// transactions from the mempool.
-    FailedTransaction(SignedTaggedJson<FailedTransaction>),
+    FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
     /// Notification from the processor of the latest known block.
-    LatestBlock(SignedTaggedJson<LatestBlock>),
+    LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

@@ -209,6 +209,6 @@ pub enum ApiNotification<AppMessage> {
         contract: String,
     },
     /// A transaction failed in the processor.
-    FailedTransaction(SignedTaggedJson<FailedTransaction>),
-    LatestBlock(SignedTaggedJson<LatestBlock>),
+    FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
+    LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
 }
