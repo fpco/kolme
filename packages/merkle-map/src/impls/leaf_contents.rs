@@ -112,22 +112,25 @@ impl<K, V> Default for LeafContents<K, V> {
     }
 }
 
-impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl<K, V: MerkleSerializeRaw> MerkleSerializeRaw for LeafContents<K, V> {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store_byte(42);
         serializer.store_usize(self.values.len());
         for entry in &self.values {
-            entry.merkle_serialize(serializer)?;
+            entry.merkle_serialize_raw(serializer)?;
         }
 
         Ok(())
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize
+impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
     for MerkleLockable<LeafContents<K, V>>
 {
-    fn merkle_deserialize(
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let magic_byte = deserializer.pop_byte()?;
@@ -143,7 +146,7 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize
         }
         let mut values = arrayvec::ArrayVec::new();
         for _ in 0..len {
-            values.push(LeafEntry::merkle_deserialize(deserializer)?);
+            values.push(LeafEntry::merkle_deserialize_raw(deserializer)?);
         }
 
         Ok(MerkleLockable::new(LeafContents { values }))

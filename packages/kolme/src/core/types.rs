@@ -269,6 +269,7 @@ impl MerkleSerialize for ExternalChain {
 impl MerkleDeserialize for ExternalChain {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer
             .load_str()?
@@ -336,6 +337,7 @@ impl MerkleSerialize for ChainState {
 impl MerkleDeserialize for ChainState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(ChainState {
             config: deserializer.load()?,
@@ -376,6 +378,7 @@ impl MerkleSerialize for PendingBridgeAction {
 impl MerkleDeserialize for PendingBridgeAction {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(PendingBridgeAction {
             payload: deserializer.load()?,
@@ -407,6 +410,7 @@ impl MerkleSerialize for PendingBridgeEvent {
 impl MerkleDeserialize for PendingBridgeEvent {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             event: deserializer.load_json()?,
@@ -427,6 +431,7 @@ impl MerkleSerialize for ChainConfig {
 impl MerkleDeserialize for ChainConfig {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             assets: deserializer.load()?,
@@ -453,6 +458,7 @@ impl MerkleSerialize for AssetConfig {
 impl MerkleDeserialize for AssetConfig {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             decimals: deserializer.load()?,
@@ -553,6 +559,7 @@ impl MerkleSerialize for BridgeContract {
 impl MerkleDeserialize for BridgeContract {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         match deserializer.pop_byte()? {
             0 => Ok(Self::NeededCosmosBridge {
@@ -594,15 +601,16 @@ impl Display for AssetId {
 
 impl MerkleSerialize for AssetId {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 
 impl MerkleDeserialize for AssetId {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        MerkleDeserialize::merkle_deserialize(deserializer).map(Self)
+        deserializer.load().map(Self)
     }
 }
 
@@ -613,12 +621,13 @@ pub struct AssetName(pub String);
 
 impl MerkleSerialize for AssetName {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 impl MerkleDeserialize for AssetName {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }
@@ -636,13 +645,14 @@ impl AccountId {
 
 impl MerkleSerialize for AccountId {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 
 impl MerkleDeserialize for AccountId {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }
@@ -699,15 +709,16 @@ impl Display for AccountNonce {
 
 impl MerkleSerialize for AccountNonce {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 
 impl MerkleDeserialize for AccountNonce {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        u64::merkle_deserialize(deserializer).map(Self)
+        deserializer.load().map(Self)
     }
 }
 
@@ -786,13 +797,14 @@ impl Display for Wallet {
 
 impl MerkleSerialize for Wallet {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 
 impl MerkleDeserialize for Wallet {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Wallet)
     }
@@ -835,8 +847,9 @@ impl<AppMessage> MerkleSerialize for SignedBlock<AppMessage> {
 impl<AppMessage: serde::de::DeserializeOwned> MerkleDeserialize for SignedBlock<AppMessage> {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        MerkleDeserialize::merkle_deserialize(deserializer).map(SignedBlock)
+        deserializer.load().map(Self)
     }
 }
 
@@ -1171,14 +1184,15 @@ impl Display for AdminProposalId {
 
 impl MerkleSerialize for AdminProposalId {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 impl MerkleDeserialize for AdminProposalId {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        u64::merkle_deserialize(deserializer).map(Self)
+        deserializer.load().map(Self)
     }
 }
 
@@ -1211,13 +1225,14 @@ impl From<ConfiguredChains> for ChainStates {
 
 impl MerkleSerialize for ChainStates {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 
 impl MerkleDeserialize for ChainStates {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }

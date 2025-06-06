@@ -12,56 +12,56 @@ use smallvec::{Array, SmallVec};
 
 use crate::*;
 
-impl MerkleDeserialize for u8 {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for u8 {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.pop_byte()
     }
 }
 
-impl MerkleDeserialize for u16 {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for u16 {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(u16::from_le_bytes)
     }
 }
 
-impl MerkleDeserialize for u32 {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for u32 {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(u32::from_le_bytes)
     }
 }
 
-impl MerkleDeserialize for u64 {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for u64 {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(u64::from_le_bytes)
     }
 }
 
-impl MerkleDeserialize for u128 {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for u128 {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(u128::from_le_bytes)
     }
 }
 
-impl MerkleDeserialize for usize {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for usize {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load_usize()
     }
 }
 
-impl MerkleDeserialize for String {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for String {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let bytes = deserializer.load_bytes()?;
@@ -71,21 +71,21 @@ impl MerkleDeserialize for String {
     }
 }
 
-impl MerkleDeserialize for Arc<str> {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for Arc<str> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        String::merkle_deserialize(deserializer).map(Into::into)
+        String::merkle_deserialize_raw(deserializer).map(Into::into)
     }
 }
 
-impl<T: MerkleDeserialize> MerkleDeserialize for Option<T> {
-    fn merkle_deserialize(
+impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for Option<T> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         match deserializer.pop_byte()? {
             0 => Ok(None),
-            1 => T::merkle_deserialize(deserializer).map(Some),
+            1 => T::merkle_deserialize_raw(deserializer).map(Some),
             x => Err(MerkleSerialError::Other(format!(
                 "When deserializing an Option, invalid byte {x}"
             ))),
@@ -93,32 +93,33 @@ impl<T: MerkleDeserialize> MerkleDeserialize for Option<T> {
     }
 }
 
-impl<T: MerkleDeserialize> MerkleDeserialize for Box<T> {
-    fn merkle_deserialize(
+// TODO any way to get this impl back?
+// impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for Box<T> {
+//     fn merkle_deserialize_raw(
+//         deserializer: &mut MerkleDeserializer,
+//     ) -> Result<Self, MerkleSerialError> {
+//         T::merkle_deserialize_raw(deserializer).map(Into::into)
+//     }
+// }
+
+impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for Rc<T> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        T::merkle_deserialize(deserializer).map(Into::into)
+        T::merkle_deserialize_raw(deserializer).map(Into::into)
     }
 }
 
-impl<T: MerkleDeserialize> MerkleDeserialize for Rc<T> {
-    fn merkle_deserialize(
+impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for Arc<T> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        T::merkle_deserialize(deserializer).map(Into::into)
+        T::merkle_deserialize_raw(deserializer).map(Into::into)
     }
 }
 
-impl<T: MerkleDeserialize> MerkleDeserialize for Arc<T> {
-    fn merkle_deserialize(
-        deserializer: &mut MerkleDeserializer,
-    ) -> Result<Self, MerkleSerialError> {
-        T::merkle_deserialize(deserializer).map(Into::into)
-    }
-}
-
-impl<T: MerkleDeserialize> MerkleDeserialize for Vec<T> {
-    fn merkle_deserialize(
+impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for Vec<T> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let len = deserializer.load_usize()?;
@@ -130,16 +131,16 @@ impl<T: MerkleDeserialize> MerkleDeserialize for Vec<T> {
     }
 }
 
-impl<T: MerkleDeserialize> MerkleDeserialize for Arc<[T]> {
-    fn merkle_deserialize(
+impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for Arc<[T]> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        Vec::<T>::merkle_deserialize(deserializer).map(Into::into)
+        Vec::<T>::merkle_deserialize_raw(deserializer).map(Into::into)
     }
 }
 
-impl<T: MerkleDeserialize, const N: usize> MerkleDeserialize for [T; N] {
-    fn merkle_deserialize(
+impl<T: MerkleDeserializeRaw, const N: usize> MerkleDeserializeRaw for [T; N] {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let mut v = Vec::with_capacity(N);
@@ -153,45 +154,47 @@ impl<T: MerkleDeserialize, const N: usize> MerkleDeserialize for [T; N] {
     }
 }
 
-impl MerkleDeserialize for Sha256Hash {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for Sha256Hash {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load_array().map(Sha256Hash::from_array)
     }
 }
 
-impl<K: MerkleDeserialize + Ord, V: MerkleDeserialize> MerkleDeserialize for BTreeMap<K, V> {
-    fn merkle_deserialize(
+impl<K: MerkleDeserializeRaw + Ord, V: MerkleDeserializeRaw> MerkleDeserializeRaw
+    for BTreeMap<K, V>
+{
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let len = deserializer.load_usize()?;
         let mut x = BTreeMap::new();
         for _ in 0..len {
-            let k = K::merkle_deserialize(deserializer)?;
-            let v = V::merkle_deserialize(deserializer)?;
+            let k = K::merkle_deserialize_raw(deserializer)?;
+            let v = V::merkle_deserialize_raw(deserializer)?;
             x.insert(k, v);
         }
         Ok(x)
     }
 }
 
-impl<T: MerkleDeserialize + Ord> MerkleDeserialize for BTreeSet<T> {
-    fn merkle_deserialize(
+impl<T: MerkleDeserializeRaw + Ord> MerkleDeserializeRaw for BTreeSet<T> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let len = deserializer.load_usize()?;
         let mut x = BTreeSet::new();
         for _ in 0..len {
-            let t = T::merkle_deserialize(deserializer)?;
+            let t = T::merkle_deserialize_raw(deserializer)?;
             x.insert(t);
         }
         Ok(x)
     }
 }
 
-impl MerkleDeserialize for rust_decimal::Decimal {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for rust_decimal::Decimal {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         deserializer
@@ -200,8 +203,8 @@ impl MerkleDeserialize for rust_decimal::Decimal {
     }
 }
 
-impl MerkleDeserialize for PublicKey {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for PublicKey {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let bytes = deserializer.load_bytes()?;
@@ -209,32 +212,32 @@ impl MerkleDeserialize for PublicKey {
     }
 }
 
-impl MerkleDeserialize for BridgeEventId {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for BridgeEventId {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        u64::merkle_deserialize(deserializer).map(Self)
+        u64::merkle_deserialize_raw(deserializer).map(Self)
     }
 }
 
-impl MerkleDeserialize for BridgeActionId {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for BridgeActionId {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        u64::merkle_deserialize(deserializer).map(Self)
+        u64::merkle_deserialize_raw(deserializer).map(Self)
     }
 }
 
-impl MerkleDeserialize for Signature {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for Signature {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Signature::from_slice(deserializer.load_bytes()?).map_err(MerkleSerialError::custom)
     }
 }
 
-impl MerkleDeserialize for RecoveryId {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for RecoveryId {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let byte = deserializer.pop_byte()?;
@@ -242,8 +245,8 @@ impl MerkleDeserialize for RecoveryId {
     }
 }
 
-impl MerkleDeserialize for SignatureWithRecovery {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for SignatureWithRecovery {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
@@ -253,16 +256,16 @@ impl MerkleDeserialize for SignatureWithRecovery {
     }
 }
 
-impl<T1: MerkleDeserialize, T2: MerkleDeserialize> MerkleDeserialize for (T1, T2) {
-    fn merkle_deserialize(
+impl<T1: MerkleDeserializeRaw, T2: MerkleDeserializeRaw> MerkleDeserializeRaw for (T1, T2) {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok((deserializer.load()?, deserializer.load()?))
     }
 }
 
-impl MerkleDeserialize for ValidatorSet {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for ValidatorSet {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
@@ -275,16 +278,16 @@ impl MerkleDeserialize for ValidatorSet {
     }
 }
 
-impl MerkleDeserialize for bool {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for bool {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Ok(deserializer.pop_byte()? == 1)
     }
 }
 
-impl MerkleDeserialize for Timestamp {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for Timestamp {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let as_bytes: [u8; 128 / 8] = deserializer.load_array()?;
@@ -293,8 +296,8 @@ impl MerkleDeserialize for Timestamp {
     }
 }
 
-impl<A: Array<Item: MerkleDeserialize>> MerkleDeserialize for SmallVec<A> {
-    fn merkle_deserialize(
+impl<A: Array<Item: MerkleDeserializeRaw>> MerkleDeserializeRaw for SmallVec<A> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         // SmallVec is serialized as slice, so it is preceded by length

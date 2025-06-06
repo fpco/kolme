@@ -125,6 +125,7 @@ impl MerkleSerialize for AppState {
 impl MerkleDeserialize for AppState {
     fn merkle_deserialize(
         deserializer: &mut kolme::MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         AppState::from_str(deserializer.load_str()?).map_err(MerkleSerialError::custom)
     }

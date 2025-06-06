@@ -1,9 +1,7 @@
 use jiff::Timestamp;
 use smallvec::{Array, SmallVec};
 
-use crate::{MerkleDeserialize, MerkleSerialize};
-
-use super::MerkleMap;
+use super::{MerkleDeserializeRaw, MerkleMap, MerkleSerializeRaw};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SerializableSlice<'a, T>(pub &'a [T]);
@@ -16,5 +14,5 @@ pub struct SerializableTimestamp(pub Timestamp);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SerializableSmallVec<
-    A: Array<Item: MerkleSerialize + MerkleDeserialize + Clone + PartialEq + std::fmt::Debug>,
+    A: Array<Item: MerkleSerializeRaw + MerkleDeserializeRaw + Clone + PartialEq + std::fmt::Debug>,
 >(pub SmallVec<A>);

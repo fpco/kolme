@@ -76,11 +76,15 @@ impl<Block: MerkleSerialize, FrameworkState: MerkleSerialize, AppState: MerkleSe
     }
 }
 
-impl<Block: MerkleDeserialize, FrameworkState: MerkleDeserialize, AppState: MerkleDeserialize>
-    MerkleDeserialize for StorableBlock<Block, FrameworkState, AppState>
+impl<
+        Block: MerkleSerialize + MerkleDeserialize,
+        FrameworkState: MerkleSerialize + MerkleDeserialize,
+        AppState: MerkleSerialize + MerkleDeserialize,
+    > MerkleDeserialize for StorableBlock<Block, FrameworkState, AppState>
 {
     fn merkle_deserialize(
         deserializer: &mut merkle_map::MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         let height = deserializer.load()?;
         let blockhash = deserializer.load()?;

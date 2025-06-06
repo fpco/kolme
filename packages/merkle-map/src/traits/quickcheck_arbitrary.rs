@@ -7,7 +7,7 @@ use quickcheck::Arbitrary;
 use smallvec::{Array, SmallVec};
 use std::collections::BTreeMap;
 
-use super::{FromMerkleKey, MerkleDeserialize, MerkleSerialize, ToMerkleKey};
+use super::{FromMerkleKey, MerkleDeserializeRaw, MerkleSerializeRaw, ToMerkleKey};
 
 impl<T: Arbitrary> Arbitrary for SerializableSlice<'static, T> {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
@@ -60,8 +60,8 @@ impl Arbitrary for SerializableTimestamp {
 impl<
         A: Array<
                 Item: Clone
-                          + MerkleSerialize
-                          + MerkleDeserialize
+                          + MerkleSerializeRaw
+                          + MerkleDeserializeRaw
                           + Arbitrary
                           + PartialEq
                           + std::fmt::Debug,

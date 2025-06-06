@@ -53,6 +53,7 @@ impl MerkleSerialize for State {
 impl MerkleDeserialize for State {
     fn merkle_deserialize(
         deserializer: &mut kolme::MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             admin_keys: deserializer.load()?,
@@ -103,6 +104,7 @@ impl MerkleSerialize for MarketState {
 impl MerkleDeserialize for MarketState {
     fn merkle_deserialize(
         deserializer: &mut kolme::MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer
             .load_str()?
@@ -156,6 +158,7 @@ impl MerkleSerialize for Market {
 impl MerkleDeserialize for Market {
     fn merkle_deserialize(
         deserializer: &mut kolme::MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             state: deserializer.load()?,
@@ -204,6 +207,7 @@ impl MerkleSerialize for Bet {
 impl MerkleDeserialize for Bet {
     fn merkle_deserialize(
         deserializer: &mut kolme::MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             bettor: deserializer.load()?,

@@ -47,14 +47,17 @@ pub struct TaggedJson<T> {
     value: T,
 }
 
-impl<T> MerkleSerialize for TaggedJson<T> {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.serialized.merkle_serialize(serializer)
+impl<T> MerkleSerializeRaw for TaggedJson<T> {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        serializer.store(&self.serialized)
     }
 }
 
-impl<T: serde::de::DeserializeOwned> MerkleDeserialize for TaggedJson<T> {
-    fn merkle_deserialize(
+impl<T: serde::de::DeserializeOwned> MerkleDeserializeRaw for TaggedJson<T> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let serialized: String = deserializer.load()?;
@@ -97,6 +100,7 @@ impl<T> MerkleSerialize for SignedTaggedJson<T> {
 impl<T: serde::de::DeserializeOwned> MerkleDeserialize for SignedTaggedJson<T> {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             message: deserializer.load()?,

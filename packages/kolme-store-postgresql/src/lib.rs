@@ -2,7 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use fjall::PartitionCreateOptions;
 use kolme_store::{KolmeStoreError, StorableBlock};
-use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
+use merkle_map::{MerkleDeserializeRaw, MerkleManager, MerkleSerialize, Sha256Hash};
 use merkle_store_fjall::{MerkleFjallStore, MerkleFjallStoreHelper};
 use sqlx::postgres::PgAdvisoryLock;
 
@@ -47,8 +47,8 @@ impl KolmeStorePostgres {
 
     pub async fn load_block<
         Block: serde::de::DeserializeOwned,
-        FrameworkState: MerkleDeserialize,
-        AppState: MerkleDeserialize,
+        FrameworkState: MerkleDeserializeRaw,
+        AppState: MerkleDeserializeRaw,
     >(
         &self,
         merkle_manager: &MerkleManager,

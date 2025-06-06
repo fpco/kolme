@@ -303,16 +303,16 @@ impl MerkleSerialize for Accounts {
         &self,
         serializer: &mut MerkleSerializer,
     ) -> std::result::Result<(), MerkleSerialError> {
-        self.accounts.merkle_serialize(serializer)
+        serializer.store(&self.accounts)
     }
 }
 
 impl MerkleDeserialize for Accounts {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        let accounts: MerkleMap<AccountId, Account> =
-            MerkleDeserialize::merkle_deserialize(deserializer)?;
+        let accounts: MerkleMap<AccountId, Account> = deserializer.load()?;
         let mut wallets = MerkleMap::new();
         let mut pubkeys = MerkleMap::new();
         for (id, account) in &accounts {
@@ -360,6 +360,7 @@ impl MerkleSerialize for Account {
 impl MerkleDeserialize for Account {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Account {
             assets: deserializer.load()?,

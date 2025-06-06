@@ -29,16 +29,16 @@ impl std::fmt::Debug for MerkleContents {
 
 impl MerkleManager {
     /// Serialize a value into a [MerkleContents] for later storage.
-    pub fn serialize<T: MerkleSerialize + ?Sized>(
+    pub fn serialize<T: MerkleSerializeRaw + ?Sized>(
         &self,
         value: &T,
     ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
-        if let Some(contents) = value.get_merkle_contents() {
+        if let Some(contents) = value.get_merkle_contents_raw() {
             return Ok(contents);
         }
 
         let mut serializer = MerkleSerializer::new(self.clone());
-        value.merkle_serialize(&mut serializer)?;
+        value.merkle_serialize_raw(&mut serializer)?;
         let mut contents = serializer.finish();
         let existing_payload = self.cache.read().get(&contents.hash).cloned();
         match existing_payload {
@@ -53,7 +53,7 @@ impl MerkleManager {
         }
 
         let contents = Arc::new(contents);
-        value.set_merkle_contents(&contents);
+        value.set_merkle_contents_raw(&contents);
         Ok(contents)
     }
 
@@ -85,7 +85,7 @@ impl MerkleManager {
     }
 
     /// Serialize a save a value.
-    pub async fn save<T: MerkleSerialize, Store: MerkleStore>(
+    pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
         &self,
         store: &mut Store,
         value: &T,
@@ -96,20 +96,20 @@ impl MerkleManager {
     }
 
     /// Deserialize a value from the given payload.
-    pub fn deserialize<T: MerkleDeserialize>(
+    pub fn deserialize<T: MerkleDeserializeRaw>(
         &self,
         hash: Sha256Hash,
         payload: Arc<[u8]>,
     ) -> Result<T, MerkleSerialError> {
         let mut deserializer = MerkleDeserializer::new(hash, payload, self.clone());
-        let value = T::merkle_deserialize(&mut deserializer)?;
+        let value = T::merkle_deserialize_raw(&mut deserializer)?;
         let contents = Arc::new(deserializer.finish()?);
-        value.set_merkle_contents(contents);
+        value.set_merkle_contents_raw(contents);
         Ok(value)
     }
 
     /// Load the value at the given hash
-    pub async fn load<T: MerkleDeserialize, Store: MerkleStore>(
+    pub async fn load<T: MerkleDeserializeRaw, Store: MerkleStore>(
         &self,
         store: &mut Store,
         hash: Sha256Hash,
@@ -151,7 +151,7 @@ impl MerkleManager {
         Ok(payload)
     }
 
-    pub(crate) fn deserialize_cached<T: MerkleDeserialize>(
+    pub(crate) fn deserialize_cached<T: MerkleDeserializeRaw>(
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<T>, MerkleSerialError> {

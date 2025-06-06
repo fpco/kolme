@@ -39,6 +39,7 @@ impl MerkleSerialize for FrameworkState {
 impl MerkleDeserialize for FrameworkState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(FrameworkState {
             validator_set: deserializer.load()?,
@@ -107,6 +108,7 @@ impl MerkleSerialize for AdminProposalState {
 impl MerkleDeserialize for AdminProposalState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             next_admin_proposal_id: deserializer.load()?,
@@ -126,6 +128,7 @@ impl MerkleSerialize for PendingProposal {
 impl MerkleDeserialize for PendingProposal {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             payload: deserializer.load()?,
@@ -152,6 +155,7 @@ impl MerkleSerialize for ProposalPayload {
 impl MerkleDeserialize for ProposalPayload {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         match deserializer.pop_byte()? {
             0 => Ok(ProposalPayload::NewSet(deserializer.load()?)),

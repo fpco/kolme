@@ -1,3 +1,4 @@
+mod blanket;
 mod iter;
 mod leaf_contents;
 mod leaf_entry;

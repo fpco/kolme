@@ -173,25 +173,32 @@ impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
     }
 }
 
-impl<K: ToMerkleKey, V: MerkleSerialize> MerkleSerialize for MerkleMap<K, V> {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for MerkleMap<K, V> {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        self.0.merkle_serialize_raw(serializer)
     }
 
-    fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
-        self.0.get_merkle_contents()
+    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
+        self.0.get_merkle_contents_raw()
     }
 
-    fn set_merkle_contents(&self, contents: &Arc<MerkleContents>) {
-        self.0.set_merkle_contents(contents)
+    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
+        self.0.set_merkle_contents_raw(contents)
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize for MerkleMap<K, V> {
-    fn merkle_deserialize(
+impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleMap<K, V> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        Node::merkle_deserialize(deserializer).map(MerkleMap)
+        Node::merkle_deserialize_raw(deserializer).map(MerkleMap)
+    }
+
+    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+        self.0.set_merkle_contents_raw(contents);
     }
 }
 
