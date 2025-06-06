@@ -43,10 +43,10 @@ pub struct Accounts {
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Account {
     /// Using a [BTreeMap] on the assumption that this data will be relatively small.
-    assets: BTreeMap<AssetId, Decimal>,
-    wallets: BTreeSet<Wallet>,
-    pubkeys: BTreeSet<PublicKey>,
-    next_nonce: AccountNonce,
+    pub assets: BTreeMap<AssetId, Decimal>,
+    pub wallets: BTreeSet<Wallet>,
+    pub pubkeys: BTreeSet<PublicKey>,
+    pub next_nonce: AccountNonce,
 }
 impl Account {
     pub(crate) fn get_next_nonce(&self) -> AccountNonce {
@@ -124,6 +124,10 @@ impl Accounts {
         self.accounts
             .iter()
             .map(|(id, account)| (id, &account.assets))
+    }
+
+    pub fn iter_accounts(&self) -> impl Iterator<Item = (&AccountId, &Account)> {
+        self.accounts.iter()
     }
 
     /// Adds an empty entry for the given account ID if not already present.
