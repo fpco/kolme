@@ -29,6 +29,8 @@ impl<T: MerkleSerialize + MerkleDeserialize> MerkleDeserializeRaw for T {
             Err(MerkleSerialError::UnexpectedVersion {
                 highest_supported,
                 actual: version,
+                type_name: std::any::type_name::<T>(),
+                offset: deserializer.get_position(),
             })
         } else {
             T::merkle_deserialize(deserializer, version)

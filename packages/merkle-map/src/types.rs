@@ -106,10 +106,12 @@ pub enum MerkleSerialError {
     },
     #[error("Leaf content limit exceeded: limit {limit}, actual {actual}")]
     LeafContentLimitExceeded { limit: usize, actual: usize },
-    #[error("Unexpected version number during serialization, received {actual}, but highest supported is {highest_supported}")]
+    #[error("Unexpected version number during deserialization of {type_name}, received {actual}, but highest supported is {highest_supported} at position {offset}")]
     UnexpectedVersion {
         highest_supported: usize,
         actual: usize,
+        type_name: &'static str,
+        offset: usize,
     },
     #[error(transparent)]
     Custom(Box<dyn std::error::Error + Send + Sync>),

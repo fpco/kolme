@@ -840,7 +840,7 @@ impl<AppMessage> SignedBlock<AppMessage> {
 
 impl<AppMessage> MerkleSerialize for SignedBlock<AppMessage> {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.0.merkle_serialize(serializer)
+        serializer.store(&self.0)
     }
 }
 

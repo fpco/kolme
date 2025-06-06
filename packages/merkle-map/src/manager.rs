@@ -90,8 +90,11 @@ impl MerkleManager {
         store: &mut Store,
         value: &T,
     ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
+        println!("save1");
         let contents = self.serialize(value)?;
+        println!("save2");
         self.save_merkle_contents(store, &contents).await?;
+        println!("save3");
         Ok(contents)
     }
 

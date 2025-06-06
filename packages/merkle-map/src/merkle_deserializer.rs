@@ -134,4 +134,8 @@ impl MerkleDeserializer {
         let bytes = self.load_bytes()?;
         serde_json::from_slice(bytes).map_err(MerkleSerialError::custom)
     }
+
+    pub(crate) fn get_position(&self) -> usize {
+        self.pos
+    }
 }
