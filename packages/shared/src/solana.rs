@@ -10,7 +10,9 @@ pub const INITIALIZE_IX: u8 = 0;
 pub const REGULAR_IX: u8 = 1;
 pub const SIGNED_IX: u8 = 2;
 
+pub const STATE_SEED: &[u8] = b"state";
 pub const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
+pub const GIT_REV_SEED: &[u8] = b"git_rev";
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct InitializeIxData {

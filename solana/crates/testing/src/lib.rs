@@ -7,21 +7,17 @@ use litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo};
 use sha_256::Sha256;
 
 use kolme_solana_bridge_client::{
-    derive_token_holder_acc,
-    instruction::{account_meta::AccountMeta, Instruction},
+    derive_token_holder_acc, init_tx,
+    instruction::account_meta::AccountMeta,
     keypair::Keypair,
-    message::Message,
     pubkey::{declare_id, Pubkey},
     regular_tx, signed_tx,
     signer::Signer,
-    transaction::Transaction,
     transfer_payload, TokenProgram,
 };
 use shared::{
     cryptography::{SecretKey, ThreadRng},
-    solana::{
-        InitializeIxData, Payload, RegularMsgIxData, SignedAction, SignedMsgIxData, INITIALIZE_IX,
-    },
+    solana::{InitializeIxData, Payload, RegularMsgIxData, SignedAction, SignedMsgIxData},
     types::ValidatorSet,
 };
 
@@ -40,6 +36,8 @@ pub const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111
 pub const TOKEN: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 pub const STATE_PDA: Pubkey =
     Pubkey::from_str_const("846CuSccLQ6jQSsvwNCoBkvvGXPGGm7ivVmT3a3GVkk7");
+pub const GIT_REV_PDA: Pubkey =
+    Pubkey::from_str_const("BY3CnQbcbmc3YFGXWRqJRqj1h7WJ5kp8U52XTSJdq2LE");
 
 pub struct Program {
     pub svm: LiteSVM,
@@ -115,18 +113,16 @@ impl Program {
 
     #[allow(clippy::result_large_err)]
     pub fn init(&mut self, sender: &Keypair, data: &InitializeIxData) -> TransactionResult {
-        let mut bytes = Vec::with_capacity(1 + borsh::object_length(data).unwrap());
-        bytes.push(INITIALIZE_IX);
-        data.serialize(&mut bytes).unwrap();
+        let blockhash = self.svm.latest_blockhash();
+        let tx = init_tx(ID, blockhash, sender, data).unwrap();
 
-        let accounts = vec![
-            AccountMeta::new(sender.pubkey(), true),
-            AccountMeta::new(SYSTEM, false),
-            AccountMeta::new(STATE_PDA, false),
-        ];
-        let tx = self.make_tx(sender, accounts, bytes);
+        let res = self.svm.send_transaction(tx);
 
-        self.svm.send_transaction(tx)
+        if res.is_ok() {
+            self.svm.expire_blockhash();
+        }
+
+        res
     }
 
     #[allow(clippy::result_large_err)]
@@ -173,26 +169,6 @@ impl Program {
         }
 
         res
-    }
-
-    pub fn make_tx(
-        &self,
-        sender: &Keypair,
-        accounts: Vec<AccountMeta>,
-        data: Vec<u8>,
-    ) -> Transaction {
-        let blockhash = self.svm.latest_blockhash();
-        let msg = Message::new_with_blockhash(
-            &[Instruction {
-                program_id: ID.into(),
-                accounts,
-                data,
-            }],
-            Some(&sender.pubkey()),
-            &blockhash,
-        );
-
-        Transaction::new(&[sender], msg, blockhash)
     }
 
     pub fn make_signed_msg(

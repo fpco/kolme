@@ -18,7 +18,8 @@ use transaction::Transaction;
 
 use shared::solana::{
     ExecuteAction, InitializeIxData, InstructionAccount, Payload, RegularMsgIxData, SignedAction,
-    SignedMsgIxData, SignerAccount, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, TOKEN_HOLDER_SEED,
+    SignedMsgIxData, SignerAccount, GIT_REV_SEED, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, STATE_SEED,
+    TOKEN_HOLDER_SEED,
 };
 
 const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
@@ -53,10 +54,13 @@ pub fn init_ix(
     data.serialize(&mut bytes)?;
 
     let state_pda = derive_state_pda(&program_id);
+    let git_rev_pda = derive_git_rev_pda(&program_id);
+
     let accounts = vec![
         AccountMeta::new(sender, true),
         AccountMeta::new(SYSTEM, false),
         AccountMeta::new(state_pda, false),
+        AccountMeta::new(git_rev_pda, false),
     ];
 
     Ok(Message::new_with_blockhash(
@@ -195,7 +199,7 @@ pub fn regular_ix(
 }
 
 pub fn derive_state_pda(program_id: &Pubkey) -> Pubkey {
-    let (pubkey, _) = Pubkey::find_program_address(&[b"state"], program_id);
+    let (pubkey, _) = Pubkey::find_program_address(&[STATE_SEED], program_id);
 
     pubkey
 }
@@ -205,6 +209,12 @@ pub fn derive_token_holder_acc(program_id: &Pubkey, mint: &Pubkey) -> Pubkey {
     let (holder, _) = Pubkey::find_program_address(&seeds, program_id);
 
     holder
+}
+
+pub fn derive_git_rev_pda(program_id: &Pubkey) -> Pubkey {
+    let (pubkey, _) = Pubkey::find_program_address(&[GIT_REV_SEED], program_id);
+
+    pubkey
 }
 
 pub fn transfer_payload(
