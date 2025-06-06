@@ -6,8 +6,8 @@ use shared::{
     cryptography::{PublicKey, PublicKeyUncompressed, SignatureWithRecovery},
     solana::{
         BridgeMessage, ExecuteAction, InitializeIxData, Message, Payload, RegularMsgIxData,
-        SignedAction, SignedMsgIxData, State, Token, INITIALIZE_IX, REGULAR_IX, SIGNED_IX,
-        TOKEN_HOLDER_SEED,
+        SignedAction, SignedMsgIxData, State, Token, GIT_REV_SEED, INITIALIZE_IX, REGULAR_IX,
+        SIGNED_IX, STATE_SEED, TOKEN_HOLDER_SEED,
     },
     types::{SelfReplace, ValidatorSet, ValidatorType},
 };
@@ -41,11 +41,19 @@ use solbox::pinocchio::entrypoint;
 #[cfg(not(feature = "no-entrypoint"))]
 entrypoint!(process_instruction);
 
-// PDAs
-const STATE_DERIVATION: PdaDerivation = PdaDerivation::new(&[b"state"]);
-type StatePda = PdaData<State, 0>;
+#[cfg(target_os = "solana")]
+const GIT_REV: &str = env!("GIT_REV", "Missing GIT_REV git hash env variable.");
 
+#[cfg(not(target_os = "solana"))]
+const GIT_REV: &str = "N/A";
+
+// PDAs
+const STATE_DERIVATION: PdaDerivation = PdaDerivation::new(&[STATE_SEED]);
+const GIT_REV_DERIVATION: PdaDerivation = PdaDerivation::new(&[GIT_REV_SEED]);
+
+type StatePda = PdaData<State, 0>;
 type TokenHolderPda = PdaData<TokenHolder, 1>;
+type GitRevPda = PdaData<GitRev, 2>;
 
 const SHA256_DIGEST_SIZE: usize = 32;
 
@@ -92,6 +100,11 @@ enum Secp256k1RecoverError {
 #[derive(BorshDeserialize, BorshSerialize)]
 struct TokenHolder;
 
+#[derive(BorshDeserialize, BorshSerialize)]
+struct GitRev {
+    hash: String,
+}
+
 pub fn process_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -125,10 +138,11 @@ pub fn process_instruction(
 }
 
 fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
-    ctx.assert_accounts_len(3)?;
+    ctx.assert_accounts_len(4)?;
     let payer_acc = ctx.account(0, AccountReq::SIGNER)?;
     ctx.assert_is_system_program(1)?;
     let state_acc = ctx.account(2, AccountReq::WRITABLE)?;
+    let git_rev_acc = ctx.account(3, AccountReq::WRITABLE)?;
 
     let ix = InitializeIxData::try_from_slice(instruction_data)
         .map_err(|_| ProgramError::BorshIoError)?;
@@ -148,6 +162,16 @@ fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError>
 
     let state_pda: StatePda = ctx.init_pda(&payer_acc, &state_acc, STATE_DERIVATION, state)?;
     state_pda.serialize_into(&state_acc)?;
+
+    let git_rev = GitRev {
+        hash: GIT_REV.trim().into(),
+    };
+
+    let git_rev_pda: GitRevPda =
+        ctx.init_pda(&payer_acc, &git_rev_acc, GIT_REV_DERIVATION, git_rev)?;
+    git_rev_pda.serialize_into(&git_rev_acc)?;
+
+    log!("Git rev: {}", GIT_REV.trim());
 
     Ok(())
 }
