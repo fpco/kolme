@@ -54,6 +54,11 @@ jobs:
         uses: clechasseur/rs-cargo@8435b10f6e71c2e3d4d3b7573003a8ce4bfc6386 # v2.0.6
         with:
           command: machete
+      - name: Install cargo-audit
+        uses: clechasseur/rs-cargo@8435b10f6e71c2e3d4d3b7573003a8ce4bfc6386 # v2.0.6
+        with:
+          command: install
+          args: cargo-audit@0.21.0
       - name: Cargo audit
         uses: rustsec/audit-check@dd51754d4e59da7395a4cd9b593f0ff2d61a9b95
         with:
