@@ -280,11 +280,11 @@ impl<App: KolmeApp> KolmeStore<App> {
 
         let x = match &self.inner {
             KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                let mut store = kolme_store_fjall.get_merkle_store();
+                let mut store = kolme_store_fjall.merkle.clone();
                 store_and_load_helper(merkle_manager, &mut store, &contents).await
             }
             KolmeStoreInner::Postgres(kolme_store_postgres) => {
-                let mut store = kolme_store_postgres.get_merkle_store();
+                let mut store = kolme_store_postgres.get_merkle_store().clone();
                 store_and_load_helper(merkle_manager, &mut store, &contents).await
             }
             KolmeStoreInner::InMemory(kolme_store_in_memory) => {

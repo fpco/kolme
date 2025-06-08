@@ -25,6 +25,7 @@ kolme-store.workspace = true
 kolme-store-postgresql.workspace = true
 libp2p = { workspace = true, features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "dns", "gossipsub", "macros", "quic", "request-response", "cbor", "rsa"] }
 merkle-map = { workspace = true }
+merkle-store-fjall.workspace = true
 parking_lot = "0.12.3"
 rand = "0.8"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }

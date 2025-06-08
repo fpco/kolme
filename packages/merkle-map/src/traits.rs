@@ -49,11 +49,16 @@ pub trait MerkleDeserialize: Sized {
 /// A backing store for raw blobs used by a [MerkleMap].
 pub trait MerkleStore {
     /// Load up the blob by hash, if available.
+    ///
+    /// This loads up a single layer of a merkle hash, by returning
+    /// both the raw payload for this level, plus the hashes of
+    /// any children. This allows the library to reconstruct
+    /// the entire [MerkleContents] for any given hash.
     #[allow(async_fn_in_trait)]
     async fn load_by_hash(
         &mut self,
         hash: Sha256Hash,
-    ) -> Result<Option<Arc<[u8]>>, MerkleSerialError>;
+    ) -> Result<Option<MerkleLayerContents>, MerkleSerialError>;
 
     /// Save the payload within the Merkle store.
     ///
@@ -62,7 +67,7 @@ pub trait MerkleStore {
     async fn save_by_hash(
         &mut self,
         hash: Sha256Hash,
-        payload: &[u8],
+        layer: &MerkleLayerContents,
     ) -> Result<(), MerkleSerialError>;
 
     /// Checks if the store already has a blob matching the given hash.

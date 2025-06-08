@@ -6,6 +6,7 @@ use std::{
 };
 
 use shared::types::Sha256Hash;
+use smallvec::SmallVec;
 
 use crate::*;
 
@@ -73,13 +74,19 @@ impl MerkleManager {
         // This is to ensure that all child data is present before
         // writing the parent. This is what allows us to have the short-circuit
         // optimization above.
+        let mut children = SmallVec::with_capacity(contents.children.len());
         for child in contents.children.iter() {
+            children.push(child.hash);
             let future = Box::pin(self.save_merkle_contents(store, child));
             future.await?;
         }
 
         // And finally write the actual contents.
-        store.save_by_hash(contents.hash, &contents.payload).await?;
+        let layer = MerkleLayerContents {
+            payload: contents.payload.clone(),
+            children,
+        };
+        store.save_by_hash(contents.hash, &layer).await?;
 
         Ok(())
     }
@@ -139,13 +146,16 @@ impl MerkleManager {
             return Ok(payload.clone());
         }
 
-        let payload =
-            store
-                .load_by_hash(hash)
-                .await?
-                .ok_or_else(|| MerkleSerialError::HashesNotFound {
-                    hashes: HashSet::from_iter([hash]),
-                })?;
+        let MerkleLayerContents { payload, children } = store
+            .load_by_hash(hash)
+            .await?
+            .ok_or_else(|| MerkleSerialError::HashesNotFound {
+                hashes: HashSet::from_iter([hash]),
+            })?;
+        for child in children {
+            let future = Box::pin(self.get_or_load_payload(store, child));
+            future.await?;
+        }
         self.cache.write().insert(hash, payload.clone());
 
         Ok(payload)

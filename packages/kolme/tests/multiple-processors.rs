@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeSet, HashSet},
+    path::PathBuf,
     sync::{Arc, OnceLock},
 };
 
@@ -102,29 +103,32 @@ async fn multiple_processors() {
         return;
     }
 
-    let (x, y, z) = TestTasks::start(multiple_processors_inner, block_db_str).await;
+    // Wipe out the database so we have a fresh run
+    let temp = tempfile::TempDir::new().unwrap();
+
+    let (x, y, z) = TestTasks::start(
+        multiple_processors_inner,
+        (block_db_str, temp.path().to_owned()),
+    )
+    .await;
     println!("Finished checking results of all clients, moving on to checker");
     checker(x, y, z).await.unwrap();
 }
 
 async fn multiple_processors_inner(
     test_tasks: TestTasks,
-    block_db_str: String,
+    (block_db_str, fjall_dir): (String, PathBuf),
 ) -> (
     Arc<[Kolme<SampleKolmeApp>]>,
     Arc<Mutex<HashSet<TxHash>>>,
     Arc<Mutex<BlockHeight>>,
 ) {
-    let tempdir = tempfile::tempdir().unwrap();
-
     let store = if block_db_str == "MEMORY" {
         Some(KolmeStore::new_in_memory())
     } else if block_db_str == "FJALL" {
         Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
-        // Wipe out the database so we have a fresh run
-        let temp = tempfile::TempDir::new().unwrap();
-        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str, temp.path())
+        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str, &fjall_dir)
             .await
             .unwrap();
         store.clear_blocks().await.unwrap();
@@ -140,7 +144,7 @@ async fn multiple_processors_inner(
         let store = match &store {
             Some(store) => store.clone(),
             None => {
-                let mut dir = tempdir.path().to_owned();
+                let mut dir = fjall_dir.clone();
                 dir.push(i.to_string());
                 KolmeStore::new_postgres(&block_db_str, dir).await.unwrap()
             }
