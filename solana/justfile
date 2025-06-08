@@ -1,3 +1,6 @@
+build:
+  GIT_REV=$(git rev-parse HEAD) cargo build-sbf
+
 test:
-  cargo build-sbf
+  GIT_REV=$(git rev-parse HEAD) cargo build-sbf
   cargo test -p testing

@@ -1,3 +1,5 @@
+use std::process::Command;
+
 use borsh::BorshSerialize;
 use kolme_solana_bridge_client::{
     instruction::error::InstructionError, keypair::Keypair, signer::Signer, spl_client,
@@ -13,7 +15,8 @@ use shared::{
 };
 use solana_transaction_error::TransactionError;
 use testing::{
-    token_holder_acc, Program, APPROVER1_KEY, APPROVER2_KEY, APPROVER3_KEY, APPROVER4_KEY, TOKEN,
+    token_holder_acc, Program, APPROVER1_KEY, APPROVER2_KEY, APPROVER3_KEY, APPROVER4_KEY,
+    GIT_REV_PDA, TOKEN,
 };
 
 #[test]
@@ -317,4 +320,26 @@ fn false_executor_signature_is_rejected() {
         meta.err,
         TransactionError::InstructionError(0, InstructionError::Custom(0))
     );
+}
+
+#[test]
+fn contains_correct_git_rev() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+
+    p.init_default(&sender).unwrap();
+    let acc = p.svm.get_account(&GIT_REV_PDA).unwrap();
+
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+
+    let expected_hash = std::str::from_utf8(&output.stdout).unwrap().trim();
+
+    // We skip the discriminator and bump seed bytes + the u32 that encodes the length of the string
+    let hash = std::str::from_utf8(&acc.data[6..]).unwrap();
+    assert_eq!(hash, expected_hash);
 }
