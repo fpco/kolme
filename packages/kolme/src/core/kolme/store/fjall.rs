@@ -9,7 +9,7 @@ use super::BlockHeight;
 
 #[derive(Clone)]
 pub struct KolmeStoreFjall {
-    _keyspace: fjall::Keyspace,
+    keyspace: fjall::Keyspace,
     handle: fjall::PartitionHandle,
 }
 
@@ -17,10 +17,7 @@ impl KolmeStoreFjall {
     pub fn new(fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
         let keyspace = fjall::Config::new(fjall_dir).open()?;
         let handle = keyspace.open_partition("kolme", PartitionCreateOptions::default())?;
-        Ok(Self {
-            _keyspace: keyspace,
-            handle,
-        })
+        Ok(Self { keyspace, handle })
     }
 
     pub fn load_latest_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
@@ -73,7 +70,7 @@ impl KolmeStoreFjall {
             self.handle.insert(key, contents.hash.as_array())?;
             self.handle
                 .insert(tx_key(TxHash(block.txhash)), block.height.to_be_bytes())?;
-            // TODO should we persist here too?
+            self.keyspace.persist(fjall::PersistMode::SyncAll)?;
             Ok(())
         }
     }

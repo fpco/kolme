@@ -225,6 +225,10 @@ impl KolmeStorePostgres {
             self.fjall_block
                 .insert(LATEST_BLOCK, height.to_be_bytes())
                 .map_err(KolmeStoreError::custom)?;
+            self.fjall
+                .get_keyspace()
+                .persist(fjall::PersistMode::SyncAll)
+                .map_err(KolmeStoreError::custom)?;
         }
         Ok(())
     }
