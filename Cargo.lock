@@ -4106,6 +4106,7 @@ dependencies = [
  "libp2p",
  "lru 0.14.0",
  "merkle-map",
+ "merkle-store-fjall",
  "parking_lot",
  "quickcheck",
  "rand 0.8.5",
@@ -4888,6 +4889,8 @@ version = "0.1.0"
 dependencies = [
  "fjall",
  "merkle-map",
+ "quickcheck",
+ "smallvec",
 ]
 
 [[package]]

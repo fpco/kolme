@@ -5,26 +5,26 @@ use shared::types::Sha256Hash;
 use crate::*;
 
 #[derive(Clone, Default)]
-pub struct MerkleMemoryStore(Arc<RwLock<HashMap<Sha256Hash, Arc<[u8]>>>>);
+pub struct MerkleMemoryStore(Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>);
 
 impl MerkleStore for MerkleMemoryStore {
     async fn load_by_hash(
         &mut self,
         hash: Sha256Hash,
-    ) -> Result<Option<Arc<[u8]>>, MerkleSerialError> {
+    ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
         Ok(self.0.read().unwrap().get(&hash).cloned())
     }
 
     async fn save_by_hash(
         &mut self,
         hash: Sha256Hash,
-        payload: &[u8],
+        payload: &MerkleLayerContents,
     ) -> Result<(), MerkleSerialError> {
         if let Some(value) = self.0.read().unwrap().get(&hash) {
-            assert_eq!(&**value, payload);
+            assert_eq!(value, payload);
             return Ok(());
         }
-        self.0.write().unwrap().insert(hash, payload.into());
+        self.0.write().unwrap().insert(hash, payload.clone());
         Ok(())
     }
 

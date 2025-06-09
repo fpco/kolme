@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 fjall.workspace = true
 merkle-map.workspace = true
+smallvec.workspace = true
+
+[dev-dependencies]
+quickcheck.workspace = true

@@ -6,6 +6,7 @@ use std::collections::HashSet;
 
 use crate::*;
 pub use key_bytes::MerkleKey;
+use smallvec::SmallVec;
 
 pub(crate) use crate::impls::MerkleLockable;
 
@@ -59,6 +60,17 @@ pub struct MerkleContents {
     )]
     pub payload: Arc<[u8]>,
     pub children: Arc<[Arc<MerkleContents>]>,
+}
+
+/// The contents of a single layer of a merkle data structure.
+///
+/// This is an intermediate data structure used for interacting with storage.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MerkleLayerContents {
+    /// The contents of this layer.
+    pub payload: Arc<[u8]>,
+    /// The hashes of the direct children of this layer.
+    pub children: SmallVec<[Sha256Hash; 16]>,
 }
 
 fn serialize_base64<S>(data: &Arc<[u8]>, serializer: S) -> Result<S::Ok, S::Error>
