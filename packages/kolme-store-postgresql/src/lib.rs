@@ -204,12 +204,24 @@ impl KolmeStorePostgres {
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(KolmeStoreError::custom)?;
+
                     if let Some(actualhash) = actualhash {
                         if actualhash == blockhash {
-                            return Ok(());
+                            // kolme#144 - Report double insertion
+                            return Err(KolmeStoreError::BlockDoubleInserted { height: *height });
+                        } else {
+                            // kolme#144 - Report diverging hash
+                            return Err(KolmeStoreError::BlockAlreadyInDb {
+                                height: *height,
+                                hash: Sha256Hash::from_hash(&actualhash)
+                                    .map_err(KolmeStoreError::custom)?,
+                            });
                         }
                     }
-                    return Err(KolmeStoreError::BlockAlreadyInDb { height: *height });
+
+                    return Err(KolmeStoreError::Other(format!(
+                        "Height {height_i64} missing from database"
+                    )));
                 }
             }
             return Err(KolmeStoreError::custom(e));
