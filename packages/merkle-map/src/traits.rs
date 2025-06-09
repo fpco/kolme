@@ -52,8 +52,42 @@ pub trait MerkleSerialize {
 
 /// A value that can be deserialized back into a [MerkleMap] value.
 pub trait MerkleDeserialize: Sized {
+    const MERKLE_DESERIALIZE_VERSION: Option<usize> = None;
+
     fn merkle_deserialize(deserializer: &mut MerkleDeserializer)
         -> Result<Self, MerkleSerialError>;
+
+    fn merkle_deserialize_with_version(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        if let Some(code_version) = Self::MERKLE_DESERIALIZE_VERSION {
+            let data_version: usize = deserializer.load()?;
+            match data_version.cmp(&code_version) {
+                std::cmp::Ordering::Less => {
+                    Self::deserialize_previous_version(deserializer, data_version)
+                }
+                std::cmp::Ordering::Equal => Self::merkle_deserialize(deserializer),
+                std::cmp::Ordering::Greater => Err(MerkleSerialError::UnexpectedVersion {
+                    highest_supported: code_version,
+                    actual: data_version,
+                    type_name: std::any::type_name::<Self>(),
+                    offset: deserializer.get_position(),
+                }),
+            }
+        } else {
+            Self::merkle_deserialize(deserializer)
+        }
+    }
+
+    fn deserialize_previous_version(
+        _deserializer: &mut MerkleDeserializer,
+        version: usize,
+    ) -> Result<Self, MerkleSerialError> {
+        unimplemented!(
+            "Deserializing version {version} of {} is not implemented!",
+            std::any::type_name::<Self>()
+        )
+    }
 
     fn set_merkle_contents(&self, _contents: Arc<MerkleContents>) {}
 }

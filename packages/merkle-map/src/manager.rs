@@ -109,7 +109,7 @@ impl MerkleManager {
         payload: Arc<[u8]>,
     ) -> Result<T, MerkleSerialError> {
         let mut deserializer = MerkleDeserializer::new(hash, payload, self.clone());
-        let value = T::merkle_deserialize(&mut deserializer)?;
+        let value = T::merkle_deserialize_with_version(&mut deserializer)?;
         let contents = Arc::new(deserializer.finish()?);
         value.set_merkle_contents(contents);
         Ok(value)

@@ -127,11 +127,15 @@ impl MerkleDeserializer {
 
     /// Load any value that can be deserialized via [MerkleDeserialize].
     pub fn load<T: MerkleDeserialize>(&mut self) -> Result<T, MerkleSerialError> {
-        T::merkle_deserialize(self)
+        T::merkle_deserialize_with_version(self)
     }
 
     pub fn load_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, MerkleSerialError> {
         let bytes = self.load_bytes()?;
         serde_json::from_slice(bytes).map_err(MerkleSerialError::custom)
+    }
+
+    pub(crate) fn get_position(&self) -> usize {
+        self.pos
     }
 }
