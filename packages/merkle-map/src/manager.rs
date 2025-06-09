@@ -39,7 +39,7 @@ impl MerkleManager {
         }
 
         let mut serializer = MerkleSerializer::new(self.clone());
-        value.merkle_serialize(&mut serializer)?;
+        value.merkle_serialize_with_version(&mut serializer)?;
         let mut contents = serializer.finish();
         let existing_payload = self.cache.read().get(&contents.hash).cloned();
         match existing_payload {

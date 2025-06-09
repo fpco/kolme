@@ -26,8 +26,20 @@ pub trait FromMerkleKey: Sized {
 
 /// A value that can be serialized within a [MerkleMap].
 pub trait MerkleSerialize {
+    const MERKLE_SERIALIZE_VERSION: Option<usize> = None;
+
     /// Serialize this data for storage.
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError>;
+
+    fn merkle_serialize_with_version(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        if let Some(version) = Self::MERKLE_SERIALIZE_VERSION {
+            serializer.store(&version)?;
+        };
+        self.merkle_serialize(serializer)
+    }
 
     /// Optimization: if we already know our serialized contents, return them.
     fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
