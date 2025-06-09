@@ -246,27 +246,35 @@ impl<App: KolmeApp> KolmeStore<App> {
         merkle_manager: &MerkleManager,
         block: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<()> {
-        match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => kolme_store_postgres
-                .add_block(merkle_manager, &block)
-                .await
-                .map_err(anyhow::Error::from)?,
+        // kolme#144 - Ignore double insertion errors
+        let insertion_result = match &self.inner {
+            KolmeStoreInner::Postgres(kolme_store_postgres) => {
+                kolme_store_postgres.add_block(merkle_manager, &block).await
+            }
             KolmeStoreInner::InMemory(kolme_store_in_memory) => {
                 kolme_store_in_memory
                     .add_block::<App>(merkle_manager, &block)
-                    .await?
+                    .await
             }
             KolmeStoreInner::Fjall(kolme_store_fjall) => {
                 kolme_store_fjall
                     .add_block::<App>(merkle_manager, &block)
-                    .await?
+                    .await
             }
+        };
+
+        match insertion_result {
+            Err(KolmeStoreError::BlockDoubleInserted { .. }) | Ok(_) => {
+                self.block_cache
+                    .write()
+                    .put(BlockHeight(block.height), block);
+
+                self.trigger_notify();
+
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
         }
-        self.block_cache
-            .write()
-            .put(BlockHeight(block.height), block);
-        self.trigger_notify();
-        Ok(())
     }
 
     /// Store merkle contents then reload the data as a serializable type.
