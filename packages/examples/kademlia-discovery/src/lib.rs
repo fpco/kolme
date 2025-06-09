@@ -118,13 +118,11 @@ impl<App> KolmeDataRequest<App> for RandomU32 {
 pub async fn validators(port: u16) -> Result<()> {
     const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
 
-    const DB_PATH: &str = "kademlia-test.fjall";
-
     kolme::init_logger(true, None);
     let kolme = Kolme::new(
         KademliaTestApp::default(),
         DUMMY_CODE_VERSION,
-        KolmeStore::new_fjall(DB_PATH)?,
+        KolmeStore::new_in_memory(),
     )
     .await?;
 
