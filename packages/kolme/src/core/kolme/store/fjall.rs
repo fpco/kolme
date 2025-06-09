@@ -70,7 +70,7 @@ impl KolmeStoreFjall {
             self.merkle
                 .handle
                 .insert(tx_key(TxHash(block.txhash)), block.height.to_be_bytes())?;
-            // TODO should we persist here too?
+            self.merkle.keyspace.persist(fjall::PersistMode::SyncAll)?;
             Ok(())
         }
     }
