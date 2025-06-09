@@ -75,30 +75,40 @@ impl KolmeStoreInMemory {
         Ok(self.0.read().await.txhashes.get(&txhash).copied())
     }
 
+    // kolme#144 - Update signature to use the KolmeStoreError type
     pub(crate) async fn add_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,
         block: &kolme_store::StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), KolmeStoreError> {
         let height = BlockHeight(block.height);
         let txhash = TxHash(block.txhash);
 
         let mut guard = self.0.write().await;
 
-        if guard.blockhashes.get(&height) == Some(&BlockHash(block.blockhash)) {
-            return Ok(());
+        if let Some(existing_hash) = guard.blockhashes.get(&height) {
+            if existing_hash.0 == block.blockhash {
+                // kolme#144 - Report diverging hash
+                return Err(KolmeStoreError::BlockAlreadyInDb {
+                    height: height.0,
+                    hash: existing_hash.0,
+                });
+            } else {
+                // kolme#144 - Report double insertion
+                return Err(KolmeStoreError::BlockDoubleInserted { height: height.0 });
+            }
         }
 
-        if guard.blocks.contains_key(&height) {
-            return Err(KolmeStoreError::BlockAlreadyInDb { height: height.0 }.into());
-        }
         if guard.txhashes.contains_key(&txhash) {
-            return Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 }.into());
+            return Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 });
         }
 
         guard.txhashes.insert(txhash, height);
 
-        let hash = merkle_manager.save(&mut guard.merkle, block).await?;
+        let hash = merkle_manager
+            .save(&mut guard.merkle, block)
+            .await
+            .map_err(KolmeStoreError::custom)?;
         guard.blocks.insert(height, hash.hash);
         guard.blockhashes.insert(height, BlockHash(block.blockhash));
         Ok(())
