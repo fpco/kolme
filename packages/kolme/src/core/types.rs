@@ -290,6 +290,7 @@ impl ChainConfig {
             pending_actions: MerkleMap::new(),
             next_event_id: BridgeEventId::start(),
             pending_events: MerkleMap::new(),
+            assets: BTreeMap::new(),
         }
     }
 }
@@ -313,6 +314,31 @@ pub struct ChainState {
     /// sufficient signatures, but an earlier event hasn't, they
     /// will both remain pending.
     pub pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
+    /// Balance of different assets in the bridge contract.
+    ///
+    /// This field is used to ensure that sufficient balances are available
+    /// for fund transfers. Listeners can update these values by submitting
+    /// known token balances. This can account for tokens that were added
+    /// by direct transfer, without trigger a smart contract execution.
+    pub assets: BTreeMap<AssetId, Decimal>,
+}
+
+impl ChainState {
+    pub(crate) fn deposit(&mut self, asset_id: AssetId, amount: Decimal) -> Result<()> {
+        let old = self.assets.entry(asset_id).or_default();
+        *old = old.checked_add(amount).with_context(|| {
+            format!("Overflow while depositing asset {asset_id}, amount == {amount}")
+        })?;
+        Ok(())
+    }
+
+    pub(crate) fn withdraw(&mut self, asset_id: AssetId, amount: Decimal) -> Result<()> {
+        let old = self.assets.entry(asset_id).or_default();
+        *old = old.checked_sub(amount).with_context(|| {
+            format!("Insufficient funds while withdrawing asset {asset_id}, amount == {amount}")
+        })?;
+        Ok(())
+    }
 }
 
 impl MerkleSerialize for ChainState {
@@ -323,12 +349,14 @@ impl MerkleSerialize for ChainState {
             pending_actions,
             next_event_id,
             pending_events,
+            assets,
         } = self;
         serializer.store(config)?;
         serializer.store(next_action_id)?;
         serializer.store(pending_actions)?;
         serializer.store(next_event_id)?;
         serializer.store(pending_events)?;
+        serializer.store(assets)?;
         Ok(())
     }
 }
@@ -343,6 +371,7 @@ impl MerkleDeserialize for ChainState {
             pending_actions: deserializer.load()?,
             next_event_id: deserializer.load()?,
             pending_events: deserializer.load()?,
+            assets: deserializer.load()?,
         })
     }
 }
@@ -435,7 +464,7 @@ impl MerkleDeserialize for ChainConfig {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AssetConfig {
     pub decimals: u8,
     pub asset_id: AssetId,
@@ -482,7 +511,7 @@ pub enum AssetError {
 }
 
 impl AssetConfig {
-    pub(crate) fn to_decimal(&self, amount: u128) -> Result<Decimal, AssetError> {
+    pub(crate) fn to_decimal(self, amount: u128) -> Result<Decimal, AssetError> {
         Decimal::try_from_i128_with_scale(
             amount
                 .try_into()
@@ -501,7 +530,7 @@ impl AssetConfig {
     /// Note that this returns a potentially modified Decimal, to
     /// account for potential rounding due to on-chain representation.
     /// The idea is to allow dust to remain in the user account.
-    pub(crate) fn to_u128(&self, amount: Decimal) -> Result<(Decimal, u128), AssetError> {
+    pub(crate) fn to_u128(self, amount: Decimal) -> Result<(Decimal, u128), AssetError> {
         let mut int = u128::try_from(amount.mantissa())
             .map_err(|source| AssetError::ToU128WithNegative { source, amount })?;
         let decimals = u32::from(self.decimals);

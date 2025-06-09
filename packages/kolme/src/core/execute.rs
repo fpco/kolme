@@ -312,15 +312,21 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                             .config
                             .assets
                             .get(&AssetName(denom.clone()))
+                            .copied()
                         else {
                             continue;
                         };
 
+                        let amount = asset_config.to_decimal(*amount)?;
                         self.framework_state.accounts.mint(
                             account_id,
                             asset_config.asset_id,
-                            asset_config.to_decimal(*amount)?,
+                            amount,
                         )?;
+                        self.framework_state
+                            .chains
+                            .get_mut(chain)?
+                            .deposit(asset_config.asset_id, amount)?;
                     }
                     self.log_event(LogEvent::ProcessedBridgeEvent(LogBridgeEvent::Regular {
                         bridge_event_id: event_id,
@@ -515,6 +521,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state
             .accounts
             .burn(source, asset_id, amount_dec)?;
+        self.framework_state
+            .chains
+            .get_mut(chain)?
+            .withdraw(asset_id, amount)?;
 
         self.add_action(
             chain,
