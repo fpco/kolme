@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use fjall::PartitionCreateOptions;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, Sha256Hash};
-use merkle_store_fjall::{MerkleFjallStore, MerkleFjallStoreHelper};
+use merkle_store_fjall::MerkleFjallStore;
 use sqlx::postgres::PgAdvisoryLock;
 
 #[derive(Clone)]
@@ -100,9 +100,9 @@ impl KolmeStorePostgres {
         let app_state_hash = to_sha256hash(&app_state_hash)?;
         let logs_hash = to_sha256hash(&logs_hash)?;
 
-        let mut store1 = self.fjall.to_store();
-        let mut store2 = self.fjall.to_store();
-        let mut store3 = self.fjall.to_store();
+        let mut store1 = self.fjall.clone();
+        let mut store2 = self.fjall.clone();
+        let mut store3 = self.fjall.clone();
 
         let merkle_res = tokio::try_join!(
             merkle_manager.load(&mut store1, framework_state_hash),
@@ -161,7 +161,7 @@ impl KolmeStorePostgres {
     ) -> Result<(), KolmeStoreError> {
         let height_i64 = i64::try_from(*height).map_err(KolmeStoreError::custom)?;
 
-        let mut store = self.fjall.to_store();
+        let mut store = self.fjall.clone();
         let framework_state_hash = merkle_manager.save(&mut store, framework_state).await?.hash;
         let app_state_hash = merkle_manager.save(&mut store, app_state).await?.hash;
         let logs_hash = merkle_manager.save(&mut store, logs).await?.hash;
@@ -286,8 +286,8 @@ impl KolmeStorePostgres {
         }
     }
 
-    pub fn get_merkle_store(&self) -> MerkleFjallStoreHelper {
-        self.fjall.to_store()
+    pub fn get_merkle_store(&self) -> &MerkleFjallStore {
+        &self.fjall
     }
 }
 
