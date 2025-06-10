@@ -628,16 +628,18 @@ impl Display for AssetId {
     }
 }
 
-impl MerkleSerialize for AssetId {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl MerkleSerializeRaw for AssetId {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)
     }
 }
 
-impl MerkleDeserialize for AssetId {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for AssetId {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }
@@ -648,15 +650,17 @@ impl MerkleDeserialize for AssetId {
 )]
 pub struct AssetName(pub String);
 
-impl MerkleSerialize for AssetName {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl MerkleSerializeRaw for AssetName {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)
     }
 }
-impl MerkleDeserialize for AssetName {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for AssetName {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }
@@ -672,16 +676,18 @@ impl AccountId {
     }
 }
 
-impl MerkleSerialize for AccountId {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl MerkleSerializeRaw for AccountId {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)
     }
 }
 
-impl MerkleDeserialize for AccountId {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for AccountId {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }
@@ -736,16 +742,18 @@ impl Display for AccountNonce {
     }
 }
 
-impl MerkleSerialize for AccountNonce {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl MerkleSerializeRaw for AccountNonce {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)
     }
 }
 
-impl MerkleDeserialize for AccountNonce {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for AccountNonce {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }
@@ -824,16 +832,18 @@ impl Display for Wallet {
     }
 }
 
-impl MerkleSerialize for Wallet {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl MerkleSerializeRaw for Wallet {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)
     }
 }
 
-impl MerkleDeserialize for Wallet {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for Wallet {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Wallet)
     }
@@ -1211,15 +1221,17 @@ impl Display for AdminProposalId {
     }
 }
 
-impl MerkleSerialize for AdminProposalId {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl MerkleSerializeRaw for AdminProposalId {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)
     }
 }
-impl MerkleDeserialize for AdminProposalId {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for AdminProposalId {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         deserializer.load().map(Self)
     }
