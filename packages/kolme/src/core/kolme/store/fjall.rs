@@ -102,6 +102,14 @@ impl KolmeStoreFjall {
             .keyspace
             .persist(fjall::PersistMode::SyncAll)
             .map_err(KolmeStoreError::custom)?;
+
+        // kolme#144 - FIXME Fjall is too fast to trigger the error reliably,
+        //      so I'm adding this yield to give the other task the oportunity to reach this point
+        //      not proud of this, so any contributions would be appreciated
+        if cfg!(feature = "store_tests") {
+            tokio::task::yield_now().await;
+        }
+
         Ok(())
     }
 
