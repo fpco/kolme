@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, str::FromStr, time::Duration};
 
 use cosmos::{Address, AddressHrp, HasAddress, SeedPhrase, Wallet};
+use example_solana_cosmos_bridge::CODE_VERSION;
 use rust_decimal::{dec, Decimal};
 use tokio::task;
 
@@ -13,7 +14,6 @@ use kolme::*;
 use kolme_solana_bridge_client::{keypair::Keypair, signer::Signer};
 use shared::types::KeyRegistration;
 
-const DUMMY_CODE_VERSION: &str = "dummy code version";
 const COSMOS_SUBMITTER_SEED: &str = "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius";
 
 const LOCALHOST: &str = "http://localhost:3000";
@@ -53,7 +53,7 @@ async fn bridge_transfer() {
     );
 
     let store = KolmeStore::new_in_memory();
-    let kolme = Kolme::new(SolanaCosmosBridgeApp::default(), DUMMY_CODE_VERSION, store)
+    let kolme = Kolme::new(SolanaCosmosBridgeApp::default(), CODE_VERSION, store)
         .await
         .unwrap();
 

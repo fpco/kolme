@@ -179,6 +179,7 @@ impl SixSigmaApp {
                 needed_approvers: 1,
             },
             chains,
+            version: DUMMY_CODE_VERSION.to_owned(),
         };
 
         Self {

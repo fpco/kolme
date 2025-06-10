@@ -72,6 +72,7 @@ impl Default for TestApp {
                 needed_approvers: 1,
             },
             chains: Default::default(),
+            version: "v1".to_owned(),
         };
 
         Self { genesis }
@@ -113,7 +114,8 @@ async fn find_free_port() -> Result<u16> {
 async fn setup(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)> {
     let app = TestApp::default();
     let store = KolmeStore::new_fjall(db_path)?;
-    let kolme = Kolme::new(app, "test_version", store).await?;
+    let code_version = app.genesis.version.clone();
+    let kolme = Kolme::new(app, code_version, store).await?;
     let read = kolme.read();
     assert_eq!(read.get_next_height(), BlockHeight(0),);
 

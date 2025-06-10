@@ -18,6 +18,7 @@ pub struct FrameworkState {
     pub(super) chains: ChainStates,
     pub(super) accounts: Accounts,
     pub(super) admin_proposal_state: MerkleLockable<AdminProposalState>,
+    pub(super) version: String,
 }
 
 impl MerkleSerialize for FrameworkState {
@@ -27,11 +28,13 @@ impl MerkleSerialize for FrameworkState {
             chains,
             accounts,
             admin_proposal_state: key_rotation_state,
+            version,
         } = self;
         serializer.store(config)?;
         serializer.store(chains)?;
         serializer.store(accounts)?;
         serializer.store(key_rotation_state)?;
+        serializer.store(version)?;
         Ok(())
     }
 }
@@ -46,6 +49,7 @@ impl MerkleDeserialize for FrameworkState {
             chains: deserializer.load()?,
             accounts: deserializer.load()?,
             admin_proposal_state: deserializer.load()?,
+            version: deserializer.load()?,
         })
     }
 }
@@ -148,6 +152,10 @@ impl MerkleSerialize for ProposalPayload {
                 serializer.store_byte(1);
                 serializer.store(migrate)?;
             }
+            ProposalPayload::Upgrade(upgrade) => {
+                serializer.store_byte(2);
+                serializer.store(upgrade)?;
+            }
         }
         Ok(())
     }
@@ -160,6 +168,7 @@ impl MerkleDeserialize for ProposalPayload {
         match deserializer.pop_byte()? {
             0 => Ok(ProposalPayload::NewSet(deserializer.load()?)),
             1 => Ok(ProposalPayload::MigrateContract(deserializer.load()?)),
+            2 => Ok(ProposalPayload::Upgrade(deserializer.load()?)),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }
@@ -171,6 +180,7 @@ impl FrameworkState {
             kolme_ident: _,
             validator_set,
             chains,
+            version,
         }: &GenesisInfo,
     ) -> Self {
         FrameworkState {
@@ -178,6 +188,7 @@ impl FrameworkState {
             chains: ChainStates::from(chains.clone()),
             accounts: Accounts::default(),
             admin_proposal_state: MerkleLockable::new(AdminProposalState::default()),
+            version: version.clone(),
         }
     }
 
@@ -209,5 +220,9 @@ impl FrameworkState {
             .values()
             .find(|config| config.asset_id == asset_id)
             .ok_or(CoreStateError::AssetNotSupported { chain, asset_id })
+    }
+
+    pub fn get_version(&self) -> &String {
+        &self.version
     }
 }

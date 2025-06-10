@@ -9,6 +9,7 @@ pub mod pass_through;
 mod processor;
 mod submitter;
 pub mod testtasks;
+mod upgrader;
 
 pub use api_server::{base_api_router, ApiNotification, ApiServer};
 pub use approver::Approver;
@@ -22,6 +23,7 @@ pub use rust_decimal::Decimal;
 pub use shared::debug::*;
 pub use shared::{cryptography::*, types::*};
 pub use submitter::Submitter;
+pub use upgrader::Upgrader;
 
 pub(crate) use anyhow::{Context, Result};
 pub(crate) use jiff::Timestamp;

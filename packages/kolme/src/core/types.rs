@@ -1127,7 +1127,14 @@ pub enum AdminMessage {
     },
     /// Initiate a contract migration.
     MigrateContract(Box<SignedTaggedJson<MigrateContract>>),
-    // TODO: update code version
+    /// Upgrade to a new code version
+    ///
+    /// Note that, technically speaking, we don't need the internal
+    /// signature for this upgrade, since unlike the other admin messages
+    /// above, we don't need to pass along signatures to external chains.
+    /// However, for consistency and simplicity of the code, we follow the
+    /// same format for this message too.
+    Upgrade(Box<SignedTaggedJson<Upgrade>>),
     /// Vote to approve an admin proposal.
     Approve {
         admin_proposal_id: AdminProposalId,
@@ -1140,6 +1147,11 @@ pub struct MigrateContract {
     pub chain: ExternalChain,
     pub new_code_id: u64,
     pub message: serde_json::Value,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct Upgrade {
+    pub desired_version: String,
 }
 
 impl AdminMessage {
@@ -1165,6 +1177,14 @@ impl AdminMessage {
         })
     }
 
+    pub fn upgrade(desired_version: impl Into<String>, proposer: &SecretKey) -> Result<Self> {
+        let json = TaggedJson::new(Upgrade {
+            desired_version: desired_version.into(),
+        })?;
+        let signed = json.sign(proposer)?;
+        Ok(AdminMessage::Upgrade(Box::new(signed)))
+    }
+
     pub fn approve(
         admin_proposal_id: AdminProposalId,
         payload: &ProposalPayload,
@@ -1183,12 +1203,14 @@ impl AdminMessage {
 pub enum ProposalPayload {
     NewSet(TaggedJson<ValidatorSet>),
     MigrateContract(TaggedJson<MigrateContract>),
+    Upgrade(TaggedJson<Upgrade>),
 }
 impl ProposalPayload {
     pub(super) fn as_bytes(&self) -> &[u8] {
         match self {
             ProposalPayload::NewSet(set) => set.as_bytes(),
             ProposalPayload::MigrateContract(migrate) => migrate.as_bytes(),
+            ProposalPayload::Upgrade(upgrade) => upgrade.as_bytes(),
         }
     }
 }
@@ -1246,6 +1268,8 @@ pub struct GenesisInfo {
     pub validator_set: ValidatorSet,
     /// Initial configuration of different chains
     pub chains: ConfiguredChains,
+    /// Initial version of the code the chain starts with.
+    pub version: String,
 }
 
 impl GenesisInfo {

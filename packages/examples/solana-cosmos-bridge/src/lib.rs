@@ -114,11 +114,14 @@ impl Default for SolanaCosmosBridgeApp {
                 needed_approvers: 1,
             },
             chains: bridges,
+            version: CODE_VERSION.to_owned(),
         };
 
         Self { genesis }
     }
 }
+
+pub const CODE_VERSION: &str = "solana code version";
 
 impl KolmeApp for SolanaCosmosBridgeApp {
     type State = State;

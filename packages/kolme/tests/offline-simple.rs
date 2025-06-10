@@ -87,6 +87,7 @@ impl Default for SampleKolmeApp {
                 needed_approvers: 1,
             },
             chains: bridges,
+            version: DUMMY_CODE_VERSION.to_owned(),
         };
 
         Self { genesis }

@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use kolme::*;
 
-use example_cosmos_bridge::{broadcast, serve, CosmosBridgeApp};
+use example_cosmos_bridge::{broadcast, serve, CosmosBridgeApp, CODE_VERSION};
 
 #[derive(clap::Parser)]
 struct Opt {
@@ -47,12 +47,11 @@ async fn main_inner() -> Result<()> {
     match Opt::parse().cmd {
         Cmd::Serve { bind } => {
             const DB_PATH: &str = "example-cosmos-bridge.fjall";
-            const DUMMY_CODE_VERSION: &str = "dummy code version";
 
             kolme::init_logger(true, None);
             let kolme = Kolme::new(
                 CosmosBridgeApp::default(),
-                DUMMY_CODE_VERSION,
+                CODE_VERSION,
                 KolmeStore::new_fjall(DB_PATH)?,
             )
             .await?;

@@ -126,11 +126,14 @@ impl Default for CosmosBridgeApp {
                 needed_approvers: 1,
             },
             chains: bridges,
+            version: CODE_VERSION.to_owned(),
         };
 
         Self { genesis }
     }
 }
+
+pub const CODE_VERSION: &str = "v1";
 
 impl KolmeApp for CosmosBridgeApp {
     type State = State;

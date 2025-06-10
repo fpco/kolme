@@ -51,6 +51,14 @@ impl<App: KolmeApp> Processor<App> {
 
         let producer_loop = async {
             loop {
+                // FIXME need to do more validation in add_block that
+                // this is the right version.
+                //
+                // Also want to emit some notification (probably the LatestHeight one?)
+                // about what the current version is, and use that in wait_for_active_version
+                // as well to avoid needing to synchronize the state fully.
+                self.kolme.wait_for_active_version().await;
+
                 let tx = self.kolme.wait_on_mempool().await;
                 let txhash = tx.hash();
                 let tx = Arc::unwrap_or_clone(tx);
@@ -90,8 +98,16 @@ impl<App: KolmeApp> Processor<App> {
 
     async fn ensure_genesis_event(&self) -> Result<()> {
         if self.kolme.read().get_next_height().is_start() {
-            tracing::info!("Creating genesis event");
-            self.create_genesis_event().await
+            let code_version = self.kolme.get_code_version();
+            let kolme = self.kolme.read();
+            let chain_version = kolme.get_framework_state().get_version();
+            if code_version != chain_version {
+                tracing::info!("Running processor with code version {code_version}, but chain is on version {chain_version}, unable to create genesis event");
+                Ok(())
+            } else {
+                tracing::info!("Creating genesis event");
+                self.create_genesis_event().await
+            }
         } else {
             tracing::info!("Genesis event already present");
             Ok(())

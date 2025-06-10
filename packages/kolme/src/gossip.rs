@@ -737,7 +737,13 @@ impl<App: KolmeApp> Gossip<App> {
             SyncMode::StateTransferForUpgrade => {
                 todo!("Holding off on StateTransferForUpgrade until we handle upgrades")
             }
-            SyncMode::BlockTransfer => false,
+            SyncMode::BlockTransfer => {
+                // For now, we force a state transfer if the chain and
+                // code versions mismatch. In the future, we may decide
+                // to be a bit more selective about this for security.
+                self.kolme.get_code_version()
+                    != self.kolme.read().get_framework_state().get_version()
+            }
         };
 
         if do_state {
@@ -754,6 +760,10 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
+        // Don't add blocks from different versions
+        if self.kolme.get_code_version() != self.kolme.read().get_framework_state().get_version() {
+            return;
+        }
         if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
             if let Err(e) = self
                 .kolme
