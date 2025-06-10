@@ -87,6 +87,7 @@ const HOUSE_FUNDS: Decimal = dec!(1000); // 1000 coins with 6 decimals
     strum::EnumString,
     Debug,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum MarketState {
     Operational,
     Settled,

@@ -469,6 +469,7 @@ struct Market {
 }
 
 #[derive(PartialEq, serde::Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
 enum MarketState {
     Operational,
     Settled,

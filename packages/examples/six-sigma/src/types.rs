@@ -43,6 +43,7 @@ pub enum AppMessage {
 }
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum LogOutput {
     NewBlock {
         height: BlockHeight,
@@ -53,6 +54,7 @@ pub enum LogOutput {
 
 // kolme::Message with details only necessary for tests
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum LoggedMessage {
     Genesis,
     App(AppMessage),
@@ -80,6 +82,7 @@ impl From<kolme::Message<AppMessage>> for LoggedMessage {
 }
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum LoggedBridgeEvent {
     Instantiated,
     Regular,
@@ -106,6 +109,7 @@ impl From<kolme::BridgeEvent> for LoggedBridgeEvent {
     strum::AsRefStr,
     strum::EnumString,
 )]
+#[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum AppState {
     #[default]

@@ -33,6 +33,7 @@ impl MerkleDeserialize for SampleState {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum SampleMessage {
     SayHi,
 }
