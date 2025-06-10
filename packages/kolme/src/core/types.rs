@@ -1647,6 +1647,7 @@ pub struct LatestBlock {
 
 /// Represents distinct occurrences in the core of Kolme that could be relevant to users.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum LogEvent {
     ProcessedBridgeEvent(LogBridgeEvent),
     NewAdminProposal(AdminProposalId),
