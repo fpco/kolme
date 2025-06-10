@@ -112,13 +112,6 @@ impl KolmeStoreInMemory {
         guard.blocks.insert(height, hash.hash);
         guard.blockhashes.insert(height, BlockHash(block.blockhash));
 
-        // kolme#144 - FIXME In memory is too fast to trigger the error reliably,
-        //      so I'm adding this yield to give the other task the oportunity to reach this point
-        //      not proud of this, so any contributions would be appreciated
-        if cfg!(feature = "store_tests") {
-            tokio::task::yield_now().await;
-        }
-
         Ok(())
     }
 

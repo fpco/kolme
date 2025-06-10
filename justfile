@@ -49,5 +49,5 @@ run-integration-tests: setup-localosmo
     RUST_LOG=info,kolme=debug,six_sigma=debug cargo t -- --ignored --nocapture
 
 [working-directory: "packages/kolme"]
-run-store-tests: sqlx-prepare
+run-store-tests $PROCESSOR_BLOCK_DB="postgres://postgres:postgres@localhost:45921/postgres": sqlx-prepare
     cargo test --test store --features store_tests
