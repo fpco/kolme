@@ -128,13 +128,13 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize
         let len = deserializer.load_usize()?;
         let leaf = match deserializer.pop_byte()? {
             0 => None,
-            1 => Some(LeafEntry::merkle_deserialize(deserializer)?),
+            1 => Some(deserializer.load()?),
             byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
         };
         let mut branches = std::array::from_fn(|_| Node::default());
         let mut missing = HashSet::new();
         for branch in &mut branches {
-            let hash = Sha256Hash::merkle_deserialize(deserializer)?;
+            let hash = deserializer.load()?;
             match deserializer.load_by_hash_optional(hash)? {
                 Some(value) => *branch = value,
                 None => {

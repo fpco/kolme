@@ -117,7 +117,7 @@ impl<K, V: MerkleSerialize> MerkleSerialize for LeafContents<K, V> {
         serializer.store_byte(42);
         serializer.store_usize(self.values.len());
         for entry in &self.values {
-            entry.merkle_serialize(serializer)?;
+            serializer.store(entry)?;
         }
 
         Ok(())
@@ -143,7 +143,7 @@ impl<K: FromMerkleKey, V: MerkleDeserialize> MerkleDeserialize
         }
         let mut values = arrayvec::ArrayVec::new();
         for _ in 0..len {
-            values.push(LeafEntry::merkle_deserialize(deserializer)?);
+            values.push(deserializer.load()?);
         }
 
         Ok(MerkleLockable::new(LeafContents { values }))
