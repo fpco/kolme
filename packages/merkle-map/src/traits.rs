@@ -25,9 +25,20 @@ pub trait FromMerkleKey: Sized {
 }
 
 /// A value that can be serialized within a [MerkleMap].
+///
+/// Types that implement this trait will always be serialized and deserialized
+/// with a version number. If you have a data type with a fixed format (e.g. primitive
+/// types like `u32`), you can use [MerkleSerializeRaw] instead.
 pub trait MerkleSerialize {
     /// Serialize this data for storage.
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError>;
+
+    /// The version number of the serialized format.
+    ///
+    /// Defaults to `0` for convenience.
+    fn merkle_version() -> usize {
+        0
+    }
 
     /// Optimization: if we already know our serialized contents, return them.
     fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
@@ -38,12 +49,48 @@ pub trait MerkleSerialize {
     fn set_merkle_contents(&self, _contents: &Arc<MerkleContents>) {}
 }
 
+/// A type that can be serialized, without requiring a version number in its payload.
+///
+/// Note that all types that implement [MerkleSerialize] also get an impl for this trait.
+pub trait MerkleSerializeRaw {
+    /// Serialize this data for storage.
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError>;
+
+    /// Optimization: if we already know our serialized contents, return them.
+    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
+        None
+    }
+
+    /// Update the cached Merkle hash and payload, if supported by this type.
+    fn set_merkle_contents_raw(&self, _contents: &Arc<MerkleContents>) {}
+}
+
 /// A value that can be deserialized back into a [MerkleMap] value.
+///
+/// See description of [MerkleSerialize] for information on serialization of
+/// versions.
 pub trait MerkleDeserialize: Sized {
-    fn merkle_deserialize(deserializer: &mut MerkleDeserializer)
-        -> Result<Self, MerkleSerialError>;
+    /// Deserialize from stored data.
+    ///
+    /// Note that, when implementing this method, you can rely on an invariant
+    /// that the version number will never be greater than [MerkleSerialize::merkle_version].
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+        version: usize,
+    ) -> Result<Self, MerkleSerialError>;
 
     fn set_merkle_contents(&self, _contents: Arc<MerkleContents>) {}
+}
+
+pub trait MerkleDeserializeRaw: Sized {
+    fn merkle_deserialize_raw(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError>;
+
+    fn set_merkle_contents_raw(&self, _contents: Arc<MerkleContents>) {}
 }
 
 /// A backing store for raw blobs used by a [MerkleMap].

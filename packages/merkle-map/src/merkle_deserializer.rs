@@ -107,15 +107,15 @@ impl MerkleDeserializer {
         }
     }
 
-    pub(crate) fn load_by_hash_optional<T: MerkleDeserialize>(
+    pub(crate) fn load_by_hash_optional<T: MerkleDeserializeRaw>(
         &mut self,
         hash: Sha256Hash,
     ) -> Result<Option<T>, MerkleSerialError> {
         self.manager.deserialize_cached(hash)
     }
 
-    pub fn load_by_hash<T: MerkleDeserialize>(&mut self) -> Result<T, MerkleSerialError> {
-        let hash = Sha256Hash::merkle_deserialize(self)?;
+    pub fn load_by_hash<T: MerkleDeserializeRaw>(&mut self) -> Result<T, MerkleSerialError> {
+        let hash = Sha256Hash::merkle_deserialize_raw(self)?;
         match self.manager.deserialize_cached(hash) {
             Err(e) => Err(e),
             Ok(Some(x)) => Ok(x),
@@ -126,12 +126,16 @@ impl MerkleDeserializer {
     }
 
     /// Load any value that can be deserialized via [MerkleDeserialize].
-    pub fn load<T: MerkleDeserialize>(&mut self) -> Result<T, MerkleSerialError> {
-        T::merkle_deserialize(self)
+    pub fn load<T: MerkleDeserializeRaw>(&mut self) -> Result<T, MerkleSerialError> {
+        T::merkle_deserialize_raw(self)
     }
 
     pub fn load_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, MerkleSerialError> {
         let bytes = self.load_bytes()?;
         serde_json::from_slice(bytes).map_err(MerkleSerialError::custom)
+    }
+
+    pub(crate) fn get_position(&self) -> usize {
+        self.pos
     }
 }

@@ -35,15 +35,16 @@ struct TestState {
 }
 impl MerkleSerialize for TestState {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.counter.merkle_serialize(serializer)
+        serializer.store(&self.counter)
     }
 }
 
 impl MerkleDeserialize for TestState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        let counter = u32::merkle_deserialize(deserializer)?;
+        let counter = deserializer.load()?;
         Ok(TestState { counter })
     }
 }

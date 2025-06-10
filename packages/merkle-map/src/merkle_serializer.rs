@@ -83,11 +83,11 @@ impl MerkleSerializer {
     }
 
     /// Store any value that can be serialized via [MerkleSerialize].
-    pub fn store<T: MerkleSerialize + ?Sized>(
+    pub fn store<T: MerkleSerializeRaw + ?Sized>(
         &mut self,
         value: &T,
     ) -> Result<(), MerkleSerialError> {
-        value.merkle_serialize(self)
+        value.merkle_serialize_raw(self)
     }
 
     /// Store a JSON-encoded version of this content.
@@ -98,13 +98,13 @@ impl MerkleSerializer {
     }
 
     /// Serialize as a new top level stored value and then store the hash in the current serialization.
-    pub fn store_by_hash<T: MerkleSerialize>(
+    pub fn store_by_hash<T: MerkleSerializeRaw>(
         &mut self,
         child: &T,
     ) -> Result<(), MerkleSerialError> {
         let contents = self.manager.serialize(child)?;
         let hash = contents.hash;
         self.children.push(contents);
-        hash.merkle_serialize(self)
+        hash.merkle_serialize_raw(self)
     }
 }

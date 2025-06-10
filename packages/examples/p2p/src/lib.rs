@@ -27,6 +27,7 @@ impl MerkleSerialize for SampleState {
 impl MerkleDeserialize for SampleState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             hi_count: deserializer.load()?,

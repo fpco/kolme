@@ -270,7 +270,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Store merkle contents then reload the data as a serializable type.
-    pub(super) async fn store_and_load<T: MerkleDeserialize>(
+    pub(super) async fn store_and_load<T: MerkleDeserializeRaw>(
         &self,
         merkle_manager: &MerkleManager,
         hash: Sha256Hash,
@@ -307,7 +307,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 }
 
-async fn store_and_load_helper<T: MerkleDeserialize, Store: MerkleStore>(
+async fn store_and_load_helper<T: MerkleDeserializeRaw, Store: MerkleStore>(
     merkle_manager: &MerkleManager,
     store: &mut Store,
     contents: &MerkleContents,

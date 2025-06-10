@@ -30,6 +30,7 @@ impl MerkleSerialize for State {
 impl MerkleDeserialize for State {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             hi_count: deserializer.load()?,

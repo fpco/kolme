@@ -267,12 +267,18 @@ fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
             serializer.store(&self.inventory)?;
             Ok(())
         }
+
+        fn merkle_version() -> usize {
+            5
+        }
     }
 
     impl MerkleDeserialize for Person {
         fn merkle_deserialize(
             deserializer: &mut MerkleDeserializer,
+            version: usize,
         ) -> Result<Self, MerkleSerialError> {
+            assert_eq!(version, Person::merkle_version());
             Ok(Self {
                 name: deserializer.load()?,
                 age: deserializer.load()?,

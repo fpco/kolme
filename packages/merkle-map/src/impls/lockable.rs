@@ -36,25 +36,32 @@ impl<T> MerkleLockable<T> {
     }
 }
 
-impl<T: MerkleSerialize> MerkleSerialize for MerkleLockable<T> {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        self.inner.merkle_serialize(serializer)
+impl<T: MerkleSerializeRaw> MerkleSerializeRaw for MerkleLockable<T> {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        self.inner.merkle_serialize_raw(serializer)
     }
 
-    fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
+    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
         self.locked.get().cloned()
     }
 
-    fn set_merkle_contents(&self, contents: &Arc<MerkleContents>) {
+    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
         self.locked.set(contents.clone()).ok();
     }
 }
 
-impl<T: MerkleDeserialize> MerkleDeserialize for MerkleLockable<T> {
-    fn merkle_deserialize(
+impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleLockable<T> {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        T::merkle_deserialize(deserializer).map(MerkleLockable::new)
+        T::merkle_deserialize_raw(deserializer).map(MerkleLockable::new)
+    }
+
+    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+        self.locked.set(contents).unwrap()
     }
 }
 

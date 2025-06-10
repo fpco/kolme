@@ -26,7 +26,7 @@ impl MerkleSerialize for State {
 }
 
 impl MerkleDeserialize for State {
-    fn merkle_deserialize(_: &mut MerkleDeserializer) -> Result<Self, MerkleSerialError> {
+    fn merkle_deserialize(_: &mut MerkleDeserializer, _: usize) -> Result<Self, MerkleSerialError> {
         Ok(State)
     }
 }
