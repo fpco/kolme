@@ -87,7 +87,7 @@ impl KolmeStoreInMemory {
         let mut guard = self.0.write().await;
 
         if let Some(existing_hash) = guard.blockhashes.get(&height) {
-            if existing_hash.0 == block.blockhash {
+            if existing_hash.0 != block.blockhash {
                 // kolme#144 - Report diverging hash
                 return Err(KolmeStoreError::BlockAlreadyInDb {
                     height: height.0,
