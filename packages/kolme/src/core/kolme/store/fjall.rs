@@ -57,6 +57,10 @@ impl KolmeStoreFjall {
         block: &StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<(), KolmeStoreError> {
         let key = block_key(BlockHeight(block.height));
+        // kolme#144 - Avoid double serialization with merkle_manager.save()
+        let contents = merkle_manager
+            .serialize(block)
+            .map_err(KolmeStoreError::custom)?;
 
         if let Some(existing_hash) = self
             .merkle
@@ -64,8 +68,8 @@ impl KolmeStoreFjall {
             .get(key)
             .map_err(KolmeStoreError::custom)?
         {
-            if existing_hash != block.blockhash.as_array() {
-                // kolme#144 - Report diverging hash from collision
+            if existing_hash != contents.hash.as_array() {
+                // kolme#144 - Report diverging
                 return Err(KolmeStoreError::BlockAlreadyInDb {
                     height: block.height,
                     hash: Sha256Hash::from_hash(&existing_hash).map_err(KolmeStoreError::custom)?,
@@ -81,7 +85,9 @@ impl KolmeStoreFjall {
         }
 
         let mut store = self.merkle.clone();
-        let contents = merkle_manager.save(&mut store, block).await?;
+        merkle_manager
+            .save_merkle_contents(&mut store, &contents)
+            .await?;
 
         // TODO do we worry about race conditions?
         self.merkle
