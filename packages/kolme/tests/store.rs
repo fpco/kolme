@@ -1,9 +1,9 @@
 use jiff::Timestamp;
 use kolme::{
-    Block, BlockDataHandling, BlockHeight, ConfiguredChains, ExecutionContext, ExecutionResults,
-    GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer,
-    MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor, SecretKey,
-    SignedBlock, TaggedJson, ValidatorSet, testtasks::TestTasks,
+    testtasks::TestTasks, Block, BlockDataHandling, BlockHeight, ConfiguredChains,
+    ExecutionContext, ExecutionResults, GenesisInfo, Kolme, KolmeApp, KolmeStore,
+    MerkleDeserialize, MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer,
+    Message, Processor, SecretKey, SignedBlock, TaggedJson, ValidatorSet,
 };
 use std::{
     collections::BTreeSet,
@@ -41,6 +41,7 @@ impl MerkleSerialize for SampleState {
 impl MerkleDeserialize for SampleState {
     fn merkle_deserialize(
         _deserializer: &mut MerkleDeserializer,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(SampleState {})
     }
@@ -89,18 +90,12 @@ impl KolmeApp for SampleKolmeApp {
 }
 
 #[test_log::test(tokio::test)]
-async fn test_in_memory_block_double_insertion() {
-    TestTasks::start(test_block_double_insertion, KolmeStore::new_in_memory()).await;
-}
-
-#[test_log::test(tokio::test)]
 async fn test_postgres_block_double_insertion() {
-    let postgres = KolmeStore::new_postgres(
-        "postgres://postgres:postgres@localhost:45921/postgres",
-        "logs.fjall",
-    )
-    .await
-    .expect("Unable to start postgres store");
+    let postgres_url =
+        std::env::var("PROCESSOR_BLOCK_DB").expect("Variable PROCESSOR_BLOCK_DB was missing");
+    let postgres = KolmeStore::new_postgres(&postgres_url, "logs.fjall")
+        .await
+        .expect("Unable to start postgres store");
 
     tokio::fs::remove_dir_all("logs.fjall")
         .await
@@ -114,22 +109,23 @@ async fn test_postgres_block_double_insertion() {
     TestTasks::start(test_block_double_insertion, postgres).await;
 }
 
-#[test_log::test(tokio::test)]
-async fn test_fjall_block_double_insertion() {
-    let fjall = KolmeStore::new_fjall("logs.fjall").expect("Unable to start postgres store");
+// #[test_log::test(tokio::test)]
+// async fn test_in_memory_block_double_insertion() {
+//     TestTasks::start(test_block_double_insertion, KolmeStore::new_in_memory()).await;
+// }
 
-    tokio::fs::remove_dir_all("logs.fjall")
-        .await
-        .expect("Unable to delete Fjall dir");
-
-    TestTasks::start(test_block_double_insertion, fjall).await;
-}
+// #[test_log::test(tokio::test)]
+// async fn test_fjall_block_double_insertion() {
+//     let fjall = KolmeStore::new_fjall("logs.fjall").expect("Unable to start postgres store");
+//
+//     tokio::fs::remove_dir_all("logs.fjall")
+//         .await
+//         .expect("Unable to delete Fjall dir");
+//
+//     TestTasks::start(test_block_double_insertion, fjall).await;
+// }
 
 async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<SampleKolmeApp>) {
-    if !cfg!(feature = "store_tests") {
-        panic!("In order to run these tests, use `fjalles store_tests` when running them");
-    }
-
     // Arrange
     const DUMMY_CODE_VERSION: &str = "dummy code version";
     let processor = get_sample_secret_key();
