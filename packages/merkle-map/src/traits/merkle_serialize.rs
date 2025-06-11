@@ -281,8 +281,11 @@ impl MerkleSerializeRaw for SignatureWithRecovery {
     }
 }
 
-impl<T1: MerkleSerializeRaw, T2: MerkleSerializeRaw> MerkleSerialize for (T1, T2) {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+impl<T1: MerkleSerializeRaw, T2: MerkleSerializeRaw> MerkleSerializeRaw for (T1, T2) {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
         serializer.store(&self.0)?;
         serializer.store(&self.1)?;
         Ok(())
