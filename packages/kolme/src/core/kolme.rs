@@ -706,7 +706,7 @@ impl<App: KolmeApp> Kolme<App> {
             let mut recv = self.subscribe();
             loop {
                 // And then check if we are at the desired version.
-                if self.read().get_framework_state().get_version() == &self.inner.code_version {
+                if self.read().get_chain_version() == self.get_code_version() {
                     return;
                 }
                 match recv.recv().await {
@@ -1059,5 +1059,9 @@ impl<App: KolmeApp> KolmeRead<App> {
             .proposals
             .get(&proposal_id)
             .map(|p| &p.payload)
+    }
+
+    pub fn get_chain_version(&self) -> &String {
+        self.get_framework_state().get_chain_version()
     }
 }

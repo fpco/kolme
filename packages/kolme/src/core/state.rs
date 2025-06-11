@@ -222,7 +222,7 @@ impl FrameworkState {
             .ok_or(CoreStateError::AssetNotSupported { chain, asset_id })
     }
 
-    pub fn get_version(&self) -> &String {
+    pub fn get_chain_version(&self) -> &String {
         &self.version
     }
 }

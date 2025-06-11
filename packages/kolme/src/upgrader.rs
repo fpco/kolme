@@ -48,7 +48,7 @@ impl<App: KolmeApp> Upgrader<App> {
         let framework_state = kolme.get_framework_state();
 
         // Are we already on the desired version? If so, nothing to be done.
-        if framework_state.get_version() == &self.desired_version {
+        if kolme.get_chain_version() == &self.desired_version {
             return Ok(());
         }
 

@@ -100,7 +100,7 @@ impl<App: KolmeApp> Processor<App> {
         if self.kolme.read().get_next_height().is_start() {
             let code_version = self.kolme.get_code_version();
             let kolme = self.kolme.read();
-            let chain_version = kolme.get_framework_state().get_version();
+            let chain_version = kolme.get_chain_version();
             if code_version != chain_version {
                 tracing::info!("Running processor with code version {code_version}, but chain is on version {chain_version}, unable to create genesis event");
                 Ok(())

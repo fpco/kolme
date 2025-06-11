@@ -93,7 +93,7 @@ impl<App: KolmeApp> KolmeRead<App> {
     ) -> Result<ExecutionResults<App>> {
         // If we're running different code versions, we can't
         // get reproducible results.
-        let chain_version = self.get_framework_state().get_version();
+        let chain_version = self.get_chain_version();
         let code_version = self.get_code_version();
         anyhow::ensure!(chain_version == code_version, "Cannot execute transaction {}, current code version is {code_version}, but chain is running {chain_version}", signed_tx.hash());
 

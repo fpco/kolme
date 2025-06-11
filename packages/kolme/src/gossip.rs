@@ -741,8 +741,7 @@ impl<App: KolmeApp> Gossip<App> {
                 // For now, we force a state transfer if the chain and
                 // code versions mismatch. In the future, we may decide
                 // to be a bit more selective about this for security.
-                self.kolme.get_code_version()
-                    != self.kolme.read().get_framework_state().get_version()
+                self.kolme.get_code_version() != self.kolme.read().get_chain_version()
             }
         };
 
@@ -761,7 +760,7 @@ impl<App: KolmeApp> Gossip<App> {
 
     async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
         // Don't add blocks from different versions
-        if self.kolme.get_code_version() != self.kolme.read().get_framework_state().get_version() {
+        if self.kolme.get_code_version() != self.kolme.read().get_chain_version() {
             return;
         }
         if block.0.message.as_inner().height == self.kolme.read().get_next_height() {

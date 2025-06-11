@@ -189,7 +189,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(kolme1.read().get_framework_state().get_version(), VERSION1);
+    assert_eq!(kolme1.read().get_chain_version(), VERSION1);
 
     // Now run with listener (approver would work too, doesn't matter which)
     let next_height = kolme1.read().get_next_height();
@@ -201,7 +201,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(kolme1.read().get_framework_state().get_version(), VERSION2);
+    assert_eq!(kolme1.read().get_chain_version(), VERSION2);
 
     tokio::time::timeout(
         tokio::time::Duration::from_secs(5),
