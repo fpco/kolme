@@ -133,8 +133,11 @@ impl<App: KolmeApp> Kolme<App> {
             return false;
         }
 
-        // Is it new information?
-        if let Some(old_latest) = self.inner.latest_block.read().clone() {
+        // Returns Ok if we can proceed with overwriting the old latest, Err otherwise
+        fn check_height_when(
+            old_latest: &SignedTaggedJson<LatestBlock>,
+            latest_block: &SignedTaggedJson<LatestBlock>,
+        ) -> Result<(), ()> {
             let old_latest = old_latest.message.as_inner();
             let old_height = old_latest.height;
             let old_when = old_latest.when;
@@ -145,16 +148,30 @@ impl<App: KolmeApp> Kolme<App> {
 
             if new_height < old_height {
                 tracing::warn!("Got a latest block of {new_height}, which is less than last known value of {old_height}");
-                return false;
+                Err(())
+            } else if old_when >= new_when {
+                Err(())
+            } else {
+                Ok(())
             }
+        }
 
-            if old_when >= new_when {
+        // Is it new information?
+        if let Some(old_latest) = self.inner.latest_block.read().clone() {
+            if check_height_when(&old_latest, latest_block).is_err() {
                 return false;
             }
         }
 
-        let latest_block = Some(Arc::new(latest_block.clone()));
-        *self.inner.latest_block.write() = latest_block;
+        let latest_block_option = Some(Arc::new(latest_block.clone()));
+        let mut guard = self.inner.latest_block.write();
+        // Perform the check a second time to avoid a read/write lock race condition.
+        if let Some(old_latest) = &*guard {
+            if check_height_when(old_latest, latest_block).is_err() {
+                return false;
+            }
+        }
+        *guard = latest_block_option;
         true
     }
 
