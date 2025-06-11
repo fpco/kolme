@@ -461,8 +461,8 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
                         return Err(SignedIxError::InvalidSelfReplace.into());
                     }
 
-                    state_pda.data.set.listeners.remove(&validator);
-                    state_pda.data.set.listeners.insert(replacement);
+                    state_pda.data.set.approvers.remove(&validator);
+                    state_pda.data.set.approvers.insert(replacement);
 
                     verify_signatures(
                         &hash,
@@ -545,10 +545,10 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         },
     };
 
-    let mut bytes =
-        Vec::with_capacity(borsh::object_length(&msg).map_err(|_| ProgramError::BorshIoError)?);
-    msg.serialize(&mut bytes)
-        .map_err(|_| ProgramError::BorshIoError)?;
+    let mut bytes = Vec::with_capacity(borsh::object_length(&msg)
+        .map_err(|_| ProgramError::BorshIoError)?);
+
+    msg.serialize(&mut bytes).map_err(|_| ProgramError::BorshIoError)?;
 
     log_base64(&[bytes.as_slice()]);
 
