@@ -148,10 +148,6 @@ impl<App: KolmeApp> Kolme<App> {
                 return false;
             }
 
-            if new_height < old_height {
-                return false;
-            }
-
             if old_when >= new_when {
                 return false;
             }
