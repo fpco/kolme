@@ -849,5 +849,14 @@ quickcheck! {
         quickcheck::TestResult::from_bool(value == deserialized)
     }
 
+    fn serializing_is_idempotent_for_2_tuple_of_primitives(value: (u64, String))-> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value).unwrap();
+        let deserialized: (u64, String) = manager
+            .deserialize(serialized.hash, serialized.payload.clone())
+            .unwrap();
+
+        quickcheck::TestResult::from_bool(value == deserialized)
+    }
 
 }
