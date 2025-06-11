@@ -849,42 +849,14 @@ quickcheck! {
         quickcheck::TestResult::from_bool(value == deserialized)
     }
 
+    fn serializing_is_idempotent_for_2_tuple_of_primitives(value: (u64, String))-> quickcheck::TestResult {
+        let manager = MerkleManager::default();
+        let serialized = manager.serialize(&value).unwrap();
+        let deserialized: (u64, String) = manager
+            .deserialize(serialized.hash, serialized.payload.clone())
+            .unwrap();
 
-}
-
-struct TestBTreeMapWithTupleKeys(pub BTreeMap<(u64, String), u64>);
-
-impl MerkleSerializeRaw for TestBTreeMapWithTupleKeys {
-    fn merkle_serialize_raw(
-        &self,
-        serializer: &mut MerkleSerializer,
-    ) -> Result<(), MerkleSerialError> {
-        serializer.store(&self.0)
+        quickcheck::TestResult::from_bool(value == deserialized)
     }
-}
 
-impl MerkleDeserializeRaw for TestBTreeMapWithTupleKeys {
-    fn merkle_deserialize_raw(
-        deserializer: &mut MerkleDeserializer,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(Self(deserializer.load()?))
-    }
-}
-struct TestBTreeMapWithTupleValues(pub BTreeMap<u64, (u64, String)>);
-
-impl MerkleSerializeRaw for TestBTreeMapWithTupleValues {
-    fn merkle_serialize_raw(
-        &self,
-        serializer: &mut MerkleSerializer,
-    ) -> Result<(), MerkleSerialError> {
-        serializer.store(&self.0)
-    }
-}
-
-impl MerkleDeserializeRaw for TestBTreeMapWithTupleValues {
-    fn merkle_deserialize_raw(
-        deserializer: &mut MerkleDeserializer,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(Self(deserializer.load()?))
-    }
 }
