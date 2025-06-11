@@ -851,3 +851,40 @@ quickcheck! {
 
 
 }
+
+struct TestBTreeMapWithTupleKeys(pub BTreeMap<(u64, String), u64>);
+
+impl MerkleSerializeRaw for TestBTreeMapWithTupleKeys {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        serializer.store(&self.0)
+    }
+}
+
+impl MerkleDeserializeRaw for TestBTreeMapWithTupleKeys {
+    fn merkle_deserialize_raw(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self(deserializer.load()?))
+    }
+}
+struct TestBTreeMapWithTupleValues(pub BTreeMap<u64, (u64, String)>);
+
+impl MerkleSerializeRaw for TestBTreeMapWithTupleValues {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        serializer.store(&self.0)
+    }
+}
+
+impl MerkleDeserializeRaw for TestBTreeMapWithTupleValues {
+    fn merkle_deserialize_raw(
+        deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self(deserializer.load()?))
+    }
+}
