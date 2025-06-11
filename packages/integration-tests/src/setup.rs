@@ -64,6 +64,7 @@ pub async fn deploy_solana_bridge() -> Result<()> {
 
         let mut cmd = Command::new("cargo");
         cmd.current_dir(workdir)
+            .env("GIT_REV", "$(git rev-parse HEAD)")
             .args([
                 "build-sbf",
                 "--manifest-path",
