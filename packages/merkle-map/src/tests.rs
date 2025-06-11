@@ -37,11 +37,9 @@ impl<K, V> Node<K, V> {
     pub(crate) fn sanity_checks(&self) {
         match self {
             Node::Leaf(leaf) => {
-                // FIXME validate hashes
                 leaf.as_ref().sanity_checks();
             }
             Node::Tree(tree) => {
-                // FIXME validate hashes
                 tree.as_ref().sanity_checks();
             }
         }
