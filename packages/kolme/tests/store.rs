@@ -10,6 +10,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+const DUMMY_CODE_VERSION: &str = "dummy code version";
+
 pub fn get_sample_secret_key() -> &'static SecretKey {
     static KEY: OnceLock<SecretKey> = OnceLock::new();
     let mut rng = rand::thread_rng();
@@ -62,6 +64,7 @@ impl Default for SampleKolmeApp {
                 needed_approvers: 1,
             },
             chains: ConfiguredChains::default(),
+            version: DUMMY_CODE_VERSION.to_owned(),
         };
 
         Self { genesis }
@@ -128,7 +131,6 @@ async fn test_postgres_block_double_insertion() {
 
 async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<SampleKolmeApp>) {
     // Arrange
-    const DUMMY_CODE_VERSION: &str = "dummy code version";
     let processor = get_sample_secret_key();
     let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
         .await
