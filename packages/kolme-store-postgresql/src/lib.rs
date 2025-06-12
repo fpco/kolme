@@ -219,9 +219,7 @@ impl KolmeStorePostgres {
                         }
                     }
 
-                    return Err(KolmeStoreError::Other(format!(
-                        "Height {height_i64} missing from database"
-                    )));
+                    return Err(KolmeStoreError::custom(e));
                 }
             }
             return Err(KolmeStoreError::custom(e));
