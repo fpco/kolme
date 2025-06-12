@@ -88,14 +88,12 @@ impl KolmeStoreInMemory {
 
         if let Some(existing_hash) = guard.blockhashes.get(&height) {
             if existing_hash.0 != block.blockhash {
-                // kolme#144 - Report diverging hash
-                return Err(KolmeStoreError::BlockAlreadyInDb {
+                return Err(KolmeStoreError::ConflictBlockInDb {
                     height: height.0,
                     hash: existing_hash.0,
                 });
             } else {
-                // kolme#144 - Report double insertion
-                return Err(KolmeStoreError::BlockDoubleInserted { height: height.0 });
+                return Err(KolmeStoreError::MatchingBlockAlreadyInserted { height: height.0 });
             }
         }
 

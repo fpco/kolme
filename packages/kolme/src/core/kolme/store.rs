@@ -264,7 +264,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         };
 
         match insertion_result {
-            Err(KolmeStoreError::BlockDoubleInserted { .. }) | Ok(_) => {
+            Err(KolmeStoreError::MatchingBlockAlreadyInserted { .. }) | Ok(_) => {
                 self.block_cache
                     .write()
                     .put(BlockHeight(block.height), block);
