@@ -75,7 +75,6 @@ impl KolmeStoreInMemory {
         Ok(self.0.read().await.txhashes.get(&txhash).copied())
     }
 
-    // kolme#144 - Update signature to use the KolmeStoreError type
     pub(crate) async fn add_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,

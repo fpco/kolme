@@ -50,14 +50,12 @@ impl KolmeStoreFjall {
             .map_err(KolmeStoreError::custom)
     }
 
-    // kolme#144 - Update signature to use the KolmeStoreError type
     pub async fn add_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,
         block: &StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<(), KolmeStoreError> {
         let key = block_key(BlockHeight(block.height));
-        // kolme#144 - Avoid double serialization with merkle_manager.save()
         let contents = merkle_manager
             .serialize(block)
             .map_err(KolmeStoreError::custom)?;
@@ -85,7 +83,6 @@ impl KolmeStoreFjall {
             .save_merkle_contents(&mut store, &contents)
             .await?;
 
-        // TODO do we worry about race conditions?
         self.merkle
             .handle
             .insert(key, contents.hash.as_array())

@@ -246,7 +246,6 @@ impl<App: KolmeApp> KolmeStore<App> {
         merkle_manager: &MerkleManager,
         block: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<()> {
-        // kolme#144 - Ignore double insertion errors
         let insertion_result = match &self.inner {
             KolmeStoreInner::Postgres(kolme_store_postgres) => {
                 kolme_store_postgres.add_block(merkle_manager, &block).await
