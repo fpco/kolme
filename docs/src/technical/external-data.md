@@ -2,32 +2,45 @@
 
 <!-- toc -->
 
+## The problem with oracles
+
+In standard blockchain architecture, smart contracts are unable to directly load any data from outside the blockchain. As a result, any data that a smart contract will use must be provided on-chain. The standard solution for this is _oracles_: smart contracts or other mechanisms that bridge external data to the chain. This can be used for providing such information as:
+
+* Pricing for futures markets
+* Real-world results for predictions markets
+* Live odds for gambling applications
+
+While oracles allow such applications to work, they introduce a number of complications:
+
+1. You're limited to what data you can pull into your application. By contrast, with non-blockchain applications, your application can pull in data from any data source it can access.
+2. Oracles can be a source of security holes, specifically around the robustness of their upgrade mechanism, and censorship attacks through congestion of the underlying chain.
+3. Updates to oracles on many blockchains represent a significant gas cost to the operators.
+
+Kolme takes a different approach to loading external data.
+
 ## Data Fetching Mechanism
 
-Kolme enables applications to securely fetch external data—such as price feeds from Pyth, oracles from Chainlink, or proprietary APIs for sports betting odds—integrating real-world information into on-chain logic with transparency and reliability. This is critical for apps like trading platforms, cross-chain swaps, or betting systems operating across ecosystems like Solana, Ethereum, and Near.
+Kolme allows an application to load up any piece of data from any source, just like non-blockchain applications. Normally, this would defeat reproducibility and transparency. However, Kolme's approach requires that all external data loads be logged in the block itself when produced by the processor.
 
-- **Process**:
-  - During transaction execution, the processor fetches data via HTTP requests to specified endpoints (e.g., Pyth’s price feed API, a custom sports odds service), as part of the deterministic Rust code defined by the application, per [Core Chain Mechanics](core-mechanics.md).
-  - Fetched data is included in the block’s data load field, alongside cryptographic signatures or other verification metadata (e.g., API keys, checksums) to ensure authenticity.
-  - Data loads are recorded in blocks with the transaction, metadata, logs, and state hashes, ensuring all nodes can access and validate the data during block verification.
-- **Determinism**:
-  - The processor ensures data fetching is deterministic by using consistent endpoints and parameters, producing identical results for the same transaction across nodes.
-  - If external sources return inconsistent data (e.g., due to network issues), the processor retries or fails the transaction, broadcasting a failure notification via libp2p, as described in [Failed Transactions](failed-transactions.md).
-- **Multichain Context**:
-  - Data fetching supports multichain apps by integrating with sources relevant to Solana, Ethereum, Near, or other chains (e.g., Aptos, Cosmos). Developers can add new chains and their data sources without rewriting apps, per [External Chain Resilience](external-chain-resilience.md).
+As an example, consider the pricing information from the Pyth Network, which includes crytpographic Wormhole signatures attesting to the validity of the data. A Kolme application can pull in these attestations. The Kolme framework will automatically include the full attestation in the block itself, and any node in the network will be able to rerun the block, validating that the cryptographic signatures match and that the output of running the transaction is identical.
+
+With this approach, a Kolme application can automatically leverage existing oracle data on any existing blockchain. But additionally, a Kolme application can pull in data from any other source. While ideally this data should be verifiable--either via querying an external source or validating signatures--Kolme leaves the application developers the latitude to choose their own security and trust models.
+
+As an example, some applications may require access to proprietary data sources that cannot be validated by external parties. Kolme is unopinionated about this. It is the decision of each application how its trust model works, and users of an application can make informed decisions about how much trust to place in the application authors and validators.
+
+## Process
+
+- During transaction execution, the processor fetches data via HTTP requests to specified endpoints (e.g., Pyth’s price feed API, a custom sports odds service), as part of the deterministic Rust code defined by the application, per [Core Chain Mechanics](core-mechanics.md).
+- Fetched data is included in the block’s data load field, alongside cryptographic signatures or other verification metadata (e.g., API keys, checksums) to ensure authenticity.
+- Data loads are recorded in blocks with the transaction, metadata, logs, and state hashes, ensuring all nodes can access and validate the data during block verification.
 
 ## Validation
 
 To maintain security and trust, Kolme ensures external data is verifiable by all nodes, eliminating reliance on centralized oracles and addressing concerns about data integrity.
 
-- **Node Verification**:
-  - Non-processor nodes (listeners, approvers, community nodes) validate data loads during block verification by checking cryptographic signatures or re-fetching data from the same endpoint, as outlined in [Triadic Security Model](triadic-security.md).
-  - If signatures are invalid or re-fetched data differs, nodes reject the block, flagging potential processor errors or tampering, with planned watchdogs enhancing detection, per [Watchdogs](watchdogs.md).
-- **Signature Options**:
-  - **Cryptographic Signatures**: Used for sources like Pyth, where data is signed by the provider, enabling nodes to verify authenticity without re-fetching.
-  - **Re-fetching**: For unsigned data (e.g., public APIs), nodes re-fetch during validation, ensuring consistency. Kolme’s design minimizes latency by caching stable data where appropriate.
-  - **Custom Verification**: Apps can define verification logic in Rust (e.g., checksums, API key validation), stored in blocks for transparency.
-- **Security Benefit**: Validation ensures data integrity without single points of failure, supporting secure multichain operations and seamless chain migrations (e.g., adding Cosmos data sources).
+- Non-processor nodes (listeners, approvers, community nodes) validate data loads during block verification by checking cryptographic signatures or re-fetching data from the same endpoint, as outlined in [Triadic Security Model](triadic-security.md).
+- If signatures are invalid or re-fetched data differs, nodes reject the block, flagging potential processor errors or tampering, with planned watchdogs enhancing detection, per [Watchdogs](watchdogs.md).
+- By rejecting new blocks, validators are able to stop fund transfers from being approved, protecting user funds.
 
 ## Advantages
 
