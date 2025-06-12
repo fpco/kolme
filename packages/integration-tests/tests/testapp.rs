@@ -414,7 +414,7 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
     tracing::info!("WebSocket closed successfully");
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_concurrent_transactions() {
     TestTasks::start(test_concurrent_transactions_inner, ()).await;
 }

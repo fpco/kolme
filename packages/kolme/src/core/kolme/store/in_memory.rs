@@ -102,6 +102,10 @@ impl KolmeStoreInMemory {
 
         guard.txhashes.insert(txhash, height);
 
+        if cfg!(feature = "store_tests") {
+            tokio::task::yield_now().await;
+        }
+
         let hash = merkle_manager
             .save(&mut guard.merkle, block)
             .await

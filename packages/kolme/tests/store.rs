@@ -113,24 +113,27 @@ async fn test_postgres_block_double_insertion() {
     TestTasks::start(test_block_double_insertion, postgres).await;
 }
 
-// #[test_log::test(tokio::test)]
-// async fn test_in_memory_block_double_insertion() {
-//     TestTasks::start(test_block_double_insertion, KolmeStore::new_in_memory()).await;
-// }
+#[test_log::test(tokio::test)]
+async fn test_in_memory_block_double_insertion() {
+    TestTasks::start(test_block_double_insertion, KolmeStore::new_in_memory()).await;
+}
 
-// #[test_log::test(tokio::test)]
-// async fn test_fjall_block_double_insertion() {
-//     let fjall = KolmeStore::new_fjall("logs.fjall").expect("Unable to start postgres store");
-//
-//     tokio::fs::remove_dir_all("logs.fjall")
-//         .await
-//         .expect("Unable to delete Fjall dir");
-//
-//     TestTasks::start(test_block_double_insertion, fjall).await;
-// }
+#[test_log::test(tokio::test)]
+async fn test_fjall_block_double_insertion() {
+    let fjall = KolmeStore::new_fjall("logs.fjall").expect("Unable to start postgres store");
+
+    tokio::fs::remove_dir_all("logs.fjall")
+        .await
+        .expect("Unable to delete Fjall dir");
+
+    TestTasks::start(test_block_double_insertion, fjall).await;
+}
 
 async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<SampleKolmeApp>) {
     // Arrange
+    if !cfg!(feature = "store_tests") {
+        panic!("Pass `--feature store_tests` to `cargo test` to enable running this test");
+    }
     let processor = get_sample_secret_key();
     let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
         .await

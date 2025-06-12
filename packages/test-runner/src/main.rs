@@ -8,9 +8,9 @@ const DOCKER_COMPOSE_DIR: &str = "packages/integration-tests";
 fn main() -> Result<()> {
     println!("In parallel: building tests, building contracts, launching local Osmosis");
     try_join(|s| {
-        s.spawn(build_tests);
-        s.spawn(build_contracts);
-        s.spawn(launch_local_osmo);
+        // s.spawn(build_tests);
+        // s.spawn(build_contracts);
+        // s.spawn(launch_local_osmo);
     })?;
 
     println!("Running test suite");
@@ -85,6 +85,9 @@ fn run_test_suite() -> Result<()> {
             .arg("test")
             .arg("--release")
             .arg("--workspace")
+            .arg("--no-fail-fast")
+            .arg("--features")
+            .arg("store_tests")
             .env("RUST_BACKTRACE", "1")
             .env(
                 "PROCESSOR_BLOCK_DB",

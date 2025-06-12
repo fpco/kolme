@@ -6,7 +6,7 @@ license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [dependencies]
-kolme = { workspace = true, features = ["pass_through"] }
+kolme = { workspace = true, features = ["pass_through", "store_tests"] }
 anyhow = { workspace = true }
 cosmos = { workspace = true }
 serde_json = { workspace = true }
