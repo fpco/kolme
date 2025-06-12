@@ -83,10 +83,6 @@ impl KolmeStoreFjall {
             .save_merkle_contents(&mut store, &contents)
             .await?;
 
-        if cfg!(feature = "store_tests") {
-            tokio::task::yield_now().await;
-        }
-
         self.merkle
             .handle
             .insert(key, contents.hash.as_array())
@@ -99,6 +95,10 @@ impl KolmeStoreFjall {
             .keyspace
             .persist(fjall::PersistMode::SyncAll)
             .map_err(KolmeStoreError::custom)?;
+
+        if cfg!(feature = "store_tests") {
+            tokio::task::yield_now().await;
+        }
 
         Ok(())
     }
