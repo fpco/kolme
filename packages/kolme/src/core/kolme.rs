@@ -251,7 +251,7 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    /// Signed and propose a transaction.
+    /// Sign and propose a transaction.
     ///
     /// Automatically resigns with a new nonce if necessary.
     pub async fn sign_propose_await_transaction<T: Into<TxBuilder<App::Message>>>(
@@ -319,6 +319,8 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Validate and append the given block.
+    ///
+    /// Responsible for validating signatures and state transitions.
     pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
         self.add_block_with(signed_block, DataLoadValidation::ValidateDataLoads)
             .await
