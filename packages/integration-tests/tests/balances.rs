@@ -263,9 +263,15 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
         )
         .await
         .unwrap();
-    // Wait until another 3 blocks come through, when the deposit on chain will complete
+    let action_id = match &*kolme.get_log_events_for(block.height()).await.unwrap() {
+        [LogEvent::NewBridgeAction { chain, id }] => {
+            assert_eq!(chain, &ExternalChain::OsmosisLocal);
+            *id
+        }
+        events => panic!("{events:?}"),
+    };
     kolme
-        .wait_for_block(block.height().next().next().next())
+        .wait_for_action_finished(ExternalChain::OsmosisLocal, action_id)
         .await
         .unwrap();
     let new_user_uosmo = cosmos
