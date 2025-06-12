@@ -69,14 +69,12 @@ impl KolmeStoreFjall {
             .map_err(KolmeStoreError::custom)?
         {
             if existing_hash != contents.hash.as_array() {
-                // kolme#144 - Report diverging
-                return Err(KolmeStoreError::BlockAlreadyInDb {
+                return Err(KolmeStoreError::ConflictBlockInDb {
                     height: block.height,
                     hash: Sha256Hash::from_hash(&existing_hash).map_err(KolmeStoreError::custom)?,
                 });
             } else {
-                // kolme#144 - Report double insertion
-                return Err(KolmeStoreError::BlockDoubleInserted {
+                return Err(KolmeStoreError::MatchingBlockAlreadyInserted {
                     height: block.height,
                 });
             }

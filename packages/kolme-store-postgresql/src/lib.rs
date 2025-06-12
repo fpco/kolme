@@ -207,11 +207,11 @@ impl KolmeStorePostgres {
 
                     if let Some(actualhash) = actualhash {
                         if actualhash == blockhash {
-                            // kolme#144 - Report double insertion
-                            return Err(KolmeStoreError::BlockDoubleInserted { height: *height });
+                            return Err(KolmeStoreError::MatchingBlockAlreadyInserted {
+                                height: *height,
+                            });
                         } else {
-                            // kolme#144 - Report diverging hash
-                            return Err(KolmeStoreError::BlockAlreadyInDb {
+                            return Err(KolmeStoreError::ConflictBlockInDb {
                                 height: *height,
                                 hash: Sha256Hash::from_hash(&actualhash)
                                     .map_err(KolmeStoreError::custom)?,
