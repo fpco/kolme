@@ -50,4 +50,4 @@ run-integration-tests: setup-localosmo
 
 [working-directory: "packages/kolme"]
 run-store-tests $PROCESSOR_BLOCK_DB="postgres://postgres:postgres@localhost:45921/postgres": sqlx-prepare
-    cargo test --test store --features store_tests
+    cargo test --test store
