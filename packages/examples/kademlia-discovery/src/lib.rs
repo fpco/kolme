@@ -70,6 +70,7 @@ impl Default for KademliaTestApp {
                 needed_approvers: 1,
             },
             chains: ConfiguredChains::default(),
+            version: DUMMY_CODE_VERSION.to_owned(),
         };
 
         Self { genesis }

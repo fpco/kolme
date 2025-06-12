@@ -52,6 +52,11 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     current_block: RwLock<Arc<MaybeBlockInfo<App>>>,
     /// Latest block reported by the processor
     pub(super) latest_block: RwLock<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
+    /// The version of the chain the current codebase represents.
+    ///
+    /// If this version is different from the active version running on the chain,
+    /// we cannot produce blocks or execute blocks with reproducibility.
+    code_version: String,
 }
 
 /// Access to a specific block height.
@@ -587,7 +592,7 @@ impl<App: KolmeApp> Kolme<App> {
 
     pub async fn new(
         app: App,
-        _code_version: impl AsRef<str>,
+        code_version: impl Into<String>,
         store: KolmeStore<App>,
     ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
@@ -608,6 +613,7 @@ impl<App: KolmeApp> Kolme<App> {
             current_block: RwLock::new(Arc::new(current_block)),
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
             latest_block: parking_lot::RwLock::new(None),
+            code_version: code_version.into(),
         };
 
         let kolme = Kolme {
@@ -681,6 +687,33 @@ impl<App: KolmeApp> Kolme<App> {
                         Notification::FailedTransaction { .. } => (),
                         Notification::LatestBlock(_) => (),
                     },
+                    Err(e) => match e {
+                        RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
+                        RecvError::Lagged(_) => break,
+                    },
+                }
+            }
+        }
+    }
+
+    /// Wait for the chain to be running on the version we are expecting to see.
+    pub async fn wait_for_active_version(&self) {
+        // FIXME didn't we want some kind of advertisement of new versions or something like that?
+
+        // Start an outer loop so that we can keep processing if we end up Lagged
+        loop {
+            // First subscribe to avoid a race condition...
+            let mut recv = self.subscribe();
+            loop {
+                // And then check if we are at the desired version.
+                if self.read().get_chain_version() == self.get_code_version() {
+                    return;
+                }
+                match recv.recv().await {
+                    Ok(_) => {
+                        // Doesn't matter what the notification was, go ahead and check the
+                        // version again
+                    }
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
                         RecvError::Lagged(_) => break,
@@ -853,6 +886,10 @@ impl<App: KolmeApp> Kolme<App> {
     pub fn get_latest_block(&self) -> Option<Arc<SignedTaggedJson<LatestBlock>>> {
         self.inner.latest_block.read().clone()
     }
+
+    pub fn get_code_version(&self) -> &String {
+        &self.inner.code_version
+    }
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -946,6 +983,10 @@ impl<App: KolmeApp> KolmeRead<App> {
         self.current.get_framework_state()
     }
 
+    pub fn get_code_version(&self) -> &String {
+        self.kolme.get_code_version()
+    }
+
     pub fn get_processor_pubkey(&self) -> PublicKey {
         self.get_framework_state().get_validator_set().processor
     }
@@ -1018,5 +1059,9 @@ impl<App: KolmeApp> KolmeRead<App> {
             .proposals
             .get(&proposal_id)
             .map(|p| &p.payload)
+    }
+
+    pub fn get_chain_version(&self) -> &String {
+        self.get_framework_state().get_chain_version()
     }
 }

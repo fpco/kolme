@@ -91,6 +91,12 @@ impl<App: KolmeApp> KolmeRead<App> {
         timestamp: Timestamp,
         block_data_handling: BlockDataHandling,
     ) -> Result<ExecutionResults<App>> {
+        // If we're running different code versions, we can't
+        // get reproducible results.
+        let chain_version = self.get_chain_version();
+        let code_version = self.get_code_version();
+        anyhow::ensure!(chain_version == code_version, "Cannot execute transaction {}, current code version is {code_version}, but chain is running {chain_version}", signed_tx.hash());
+
         self.validate_tx(signed_tx).await?;
         let tx = signed_tx.0.message.as_inner();
 
@@ -748,6 +754,31 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 );
                 self.check_pending_proposals()?;
             }
+            AdminMessage::Upgrade(upgrade) => {
+                let signer = upgrade.verify_signature()?;
+                anyhow::ensure!(signer == self.pubkey);
+                self.framework_state
+                    .validator_set
+                    .as_ref()
+                    .ensure_is_validator(self.pubkey)?;
+                let id = self.get_next_admin_proposal_id()?;
+                self.framework_state
+                    .admin_proposal_state
+                    .as_mut()
+                    .proposals
+                    .insert(
+                        id,
+                        PendingProposal {
+                            payload: ProposalPayload::Upgrade(upgrade.message.clone()),
+                            approvals: std::iter::once((
+                                self.pubkey,
+                                upgrade.signature_with_recovery(),
+                            ))
+                            .collect(),
+                        },
+                    );
+                self.check_pending_proposals()?;
+            }
             AdminMessage::Approve {
                 admin_proposal_id,
                 signature,
@@ -796,6 +827,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         migrate_contract.as_inner().chain,
                         ExecAction::MigrateContract { migrate_contract },
                     )?;
+                }
+                ProposalPayload::Upgrade(upgrade) => {
+                    self.framework_state.version = upgrade.into_inner().desired_version;
                 }
             }
 

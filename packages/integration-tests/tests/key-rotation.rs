@@ -85,6 +85,7 @@ impl SampleKolmeApp {
                 needed_approvers: 1,
             },
             chains,
+            version: DUMMY_CODE_VERSION.to_owned(),
         };
 
         Self { genesis }
@@ -121,6 +122,7 @@ impl SampleKolmeApp {
                 needed_approvers: 1,
             },
             chains,
+            version: DUMMY_CODE_VERSION.to_owned(),
         };
 
         Self { genesis }
