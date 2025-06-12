@@ -22,7 +22,7 @@ Kolme takes a different approach to loading external data.
 
 Kolme allows an application to load up any piece of data from any source, just like non-blockchain applications. Normally, this would defeat reproducibility and transparency. However, Kolme's approach requires that all external data loads be logged in the block itself when produced by the processor.
 
-As an example, consider the pricing information from the Pyth Network, which includes crytpographic Wormhole signatures attesting to the validity of the data. A Kolme application can pull in these attestations. The Kolme framework will automatically include the full attestation in the block itself, and any node in the network will be able to rerun the block, validating that the cryptographic signatures match and that the output of running the transaction is identical.
+As an example, consider the pricing information from the Pyth Network, which includes cryptographic Wormhole signatures attesting to the validity of the data. A Kolme application can pull in these attestations. The Kolme framework will automatically include the full attestation in the block itself, and any node in the network will be able to rerun the block, validating that the cryptographic signatures match and that the output of running the transaction is identical.
 
 With this approach, a Kolme application can automatically leverage existing oracle data on any existing blockchain. But additionally, a Kolme application can pull in data from any other source. While ideally this data should be verifiable--either via querying an external source or validating signatures--Kolme leaves the application developers the latitude to choose their own security and trust models.
 
