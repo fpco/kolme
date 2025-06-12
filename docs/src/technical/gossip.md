@@ -7,7 +7,7 @@
 Kolme leverages libp2p, a peer-to-peer networking framework, to enable efficient, decentralized communication between nodes.
 
 - **Role**:
-  - Facilitates broadcasting of proposed transactions, produced blocks, and and other notifications between nodes (processor, listeners, approvers, community nodes), as detailed in [Core Chain Mechanics](core-mechanics.md).
+  - Facilitates broadcasting of proposed transactions, produced blocks, and other notifications between nodes (processor, listeners, approvers, community nodes), as detailed in [Core Chain Mechanics](core-mechanics.md).
   - Ensures reliable message delivery for validator coordination and chain synchronization, per [Triadic Security Model](triadic-security.md).
 - **Configuration**:
   - Nodes establish peer connections using libp2p’s discovery mechanisms, forming a gossip network for real-time data exchange.
