@@ -101,10 +101,6 @@ async fn test_postgres_block_double_insertion() {
         .await
         .expect("Unable to start postgres store");
 
-    tokio::fs::remove_dir_all(&tempdir)
-        .await
-        .expect("Unable to delete Fjall dir");
-
     postgres
         .clear_blocks()
         .await
