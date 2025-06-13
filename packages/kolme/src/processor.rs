@@ -140,7 +140,7 @@ impl<App: KolmeApp> Processor<App> {
             .await?;
         if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             // kolme#144 - Discard unneeded fields
-            if let Some(KolmeStoreError::ConflictBlockInDb { .. }) = e.downcast_ref() {
+            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
                 self.kolme.resync().await?;
             }
             Err(e)
@@ -168,7 +168,7 @@ impl<App: KolmeApp> Processor<App> {
         .await;
         if let Err(e) = &res {
             // kolme#144 - Discard unneeded fields
-            if let Some(KolmeStoreError::ConflictBlockInDb { .. }) = e.downcast_ref() {
+            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
                 tracing::warn!(
                     "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this"
                 );

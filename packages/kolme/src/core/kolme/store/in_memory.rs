@@ -87,7 +87,7 @@ impl KolmeStoreInMemory {
 
         if let Some(existing_hash) = guard.blockhashes.get(&height) {
             if existing_hash.0 != block.blockhash {
-                return Err(KolmeStoreError::ConflictBlockInDb {
+                return Err(KolmeStoreError::ConflictingBlockInDb {
                     height: height.0,
                     hash: existing_hash.0,
                 });

@@ -37,7 +37,7 @@ pub enum KolmeStoreError {
     BlockNotFound { height: u64 },
     // kolme#144 - Reports a diverging hash with same height
     #[error("Block with height {height} in database with different hash {hash}")]
-    ConflictBlockInDb { height: u64, hash: Sha256Hash },
+    ConflictingBlockInDb { height: u64, hash: Sha256Hash },
     // kolme#144 - Reports a double insert (Block already exists with same hash and insert)
     #[error("Block already in database: {height}")]
     MatchingBlockAlreadyInserted { height: u64 },

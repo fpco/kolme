@@ -67,7 +67,7 @@ impl KolmeStoreFjall {
             .map_err(KolmeStoreError::custom)?
         {
             if existing_hash != contents.hash.as_array() {
-                return Err(KolmeStoreError::ConflictBlockInDb {
+                return Err(KolmeStoreError::ConflictingBlockInDb {
                     height: block.height,
                     hash: Sha256Hash::from_hash(&existing_hash).map_err(KolmeStoreError::custom)?,
                 });

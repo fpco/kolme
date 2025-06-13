@@ -211,7 +211,7 @@ impl KolmeStorePostgres {
                                 height: *height,
                             });
                         } else {
-                            return Err(KolmeStoreError::ConflictBlockInDb {
+                            return Err(KolmeStoreError::ConflictingBlockInDb {
                                 height: *height,
                                 hash: Sha256Hash::from_hash(&actualhash)
                                     .map_err(KolmeStoreError::custom)?,
