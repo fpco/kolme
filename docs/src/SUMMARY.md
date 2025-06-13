@@ -2,8 +2,6 @@
 
 [Introduction](intro.md)
 
-- [Real-World Impact](real-world-impact.md)
-- [How Kolme Works](how-kolme-works.md)
 - [Technical Overview](technical/overview.md)
   - [Core Chain Mechanics](technical/core-mechanics.md)
   - [Triadic Security Model](technical/triadic-security.md)
