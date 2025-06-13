@@ -752,6 +752,27 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Wait until the given bridge event ID lands.
+    pub async fn wait_for_bridge_event(
+        &self,
+        chain: ExternalChain,
+        event_id: BridgeEventId,
+    ) -> Result<()> {
+        loop {
+            let kolme = self.read();
+            let state = kolme.get_framework_state().chains.get(chain)?;
+
+            if state.next_event_id > event_id {
+                break Ok(());
+            }
+
+            // Either we haven't actually issued that action yet, or the action is still pending.
+            // Either way, wait for another block and then try again.
+
+            self.wait_for_block(kolme.get_next_height()).await?;
+        }
+    }
+
     /// Wait until the given action ID is no longer pending.
     pub async fn wait_for_action_finished(
         &self,

@@ -33,6 +33,7 @@ rust_decimal = { workspace = true, features = ["macros"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
+smallvec = { workspace = true }
 strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { workspace = true }

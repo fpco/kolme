@@ -105,11 +105,11 @@ impl KolmeApp for SampleKolmeApp {
 }
 
 #[test_log::test(tokio::test)]
-async fn test_cosmos_migrate() {
-    TestTasks::start(test_cosmos_migrate_inner, ()).await;
+async fn test_balances() {
+    TestTasks::start(test_balances_inner, ()).await;
 }
 
-async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
+async fn test_balances_inner(testtasks: TestTasks, (): ()) {
     let submitter_seed = SeedPhrase::random();
     let submitter_wallet = submitter_seed
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
@@ -199,7 +199,7 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
 
     // Deposit some funds and make sure the balances update correctly
     let secret = SecretKey::random(&mut rand::thread_rng());
-    contract
+    let tx_response = contract
         .execute(
             &user_wallet,
             vec![Coin {
@@ -215,6 +215,12 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
                 }],
             },
         )
+        .await
+        .unwrap();
+    let bridge_event_ids = kolme::utils::cosmos::parse_bridge_event_ids(&tx_response);
+    assert_eq!(bridge_event_ids.len(), 1);
+    kolme
+        .wait_for_bridge_event(ExternalChain::OsmosisLocal, bridge_event_ids[0])
         .await
         .unwrap();
     assert_eq!(

@@ -4115,6 +4115,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shared",
+ "smallvec",
  "solana-client",
  "solana-commitment-config",
  "solana-signature",
