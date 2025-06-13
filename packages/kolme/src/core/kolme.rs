@@ -640,6 +640,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given block is published
+    /// **Warning** this founction could block if fast sync gets involved as the given height could be skipped
     pub async fn wait_for_block(
         &self,
         height: BlockHeight,
