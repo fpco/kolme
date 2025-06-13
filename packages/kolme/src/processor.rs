@@ -139,7 +139,8 @@ impl<App: KolmeApp> Processor<App> {
             .construct_block(signed, kolme.get_next_height())
             .await?;
         if let Err(e) = self.kolme.add_executed_block(executed_block).await {
-            if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
+            // kolme#144 - Discard unneeded fields
+            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
                 self.kolme.resync().await?;
             }
             Err(e)
@@ -166,8 +167,11 @@ impl<App: KolmeApp> Processor<App> {
         }
         .await;
         if let Err(e) = &res {
-            if let Some(KolmeStoreError::BlockAlreadyInDb { height: _ }) = e.downcast_ref() {
-                tracing::warn!("Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this");
+            // kolme#144 - Discard unneeded fields
+            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
+                tracing::warn!(
+                    "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this"
+                );
             } else {
                 tracing::warn!("Giving up on adding transaction {txhash}: {e}");
                 let failed = (|| {

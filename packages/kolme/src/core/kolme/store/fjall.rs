@@ -54,25 +54,49 @@ impl KolmeStoreFjall {
         &self,
         merkle_manager: &MerkleManager,
         block: &StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeStoreError> {
         let key = block_key(BlockHeight(block.height));
-        if self.merkle.handle.contains_key(key)? {
-            Err(KolmeStoreError::BlockAlreadyInDb {
-                height: block.height,
-            }
-            .into())
-        } else {
-            let mut store = self.merkle.clone();
-            let contents = merkle_manager.save(&mut store, block).await?;
+        let contents = merkle_manager
+            .serialize(block)
+            .map_err(KolmeStoreError::custom)?;
 
-            // TODO do we worry about race conditions?
-            self.merkle.handle.insert(key, contents.hash.as_array())?;
-            self.merkle
-                .handle
-                .insert(tx_key(TxHash(block.txhash)), block.height.to_be_bytes())?;
-            self.merkle.keyspace.persist(fjall::PersistMode::SyncAll)?;
-            Ok(())
+        if let Some(existing_hash) = self
+            .merkle
+            .handle
+            .get(key)
+            .map_err(KolmeStoreError::custom)?
+        {
+            if existing_hash != contents.hash.as_array() {
+                return Err(KolmeStoreError::ConflictingBlockInDb {
+                    height: block.height,
+                    hash: Sha256Hash::from_hash(&existing_hash).map_err(KolmeStoreError::custom)?,
+                });
+            } else {
+                return Err(KolmeStoreError::MatchingBlockAlreadyInserted {
+                    height: block.height,
+                });
+            }
         }
+
+        let mut store = self.merkle.clone();
+        merkle_manager
+            .save_merkle_contents(&mut store, &contents)
+            .await?;
+
+        self.merkle
+            .handle
+            .insert(key, contents.hash.as_array())
+            .map_err(KolmeStoreError::custom)?;
+        self.merkle
+            .handle
+            .insert(tx_key(TxHash(block.txhash)), block.height.to_be_bytes())
+            .map_err(KolmeStoreError::custom)?;
+        self.merkle
+            .keyspace
+            .persist(fjall::PersistMode::SyncAll)
+            .map_err(KolmeStoreError::custom)?;
+
+        Ok(())
     }
 
     pub fn get_height_for_tx(&self, txhash: TxHash) -> Result<Option<BlockHeight>> {
