@@ -21,7 +21,7 @@ Kolme manages application and system state efficiently using a MerkleMap, a base
 - **Framework State**: Represents the cumulative system state from all transactions since the genesis block, including account balances, validator sets, nonces (for transaction ordering), admin proposals (e.g., upgrades), and the `chain_version` (the code version used by the chain). Stored in a MerkleMap, only state hashes are included in blocks to avoid exceeding storage and network limits, addressing concerns about state size and scalability.
 - **App State**: Arbitrary data defined by the application, also stored in a MerkleMap, allowing developers to manage custom data structures (e.g., trade histories, betting outcomes) tailored to their app’s needs.
 
-The MerkleMap’s design ensures efficient state updates and verification, enabling nodes to validate processor outputs quickly. This clarifies misunderstandings about state management, as the framework state is not just a block number but a comprehensive snapshot of the system, crucial for developers building robust apps.
+The MerkleMap’s design ensures efficient state updates and verification, enabling nodes to validate processor outputs quickly. Note that the framework state is not just a block number but a comprehensive snapshot of the system, crucial for developers building robust apps.
 
 ## Multichain Integration
 
