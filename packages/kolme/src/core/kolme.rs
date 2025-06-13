@@ -659,6 +659,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given block is published
+    /// **Warning** this founction could block if fast sync gets involved as the given height could be skipped
     pub async fn wait_for_block(
         &self,
         height: BlockHeight,
@@ -675,6 +676,40 @@ impl<App: KolmeApp> Kolme<App> {
             recv.changed()
                 .await
                 .context("wait_for_block: unexpected end of stream from store.subscribe()")?;
+        }
+    }
+
+    /// Wait until a block with height greater than or equal to the given height gets published
+    pub async fn wait_for_block_gte(&self, height: BlockHeight) -> Result<()> {
+        // Start an outer loop so that we can keep processing if we end up Lagged
+        loop {
+            // First subscribe to avoid a race condition...
+            let mut recv = self.subscribe();
+            // And then check if we have that height.
+            let current_height = self.read().get_next_height().prev();
+            if current_height.is_some_and(|current| current >= height) {
+                break Ok(());
+            }
+            loop {
+                match recv.recv().await {
+                    Ok(note) => match note {
+                        Notification::NewBlock(block) => {
+                            if block.height() >= height {
+                                // wait for the block to get persisted in the store
+                                self.wait_for_block(block.height()).await?;
+                                return Ok(());
+                            }
+                        }
+                        Notification::GenesisInstantiation { .. } => (),
+                        Notification::FailedTransaction { .. } => (),
+                        Notification::LatestBlock(_) => (),
+                    },
+                    Err(e) => match e {
+                        RecvError::Closed => panic!("wait_for_block_gte: unexpected Closed"),
+                        RecvError::Lagged(_) => break,
+                    },
+                }
+            }
         }
     }
 
