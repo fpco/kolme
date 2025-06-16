@@ -57,14 +57,18 @@ pub async fn execute(
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload: &str,
 ) -> Result<String> {
-    let url = format!("http://localhost:{port}/actions");
+    let url = format!("http://localhost:{port}/msg");
     tracing::debug!("Sending bridge action to {url}");
     let resp = client
         .post(url)
-        .json(&Action {
-            processor,
-            approvers: approvals.values().copied().collect(),
-            payload: payload.to_owned(),
+        .json(&Msg {
+            wallet: "submitter".to_string(), // not currently used for anything
+            coins: vec![],
+            msg: ExecuteMsg::Signed {
+                processor,
+                approvers: approvals.values().copied().collect(),
+                payload: payload.to_owned(),
+            },
         })
         .send()
         .await?;
@@ -93,7 +97,7 @@ impl PassThrough {
         let app = axum::Router::new()
             .route("/msg", post(msg))
             .route("/notifications", get(ws_handler))
-            .route("/actions", get(actions).post(new_action))
+            .route("/actions", get(actions) /*.post(new_action)*/)
             .route("/actions/{bridge_action_id}", get(action))
             .route("/actions/{bridge_action_id}/wait", get(action_wait))
             .layer(cors)
@@ -160,10 +164,21 @@ async fn msg(State(state): State<PassThrough>, Json(msg): Json<Msg>) -> impl Int
             keys: keys.into_iter().map(|x| x.key).collect(),
         },
         ExecuteMsg::Signed {
-            processor: _,
-            approvers: _,
-            payload: _,
-        } => todo!(),
+            processor,
+            approvers,
+            payload,
+        } => {
+            new_action(
+                &state,
+                msg.wallet,
+                Action {
+                    processor,
+                    approvers,
+                    payload,
+                },
+            )
+            .await
+        }
     };
     state.notify.send(message).unwrap();
     let bridge_event_id = *guard;
@@ -196,10 +211,7 @@ async fn handle_websocket(mut socket: WebSocket, mut rx: broadcast::Receiver<Bri
     }
 }
 
-async fn new_action(
-    State(state): State<PassThrough>,
-    Json(action): Json<Action>,
-) -> impl IntoResponse {
+async fn new_action(state: &PassThrough, wallet: String, action: Action) -> BridgeEventMessage {
     tracing::debug!("new action to pass-through bridge: {action:?}");
     let Transfer {
         bridge_action_id, ..
@@ -208,6 +220,10 @@ async fn new_action(
     let mut guard = state.actions.write().await;
     guard.insert(bridge_action_id, action);
     state.latest_action.send(Some(bridge_action_id)).ok();
+    BridgeEventMessage::Signed {
+        wallet,
+        action_id: bridge_action_id,
+    }
 }
 
 async fn actions(State(state): State<PassThrough>) -> impl IntoResponse {
