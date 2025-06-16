@@ -65,7 +65,7 @@ The framework state is the cumulative system state resulting from all transactio
   - Only state hashes are stored in blocks, as full state inclusion would exceed storage and network limits, addressing scalability concerns.
 - **Role**:
   - Provides a single source of truth for the system, enabling nodes to validate processor outputs and maintain consistency.
-  - Clarifies misunderstandings about the framework state being merely a block number or height; it’s a comprehensive dataset encompassing all system operations, critical for developers building reliable apps.
+  - The framework state is not just a block number but a comprehensive snapshot of the system, crucial for developers building robust apps.
 
 ## App State
 
