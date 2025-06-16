@@ -339,10 +339,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         account_id,
                     }))?;
                 }
-                BridgeEvent::Signed {
-                    wallet: _,
-                    action_id,
-                } => {
+                BridgeEvent::Signed { wallet, action_id } => {
                     // TODO in the future we may track wallet addresses that submitted signed actions to give them rewards.
                     let action_id = *action_id;
                     let actions = &mut self.framework_state.chains.get_mut(chain)?.pending_actions;
@@ -353,6 +350,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     anyhow::ensure!(*next_action_id == action_id);
                     let (old_id, _old) = actions.remove(&action_id).unwrap();
                     anyhow::ensure!(old_id == action_id);
+                    self.log_event(LogEvent::ProcessedBridgeEvent(LogBridgeEvent::Signed {
+                        wallet: wallet.clone(),
+                        action_id,
+                    }))?;
                 }
             }
         }
