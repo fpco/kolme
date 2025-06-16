@@ -1683,6 +1683,7 @@ pub enum LogEvent {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum LogBridgeEvent {
     Regular {
         bridge_event_id: BridgeEventId,
