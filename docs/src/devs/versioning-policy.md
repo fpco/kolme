@@ -164,3 +164,5 @@ Gossip modifications are less severe than the changes above. They impact the net
 ## Changelog
 
 *FIXME* when ready, document how we use git-cliff to generate changelogs.
+
+We're going to follow the "bump right before" strategy of bumping version numbers in Cargo.toml files just before cutting a release. That means that the repo will always have the _newest released version number_ in the Cargo.toml files.
