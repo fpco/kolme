@@ -8,7 +8,7 @@ Kolme is a Rust library, and as such can follow a standard semver-inspired versi
 2. New versions of Kolme may modify any number of protocol components exposed to the outside world, network APIs and serialization formats being the most obvious.
 3. When applications themselves make changes, they may change their own APIs, serialization, or application logic, all of which would make it impossible to reproducibly reexecute prior transactions.
 
-The last point is mostly out of scope for this document. It is a responsible of application authors, and is enabled by the [version upgrade system](../technical/version-upgrades.md) provided by Kolme. Please see that document for a better understanding of the goals in this document.
+The last point is mostly out of scope for this document. It is a responsibility of application authors, and is enabled by the [version upgrade system](../technical/version-upgrades.md) provided by Kolme. Please see that document for a better understanding of the goals in this document.
 
 The purpose of this document is to ensure:
 
