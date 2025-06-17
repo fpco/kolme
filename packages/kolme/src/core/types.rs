@@ -18,8 +18,8 @@ pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubC
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct ExternalTxHash(pub String);
 
-impl MerkleSerialize for ExternalTxHash {
-    fn merkle_serialize(
+impl MerkleSerializeRaw for ExternalTxHash {
+    fn merkle_serialize_raw(
         &self,
         serializer: &mut MerkleSerializer,
     ) -> std::result::Result<(), MerkleSerialError> {
@@ -27,11 +27,10 @@ impl MerkleSerialize for ExternalTxHash {
     }
 }
 
-impl MerkleDeserialize for ExternalTxHash {
-    fn merkle_deserialize(
+impl MerkleDeserializeRaw for ExternalTxHash {
+    fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
-    ) -> Result<Self, MerkleSerialError> {
+    ) -> std::result::Result<Self, MerkleSerialError> {
         Ok(ExternalTxHash(deserializer.load()?))
     }
 }
@@ -446,6 +445,8 @@ pub struct PendingBridgeEvent {
     pub attestations: BTreeSet<PublicKey>,
 }
 
+const VERSION_WITH_TX_HASH: usize = 1;
+
 impl MerkleSerialize for PendingBridgeEvent {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let Self {
@@ -454,21 +455,29 @@ impl MerkleSerialize for PendingBridgeEvent {
             attestations,
         } = self;
         serializer.store_json(event)?;
-        serializer.store(tx_hash)?;
         serializer.store(attestations)?;
+        serializer.store(tx_hash)?;
         Ok(())
+    }
+
+    fn merkle_version() -> usize {
+        VERSION_WITH_TX_HASH
     }
 }
 
 impl MerkleDeserialize for PendingBridgeEvent {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
+        version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             event: deserializer.load_json()?,
-            tx_hash: deserializer.load()?,
             attestations: deserializer.load()?,
+            tx_hash: if version >= VERSION_WITH_TX_HASH {
+                deserializer.load()?
+            } else {
+                None
+            },
         })
     }
 }
