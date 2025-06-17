@@ -35,7 +35,7 @@ However, at its current state of development, Kolme does _not strive to keep sta
 
 This _will_ change at some point in the future, but not yet.
 
-As a result of this, we currently have a no specific policy around whether a change below results in a major, minor, or patch version bump. We'll refine this over time.
+As a result of this, we currently have no specific policy around whether a change below results in a major, minor, or patch version bump. We'll refine this over time.
 
 ## Application versioning impact
 
