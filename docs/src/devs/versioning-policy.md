@@ -84,7 +84,6 @@ impl MerkleDeserialize for Person0 {
         deserializer: &mut merkle_map::MerkleDeserializer,
         version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        assert!(version == 0);
         Ok(Self {
             name: deserializer.load()?,
             age: deserializer.load()?,
@@ -130,7 +129,6 @@ impl MerkleDeserialize for Person1 {
         deserializer: &mut merkle_map::MerkleDeserializer,
         version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        assert!(version <= 1);
         Ok(Self {
             name: deserializer.load()?,
             age: deserializer.load()?,
