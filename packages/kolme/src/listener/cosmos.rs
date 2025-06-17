@@ -120,6 +120,7 @@ pub(crate) fn to_kolme_message<T>(
 
             Message::Listener {
                 chain,
+                tx_hash: None,
                 event_id,
                 event: BridgeEvent::Regular {
                     wallet: Wallet(wallet),
@@ -130,6 +131,7 @@ pub(crate) fn to_kolme_message<T>(
         }
         BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
             chain,
+            tx_hash: None,
             event_id,
             event: BridgeEvent::Signed {
                 wallet: Wallet(wallet),

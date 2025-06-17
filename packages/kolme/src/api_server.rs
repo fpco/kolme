@@ -171,9 +171,15 @@ async fn handle_websocket<App: KolmeApp>(
                 };
                 ApiNotification::NewBlock { block, logs }
             }
-            Notification::GenesisInstantiation { chain, contract } => {
-                ApiNotification::GenesisInstantiation { chain, contract }
-            }
+            Notification::GenesisInstantiation {
+                chain,
+                tx_hash,
+                contract,
+            } => ApiNotification::GenesisInstantiation {
+                chain,
+                tx_hash,
+                contract,
+            },
             Notification::FailedTransaction(failed) => ApiNotification::FailedTransaction(failed),
             Notification::LatestBlock(latest_block) => ApiNotification::LatestBlock(latest_block),
         };
@@ -206,6 +212,7 @@ pub enum ApiNotification<AppMessage> {
     /// A claim by a submitter that it has instantiated a bridge contract.
     GenesisInstantiation {
         chain: ExternalChain,
+        tx_hash: Option<ExternalTxHash>,
         contract: String,
     },
     /// A transaction failed in the processor.

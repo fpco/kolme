@@ -15,6 +15,27 @@ pub use error::KolmeError;
 pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
 pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;
 
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct ExternalTxHash(pub String);
+
+impl MerkleSerialize for ExternalTxHash {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        serializer.store(&self.0)
+    }
+}
+
+impl MerkleDeserialize for ExternalTxHash {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+        _version: usize,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(ExternalTxHash(deserializer.load()?))
+    }
+}
+
 #[derive(
     serde::Serialize,
     serde::Deserialize,
@@ -420,6 +441,7 @@ impl MerkleDeserialize for PendingBridgeAction {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PendingBridgeEvent {
     pub event: BridgeEvent,
+    pub tx_hash: Option<ExternalTxHash>,
     /// Attestations from the listeners
     pub attestations: BTreeSet<PublicKey>,
 }
@@ -428,9 +450,11 @@ impl MerkleSerialize for PendingBridgeEvent {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let Self {
             event,
+            tx_hash,
             attestations,
         } = self;
         serializer.store_json(event)?;
+        serializer.store(tx_hash)?;
         serializer.store(attestations)?;
         Ok(())
     }
@@ -443,6 +467,7 @@ impl MerkleDeserialize for PendingBridgeEvent {
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             event: deserializer.load_json()?,
+            tx_hash: deserializer.load()?,
             attestations: deserializer.load()?,
         })
     }
@@ -1042,6 +1067,7 @@ pub enum Message<AppMessage> {
     App(AppMessage),
     Listener {
         chain: ExternalChain,
+        tx_hash: Option<ExternalTxHash>,
         event_id: BridgeEventId,
         event: BridgeEvent,
     },
@@ -1642,6 +1668,7 @@ pub enum Notification<AppMessage> {
     /// A claim by a submitter that it has instantiated a bridge contract.
     GenesisInstantiation {
         chain: ExternalChain,
+        tx_hash: Option<ExternalTxHash>,
         contract: String,
     },
     /// A transaction failed in the processor.
@@ -1686,6 +1713,7 @@ pub enum LogEvent {
 #[serde(rename_all = "snake_case")]
 pub enum LogBridgeEvent {
     Regular {
+        tx_hash: Option<ExternalTxHash>,
         bridge_event_id: BridgeEventId,
         account_id: AccountId,
     },

@@ -117,7 +117,9 @@ async fn listen_internal<App: KolmeApp>(
                 continue;
             }
 
-            let Some(msg) = extract_bridge_message_from_logs(&resp.value.logs)? else {
+            let Some((tx_hash, msg)) =
+                extract_bridge_message_from_logs(&resp.value.signature, &resp.value.logs)?
+            else {
                 tracing::warn!(
                     "No bridge message data log was found in TX {} logs.",
                     resp.value.signature
@@ -144,7 +146,7 @@ async fn listen_internal<App: KolmeApp>(
                     .expect("should have at least one TX processed.")
                     .next();
             } else {
-                let msg = to_kolme_message::<App::Message>(msg, chain);
+                let msg = to_kolme_message::<App::Message>(tx_hash, msg, chain);
 
                 kolme
                     .sign_propose_await_transaction(secret, vec![msg])
@@ -168,7 +170,7 @@ async fn catch_up<App: KolmeApp>(
 ) -> Result<Option<BridgeEventId>> {
     tracing::info!("Catching up on missing bridge events until {}.", last_seen);
 
-    let mut messages = vec![];
+    let mut messages_with_hashes = vec![];
     let txs = client.get_signatures_for_address(contract).await?;
 
     // First entry is the latest transaction, we want to work up until to the target ID provided.
@@ -196,7 +198,8 @@ async fn catch_up<App: KolmeApp>(
             continue;
         };
 
-        let Some(msg) = extract_bridge_message_from_logs(&logs)? else {
+        let Some((tx_hash, msg)) = extract_bridge_message_from_logs(&sig.to_string(), &logs)?
+        else {
             tracing::warn!("No bridge message data log was found in TX {} logs.", sig);
 
             continue;
@@ -206,24 +209,24 @@ async fn catch_up<App: KolmeApp>(
             break;
         }
 
-        messages.push(msg);
+        messages_with_hashes.push((tx_hash, msg));
     }
 
-    assert!(messages.is_sorted_by(|a, b| a.id > b.id));
-    let Some(latest_id) = messages.first().map(|x| x.id) else {
+    assert!(messages_with_hashes.is_sorted_by(|(_, a), (_, b)| a.id > b.id));
+    let Some(latest_id) = messages_with_hashes.first().map(|(_, x)| x.id) else {
         return Ok(None);
     };
 
     tracing::info!(
         "Found {} missed bridge events. Proposing Kolme transaction...",
-        messages.len()
+        messages_with_hashes.len()
     );
 
     // Now process in reverse insertion order - from oldest to newest.
-    let kolme_messages: Vec<Message<App::Message>> = messages
+    let kolme_messages: Vec<Message<App::Message>> = messages_with_hashes
         .into_iter()
         .rev()
-        .map(|x| to_kolme_message(x, chain))
+        .map(|(tx_hash, x)| to_kolme_message(tx_hash, x, chain))
         .collect();
 
     kolme
@@ -233,7 +236,10 @@ async fn catch_up<App: KolmeApp>(
     Ok(Some(BridgeEventId(latest_id)))
 }
 
-fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMessage>> {
+fn extract_bridge_message_from_logs(
+    signature: &str,
+    logs: &[String],
+) -> Result<Option<(ExternalTxHash, BridgeMessage)>> {
     const PROGRAM_DATA_LOG: &str = "Program data: ";
 
     // Our program data should always be the last "Program data:" entry even if CPI was invoked.
@@ -253,7 +259,7 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
         });
 
         match result {
-            Ok(result) => return Ok(Some(result)),
+            Ok(result) => return Ok(Some((ExternalTxHash(signature.to_owned()), result))),
             Err(e) => {
                 if logs.iter().any(|x| x.contains("Instruction: Initialize")) {
                     tracing::info!(
@@ -270,7 +276,11 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
     Ok(None)
 }
 
-fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
+fn to_kolme_message<T>(
+    tx_hash: ExternalTxHash,
+    msg: BridgeMessage,
+    chain: SolanaChain,
+) -> Message<T> {
     let event_id = BridgeEventId(msg.id);
     let wallet = Pubkey::new_from_array(msg.wallet).to_string();
     let event = match msg.ty {
@@ -299,6 +309,7 @@ fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
 
     Message::Listener {
         chain: chain.into(),
+        tx_hash: Some(tx_hash),
         event_id,
         event,
     }

@@ -14,16 +14,16 @@ pub async fn instantiate(
     keypair: &Keypair,
     program_id: &str,
     set: ValidatorSet,
-) -> Result<()> {
+) -> Result<ExternalTxHash> {
     let data = InitializeIxData { set };
 
     let program_pubkey = Pubkey::from_str(program_id)?;
     let blockhash = client.get_latest_blockhash().await?;
     let tx = init_tx(program_pubkey, blockhash, keypair, &data).map_err(|x| anyhow::anyhow!(x))?;
 
-    client.send_and_confirm_transaction(&tx).await?;
+    let signature = client.send_and_confirm_transaction(&tx).await?;
 
-    Ok(())
+    Ok(ExternalTxHash(signature.to_string()))
 }
 
 pub async fn execute(
