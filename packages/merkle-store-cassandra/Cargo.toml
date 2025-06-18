@@ -1,0 +1,14 @@
+[package]
+name = "merkle-store-cassandra"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+merkle-map.workspace = true
+scylla = "1.2.0"
+smallvec.workspace = true
+sha2 = "0.10.9"
+lazy_static = "1.5.0"
+futures = "0.3.31"
+hex.workspace = true
+tracing = "0.1.41"
