@@ -167,7 +167,6 @@ impl<App: KolmeApp> Processor<App> {
         }
         .await;
         if let Err(e) = &res {
-            // kolme#144 - Discard unneeded fields
             if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
                 tracing::warn!(
                     "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this"
