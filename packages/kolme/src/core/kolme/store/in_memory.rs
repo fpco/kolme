@@ -6,6 +6,7 @@ use std::{
 use crate::core::*;
 
 use kolme_store::KolmeStoreError;
+use merkle_store::KolmeMerkleStore;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::{BlockHeight, TxHash};
@@ -21,13 +22,23 @@ impl Default for KolmeStoreInMemory {
 
 #[derive(Default)]
 struct Inner {
-    merkle: MerkleMemoryStore,
+    merkle: KolmeMerkleStore,
     blockhashes: BTreeMap<BlockHeight, BlockHash>,
     blocks: BTreeMap<BlockHeight, Sha256Hash>,
     txhashes: HashMap<TxHash, BlockHeight>,
 }
 
 impl KolmeStoreInMemory {
+    pub fn new_with_merkle_store(merkle: impl Into<KolmeMerkleStore>) -> Self {
+        Self(
+            Arc::new(tokio::sync::RwLock::new(Inner {
+                merkle: merkle.into(),
+                ..Default::default()
+            })),
+            Arc::new(Semaphore::new(1)),
+        )
+    }
+
     pub(crate) async fn clear_blocks(&self) -> Result<(), kolme_store::KolmeStoreError> {
         let mut guard = self.0.write().await;
         guard.blocks.clear();
@@ -116,7 +127,7 @@ impl KolmeStoreInMemory {
         self.1.clone().acquire_owned().await.unwrap()
     }
 
-    pub(super) async fn get_merkle_store(&self) -> MerkleMemoryStore {
+    pub(super) async fn get_merkle_store(&self) -> KolmeMerkleStore {
         self.0.read().await.merkle.clone()
     }
 }

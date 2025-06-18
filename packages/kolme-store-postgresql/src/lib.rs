@@ -1,26 +1,23 @@
-use std::{path::Path, sync::Arc};
-
-use fjall::PartitionCreateOptions;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_map::{MerkleDeserializeRaw, MerkleManager, MerkleSerialize, Sha256Hash};
+use merkle_store::{FjallBlock, KolmeMerkleStore, Not};
 use merkle_store_fjall::MerkleFjallStore;
 use sqlx::postgres::PgAdvisoryLock;
+use std::{path::Path, sync::Arc};
 
 #[derive(Clone)]
 pub struct KolmeStorePostgres {
     pool: sqlx::PgPool,
-    fjall: MerkleFjallStore,
-    fjall_block: fjall::PartitionHandle,
+    store: KolmeMerkleStore,
+    fjall_block: FjallBlock,
 }
 
 const LATEST_BLOCK: &[u8] = b"latest";
 
 impl KolmeStorePostgres {
     pub async fn new(url: &str, fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let fjall = MerkleFjallStore::new(fjall_dir)?;
-        let fjall_block = fjall
-            .get_keyspace()
-            .open_partition("kolme", PartitionCreateOptions::default())?;
+        let store = KolmeMerkleStore::new_fjall(fjall_dir)?;
+        let fjall_block = FjallBlock::try_from_fjall_merkle_store(&store, "kolme")?;
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(5)
             .connect(url)
@@ -28,7 +25,38 @@ impl KolmeStorePostgres {
         sqlx::migrate!().run(&pool).await?;
         Ok(Self {
             pool,
-            fjall,
+            store,
+            fjall_block,
+        })
+    }
+
+    /// Create a PostgreSQL store with the provided merkle store
+    ///
+    /// **NOTE**: If you were previously using `new` and are now migrating to this method, please make
+    /// sure that `fjall_dir` is the same `fjall_dir` used on `new`
+    ///
+    /// # Returns
+    ///
+    /// This function is guaranteed to error out if `fjall_dir` is not given and `store` is not a `KolmeMerkleStore::FjallStore`
+    pub async fn new_with_merkle_store_and_fjall_options<Store>(
+        url: &str,
+        store: Store,
+        fjall_dir: impl AsRef<Path>,
+    ) -> anyhow::Result<Self>
+    where
+        Store: Into<KolmeMerkleStore> + Not<MerkleFjallStore>,
+    {
+        let store = store.into();
+        let fjall_block = FjallBlock::try_from_options("kolme", fjall_dir.as_ref())?;
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(url)
+            .await?;
+        sqlx::migrate!().run(&pool).await?;
+
+        Ok(Self {
+            pool,
+            store,
             fjall_block,
         })
     }
@@ -100,9 +128,9 @@ impl KolmeStorePostgres {
         let app_state_hash = to_sha256hash(&app_state_hash)?;
         let logs_hash = to_sha256hash(&logs_hash)?;
 
-        let mut store1 = self.fjall.clone();
-        let mut store2 = self.fjall.clone();
-        let mut store3 = self.fjall.clone();
+        let mut store1 = self.store.clone();
+        let mut store2 = self.store.clone();
+        let mut store3 = self.store.clone();
 
         let merkle_res = tokio::try_join!(
             merkle_manager.load(&mut store1, framework_state_hash),
@@ -161,7 +189,7 @@ impl KolmeStorePostgres {
     ) -> Result<(), KolmeStoreError> {
         let height_i64 = i64::try_from(*height).map_err(KolmeStoreError::custom)?;
 
-        let mut store = self.fjall.clone();
+        let mut store = self.store.clone();
         let framework_state_hash = merkle_manager.save(&mut store, framework_state).await?.hash;
         let app_state_hash = merkle_manager.save(&mut store, app_state).await?.hash;
         let logs_hash = merkle_manager.save(&mut store, logs).await?.hash;
@@ -235,10 +263,6 @@ impl KolmeStorePostgres {
             self.fjall_block
                 .insert(LATEST_BLOCK, height.to_be_bytes())
                 .map_err(KolmeStoreError::custom)?;
-            self.fjall
-                .get_keyspace()
-                .persist(fjall::PersistMode::SyncAll)
-                .map_err(KolmeStoreError::custom)?;
         }
         Ok(())
     }
@@ -296,8 +320,8 @@ impl KolmeStorePostgres {
         }
     }
 
-    pub fn get_merkle_store(&self) -> &MerkleFjallStore {
-        &self.fjall
+    pub fn get_merkle_store(&self) -> &KolmeMerkleStore {
+        &self.store
     }
 }
 
