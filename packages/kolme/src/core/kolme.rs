@@ -610,6 +610,21 @@ impl<App: KolmeApp> Kolme<App> {
         code_version: impl Into<String>,
         store: KolmeStore<App>,
     ) -> Result<Self> {
+        Self::new_with_timeout(
+            app,
+            code_version,
+            store,
+            tokio::time::Duration::from_secs(10),
+        )
+        .await
+    }
+
+    pub async fn new_with_timeout(
+        app: App,
+        code_version: impl Into<String>,
+        store: KolmeStore<App>,
+        tx_timeout: tokio::time::Duration,
+    ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
         let merkle_manager = MerkleManager::default();
@@ -633,7 +648,7 @@ impl<App: KolmeApp> Kolme<App> {
 
         let kolme = Kolme {
             inner: Arc::new(inner),
-            tx_await_duration: tokio::time::Duration::from_secs(10),
+            tx_await_duration: tx_timeout,
         };
 
         kolme.resync().await?;
@@ -1016,14 +1031,14 @@ impl<App: KolmeApp> KolmeRead<App> {
                         chain: chain.to_cosmos_chain().unwrap(),
                         code_id: *code_id,
                         validator_set: self.get_framework_state().get_validator_set().clone(),
-                    })
+                    });
                 }
                 BridgeContract::NeededSolanaBridge { program_id } => {
                     return Some(GenesisAction::InstantiateSolana {
                         chain: chain.to_solana_chain().unwrap(),
                         program_id: program_id.clone(),
                         validator_set: self.get_framework_state().get_validator_set().clone(),
-                    })
+                    });
                 }
                 BridgeContract::Deployed(_) => (),
             }
@@ -1094,6 +1109,7 @@ impl<App: KolmeApp> KolmeRead<App> {
     ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key();
         let nonce = self.get_next_nonce(pubkey);
+        tracing::debug!("Using nonce {} with transaction", nonce);
         let TxBuilder {
             messages,
             max_height,

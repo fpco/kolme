@@ -64,6 +64,7 @@ fn launch_local_osmo() -> Result<()> {
             .arg("-d")
             .arg("localosmosis")
             .arg("postgres")
+            .arg("cassandra")
             .current_dir(DOCKER_COMPOSE_DIR)
             .spawn()?
             .wait()
@@ -90,6 +91,7 @@ fn run_test_suite() -> Result<()> {
                 "PROCESSOR_BLOCK_DB",
                 "psql://postgres:postgres@localhost:45921/postgres",
             )
+            .env("MERKLE_STORE_DB", "127.0.0.1:45921")
             .spawn()?
             .wait()
             .context("Error while running test suite")?;

@@ -8,6 +8,8 @@ members = [
   "packages/kolme-store",
   "packages/kolme-store-postgresql",
   "packages/merkle-map",
+  "packages/merkle-store",
+  "packages/merkle-store-cassandra",
   "packages/merkle-store-fjall",
   "packages/shared",
   "packages/test-runner",
@@ -31,11 +33,12 @@ kolme-store = { path = "packages/kolme-store" }
 kolme-store-postgresql = { path = "packages/kolme-store-postgresql" }
 libp2p = { version = "0.55" }
 merkle-map = { path = "packages/merkle-map" }
+merkle-store = { path = "packages/merkle-store" }
 merkle-store-fjall = { path = "packages/merkle-store-fjall" }
+merkle-store-cassandra = { path = "packages/merkle-store-cassandra" }
 quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
 test-log = { version = "0.2", features = ["trace"] }
-thiserror = "2.0.12"
 
 [profile.release]
 debug = 0

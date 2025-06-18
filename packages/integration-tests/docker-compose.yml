@@ -20,3 +20,17 @@ services:
       POSTGRES_DB: postgres
     ports:
       - "127.0.0.1:45921:5432"
+
+  cassandra:
+    container_name: cassandra
+    image: "cassandra:5"
+    environment:
+      - CASSANDRA_AUTHENTICATOR=PasswordAuthenticator
+      - CASSANDRA_USER=cassandra
+      - CASSANDRA_PASSWORD=cassandra
+      - CASSANDRA_PASSWORD_SEEDER=yes
+      - LOCAL_QUORUM=1
+    ports:
+      - "127.0.0.1:45922:9042"
+      - "127.0.0.1:45923:7000"
+      - "127.0.0.1:45924:7001"

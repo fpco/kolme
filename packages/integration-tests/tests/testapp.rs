@@ -1,14 +1,16 @@
 use anyhow::{Context, Result};
-use futures_util::future::join_all;
 use futures_util::StreamExt;
+use futures_util::future::join_all;
 use kolme::ApiNotification;
 use kolme::{
-    testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
-    ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
-    MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor,
-    Transaction, ValidatorSet,
+    AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext, GenesisInfo,
+    Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer, MerkleSerialError,
+    MerkleSerialize, MerkleSerializer, Message, Processor, Transaction, ValidatorSet,
+    testtasks::TestTasks,
 };
 
+use merkle_store_cassandra::MerkleCassandraStore;
+use merkle_store_cassandra::scylla::client::session_builder::SessionBuilder;
 use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
@@ -111,13 +113,37 @@ async fn find_free_port() -> Result<u16> {
     Ok(port)
 }
 
-async fn setup(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)> {
+async fn setup_fjall(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)> {
     let app = TestApp::default();
     let store = KolmeStore::new_fjall(db_path)?;
     let code_version = app.genesis.version.clone();
     let kolme = Kolme::new(app, code_version, store).await?;
     let read = kolme.read();
     assert_eq!(read.get_next_height(), BlockHeight(0),);
+
+    let addr = SocketAddr::new("127.0.0.1".parse()?, find_free_port().await?);
+
+    Ok((kolme, addr))
+}
+
+async fn setup_cassandra(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)> {
+    let app = TestApp::default();
+    let known_node = std::env::var("MERKLE_STORE_DB").expect("MERKLE_STORE_DB variable missing");
+    let session_builder = SessionBuilder::new().known_node(&known_node);
+    let store = KolmeStore::new_fjall_with_merkle_store_and_fjall_options(
+        MerkleCassandraStore::new_with_builder(session_builder).await?,
+        db_path,
+    )?;
+    let code_version = app.genesis.version.clone();
+    let kolme = Kolme::new_with_timeout(
+        app,
+        code_version,
+        store,
+        tokio::time::Duration::from_secs(40),
+    )
+    .await?;
+    let read = kolme.read();
+    assert_eq!(read.get_next_height(), BlockHeight(0));
 
     let addr = SocketAddr::new("127.0.0.1".parse()?, find_free_port().await?);
 
@@ -148,13 +174,25 @@ where
 }
 
 #[tokio::test]
-async fn test_websocket_notifications() {
-    TestTasks::start(test_websocket_notifications_inner, ()).await;
+async fn test_websocket_notifications_with_fjall() {
+    let db_path = tempfile::tempdir().unwrap();
+    let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;
 }
 
-async fn test_websocket_notifications_inner(testtasks: TestTasks, (): ()) {
+#[tokio::test]
+async fn test_websocket_notifications_with_cassandra() {
     let db_path = tempfile::tempdir().unwrap();
-    let (kolme, addr) = setup(db_path.path()).await.unwrap();
+    let (kolme, addr) = setup_cassandra(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;
+}
+
+async fn test_websocket_notifications_inner(
+    testtasks: TestTasks,
+    (kolme, addr): (Kolme<TestApp>, SocketAddr),
+) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     let kolme_cloned = kolme.clone();
@@ -195,13 +233,25 @@ async fn test_websocket_notifications_inner(testtasks: TestTasks, (): ()) {
 }
 
 #[tokio::test]
-async fn test_validate_tx_valid_signature() {
-    TestTasks::start(test_validate_tx_valid_signature_inner, ()).await;
+async fn test_validate_tx_valid_signature_with_fjall() {
+    let db_path = tempfile::tempdir().unwrap();
+    let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_validate_tx_valid_signature_inner, (kolme, addr)).await;
 }
 
-async fn test_validate_tx_valid_signature_inner(testtasks: TestTasks, (): ()) {
+#[tokio::test]
+async fn test_validate_tx_valid_signature_with_cassandra() {
     let db_path = tempfile::tempdir().unwrap();
-    let (kolme, addr) = setup(db_path.path()).await.unwrap();
+    let (kolme, addr) = setup_cassandra(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_validate_tx_valid_signature_inner, (kolme, addr)).await;
+}
+
+async fn test_validate_tx_valid_signature_inner(
+    testtasks: TestTasks,
+    (kolme, addr): (Kolme<TestApp>, SocketAddr),
+) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     let kolme_cloned = kolme.clone();
@@ -243,13 +293,25 @@ async fn test_validate_tx_valid_signature_inner(testtasks: TestTasks, (): ()) {
 }
 
 #[tokio::test]
-async fn test_execute_transaction_genesis() {
-    TestTasks::start(test_execute_transaction_genesis_inner, ()).await;
+async fn test_execute_transaction_genesis_with_fjall() {
+    let db_path = tempfile::tempdir().unwrap();
+    let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_execute_transaction_genesis_inner, (kolme, addr)).await;
 }
 
-async fn test_execute_transaction_genesis_inner(testtasks: TestTasks, (): ()) {
+#[tokio::test]
+async fn test_execute_transaction_genesis_with_cassandra() {
     let db_path = tempfile::tempdir().unwrap();
-    let (kolme, addr) = setup(db_path.path()).await.unwrap();
+    let (kolme, addr) = setup_cassandra(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_execute_transaction_genesis_inner, (kolme, addr)).await;
+}
+
+async fn test_execute_transaction_genesis_inner(
+    testtasks: TestTasks,
+    (kolme, addr): (Kolme<TestApp>, SocketAddr),
+) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     let kolme_cloned = kolme.clone();
@@ -278,13 +340,25 @@ async fn test_execute_transaction_genesis_inner(testtasks: TestTasks, (): ()) {
 }
 
 #[tokio::test]
-async fn test_validate_tx_invalid_nonce() {
-    TestTasks::start(test_validate_tx_invalid_nonce_inner, ()).await;
+async fn test_validate_tx_invalid_nonce_fjall() {
+    let db_path = tempfile::tempdir().unwrap();
+    let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_validate_tx_invalid_nonce_inner, (kolme, addr)).await;
 }
 
-async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
+#[tokio::test]
+async fn test_validate_tx_invalid_nonce_cassandra() {
     let db_path = tempfile::tempdir().unwrap();
-    let (kolme, addr) = setup(db_path.path()).await.unwrap();
+    let (kolme, addr) = setup_cassandra(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_validate_tx_invalid_nonce_inner, (kolme, addr)).await;
+}
+
+async fn test_validate_tx_invalid_nonce_inner(
+    testtasks: TestTasks,
+    (kolme, addr): (Kolme<TestApp>, SocketAddr),
+) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
@@ -318,13 +392,33 @@ async fn test_validate_tx_invalid_nonce_inner(testtasks: TestTasks, (): ()) {
 }
 
 #[tokio::test]
-async fn test_rejected_transaction_insufficient_balance() {
-    TestTasks::start(test_rejected_transaction_insufficient_balance_inner, ()).await;
+async fn test_rejected_transaction_insufficient_balance_fjall() {
+    let db_path = tempfile::tempdir().unwrap();
+    let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
+
+    TestTasks::start(
+        test_rejected_transaction_insufficient_balance_inner,
+        (kolme, addr),
+    )
+    .await;
 }
 
-async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTasks, (): ()) {
+#[tokio::test]
+async fn test_rejected_transaction_insufficient_balance_cassandra() {
     let db_path = tempfile::tempdir().unwrap();
-    let (kolme, addr) = setup(db_path.path()).await.unwrap();
+    let (kolme, addr) = setup_cassandra(db_path.path()).await.unwrap();
+
+    TestTasks::start(
+        test_rejected_transaction_insufficient_balance_inner,
+        (kolme, addr),
+    )
+    .await;
+}
+
+async fn test_rejected_transaction_insufficient_balance_inner(
+    testtasks: TestTasks,
+    (kolme, addr): (Kolme<TestApp>, SocketAddr),
+) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
@@ -337,14 +431,11 @@ async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTas
     let tx_withdraw = Arc::new(
         kolme
             .read()
-            .create_signed_transaction(
-                &secret,
-                vec![Message::Bank(BankMessage::Transfer {
-                    asset: AssetId(1),
-                    dest: kolme::AccountId(0),
-                    amount: dec!(500),
-                })],
-            )
+            .create_signed_transaction(&secret, vec![Message::Bank(BankMessage::Transfer {
+                asset: AssetId(1),
+                dest: kolme::AccountId(0),
+                amount: dec!(500),
+            })])
             .unwrap(),
     );
 
@@ -362,14 +453,58 @@ async fn test_rejected_transaction_insufficient_balance_inner(testtasks: TestTas
     tracing::info!("WebSocket closed successfully");
 }
 
-#[tokio::test]
-async fn test_many_transactions() {
-    TestTasks::start(test_many_transactions_inner, ()).await;
+type NoncePoller = for<'a> fn(
+    AccountNonce,
+    &'a Kolme<TestApp>,
+    &'a SecretKey,
+) -> futures::future::BoxFuture<'a, ()>;
+
+fn no_poll<'a>(
+    _: AccountNonce,
+    _: &'a Kolme<TestApp>,
+    _: &'a SecretKey,
+) -> futures::future::BoxFuture<'a, ()> {
+    Box::pin(async move {})
 }
 
-async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
+fn wait_for_nonce<'a>(
+    nonce: AccountNonce,
+    kolme: &'a Kolme<TestApp>,
+    secret: &'a SecretKey,
+) -> futures::future::BoxFuture<'a, ()> {
+    Box::pin(async move {
+        loop {
+            let account_nonce = kolme.read().get_next_nonce(secret.public_key());
+            if account_nonce > nonce {
+                tracing::debug!("Got {} new account nonce", account_nonce);
+                return;
+            }
+
+            tokio::task::yield_now().await;
+        }
+    })
+}
+
+#[tokio::test]
+async fn test_many_transactions_fjall() {
     let db_path = tempfile::tempdir().unwrap();
-    let (kolme, addr) = setup(db_path.path()).await.unwrap();
+    let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_many_transactions_inner, (kolme, addr, no_poll)).await;
+}
+
+#[tokio::test]
+async fn test_many_transactions_cassandra() {
+    let db_path = tempfile::tempdir().unwrap();
+    let (kolme, addr) = setup_cassandra(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_many_transactions_inner, (kolme, addr, wait_for_nonce)).await;
+}
+
+async fn test_many_transactions_inner(
+    testtasks: TestTasks,
+    (kolme, addr, wait_for_nonce): (Kolme<TestApp>, SocketAddr, NoncePoller),
+) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
@@ -378,6 +513,10 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
     tracing::info!("Connected to WebSocket");
+
+    // FIXME I think that having the need for this wait_for_nonce on this kind of tests
+    // is a sympton that we're doing something wrong, possibly the nonce is not getting updated before sending the websocket
+    wait_for_nonce(AccountNonce::start(), &kolme, &secret).await;
 
     for i in 0..100 {
         let tx = Arc::new(
@@ -400,6 +539,9 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
             i,
             notification
         );
+
+        // FIXME same as above
+        wait_for_nonce(tx.0.message.as_inner().nonce, &kolme, &secret).await;
     }
 
     let read = kolme.read();
@@ -415,13 +557,25 @@ async fn test_many_transactions_inner(testtasks: TestTasks, (): ()) {
 }
 
 #[tokio::test]
-async fn test_concurrent_transactions() {
-    TestTasks::start(test_concurrent_transactions_inner, ()).await;
+async fn test_concurrent_transactions_fjall() {
+    let db_path = tempfile::tempdir().unwrap();
+    let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_concurrent_transactions_inner, (kolme, addr)).await;
 }
 
-async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
+#[test_log::test(tokio::test)]
+async fn test_concurrent_transactions_cassandra() {
     let db_path = tempfile::tempdir().unwrap();
-    let (kolme, addr) = setup(db_path.path()).await.unwrap();
+    let (kolme, addr) = setup_cassandra(db_path.path()).await.unwrap();
+
+    TestTasks::start(test_concurrent_transactions_inner, (kolme, addr)).await;
+}
+
+async fn test_concurrent_transactions_inner(
+    testtasks: TestTasks,
+    (kolme, addr): (Kolme<TestApp>, SocketAddr),
+) {
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
@@ -434,6 +588,9 @@ async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
     let mut secrets = Vec::with_capacity(50);
     for _ in 0..50 {
         let secret = SecretKey::random(&mut rand::rngs::ThreadRng::default());
+
+        // FIXME I think this is even more dangerous, as what's happening is that
+        // wait_for_nonce(AccountNonce::start(), &kolme, &secret).await;
         secrets.push(secret);
     }
 
@@ -457,6 +614,9 @@ async fn test_concurrent_transactions_inner(testtasks: TestTasks, (): ()) {
                 .propose_and_await_transaction(signed_tx)
                 .await
                 .unwrap();
+
+            // FIXME same as before
+            // wait_for_nonce(next_nonce, &kolme_clone, &secret).await;
         });
         tasks.push(task);
     }

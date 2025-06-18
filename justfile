@@ -16,6 +16,10 @@ postgres:
     docker compose -f ./packages/integration-tests/docker-compose.yml down
     docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
 
+cassandra:
+    docker compose -f ./packages/integration-tests/docker-compose.yml down
+    docker compose -f ./packages/integration-tests/docker-compose.yml up -d cassandra
+
 test:
     cargo run --bin test-runner
 
