@@ -148,21 +148,21 @@ impl MerkleStore for MerkleCassandraStore {
             .0
             .session
             .query_iter(
-                "SELECT children FROM kolme.merkle_contents WHERE hash = ?",
+                "SELECT payload, children FROM kolme.merkle_contents WHERE hash = ?",
                 (hash.as_array(),),
             )
             .await
             .map_err(MerkleSerialError::custom)?
-            .rows_stream::<(Vec<Vec<u8>>,)>()
+            .rows_stream::<(Vec<u8>, Vec<Vec<u8>>)>()
             .map_err(MerkleSerialError::custom)?;
 
         let Some(query_result) = stream.next().await else {
             return Ok(None);
         };
-        let (children,) = query_result.map_err(MerkleSerialError::custom)?;
+        let (payload, children) = query_result.map_err(MerkleSerialError::custom)?;
 
         Ok(Some(MerkleLayerContents {
-            payload: Arc::from(*hash.as_array()),
+            payload: Arc::from(payload),
             children: children
                 .into_iter()
                 .map(|hash| Sha256Hash::from_hash(&hash).unwrap())

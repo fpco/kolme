@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
-fjall.workspace = true
 merkle-store.workspace = true
 merkle-map.workspace = true
 merkle-store-fjall.workspace = true

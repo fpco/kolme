@@ -34,3 +34,8 @@ services:
       - "127.0.0.1:45922:9042"
       - "127.0.0.1:45923:7000"
       - "127.0.0.1:45924:7001"
+    healthcheck:
+      test: ["CMD-SHELL", "[ $$(nodetool statusgossip) = running ]"]
+      interval: 10s
+      timeout: 20s
+      retries: 6

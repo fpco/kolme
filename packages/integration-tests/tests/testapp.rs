@@ -1,16 +1,16 @@
 use anyhow::{Context, Result};
-use futures_util::StreamExt;
 use futures_util::future::join_all;
+use futures_util::StreamExt;
 use kolme::ApiNotification;
 use kolme::{
-    AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext, GenesisInfo,
-    Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer, MerkleSerialError,
-    MerkleSerialize, MerkleSerializer, Message, Processor, Transaction, ValidatorSet,
-    testtasks::TestTasks,
+    testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
+    ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
+    MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor,
+    Transaction, ValidatorSet,
 };
 
-use merkle_store_cassandra::MerkleCassandraStore;
 use merkle_store_cassandra::scylla::client::session_builder::SessionBuilder;
+use merkle_store_cassandra::MerkleCassandraStore;
 use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
@@ -139,7 +139,7 @@ async fn setup_cassandra(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)>
         app,
         code_version,
         store,
-        tokio::time::Duration::from_secs(40),
+        tokio::time::Duration::from_secs(15),
     )
     .await?;
     let read = kolme.read();
@@ -431,11 +431,14 @@ async fn test_rejected_transaction_insufficient_balance_inner(
     let tx_withdraw = Arc::new(
         kolme
             .read()
-            .create_signed_transaction(&secret, vec![Message::Bank(BankMessage::Transfer {
-                asset: AssetId(1),
-                dest: kolme::AccountId(0),
-                amount: dec!(500),
-            })])
+            .create_signed_transaction(
+                &secret,
+                vec![Message::Bank(BankMessage::Transfer {
+                    asset: AssetId(1),
+                    dest: kolme::AccountId(0),
+                    amount: dec!(500),
+                })],
+            )
             .unwrap(),
     );
 

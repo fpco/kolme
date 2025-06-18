@@ -4184,7 +4184,6 @@ name = "kolme-store-postgresql"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "fjall",
  "kolme-store",
  "merkle-map",
  "merkle-store",
@@ -4905,7 +4904,6 @@ dependencies = [
  "merkle-map",
  "merkle-store-cassandra",
  "merkle-store-fjall",
- "smallvec",
 ]
 
 [[package]]
@@ -4918,8 +4916,6 @@ dependencies = [
  "merkle-map",
  "scylla",
  "sha2 0.10.9",
- "smallvec",
- "tracing",
 ]
 
 [[package]]

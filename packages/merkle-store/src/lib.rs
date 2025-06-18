@@ -1,7 +1,7 @@
 pub use fjall::*;
 use merkle_map::{MerkleMemoryStore, MerkleSerialError, MerkleStore};
 use merkle_store_cassandra::{
-    MerkleCassandraStore, scylla::client::session_builder::SessionBuilder,
+    scylla::client::session_builder::SessionBuilder, MerkleCassandraStore,
 };
 use merkle_store_fjall::MerkleFjallStore;
 use std::path::Path;

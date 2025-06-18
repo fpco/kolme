@@ -7,6 +7,5 @@ edition = "2021"
 merkle-map.workspace = true
 merkle-store-fjall.workspace = true
 merkle-store-cassandra.workspace = true
-smallvec.workspace = true
 anyhow.workspace = true
 fjall.workspace = true
