@@ -10,6 +10,8 @@ use in_memory::KolmeStoreInMemory;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use kolme_store_postgresql::{ConstructLock, KolmeStorePostgres};
 use lru::LruCache;
+use merkle_store::{KolmeMerkleStore, Not};
+use merkle_store_fjall::MerkleFjallStore;
 use parking_lot::RwLock;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -60,12 +62,41 @@ impl<App: KolmeApp> KolmeStore<App> {
             .map_err(anyhow::Error::from)
     }
 
+    pub async fn new_postgres_with_merkle_store_and_fjall_options<Store>(
+        url: &str,
+        store: Store,
+        fjall_dir: impl AsRef<Path>,
+    ) -> Result<Self>
+    where
+        Store: Into<KolmeMerkleStore> + Not<MerkleFjallStore>,
+    {
+        KolmeStorePostgres::new_with_merkle_store_and_fjall_options(url, store, fjall_dir)
+            .await
+            .map(|x| KolmeStoreInner::Postgres(x).into())
+            .map_err(anyhow::Error::from)
+    }
+
     pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
         KolmeStoreFjall::new(dir).map(|x| KolmeStoreInner::Fjall(x).into())
     }
 
+    pub fn new_fjall_with_merkle_store_and_fjall_options<Store>(
+        store: Store,
+        dir: impl AsRef<Path>,
+    ) -> Result<Self>
+    where
+        Store: Into<KolmeMerkleStore> + Not<MerkleFjallStore>,
+    {
+        KolmeStoreFjall::new_with_merkle_store_and_fjall_options(store, dir)
+            .map(|x| KolmeStoreInner::Fjall(x).into())
+    }
+
     pub fn new_in_memory() -> Self {
         KolmeStoreInner::InMemory(KolmeStoreInMemory::default()).into()
+    }
+
+    pub fn new_in_memory_with_store(merkle: KolmeMerkleStore) -> Self {
+        KolmeStoreInner::InMemory(KolmeStoreInMemory::new_with_merkle_store(merkle)).into()
     }
 
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.

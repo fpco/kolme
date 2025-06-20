@@ -25,6 +25,7 @@ kolme-store.workspace = true
 kolme-store-postgresql.workspace = true
 libp2p = { workspace = true, features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "mdns", "dns", "gossipsub", "macros", "quic", "request-response", "cbor", "rsa"] }
 merkle-map = { workspace = true }
+merkle-store.workspace = true
 merkle-store-fjall.workspace = true
 parking_lot = "0.12.3"
 rand = "0.8"
@@ -52,3 +53,4 @@ quickcheck = { workspace = true }
 tempfile = "3.18.0"
 kademlia-discovery = { path = "../examples/kademlia-discovery" }
 test-log = { workspace = true }
+merkle-store-postgres.workspace = true

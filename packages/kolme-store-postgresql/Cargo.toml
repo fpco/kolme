@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
-fjall.workspace = true
+merkle-store.workspace = true
 merkle-map.workspace = true
 merkle-store-fjall.workspace = true
 kolme-store.workspace = true
-sqlx = { version = "0.8.5", features = ["macros", "migrate", "runtime-tokio", "postgres"], default-features = false }
+sqlx = { workspace = true, features = ["macros", "runtime-tokio", "postgres", "migrate"] }
 tracing = "0.1.41"
 tokio.workspace = true
 serde_json.workspace = true
