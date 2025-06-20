@@ -1,0 +1,8 @@
+[package]
+name = "merkle-store-postgres"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+merkle-map.workspace = true
+sqlx = { workspace = true, features = ["macros", "runtime-tokio", "postgres", "migrate"] }

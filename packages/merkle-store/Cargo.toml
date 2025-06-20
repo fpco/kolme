@@ -1,0 +1,11 @@
+[package]
+name = "merkle-store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+merkle-map.workspace = true
+merkle-store-fjall.workspace = true
+merkle-store-postgres.workspace = true
+anyhow.workspace = true
+fjall.workspace = true

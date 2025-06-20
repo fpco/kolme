@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO merkle_contents VALUES($1, $2, $3)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "ByteaArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd124f164988e131d33f0fda4dd8fb40e80ddd9fa387e686ee804841f78a0e8c"
+}
