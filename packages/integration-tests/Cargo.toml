@@ -24,6 +24,8 @@ solana-commitment-config = "2.2.1"
 [dev-dependencies]
 example-six-sigma = { path = "../examples/six-sigma" }
 example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
+merkle-store = { path = "../merkle-store" }
+merkle-store-postgres = { path = "../merkle-store-postgres" }
 test-log = { workspace = true }
 strum = { version = "0.27.1", features = ["derive"] }
 futures = "0.3.31"

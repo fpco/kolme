@@ -24,7 +24,8 @@ sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgre
     # TODO: On my end I need this so that docker has time to launch the container
     sleep 3
     cargo sqlx database reset -y
-    cargo sqlx migrate run
+    cargo sqlx migrate run --ignore-missing
+    cargo sqlx migrate run --ignore-missing --source=../merkle-store-postgres/migrations
     cargo sqlx prepare
 
 build-optimizer-image:
