@@ -3866,6 +3866,8 @@ dependencies = [
  "jiff",
  "kolme",
  "kolme-solana-bridge-client",
+ "merkle-store",
+ "merkle-store-postgres",
  "pretty_assertions",
  "rand 0.8.5",
  "reqwest 0.12.15",
@@ -4106,7 +4108,9 @@ dependencies = [
  "libp2p",
  "lru 0.14.0",
  "merkle-map",
+ "merkle-store",
  "merkle-store-fjall",
+ "merkle-store-postgres",
  "parking_lot",
  "quickcheck",
  "rand 0.8.5",
@@ -4176,9 +4180,9 @@ name = "kolme-store-postgresql"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "fjall",
  "kolme-store",
  "merkle-map",
+ "merkle-store",
  "merkle-store-fjall",
  "serde",
  "serde_json",
@@ -4885,6 +4889,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "merkle-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fjall",
+ "merkle-map",
+ "merkle-store-fjall",
+ "merkle-store-postgres",
+]
+
+[[package]]
 name = "merkle-store-fjall"
 version = "0.1.0"
 dependencies = [
@@ -4892,6 +4907,14 @@ dependencies = [
  "merkle-map",
  "quickcheck",
  "smallvec",
+]
+
+[[package]]
+name = "merkle-store-postgres"
+version = "0.1.0"
+dependencies = [
+ "merkle-map",
+ "sqlx",
 ]
 
 [[package]]
