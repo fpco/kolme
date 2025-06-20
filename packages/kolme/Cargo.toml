@@ -54,3 +54,4 @@ tempfile = "3.18.0"
 kademlia-discovery = { path = "../examples/kademlia-discovery" }
 test-log = { workspace = true }
 merkle-store-postgres.workspace = true
+serial_test = "3.2.0"

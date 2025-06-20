@@ -10,6 +10,7 @@ use kolme::*;
 use merkle_store_postgres::MerklePostgresStore;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
+use serial_test::serial;
 
 #[derive(Clone)]
 pub struct SampleKolmeApp {
@@ -102,6 +103,7 @@ enum KolmeMerkleTestStore {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 100)]
+#[serial]
 async fn multiple_processors_fjall() {
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
     let block_db_str = match std::env::var(ENVVAR) {
@@ -129,6 +131,7 @@ async fn multiple_processors_fjall() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 100)]
+#[serial]
 async fn multiple_processors_postgres() {
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
     let block_db_str = match std::env::var(ENVVAR) {
