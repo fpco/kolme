@@ -51,10 +51,6 @@ impl KolmeStorePostgres {
     ///
     /// **NOTE**: If you were previously using `new` and are now migrating to this method, please make
     /// sure that `fjall_dir` is the same `fjall_dir` used on `new`
-    ///
-    /// # Returns
-    ///
-    /// This function is guaranteed to error out if `fjall_dir` is not given and `store` is not a `KolmeMerkleStore::FjallStore`
     pub async fn new_with_merkle_and_fjall<Store>(
         url: &str,
         store: Store,
@@ -82,10 +78,6 @@ impl KolmeStorePostgres {
     ///
     /// **NOTE**: If you were previously using `new` and are now migrating to this method, please make
     /// sure that `fjall_dir` is the same `fjall_dir` used on `new`
-    ///
-    /// # Returns
-    ///
-    /// This function is guaranteed to error out if `fjall_dir` is not given and `store` is not a `KolmeMerkleStore::FjallStore`
     pub async fn new_all_settings<Store>(
         url: &str,
         options: PoolOptions<Postgres>,
