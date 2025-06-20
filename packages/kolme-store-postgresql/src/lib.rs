@@ -2,9 +2,9 @@ use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_map::{MerkleDeserializeRaw, MerkleManager, MerkleSerialize, Sha256Hash};
 use merkle_store::{FjallBlock, KolmeMerkleStore, Not};
 use merkle_store_fjall::MerkleFjallStore;
+pub use sqlx;
 use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Postgres};
 use std::{path::Path, sync::Arc};
-pub use sqlx;
 
 #[derive(Clone)]
 pub struct KolmeStorePostgres {
@@ -97,10 +97,7 @@ impl KolmeStorePostgres {
     {
         let store = store.into();
         let fjall_block = FjallBlock::try_from_options("kolme", fjall_dir.as_ref())?;
-        let pool = options
-            .max_connections(5)
-            .connect(url)
-            .await?;
+        let pool = options.max_connections(5).connect(url).await?;
         sqlx::migrate!().set_ignore_missing(true).run(&pool).await?;
 
         Ok(Self {
