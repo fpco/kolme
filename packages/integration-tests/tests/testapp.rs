@@ -135,13 +135,9 @@ async fn setup_cassandra(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)>
         db_path,
     )?;
     let code_version = app.genesis.version.clone();
-    let kolme = Kolme::new_with_timeout(
-        app,
-        code_version,
-        store,
-        tokio::time::Duration::from_secs(15),
-    )
-    .await?;
+    let kolme = Kolme::new(app, code_version, store)
+        .await?
+        .set_tx_await_duration(tokio::time::Duration::from_secs(20));
     let read = kolme.read();
     assert_eq!(read.get_next_height(), BlockHeight(0));
 
