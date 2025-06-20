@@ -4,6 +4,7 @@ use merkle_store::{FjallBlock, KolmeMerkleStore, Not};
 use merkle_store_fjall::MerkleFjallStore;
 use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Postgres};
 use std::{path::Path, sync::Arc};
+pub use sqlx;
 
 #[derive(Clone)]
 pub struct KolmeStorePostgres {
@@ -31,8 +32,8 @@ impl KolmeStorePostgres {
     }
 
     pub async fn new_with_options(
-        options: PoolOptions<Postgres>,
         url: &str,
+        options: PoolOptions<Postgres>,
         fjall_dir: impl AsRef<Path>,
     ) -> anyhow::Result<Self> {
         let store = KolmeMerkleStore::new_fjall(fjall_dir)?;
@@ -54,7 +55,7 @@ impl KolmeStorePostgres {
     /// # Returns
     ///
     /// This function is guaranteed to error out if `fjall_dir` is not given and `store` is not a `KolmeMerkleStore::FjallStore`
-    pub async fn new_with_merkle_store_and_fjall_options<Store>(
+    pub async fn new_with_merkle_and_fjall<Store>(
         url: &str,
         store: Store,
         fjall_dir: impl AsRef<Path>,
@@ -65,6 +66,38 @@ impl KolmeStorePostgres {
         let store = store.into();
         let fjall_block = FjallBlock::try_from_options("kolme", fjall_dir.as_ref())?;
         let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(url)
+            .await?;
+        sqlx::migrate!().set_ignore_missing(true).run(&pool).await?;
+
+        Ok(Self {
+            pool,
+            store,
+            fjall_block,
+        })
+    }
+
+    /// Create a PostgreSQL store with the provided merkle store, connection string and pool options
+    ///
+    /// **NOTE**: If you were previously using `new` and are now migrating to this method, please make
+    /// sure that `fjall_dir` is the same `fjall_dir` used on `new`
+    ///
+    /// # Returns
+    ///
+    /// This function is guaranteed to error out if `fjall_dir` is not given and `store` is not a `KolmeMerkleStore::FjallStore`
+    pub async fn new_all_settings<Store>(
+        url: &str,
+        options: PoolOptions<Postgres>,
+        store: Store,
+        fjall_dir: impl AsRef<Path>,
+    ) -> anyhow::Result<Self>
+    where
+        Store: Into<KolmeMerkleStore> + Not<MerkleFjallStore>,
+    {
+        let store = store.into();
+        let fjall_block = FjallBlock::try_from_options("kolme", fjall_dir.as_ref())?;
+        let pool = options
             .max_connections(5)
             .connect(url)
             .await?;

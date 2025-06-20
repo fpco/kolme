@@ -8,7 +8,7 @@ use crate::core::*;
 use fjall::KolmeStoreFjall;
 use in_memory::KolmeStoreInMemory;
 use kolme_store::{KolmeStoreError, StorableBlock};
-use kolme_store_postgresql::{ConstructLock, KolmeStorePostgres};
+use kolme_store_postgresql::{ConstructLock, KolmeStorePostgres, sqlx::{pool::PoolOptions, Postgres}};
 use lru::LruCache;
 use merkle_store::{KolmeMerkleStore, Not};
 use merkle_store_fjall::MerkleFjallStore;
@@ -62,7 +62,14 @@ impl<App: KolmeApp> KolmeStore<App> {
             .map_err(anyhow::Error::from)
     }
 
-    pub async fn new_postgres_with_merkle_store_and_fjall_options<Store>(
+    pub async fn new_postgres_with_options(url: &str, options: PoolOptions<Postgres>, fjall_dir: impl AsRef<Path>) -> Result<Self> {
+        KolmeStorePostgres::new_with_options(url, options, fjall_dir)
+            .await
+            .map(|x| KolmeStoreInner::Postgres(x).into())
+            .map_err(anyhow::Error::from)
+    }
+
+    pub async fn new_postgres_with_merkle_and_fjall<Store>(
         url: &str,
         store: Store,
         fjall_dir: impl AsRef<Path>,
@@ -70,7 +77,22 @@ impl<App: KolmeApp> KolmeStore<App> {
     where
         Store: Into<KolmeMerkleStore> + Not<MerkleFjallStore>,
     {
-        KolmeStorePostgres::new_with_merkle_store_and_fjall_options(url, store, fjall_dir)
+        KolmeStorePostgres::new_with_merkle_and_fjall(url, store, fjall_dir)
+            .await
+            .map(|x| KolmeStoreInner::Postgres(x).into())
+            .map_err(anyhow::Error::from)
+    }
+
+    pub async fn new_postgres_all_settings<Store>(
+        url: &str,
+        options: PoolOptions<Postgres>,
+        store: Store,
+        fjall_dir: impl AsRef<Path>,
+    ) -> Result<Self>
+    where
+        Store: Into<KolmeMerkleStore> + Not<MerkleFjallStore>,
+    {
+        KolmeStorePostgres::new_all_settings(url, options, store, fjall_dir)
             .await
             .map(|x| KolmeStoreInner::Postgres(x).into())
             .map_err(anyhow::Error::from)

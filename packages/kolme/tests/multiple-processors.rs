@@ -176,7 +176,7 @@ async fn multiple_processors_inner(
                     .unwrap()
             }
             KolmeMerkleTestStore::Postgres(merkle_store) => {
-                KolmeStore::<SampleKolmeApp>::new_postgres_with_merkle_store_and_fjall_options(
+                KolmeStore::<SampleKolmeApp>::new_postgres_with_merkle_and_fjall(
                     &block_db_str,
                     merkle_store,
                     &fjall_dir,
@@ -208,7 +208,7 @@ async fn multiple_processors_inner(
                             .unwrap()
                     }
                     KolmeMerkleTestStore::Postgres(merkle_store) => {
-                        KolmeStore::<SampleKolmeApp>::new_postgres_with_merkle_store_and_fjall_options(
+                        KolmeStore::<SampleKolmeApp>::new_postgres_with_merkle_and_fjall(
                             &block_db_str,
                             merkle_store,
                             &dir,
