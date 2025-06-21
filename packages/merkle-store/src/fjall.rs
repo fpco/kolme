@@ -5,19 +5,16 @@ use anyhow::Context;
 use fjall::{PartitionCreateOptions, PersistMode};
 
 #[derive(Clone)]
-pub enum FjallBlock {
-    Handle(fjall::PartitionHandle),
-    Owned(fjall::Keyspace, fjall::PartitionHandle),
+pub struct FjallBlock {
+    handle: fjall::PartitionHandle,
+    keyspace: fjall::Keyspace,
 }
 
 impl Deref for FjallBlock {
     type Target = fjall::PartitionHandle;
 
     fn deref(&self) -> &Self::Target {
-        match self {
-            FjallBlock::Handle(ref part) => part,
-            FjallBlock::Owned(_, ref part) => part,
-        }
+        &self.handle
     }
 }
 
@@ -38,7 +35,10 @@ impl FjallBlock {
             fjall.handle.clone()
         };
 
-        Ok(FjallBlock::Handle(handle))
+        Ok(FjallBlock {
+            handle,
+            keyspace: fjall.get_keyspace().clone(),
+        })
     }
 
     pub fn try_from_options(partition: &str, path: &Path) -> anyhow::Result<Self> {
@@ -48,15 +48,12 @@ impl FjallBlock {
                 path.display()
             )
         })?;
-        let fjall_block = keyspace.open_partition(partition, PartitionCreateOptions::default())?;
+        let handle = keyspace.open_partition(partition, PartitionCreateOptions::default())?;
 
-        Ok(FjallBlock::Owned(keyspace, fjall_block))
+        Ok(FjallBlock { keyspace, handle })
     }
 
     pub fn persist(&self, mode: PersistMode) -> fjall::Result<()> {
-        match self {
-            FjallBlock::Owned(keyspace, _) => keyspace.persist(mode),
-            _ => Ok(()),
-        }
+        self.keyspace.persist(mode)
     }
 }
