@@ -19,3 +19,5 @@
   - [Multisig accounts](technical/multisig-accounts.md)
   - [Watchdogs](technical/watchdogs.md)
   - [Timestamp Verification](technical/timestamp-verification.md)
+- [Developer Guides]()
+  - [Versioning policy](devs/versioning-policy.md)
