@@ -139,7 +139,6 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
             )
             .set_local_display_name("sanity-processor")
             .build(kolme_processor)
-            .await
             .unwrap()
             .run(),
     );
@@ -156,7 +155,6 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
         GossipBuilder::new()
             .set_local_display_name("sanity-client")
             .build(kolme_client.clone())
-            .await
             .unwrap()
             .run(),
     );

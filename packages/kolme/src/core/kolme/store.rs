@@ -150,7 +150,6 @@ impl<App: KolmeApp> KolmeStore<App> {
         Ok(match &self.inner {
             KolmeStoreInner::Postgres(kolme_store_postgres) => kolme_store_postgres
                 .load_latest_block()
-                .await
                 .map(|x| x.map(BlockHeight))?,
             KolmeStoreInner::InMemory(kolme_store_in_memory) => {
                 kolme_store_in_memory.load_latest_block().await?

@@ -24,7 +24,7 @@ async fn basic_scenario() {
     tracing::debug!("starting");
     prebuild().await.unwrap();
     let log_file = NamedTempFile::new().unwrap();
-    let mut app = start_the_app(log_file.path().to_path_buf()).await.unwrap();
+    let mut app = start_the_app(log_file.path().to_path_buf()).unwrap();
     let client = reqwest::Client::new();
     let contract_addr = wait_contract_deployed(&client).await.unwrap();
     tracing::debug!("contract: {contract_addr}");
@@ -401,7 +401,7 @@ fn six_sigma_cmd() -> Command {
     cmd
 }
 
-async fn start_the_app(log_path: PathBuf) -> Result<Child> {
+fn start_the_app(log_path: PathBuf) -> Result<Child> {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(env!("CARGO_MANIFEST_DIR")).args([
         "run",

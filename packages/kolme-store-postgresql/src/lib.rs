@@ -33,7 +33,7 @@ impl KolmeStorePostgres {
         })
     }
 
-    pub async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError> {
+    pub fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError> {
         let latest = self
             .fjall_block
             .get(LATEST_BLOCK)
@@ -226,7 +226,7 @@ impl KolmeStorePostgres {
         }
 
         // Update the latest within Fjall
-        let old = self.load_latest_block().await?;
+        let old = self.load_latest_block()?;
         let to_store = match old {
             None => true,
             Some(old) => old < *height,

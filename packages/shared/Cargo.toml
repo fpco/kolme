@@ -21,3 +21,6 @@ rand = { version = "0.8", optional = true }
 serde = { workspace = true }
 borsh = { version = "1.5.7", default-features = false, features = ["derive"], optional = true }
 thiserror = "2.0.12"
+
+[lints]
+workspace = true

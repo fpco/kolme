@@ -923,7 +923,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     #[cfg(feature = "pass_through")]
-    pub async fn get_pass_through_client(&self) -> reqwest::Client {
+    pub fn get_pass_through_client(&self) -> reqwest::Client {
         self.inner
             .pass_through_conn
             .get_or_init(reqwest::Client::new)

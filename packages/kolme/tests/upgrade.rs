@@ -144,7 +144,6 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .build(kolme1.clone())
-            .await
             .unwrap()
             .run(),
     );
@@ -158,7 +157,6 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .build(kolme2.clone())
-            .await
             .unwrap()
             .run(),
     );
