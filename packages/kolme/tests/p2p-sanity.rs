@@ -107,10 +107,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn sanity() {
     let _guard = P2P_TEST_LOCK.lock().await;
-    init_logger(true, None);
     TestTasks::start(sanity_inner, ()).await;
 }
 

@@ -14,6 +14,8 @@ pub(super) enum BlockRequest {
     BlockAtHeight(BlockHeight),
     /// Return both the raw block as well as the full app and framework state to go along with it.
     BlockWithStateAtHeight(BlockHeight),
+    /// Request a Merkle layer
+    Merkle(Sha256Hash),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -26,9 +28,10 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     Block(Arc<SignedBlock<AppMessage>>),
     BlockWithState {
         block: Arc<SignedBlock<AppMessage>>,
-        framework_state: Arc<MerkleContents>,
-        app_state: Arc<MerkleContents>,
-        logs: Arc<MerkleContents>,
+    },
+    Merkle {
+        hash: Sha256Hash,
+        contents: MerkleLayerContents,
     },
     HeightNotFound(BlockHeight),
 }

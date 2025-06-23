@@ -1,13 +1,8 @@
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 
 use kolme::{testtasks::TestTasks, *};
-
-// We only want one copy of this test running at a time
-// to avoid mDNS Gossip confusion
-static P2P_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
-    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
@@ -15,15 +10,17 @@ pub struct SampleKolmeApp {
     pub genesis: GenesisInfo,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct SampleState {
-    #[serde(default)]
-    hi_count: u32,
+    next_hi: u64,
+    payloads: MerkleMap<u64, Vec<u8>>,
 }
 
 impl MerkleSerialize for SampleState {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        serializer.store(&self.hi_count)?;
+        let Self { next_hi, payloads } = self;
+        serializer.store(next_hi)?;
+        serializer.store(payloads)?;
         Ok(())
     }
 }
@@ -34,7 +31,8 @@ impl MerkleDeserialize for SampleState {
         _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
-            hi_count: deserializer.load()?,
+            next_hi: deserializer.load()?,
+            payloads: deserializer.load()?,
         })
     }
 }
@@ -42,7 +40,7 @@ impl MerkleDeserialize for SampleState {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum SampleMessage {
-    SayHi {},
+    SayHi { payload: Vec<u8> },
 }
 
 // Another keypair for client testing:
@@ -88,7 +86,10 @@ impl KolmeApp for SampleKolmeApp {
     }
 
     fn new_state() -> Result<Self::State> {
-        Ok(SampleState { hi_count: 0 })
+        Ok(SampleState {
+            next_hi: 0,
+            payloads: MerkleMap::new(),
+        })
     }
 
     async fn execute(
@@ -97,23 +98,27 @@ impl KolmeApp for SampleKolmeApp {
         msg: &Self::Message,
     ) -> Result<()> {
         match msg {
-            SampleMessage::SayHi {} => ctx.state_mut().hi_count += 1,
+            SampleMessage::SayHi { payload } => {
+                let state = ctx.state_mut();
+                let idx = state.next_hi;
+                state.next_hi += 1;
+                state.payloads.insert(idx, payload.clone());
+            }
         }
         Ok(())
     }
 }
 
 #[test_log::test(tokio::test)]
-async fn fast_sync() {
-    let _guard = P2P_TEST_LOCK.lock().await;
-    TestTasks::start(fast_sync_inner, ()).await
+async fn large_sync() {
+    TestTasks::start(large_sync_inner, ()).await
 }
 
-async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
+async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     // We're going to launch a fully working cluster, then manually
     // delete some older blocks and confirm we can fast-sync
     // just the newest block.
-    const IDENT: &str = "p2p-fast";
+    const IDENT: &str = "p2p-large";
     let store1 = KolmeStore::new_in_memory();
     let kolme1 = Kolme::new(
         SampleKolmeApp::new(IDENT),
@@ -126,17 +131,26 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
 
     // Send a few transactions to bump up the block height
-    for _ in 0..10 {
+    for i in 0..200 {
+        let payload = std::iter::repeat(i).take(50_000).collect::<Vec<_>>();
         let secret = SecretKey::random(&mut rand::thread_rng());
         kolme1
-            .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+            .sign_propose_await_transaction(
+                &secret,
+                vec![Message::App(SampleMessage::SayHi { payload })],
+            )
             .await
             .unwrap();
     }
 
     let secret = SecretKey::random(&mut rand::thread_rng());
     let latest_block_height = kolme1
-        .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+        .sign_propose_await_transaction(
+            &secret,
+            vec![Message::App(SampleMessage::SayHi {
+                payload: vec![1, 2, 3],
+            })],
+        )
         .await
         .unwrap()
         .height();
@@ -163,27 +177,6 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
             .run(),
     );
 
-    // Launching a new Kolme with a new gossip set to BlockTransfer should fail
-    // at syncing blocks, since the source gossip doesn't have the early blocks
-    let kolme_block_transfer = Kolme::new(
-        SampleKolmeApp::new(IDENT),
-        DUMMY_CODE_VERSION,
-        KolmeStore::new_in_memory(),
-    )
-    .await
-    .unwrap();
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_local_display_name("kolme_block_transfer")
-            .set_sync_mode(
-                SyncMode::BlockTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-            .build(kolme_block_transfer.clone())
-            .unwrap()
-            .run(),
-    );
-
     // We'll check at the end of the run to confirm that this never received the latest block.
     // First check that StateTransfer works
     let kolme_state_transfer = Kolme::new(
@@ -205,22 +198,13 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
             .run(),
     );
 
-    // We should be able to sync the latest block within a few seconds
+    // Due to data size, it can take a bit to transfer the entire state
     let latest_from_gossip = tokio::time::timeout(
-        tokio::time::Duration::from_secs(10),
+        tokio::time::Duration::from_secs(30),
         kolme_state_transfer.wait_for_block(latest_block_height),
     )
     .await
     .unwrap()
     .unwrap();
     assert_eq!(latest_from_gossip.hash(), BlockHash(latest_block.blockhash));
-
-    // Make sure we never caught up via block transfer.
-    // TODO We'd like to ensure we get no blocks at all.
-    // However, some tests have demonstrated getting the first block.
-    // It's worth investigating why in the future, but it's not priority.
-    assert_ne!(
-        kolme_block_transfer.read().get_next_height().0,
-        latest_block.height + 1
-    );
 }

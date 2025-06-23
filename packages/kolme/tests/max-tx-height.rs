@@ -99,9 +99,8 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn max_tx_height() {
-    init_logger(true, None);
     TestTasks::start(max_tx_height_inner, ()).await;
 }
 

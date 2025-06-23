@@ -174,6 +174,62 @@ impl<App: KolmeApp> KolmeStore<App> {
             KolmeStoreInner::Fjall(_kolme_store_fjall) => Ok(KolmeConstructLock::NoLocking),
         }
     }
+
+    pub(crate) async fn has_merkle_hash(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<bool, MerkleSerialError> {
+        // TODO consider if we should look at the merkle manager's cache first
+        // for efficiency, probably yes
+        match &self.inner {
+            KolmeStoreInner::Fjall(store) => {
+                let mut merkle = store.merkle.clone();
+                merkle.contains_hash(hash).await
+            }
+            KolmeStoreInner::Postgres(store) => {
+                let mut merkle = store.get_merkle_store().clone();
+                merkle.contains_hash(hash).await
+            }
+            KolmeStoreInner::InMemory(store) => {
+                let mut merkle = store.get_merkle_store().await;
+                merkle.contains_hash(hash).await
+            }
+            KolmeStoreInner::PurePostgres(store) => {
+                let mut merkle = store.new_store();
+                merkle.contains_hash(hash).await
+            }
+        }
+    }
+
+    pub(crate) async fn add_merkle_layer(
+        &self,
+        hash: Sha256Hash,
+        layer: &MerkleLayerContents,
+    ) -> Result<()> {
+        anyhow::ensure!(hash == Sha256Hash::hash(&layer.payload));
+        for child in &layer.children {
+            anyhow::ensure!(self.has_merkle_hash(*child).await?);
+        }
+        match &self.inner {
+            KolmeStoreInner::Fjall(store) => {
+                let mut merkle = store.merkle.clone();
+                merkle.save_by_hash(hash, layer).await
+            }
+            KolmeStoreInner::Postgres(store) => {
+                let mut merkle = store.get_merkle_store().clone();
+                merkle.save_by_hash(hash, layer).await
+            }
+            KolmeStoreInner::InMemory(store) => {
+                let mut merkle = store.get_merkle_store().await;
+                merkle.save_by_hash(hash, layer).await
+            }
+            KolmeStoreInner::PurePostgres(store) => {
+                let mut merkle = store.new_store();
+                merkle.save_by_hash(hash, layer).await
+            }
+        }
+        .map_err(anyhow::Error::from)
+    }
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
@@ -227,6 +283,25 @@ impl<App: KolmeApp> KolmeStore<App> {
             Err(KolmeStoreError::BlockNotFound { height: _ }) => Ok(None),
             Err(e) => Err(e.into()),
             Ok(block) => Ok(Some(block)),
+        }
+    }
+
+    pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
+        if self.block_cache.read().peek(&height).is_some() {
+            return Ok(true);
+        }
+
+        match &self.inner {
+            KolmeStoreInner::Postgres(kolme_store_postgres) => {
+                kolme_store_postgres.has_block(height.0).await
+            }
+            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
+                kolme_store_postgres.has_block(height.0).await
+            }
+            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
+                kolme_store_in_memory.has_block(height).await
+            }
+            KolmeStoreInner::Fjall(kolme_store_fjall) => kolme_store_fjall.has_block(height),
         }
     }
 
@@ -297,6 +372,17 @@ impl<App: KolmeApp> KolmeStore<App> {
         merkle_manager: &MerkleManager,
         block: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<()> {
+        let inner = block.block.0.message.as_inner();
+        self.save(
+            merkle_manager,
+            &block.framework_state,
+            inner.framework_state,
+        )
+        .await?;
+        self.save(merkle_manager, &block.app_state, inner.app_state)
+            .await?;
+        self.save(merkle_manager, &block.logs, inner.logs).await?;
+
         let insertion_result = match &self.inner {
             KolmeStoreInner::Postgres(kolme_store_postgres) => {
                 kolme_store_postgres.add_block(merkle_manager, &block).await
@@ -330,42 +416,61 @@ impl<App: KolmeApp> KolmeStore<App> {
         }
     }
 
-    /// Store merkle contents then reload the data as a serializable type.
-    pub(super) async fn store_and_load<T: MerkleDeserializeRaw>(
+    /// Save data to the merkle store.
+    pub(super) async fn save<T: MerkleSerializeRaw>(
         &self,
         merkle_manager: &MerkleManager,
-        hash: Sha256Hash,
-        contents: Arc<MerkleContents>,
-    ) -> Result<T> {
-        anyhow::ensure!(hash == contents.hash);
-
-        let x = match &self.inner {
+        value: &T,
+        expected: Sha256Hash,
+    ) -> Result<()> {
+        let actual = match &self.inner {
             KolmeStoreInner::Fjall(kolme_store_fjall) => {
                 let mut store = kolme_store_fjall.merkle.clone();
-                store_and_load_helper(merkle_manager, &mut store, &contents).await
+                merkle_manager.save(&mut store, value).await?
             }
             KolmeStoreInner::Postgres(kolme_store_postgres) => {
                 let mut store = kolme_store_postgres.get_merkle_store().clone();
-                store_and_load_helper(merkle_manager, &mut store, &contents).await
+                merkle_manager.save(&mut store, value).await?
             }
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => kolme_store_postgres
-                .store_and_load(merkle_manager, &contents)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Unable to deserialize contents of hash {} as {}",
-                        hash,
-                        std::any::type_name::<T>()
-                    )
-                }),
+            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
+                kolme_store_postgres.save(merkle_manager, value).await?
+            }
             KolmeStoreInner::InMemory(kolme_store_in_memory) => {
                 let mut store = kolme_store_in_memory.get_merkle_store().await;
-                store_and_load_helper(merkle_manager, &mut store, &contents).await
+                merkle_manager.save(&mut store, value).await?
             }
-        }?;
+        };
+        anyhow::ensure!(
+            expected == actual.hash,
+            "Hash mismatch, expected {expected} but received {}",
+            actual.hash
+        );
+        Ok(())
+    }
 
-        self.trigger_notify();
-        Ok(x)
+    /// Load data from the merkle store.
+    pub(super) async fn load<T: MerkleDeserializeRaw>(
+        &self,
+        merkle_manager: &MerkleManager,
+        hash: Sha256Hash,
+    ) -> Result<T, MerkleSerialError> {
+        match &self.inner {
+            KolmeStoreInner::Fjall(kolme_store_fjall) => {
+                let mut store = kolme_store_fjall.merkle.clone();
+                merkle_manager.load(&mut store, hash).await
+            }
+            KolmeStoreInner::Postgres(kolme_store_postgres) => {
+                let mut store = kolme_store_postgres.get_merkle_store().clone();
+                merkle_manager.load(&mut store, hash).await
+            }
+            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
+                kolme_store_postgres.load(merkle_manager, hash).await
+            }
+            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
+                let mut store = kolme_store_in_memory.get_merkle_store().await;
+                merkle_manager.load(&mut store, hash).await
+            }
+        }
     }
 
     fn trigger_notify(&self) {
@@ -376,16 +481,28 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<usize> {
         self.notify.subscribe()
     }
-}
 
-async fn store_and_load_helper<T: MerkleDeserializeRaw, Store: MerkleStore>(
-    merkle_manager: &MerkleManager,
-    store: &mut Store,
-    contents: &MerkleContents,
-) -> Result<T> {
-    merkle_manager.save_merkle_contents(store, contents).await?;
-    merkle_manager
-        .load(store, contents.hash)
-        .await
-        .map_err(Into::into)
+    pub(crate) async fn get_merkle_layer(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
+        match &self.inner {
+            KolmeStoreInner::Fjall(store) => {
+                let mut merkle = store.merkle.clone();
+                merkle.load_by_hash(hash).await
+            }
+            KolmeStoreInner::Postgres(store) => {
+                let mut merkle = store.get_merkle_store().clone();
+                merkle.load_by_hash(hash).await
+            }
+            KolmeStoreInner::InMemory(store) => {
+                let mut merkle = store.get_merkle_store().await;
+                merkle.load_by_hash(hash).await
+            }
+            KolmeStoreInner::PurePostgres(store) => {
+                let mut merkle = store.new_store();
+                merkle.load_by_hash(hash).await
+            }
+        }
+    }
 }

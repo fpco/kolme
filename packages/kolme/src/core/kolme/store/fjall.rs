@@ -50,6 +50,14 @@ impl KolmeStoreFjall {
             .map_err(KolmeStoreError::custom)
     }
 
+    pub fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
+        self.merkle
+            .handle
+            .get(block_key(height))
+            .map(|x| x.is_some())
+            .map_err(KolmeStoreError::custom)
+    }
+
     pub async fn add_block<App: KolmeApp>(
         &self,
         merkle_manager: &MerkleManager,

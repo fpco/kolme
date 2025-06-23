@@ -1,4 +1,5 @@
 mod messages;
+mod state_sync;
 
 use std::{
     fmt::Display,
@@ -19,6 +20,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
+use state_sync::{DataRequest, StateSyncStatus};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
@@ -35,8 +37,12 @@ pub struct Gossip<App: KolmeApp> {
     local_display_name: String,
     /// Trigger a broadcast of our latest block height.
     trigger_broadcast_height: tokio::sync::watch::Sender<u64>,
+    /// Trigger a check of the state sync.
+    trigger_state_sync: tokio::sync::watch::Sender<u64>,
     /// Switches to true once we have our first success received message
     watch_network_ready: tokio::sync::watch::Sender<bool>,
+    /// Status of state syncs, if present.
+    state_sync: Mutex<StateSyncStatus<App>>,
 }
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -304,8 +310,10 @@ impl GossipBuilder {
         }
 
         let (trigger_broadcast_height, _) = tokio::sync::watch::channel(0);
+        let (trigger_state_sync, _) = tokio::sync::watch::channel(0);
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
+        let state_sync = Mutex::new(StateSyncStatus::new(kolme.clone()));
 
         Ok(Gossip {
             kolme,
@@ -315,8 +323,10 @@ impl GossipBuilder {
             data_load_validation: self.data_load_validation,
             local_peer_id,
             trigger_broadcast_height,
+            trigger_state_sync,
             watch_network_ready,
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
+            state_sync,
         })
     }
 }
@@ -341,6 +351,7 @@ impl<App: KolmeApp> Gossip<App> {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         interval.reset_immediately();
         let mut trigger_broadcast_height = self.trigger_broadcast_height.subscribe();
+        let mut trigger_state_sync = self.trigger_state_sync.subscribe();
 
         let mut mempool_additions = self.kolme.subscribe_mempool_additions();
 
@@ -354,16 +365,19 @@ impl<App: KolmeApp> Gossip<App> {
                 event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &peers_with_blocks_tx).await,
                 // A peer reported a known height higher than we have, so
                 // try to synchronize with it
-                report_block_height = peers_with_blocks_rx.recv() => async {self.catch_up(&mut swarm,report_block_height)}.await,
+                report_block_height = peers_with_blocks_rx.recv() => async {self.catch_up(&mut swarm,report_block_height).await}.await,
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
                 _ = interval.tick() => async {
                     self.request_block_heights(&mut swarm);
+                    self.process_state_sync(&mut swarm).await;
                     self.broadcast_latest_block(&mut swarm);
                     self.broadcast_mempool_entries(&mut swarm);
                 }.await,
                 // When we're specifically triggered for it, also notify for latest block height
                 _ = trigger_broadcast_height.changed() => async {self.broadcast_latest_block(&mut swarm)}.await,
+                // Same with state sync
+                _ = trigger_state_sync.changed() => async { self.process_state_sync(&mut swarm).await }.await,
                 // And any time we add something new to the mempool, broadcast all items.
                 _ = mempool_additions.changed() => async {self.broadcast_mempool_entries(&mut swarm)}.await,
             }
@@ -499,7 +513,7 @@ impl<App: KolmeApp> Gossip<App> {
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
                 libp2p::request_response::Event::Message {
-                    peer: _,
+                    peer,
                     connection_id: _,
                     message,
                 },
@@ -513,7 +527,7 @@ impl<App: KolmeApp> Gossip<App> {
                 libp2p::request_response::Message::Response {
                     request_id: _,
                     response,
-                } => self.handle_response(response).await,
+                } => self.handle_response(response, peer).await,
             },
             _ => tracing::debug!(
                 "{local_display_name}: Received and ignoring libp2p event: {event:?}"
@@ -604,40 +618,18 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                     Ok(None) => BlockResponse::HeightNotFound(height),
                     Ok(Some(storable_block)) => {
-                        let manager = self.kolme.get_merkle_manager();
-                        let framework_state = match manager
-                            .serialize(&storable_block.framework_state)
+                        #[cfg(debug_assertions)]
                         {
-                            Ok(x) => x,
-                            Err(e) => {
-                                tracing::warn!("{local_display_name}: Unable to serialize framework state: {e}");
-                                return;
+                            // Sanity testing
+                            let block = storable_block.block.0.message.as_inner();
+                            for hash in [block.framework_state, block.app_state, block.logs] {
+                                if self.kolme.get_merkle_layer(hash).await.unwrap().is_none() {
+                                    panic!("{local_display_name}: has block with hash {hash}, but that hash isn't in the store: {block:?}");
+                                }
                             }
-                        };
-                        let app_state = match manager.serialize(&storable_block.app_state) {
-                            Ok(x) => x,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "{local_display_name}: Unable to serialize app state: {e}"
-                                );
-                                return;
-                            }
-                        };
-                        let logs = match manager.serialize(&storable_block.logs) {
-                            Ok(x) => x,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "{local_display_name}: Unable to serialize logs: {e}"
-                                );
-                                return;
-                            }
-                        };
-
+                        }
                         BlockResponse::BlockWithState {
                             block: storable_block.block,
-                            framework_state,
-                            app_state,
-                            logs,
                         }
                     }
                 };
@@ -651,30 +643,51 @@ impl<App: KolmeApp> Gossip<App> {
                     );
                 }
             }
+            BlockRequest::Merkle(hash) => match self.kolme.get_merkle_layer(hash).await {
+                // We didn't have it, in theory we could send a message back about this, but
+                // skipping for now
+                Ok(None) => {
+                    tracing::warn!("{local_display_name}: Received a request for merkle layer {hash}, but didn't have it.");
+                }
+                Ok(Some(contents)) => {
+                    if let Err(e) = swarm
+                        .behaviour_mut()
+                        .request_response
+                        .send_response(channel, BlockResponse::Merkle { hash, contents })
+                    {
+                        tracing::warn!(
+                            "{local_display_name}: Unable to answer Merkle request: {e:?}"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "{local_display_name}: Error when loading Merkle layer for {hash}: {e}"
+                    )
+                }
+            },
         }
     }
 
-    async fn handle_response(&self, response: BlockResponse<App::Message>) {
+    async fn handle_response(&self, response: BlockResponse<App::Message>, peer: PeerId) {
         let local_display_name = self.local_display_name.clone();
         tracing::debug!("{local_display_name}: response");
         match response {
             BlockResponse::Block(block) => {
                 self.add_block(block).await;
             }
-            BlockResponse::BlockWithState {
-                block,
-                framework_state,
-                app_state,
-                logs,
-            } => {
-                if let Err(e) = self
-                    .kolme
-                    .add_block_with_state(block, framework_state, app_state, logs)
+            BlockResponse::BlockWithState { block } => {
+                match self
+                    .state_sync
+                    .lock()
+                    .await
+                    .add_pending_block(block, peer)
                     .await
                 {
-                    tracing::warn!(
-                        "{local_display_name}: Unable to add block (with state) to chain: {e}"
-                    );
+                    Ok(()) => self.trigger_state_sync.send_modify(|old| *old += 1),
+                    Err(e) => {
+                        tracing::error!("{local_display_name}: error adding pending block: {e}")
+                    }
                 }
             }
             BlockResponse::HeightNotFound(height) => {
@@ -682,13 +695,27 @@ impl<App: KolmeApp> Gossip<App> {
                     "{local_display_name}: Tried to find block height {height}, but peer didn't find it"
                 );
             }
+            BlockResponse::Merkle { hash, contents } => {
+                match self
+                    .state_sync
+                    .lock()
+                    .await
+                    .add_merkle_layer(hash, contents, peer)
+                    .await
+                {
+                    Ok(()) => self.trigger_state_sync.send_modify(|old| *old += 1),
+                    Err(e) => tracing::error!(
+                        "{local_display_name}: error adding Merkle layer contents for {hash}: {e}"
+                    ),
+                }
+            }
         }
     }
 
     /// Catch up on the latest chain information, if needed.
     ///
     /// Both puts out a broadcast to find more peers, plus sends requests to those peers for latest height information and any missing blocks.
-    fn catch_up(
+    async fn catch_up(
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         report_block_height: Option<ReportBlockHeight>,
@@ -739,10 +766,19 @@ impl<App: KolmeApp> Gossip<App> {
         };
 
         if do_state {
-            swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer, BlockRequest::BlockWithStateAtHeight(their_highest));
+            match self
+                .state_sync
+                .lock()
+                .await
+                .add_needed_block(their_highest, peer)
+                .await
+            {
+                Ok(()) => self.trigger_state_sync.send_modify(|old| *old += 1),
+                Err(e) => tracing::error!(
+                    "{}: error adding needed block: {e}",
+                    self.local_display_name
+                ),
+            }
         } else {
             swarm
                 .behaviour_mut()
@@ -766,6 +802,58 @@ impl<App: KolmeApp> Gossip<App> {
                     "{}: Unable to add block to chain: {e}",
                     self.local_display_name
                 )
+            }
+        }
+    }
+
+    async fn process_state_sync(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        let requests = match self.state_sync.lock().await.get_requests().await {
+            Ok(requests) => requests,
+            Err(e) => {
+                tracing::error!(
+                    "{}: unable to get state sync requests: {e}",
+                    self.local_display_name
+                );
+                return;
+            }
+        };
+        for request in requests {
+            match request {
+                DataRequest::GetBlock {
+                    height,
+                    current_peers,
+                    request_new_peers,
+                } => {
+                    for peer in current_peers {
+                        swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_request(&peer, BlockRequest::BlockWithStateAtHeight(height));
+                    }
+                    if request_new_peers {
+                        // https://github.com/fpco/kolme/issues/349
+                        tracing::warn!("TODO: Implement new peer discovery for blocks: {height}");
+                    }
+                }
+                DataRequest::GetMerkle {
+                    hash,
+                    current_peers,
+                    request_new_peers,
+                } => {
+                    for peer in current_peers {
+                        swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_request(&peer, BlockRequest::Merkle(hash));
+                    }
+
+                    if request_new_peers {
+                        // https://github.com/fpco/kolme/issues/349
+                        tracing::warn!(
+                            "TODO: Implement new peer discovery for merkle layers: {hash}"
+                        );
+                    }
+                }
             }
         }
     }
