@@ -17,6 +17,7 @@ reqwest = { version = "0.12.15", features = ["json"] }
 serde = { workspace = true }
 tracing = "0.1.41"
 kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-client" }
+merkle-store-cassandra.workspace = true
 solana-client = "2.2.7"
 spl-token-client = "0.14.0"
 solana-commitment-config = "2.2.1"
