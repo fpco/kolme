@@ -156,7 +156,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
     // And now launch a gossip node for this Kolme
-    testtasks.try_spawn_persistent(GossipBuilder::new().build(kolme1).await.unwrap().run());
+    testtasks.try_spawn_persistent(GossipBuilder::new().build(kolme1).unwrap().run());
 
     // Launching a new Kolme with a new gossip set to BlockTransfer should fail
     // at syncing blocks, since the source gossip doesn't have the early blocks
@@ -174,7 +174,6 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
                 DataLoadValidation::ValidateDataLoads,
             )
             .build(kolme_block_transfer.clone())
-            .await
             .unwrap()
             .run(),
     );
@@ -195,7 +194,6 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
                 DataLoadValidation::ValidateDataLoads,
             )
             .build(kolme_state_transfer.clone())
-            .await
             .unwrap()
             .run(),
     );

@@ -86,7 +86,7 @@ impl<App: KolmeApp> Listener<App> {
     async fn wait_for_contracts(&self, name: ChainName) -> Result<BTreeMap<ExternalChain, String>> {
         let mut receiver = self.kolme.subscribe();
         loop {
-            if let Some(contracts) = self.get_contracts(name).await {
+            if let Some(contracts) = self.get_contracts(name) {
                 return Ok(contracts);
             }
 
@@ -157,7 +157,7 @@ impl<App: KolmeApp> Listener<App> {
         }
     }
 
-    async fn get_contracts(&self, name: ChainName) -> Option<BTreeMap<ExternalChain, String>> {
+    fn get_contracts(&self, name: ChainName) -> Option<BTreeMap<ExternalChain, String>> {
         let mut res = BTreeMap::new();
 
         for (chain, state) in self.kolme.read().get_bridge_contracts().iter() {

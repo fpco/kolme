@@ -21,3 +21,6 @@ smallvec = { workspace = true }
 paste = "1.0.15"
 quickcheck = { workspace = true }
 tokio = { version = "1.43.0", features = ["full"] }
+
+[lints]
+workspace = true

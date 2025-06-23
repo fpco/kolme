@@ -141,13 +141,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     .await
     .unwrap();
     testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), processor.clone()).run());
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .build(kolme1.clone())
-            .await
-            .unwrap()
-            .run(),
-    );
+    testtasks.try_spawn_persistent(GossipBuilder::new().build(kolme1.clone()).unwrap().run());
 
     // And we'll launch the v2 processor immediately too, even though it won't do anything yet
     let store2 = KolmeStore::new_fjall(tempdir.path()).unwrap();
@@ -155,13 +149,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
         .await
         .unwrap();
     testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), processor.clone()).run());
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .build(kolme2.clone())
-            .await
-            .unwrap()
-            .run(),
-    );
+    testtasks.try_spawn_persistent(GossipBuilder::new().build(kolme2.clone()).unwrap().run());
 
     let client = SecretKey::random(&mut rand::thread_rng());
     const HI_COUNT1: u64 = 10;

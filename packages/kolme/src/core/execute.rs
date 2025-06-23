@@ -67,7 +67,7 @@ pub enum BlockDataHandling {
 }
 
 impl<App: KolmeApp> KolmeRead<App> {
-    async fn validate_tx(&self, tx: &SignedTransaction<App::Message>) -> Result<()> {
+    fn validate_tx(&self, tx: &SignedTransaction<App::Message>) -> Result<()> {
         // Ensure that the signature is valid
         tx.validate_signature()?;
 
@@ -97,7 +97,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         let code_version = self.get_code_version();
         anyhow::ensure!(chain_version == code_version, "Cannot execute transaction {}, current code version is {code_version}, but chain is running {chain_version}", signed_tx.hash());
 
-        self.validate_tx(signed_tx).await?;
+        self.validate_tx(signed_tx)?;
         let tx = signed_tx.0.message.as_inner();
 
         let mut framework_state = self.get_framework_state().clone();
@@ -177,7 +177,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 chain,
                 action_id,
                 signature,
-            } => self.approve(*chain, *action_id, *signature).await?,
+            } => self.approve(*chain, *action_id, *signature)?,
             Message::ProcessorApprove {
                 chain,
                 action_id,
@@ -186,9 +186,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             } => {
                 self.processor_approve(*chain, *action_id, processor, approvers)?;
             }
-            Message::Bank(bank) => self.bank(bank).await?,
-            Message::Auth(auth) => self.auth(auth).await?,
-            Message::Admin(admin) => self.admin(admin).await?,
+            Message::Bank(bank) => self.bank(bank)?,
+            Message::Auth(auth) => self.auth(auth)?,
+            Message::Admin(admin) => self.admin(admin)?,
         }
         Ok(())
     }
@@ -360,7 +360,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn approve(
+    fn approve(
         &mut self,
         chain: ExternalChain,
         action_id: BridgeActionId,
@@ -468,7 +468,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.sender
     }
 
-    pub async fn get_sender_wallets(&self) -> &BTreeSet<Wallet> {
+    pub fn get_sender_wallets(&self) -> &BTreeSet<Wallet> {
         self.framework_state
             .accounts
             .get_wallets_for(self.sender)
@@ -617,7 +617,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(res)
     }
 
-    async fn bank(&mut self, bank: &BankMessage) -> Result<()> {
+    fn bank(&mut self, bank: &BankMessage) -> Result<()> {
         match bank {
             BankMessage::Withdraw {
                 asset,
@@ -639,7 +639,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn auth(&mut self, auth: &AuthMessage) -> Result<()> {
+    fn auth(&mut self, auth: &AuthMessage) -> Result<()> {
         match auth {
             AuthMessage::AddPublicKey { key } => {
                 self.framework_state
@@ -666,7 +666,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    async fn admin(&mut self, admin: &AdminMessage) -> Result<()> {
+    fn admin(&mut self, admin: &AdminMessage) -> Result<()> {
         match admin {
             AdminMessage::SelfReplace(self_replace) => {
                 let signer = self_replace.verify_signature()?;

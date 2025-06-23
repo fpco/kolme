@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 merkle-map.workspace = true
 thiserror = "2.0.12"
+
+[lints]
+workspace = true

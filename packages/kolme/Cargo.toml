@@ -47,6 +47,9 @@ fjall.workspace = true
 lru = "0.14.0"
 hex.workspace = true
 
+[lints]
+workspace = true
+
 [dev-dependencies]
 quickcheck = { workspace = true }
 tempfile = "3.18.0"
