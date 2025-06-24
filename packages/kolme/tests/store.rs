@@ -97,7 +97,7 @@ async fn test_postgres_block_double_insertion() {
     let postgres_url =
         std::env::var("PROCESSOR_BLOCK_DB").expect("Variable PROCESSOR_BLOCK_DB was missing");
     let tempdir = tempfile::TempDir::new().expect("Unable to retrieve tempdir");
-    let postgres = KolmeStore::new_postgres(&postgres_url, &tempdir)
+    let postgres = KolmeStore::new_postgres_with_fjall(&postgres_url, &tempdir)
         .await
         .expect("Unable to start postgres store");
 
