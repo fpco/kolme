@@ -66,7 +66,7 @@ impl KolmeStorePurePostgres {
             return Ok(None);
         };
 
-        Ok(Some(height.load(Ordering::Acquire)))
+        Ok(Some(height.load(Ordering::Relaxed)))
     }
 
     pub async fn load_block<
