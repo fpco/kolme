@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
-use futures_util::StreamExt;
 use futures_util::future::join_all;
+use futures_util::StreamExt;
 use kolme::ApiNotification;
 use kolme::{
-    AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext, GenesisInfo,
-    Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer, MerkleSerialError,
-    MerkleSerialize, MerkleSerializer, Message, Processor, Transaction, ValidatorSet,
-    testtasks::TestTasks,
+    testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
+    ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
+    MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor,
+    Transaction, ValidatorSet,
 };
 use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Error;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
+use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
@@ -467,11 +467,14 @@ async fn test_rejected_transaction_insufficient_balance_inner(
     let tx_withdraw = Arc::new(
         kolme
             .read()
-            .create_signed_transaction(&secret, vec![Message::Bank(BankMessage::Transfer {
-                asset: AssetId(1),
-                dest: kolme::AccountId(0),
-                amount: dec!(500),
-            })])
+            .create_signed_transaction(
+                &secret,
+                vec![Message::Bank(BankMessage::Transfer {
+                    asset: AssetId(1),
+                    dest: kolme::AccountId(0),
+                    amount: dec!(500),
+                })],
+            )
             .unwrap(),
     );
 

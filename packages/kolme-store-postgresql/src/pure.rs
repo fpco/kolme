@@ -4,12 +4,12 @@ use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialize,
     Sha256Hash,
 };
-use sqlx::{Postgres, pool::PoolOptions, postgres::PgAdvisoryLock};
+use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Postgres};
 use std::{
     collections::HashMap,
     sync::{
-        Arc, OnceLock, RwLock,
         atomic::{AtomicU64, Ordering},
+        Arc, OnceLock, RwLock,
     },
 };
 
@@ -393,10 +393,10 @@ mod merkle {
     use merkle_map::{MerkleStore, Sha256Hash};
     use smallvec::SmallVec;
     use sqlx::{
-        Decode, Encode, Postgres, Type,
         encode::IsNull,
         error::BoxDynError,
         postgres::{PgHasArrayType, PgTypeInfo},
+        Decode, Encode, Postgres, Type,
     };
 
     use super::MerkleCache;
