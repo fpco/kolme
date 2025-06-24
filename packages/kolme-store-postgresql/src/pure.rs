@@ -4,29 +4,28 @@ use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialize,
     Sha256Hash,
 };
-use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Postgres};
+use sqlx::{Postgres, pool::PoolOptions, postgres::PgAdvisoryLock};
 use std::{
     collections::HashMap,
     sync::{
+        Arc, OnceLock, RwLock,
         atomic::{AtomicU64, Ordering},
-        Arc, RwLock,
     },
 };
 
 use crate::ConstructLock;
-
 type MerkleCache = Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>;
 
 #[derive(Clone)]
 pub struct KolmeStorePurePostgres {
     pool: sqlx::PgPool,
     merkle_cache: MerkleCache,
-    latest_block: Arc<AtomicU64>,
+    latest_block: Arc<OnceLock<AtomicU64>>,
 }
 
 impl KolmeStorePurePostgres {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
-        Self::new_with_options(url, PoolOptions::new()).await
+        Self::new_with_options(url, PoolOptions::new().max_connections(5)).await
     }
 
     pub async fn new_with_options(
@@ -36,29 +35,38 @@ impl KolmeStorePurePostgres {
         let pool = options
             .connect(url)
             .await
-            .with_context(|| format!("Could not connect with given URL: {url}"))?;
+            .with_context(|| format!("Could not connect with given URL: {url}"))
+            .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         sqlx::migrate!()
             .run(&pool)
             .await
-            .context("Unable to execute migrations")?;
+            .context("Unable to execute migrations")
+            .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         let latest_block =
             sqlx::query_scalar!("SELECT height FROM blocks ORDER BY height DESC LIMIT 1")
                 .fetch_optional(&pool)
                 .await
-                .context("Unable to fetch latest block height from DB")?
-                .unwrap_or_default();
+                .context("Unable to fetch latest block height from DB")
+                .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         Ok(Self {
             pool,
-            latest_block: Arc::new(AtomicU64::new(latest_block as u64)),
+            latest_block: Arc::new(match latest_block {
+                Some(height) => OnceLock::from(AtomicU64::new(height as u64)),
+                None => OnceLock::new(),
+            }),
             merkle_cache: Default::default(),
         })
     }
 
     pub fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError> {
-        Ok(Some(self.latest_block.load(Ordering::Relaxed)))
+        let Some(height) = self.latest_block.get() else {
+            return Ok(None);
+        };
+
+        Ok(Some(height.load(Ordering::Acquire)))
     }
 
     pub async fn load_block<
@@ -93,7 +101,9 @@ impl KolmeStorePurePostgres {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(KolmeStoreError::custom)?;
+        .map_err(KolmeStoreError::custom)
+        .inspect_err(|err| tracing::error!("{err:?}"))?;
+
         let Some(Output {
             blockhash,
             txhash,
@@ -152,7 +162,8 @@ impl KolmeStorePurePostgres {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(KolmeStoreError::custom)?
+        .map_err(KolmeStoreError::custom)
+        .inspect_err(|err| tracing::error!("{err:?}"))?
         .ok_or(KolmeStoreError::BlockNotFound { height })
     }
 
@@ -165,7 +176,8 @@ impl KolmeStorePurePostgres {
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(KolmeStoreError::custom)?;
+                .map_err(KolmeStoreError::custom)
+                .inspect_err(|err| tracing::error!("{err:?}"))?;
         match height {
             None => Ok(None),
             Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
@@ -244,7 +256,8 @@ impl KolmeStorePurePostgres {
                     )
                     .fetch_optional(&self.pool)
                     .await
-                    .map_err(KolmeStoreError::custom)?;
+                    .map_err(KolmeStoreError::custom)
+                    .inspect_err(|err| tracing::error!("{err:?}"))?;
 
                     if let Some(actualhash) = actualhash {
                         if actualhash == blockhash {
@@ -266,7 +279,9 @@ impl KolmeStorePurePostgres {
             return Err(KolmeStoreError::custom(e));
         }
 
-        self.latest_block.fetch_max(*height, Ordering::SeqCst);
+        self.latest_block
+            .get_or_init(|| AtomicU64::new(*height))
+            .fetch_max(*height, Ordering::SeqCst);
 
         Ok(())
     }
@@ -277,6 +292,7 @@ impl KolmeStorePurePostgres {
             .await
             .map(|_| ())
             .map_err(KolmeStoreError::custom)
+            .inspect_err(|err| tracing::error!("{err:?}"))
     }
 
     pub async fn take_construct_lock(&self) -> Result<ConstructLock, KolmeStoreError> {
@@ -364,7 +380,8 @@ impl KolmeStorePurePostgres {
         .bind(childrens)
         .execute(&self.pool)
         .await
-        .map_err(KolmeStoreError::custom)?;
+        .map_err(KolmeStoreError::custom)
+        .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         Ok(())
     }
@@ -376,10 +393,10 @@ mod merkle {
     use merkle_map::{MerkleStore, Sha256Hash};
     use smallvec::SmallVec;
     use sqlx::{
+        Decode, Encode, Postgres, Type,
         encode::IsNull,
         error::BoxDynError,
-        postgres::{types::PgRecordEncoder, PgHasArrayType, PgTypeInfo},
-        Encode, Postgres, Type,
+        postgres::{PgHasArrayType, PgTypeInfo},
     };
 
     use super::MerkleCache;
@@ -448,38 +465,25 @@ mod merkle {
             &self,
             buf: &mut <Postgres as sqlx::Database>::ArgumentBuffer<'a>,
         ) -> Result<IsNull, BoxDynError> {
-            for hash in self.0.iter() {
-                buf.extend_from_slice(hash.as_array());
-            }
+            let slice: &[Sha256Hash] = &self.0;
+            let slice: &[[u8; 32]] = unsafe { std::mem::transmute(slice) };
 
-            Ok(IsNull::No)
+            slice.encode_by_ref(buf)
         }
     }
 
-    pub(super) struct Children(ChildrenInner);
-
-    impl Type<Postgres> for Children {
-        fn type_info() -> <Postgres as sqlx::Database>::TypeInfo {
-            PgTypeInfo::with_name("children")
+    impl<'a> Decode<'a, Postgres> for ChildrenInner {
+        fn decode(_: <Postgres as sqlx::Database>::ValueRef<'a>) -> Result<Self, BoxDynError> {
+            unreachable!(
+                "This could should not be called as this struct is not used for deserialization"
+            )
         }
     }
 
-    impl<'a> Encode<'a, Postgres> for Children {
-        fn encode_by_ref(
-            &self,
-            buf: &mut <Postgres as sqlx::Database>::ArgumentBuffer<'a>,
-        ) -> Result<IsNull, BoxDynError> {
-            let mut encoder = PgRecordEncoder::new(buf);
-            encoder.encode(&self.0)?;
-            encoder.finish();
-            Ok(IsNull::No)
-        }
-    }
-
-    impl PgHasArrayType for Children {
-        fn array_type_info() -> PgTypeInfo {
-            PgTypeInfo::array_of("bytea[]")
-        }
+    #[derive(sqlx::Type)]
+    #[sqlx(type_name = "children")]
+    pub(super) struct Children {
+        bytes: ChildrenInner,
     }
 
     pub struct PurePostgresMerkleStore<'a> {
@@ -512,7 +516,8 @@ mod merkle {
             )
             .fetch_optional(self.pool)
             .await
-            .map_err(merkle_map::MerkleSerialError::custom)?
+            .map_err(merkle_map::MerkleSerialError::custom)
+            .inspect_err(|err| tracing::error!("{err:?}"))?
             .map(|row| merkle_map::MerkleLayerContents {
                 payload: row.payload.into(),
                 children: row
@@ -533,8 +538,9 @@ mod merkle {
         ) -> Result<(), merkle_map::MerkleSerialError> {
             self.hashes_to_insert.push(Hash(hash));
             self.payloads_to_insert.push(Payload(layer.payload.clone()));
-            self.childrens_to_insert
-                .push(Children(ChildrenInner(layer.children.clone())));
+            self.childrens_to_insert.push(Children {
+                bytes: ChildrenInner(layer.children.clone()),
+            });
 
             self.merkle_cache
                 .write()
@@ -562,7 +568,8 @@ mod merkle {
             )
             .fetch_optional(self.pool)
             .await
-            .map_err(merkle_map::MerkleSerialError::custom)?
+            .map_err(merkle_map::MerkleSerialError::custom)
+            .inspect_err(|err| tracing::error!("{err:?}"))?
             .is_some())
         }
     }
