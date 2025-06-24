@@ -4,6 +4,11 @@ use fjall::PartitionCreateOptions;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_map::{MerkleDeserializeRaw, MerkleManager, MerkleSerialize, Sha256Hash};
 use merkle_store_fjall::MerkleFjallStore;
+
+mod pure;
+
+pub use pure::KolmeStorePurePostgres;
+pub use sqlx;
 use sqlx::postgres::PgAdvisoryLock;
 
 #[derive(Clone)]

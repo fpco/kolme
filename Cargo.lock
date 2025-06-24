@@ -4182,6 +4182,7 @@ dependencies = [
  "merkle-store-fjall",
  "serde",
  "serde_json",
+ "smallvec",
  "sqlx",
  "tokio",
  "tracing",
