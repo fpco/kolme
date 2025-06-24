@@ -155,7 +155,7 @@ mod tests {
         }
 
         let tempdir = tempfile::tempdir().unwrap();
-        let store = KolmeStore::new_postgres(&block_db_str, tempdir.path())
+        let store = KolmeStore::new_postgres_with_fjall(&block_db_str, tempdir.path())
             .await
             .unwrap();
         store.clear_blocks().await.unwrap();
