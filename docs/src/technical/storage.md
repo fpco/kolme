@@ -58,7 +58,7 @@ Uses the [Fjall](https://docs.rs/fjall) crate as a local filesystem key-value st
 
 ### PostgreSQL
 
-The PostgreSQL backend is primarily intended for high availability processors. It still uses Fjall for Merkle hash storage for efficiency, since in early testing uses a PostgreSQL table for storing hashes was too inefficient.
+The PostgreSQL backend is primarily intended for high availability processors. It still uses Fjall for Merkle hash storage for efficiency, since in early testing using a PostgreSQL table for storing hashes was too inefficient.
 
 Side note: It may be worth revisiting this in the future, and at the very least have a background synchronization job between hashes in the local Fjall store and the PostgreSQL database. This would allow for faster launch of new nodes in a cluster without needing to synchronize data from other nodes on the network.
 

@@ -142,8 +142,7 @@ pub async fn validators(port: u16) -> Result<()> {
             &mut VALIDATOR_KEYPAIR_BYTES.to_owned(),
         )?)
         .disable_mdns()
-        .build(kolme.clone())
-        .await?;
+        .build(kolme.clone())?;
     set.spawn(gossip.run());
 
     while let Some(res) = set.join_next().await {
@@ -179,8 +178,7 @@ pub async fn client(validator_addr: &str, signing_secret: SecretKey) -> Result<(
     let gossip = GossipBuilder::new()
         .add_bootstrap(VALIDATOR_PEER_ID.parse()?, validator_addr.parse()?)
         .disable_mdns()
-        .build(kolme.clone())
-        .await?;
+        .build(kolme.clone())?;
 
     let mut peers_connected = gossip.subscribe_network_ready();
     set.spawn(gossip.run());

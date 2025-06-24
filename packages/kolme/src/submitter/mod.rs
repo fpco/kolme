@@ -245,7 +245,7 @@ impl<App: KolmeApp> Submitter<App> {
             #[cfg(feature = "pass_through")]
             ChainArgs::PassThrough { port } => {
                 anyhow::ensure!(chain == ExternalChain::PassThrough);
-                let client = self.kolme.read().get_pass_through_client().await;
+                let client = self.kolme.read().get_pass_through_client();
                 pass_through::execute(client, *port, *processor, approvals, payload).await?
             }
         };

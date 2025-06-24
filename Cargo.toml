@@ -37,6 +37,9 @@ shared = { path = "packages/shared" }
 test-log = { version = "0.2", features = ["trace"] }
 thiserror = "2.0.12"
 
+[workspace.lints.clippy]
+unused_async = "deny"
+
 [profile.release]
 debug = 0
 strip = "debuginfo"

@@ -175,7 +175,7 @@ impl GossipBuilder {
         self
     }
 
-    pub async fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>> {
+    pub fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>> {
         let builder = match self.keypair {
             Some(keypair) => SwarmBuilder::with_existing_identity(keypair),
             None => SwarmBuilder::with_new_identity(),
@@ -349,36 +349,33 @@ impl<App: KolmeApp> Gossip<App> {
                 // Our local Kolme generated a notification to be sent through the
                 // rest of the p2p network
                 notification = subscription.recv() =>
-                    self.handle_notification(&mut swarm, notification).await,
+                async {self.handle_notification(&mut swarm, notification)}.await,
                 // A new event was generated from the p2p network
                 event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &peers_with_blocks_tx).await,
                 // A peer reported a known height higher than we have, so
                 // try to synchronize with it
-                report_block_height = peers_with_blocks_rx.recv() => self.catch_up(&mut swarm,report_block_height).await,
+                report_block_height = peers_with_blocks_rx.recv() => async {self.catch_up(&mut swarm,report_block_height)}.await,
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
-                _ = interval.tick() => {
-                    self.request_block_heights(&mut swarm).await;
-                    self.broadcast_latest_block(&mut swarm).await;
-                    self.broadcast_mempool_entries(&mut swarm).await;
-                }
+                _ = interval.tick() => async {
+                    self.request_block_heights(&mut swarm);
+                    self.broadcast_latest_block(&mut swarm);
+                    self.broadcast_mempool_entries(&mut swarm);
+                }.await,
                 // When we're specifically triggered for it, also notify for latest block height
-                _ = trigger_broadcast_height.changed() => self.broadcast_latest_block(&mut swarm).await,
+                _ = trigger_broadcast_height.changed() => async {self.broadcast_latest_block(&mut swarm)}.await,
                 // And any time we add something new to the mempool, broadcast all items.
-                _ = mempool_additions.changed() => self.broadcast_mempool_entries(&mut swarm).await,
+                _ = mempool_additions.changed() => async {self.broadcast_mempool_entries(&mut swarm)}.await,
             }
         }
     }
 
-    async fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+    fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
         if *self.watch_network_ready.borrow() {
             // We already sent this request successfully, no need to repeat.
             return;
         }
-        match GossipMessage::RequestBlockHeights(jiff::Timestamp::now())
-            .publish(self, swarm)
-            .await
-        {
+        match GossipMessage::RequestBlockHeights(jiff::Timestamp::now()).publish(self, swarm) {
             Ok(sent) => {
                 if sent {
                     tracing::info!(
@@ -397,7 +394,7 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
-    async fn broadcast_latest_block(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+    fn broadcast_latest_block(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
         if let Err(e) = GossipMessage::ReportBlockHeight(ReportBlockHeight {
             next: self.kolme.read().get_next_height(),
             peer: self.local_peer_id,
@@ -405,7 +402,6 @@ impl<App: KolmeApp> Gossip<App> {
             latest_block: self.kolme.get_latest_block(),
         })
         .publish(self, swarm)
-        .await
         {
             tracing::error!(
                 "{}: Unable to broadcast latest block height: {e:?}",
@@ -414,11 +410,11 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
-    async fn broadcast_mempool_entries(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+    fn broadcast_mempool_entries(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
         for tx in self.kolme.get_mempool_entries() {
             let txhash = tx.hash();
             let msg = GossipMessage::BroadcastTx { tx };
-            if let Err(e) = msg.publish(self, swarm).await {
+            if let Err(e) = msg.publish(self, swarm) {
                 tracing::error!(
                     "{}: Unable to broadcast transaction {txhash}: {e:?}",
                     self.local_display_name
@@ -427,7 +423,7 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
-    async fn handle_notification(
+    fn handle_notification(
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         notification: Result<Notification<App::Message>, RecvError>,
@@ -442,10 +438,7 @@ impl<App: KolmeApp> Gossip<App> {
                 return;
             }
         };
-        if let Err(e) = GossipMessage::Notification(notification)
-            .publish(self, swarm)
-            .await
-        {
+        if let Err(e) = GossipMessage::Notification(notification).publish(self, swarm) {
             tracing::warn!(
                 "{}: Error when handling notification: {e}",
                 self.local_display_name
@@ -695,7 +688,7 @@ impl<App: KolmeApp> Gossip<App> {
     /// Catch up on the latest chain information, if needed.
     ///
     /// Both puts out a broadcast to find more peers, plus sends requests to those peers for latest height information and any missing blocks.
-    async fn catch_up(
+    fn catch_up(
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         report_block_height: Option<ReportBlockHeight>,

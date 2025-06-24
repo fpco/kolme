@@ -101,7 +101,7 @@ impl<App: KolmeApp> GossipMessage<App> {
 
     /// returns true if this message was sent (including the case when it was a duplicate)
     /// returns false in the case of the muted error InsufficientPeers
-    pub(super) async fn publish(
+    pub(super) fn publish(
         self,
         gossip: &Gossip<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
