@@ -9,6 +9,7 @@ use kolme::testtasks::TestTasks;
 use kolme::*;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
+use serial_test::serial;
 
 #[derive(Clone)]
 pub struct SampleKolmeApp {
@@ -94,12 +95,21 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
+#[derive(Clone)]
+enum KolmeMerkleTestStore {
+    Postgres,
+    Fjall,
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 100)]
-async fn multiple_processors() {
+#[serial]
+async fn multiple_processors_fjall() {
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
     let block_db_str = match std::env::var(ENVVAR) {
         Ok(x) => x,
-        Err(e) => panic!("Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}")
+        Err(e) => panic!(
+            "Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}"
+        ),
     };
     if block_db_str == "SKIP" {
         println!("Skipping test due to no local database being available");
@@ -108,10 +118,39 @@ async fn multiple_processors() {
 
     // Wipe out the database so we have a fresh run
     let temp = tempfile::TempDir::new().unwrap();
+    let merkle_store = KolmeMerkleTestStore::Fjall;
 
     let (x, y, z) = TestTasks::start(
         multiple_processors_inner,
-        (block_db_str, temp.path().to_owned()),
+        (block_db_str, temp.path().to_owned(), merkle_store),
+    )
+    .await;
+    println!("Finished checking results of all clients, moving on to checker");
+    checker(x, y, z).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 100)]
+#[serial]
+async fn multiple_processors_postgres() {
+    const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
+    let block_db_str = match std::env::var(ENVVAR) {
+        Ok(x) => x,
+        Err(e) => panic!(
+            "Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}"
+        ),
+    };
+    if block_db_str == "SKIP" {
+        println!("Skipping test due to no local database being available");
+        return;
+    }
+
+    // Wipe out the database so we have a fresh run
+    let temp = tempfile::TempDir::new().unwrap();
+    let merkle_store = KolmeMerkleTestStore::Postgres;
+
+    let (x, y, z) = TestTasks::start(
+        multiple_processors_inner,
+        (block_db_str, temp.path().to_owned(), merkle_store),
     )
     .await;
     println!("Finished checking results of all clients, moving on to checker");
@@ -120,7 +159,7 @@ async fn multiple_processors() {
 
 async fn multiple_processors_inner(
     test_tasks: TestTasks,
-    (block_db_str, fjall_dir): (String, PathBuf),
+    (block_db_str, fjall_dir, merkle_store): (String, PathBuf, KolmeMerkleTestStore),
 ) -> (
     Arc<[Kolme<SampleKolmeApp>]>,
     Arc<Mutex<HashSet<TxHash>>>,
@@ -131,9 +170,19 @@ async fn multiple_processors_inner(
     } else if block_db_str == "FJALL" {
         Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
-        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str, &fjall_dir)
-            .await
-            .unwrap();
+        let store = match merkle_store.clone() {
+            KolmeMerkleTestStore::Fjall => {
+                KolmeStore::<SampleKolmeApp>::new_postgres_with_fjall(&block_db_str, &fjall_dir)
+                    .await
+                    .unwrap()
+            }
+            KolmeMerkleTestStore::Postgres => {
+                KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+                    .await
+                    .unwrap()
+            }
+        };
+
         store.clear_blocks().await.unwrap();
         None
     };
@@ -149,7 +198,18 @@ async fn multiple_processors_inner(
             None => {
                 let mut dir = fjall_dir.clone();
                 dir.push(i.to_string());
-                KolmeStore::new_postgres(&block_db_str, dir).await.unwrap()
+                match merkle_store.clone() {
+                    KolmeMerkleTestStore::Fjall => {
+                        KolmeStore::<SampleKolmeApp>::new_postgres_with_fjall(&block_db_str, &dir)
+                            .await
+                            .unwrap()
+                    }
+                    KolmeMerkleTestStore::Postgres => {
+                        KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+                            .await
+                            .unwrap()
+                    }
+                }
             }
         };
         let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
@@ -159,7 +219,7 @@ async fn multiple_processors_inner(
         // TODO Ideally we would like to speed up things so this test runs much faster.
         // However, at the moment, sometimes transactions take more than
         // 10 seconds to land.
-        let kolme = kolme.set_tx_await_duration(tokio::time::Duration::from_secs(60));
+        let kolme = kolme.set_tx_await_duration(tokio::time::Duration::from_secs(70));
 
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         test_tasks.try_spawn_persistent(processor.run());
