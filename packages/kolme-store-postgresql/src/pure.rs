@@ -4,7 +4,7 @@ use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialize,
     Sha256Hash,
 };
-use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Postgres};
+use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Executor, Postgres};
 use std::{
     collections::HashMap,
     sync::{
@@ -206,6 +206,7 @@ impl KolmeStorePurePostgres {
         let mut store1 = self.new_store();
         let mut store2 = self.new_store();
         let mut store3 = self.new_store();
+        let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
 
         let (framework_state, app_state, logs) = tokio::try_join!(
             merkle_manager.save(&mut store1, framework_state),
@@ -217,7 +218,8 @@ impl KolmeStorePurePostgres {
         let app_state_hash = app_state.hash;
         let logs_hash = logs.hash;
 
-        self.consume_stores([store1, store2, store3]).await?;
+        self.consume_stores(&mut *tx, [store1, store2, store3])
+            .await?;
 
         let blockhash = blockhash.as_array().as_slice();
         let txhash = txhash.as_array().as_slice();
@@ -240,8 +242,11 @@ impl KolmeStorePurePostgres {
             app_state_hash,
             logs_hash,
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await;
+
+        tx.commit().await.map_err(KolmeStoreError::custom)?;
+
         if let Err(e) = res {
             // If the block already exists in the database, ignore the error
             if let Some(db_error) = e.as_database_error() {
@@ -339,7 +344,7 @@ impl KolmeStorePurePostgres {
             .await
             .map_err(KolmeStoreError::custom)?;
 
-        self.consume_stores([store]).await?;
+        self.consume_stores(&self.pool, [store]).await?;
 
         Ok(result)
     }
@@ -356,6 +361,7 @@ impl KolmeStorePurePostgres {
 
     async fn consume_stores(
         &self,
+        tx: impl Executor<'_, Database = Postgres>,
         stores: impl IntoIterator<Item = merkle::PurePostgresMerkleStore<'_>>,
     ) -> Result<(), KolmeStoreError> {
         let mut hashes = Vec::new();
@@ -378,7 +384,7 @@ impl KolmeStorePurePostgres {
         .bind(hashes)
         .bind(payloads)
         .bind(childrens)
-        .execute(&self.pool)
+        .execute(tx)
         .await
         .map_err(KolmeStoreError::custom)
         .inspect_err(|err| tracing::error!("{err:?}"))?;
