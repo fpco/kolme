@@ -1,9 +1,11 @@
-# Kolme Changelog
+# Changelog
 
-All notable changes to this project are documented in this file. This changelog is generated automatically from commit history using [git-cliff](https://github.com/orhun/git-cliff) and follows the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this changelog is generated automatically from commit history using [git-cliff](https://github.com/orhun/git-cliff).
 
 
-## Unreleased
+## [Unreleased]
 
 
 
@@ -77,7 +79,7 @@ All notable changes to this project are documented in this file. This changelog 
 
 
 
-## Version v0.1.0 — 2025-06-13
+## [v0.1.0] - 2025-06-13
 
 
 
@@ -230,4 +232,4 @@ All notable changes to this project are documented in this file. This changelog 
 
 
 ---
-This changelog is maintained for production releases. For more details, see the project repository.
+For previous versions and more details, see the project repository.

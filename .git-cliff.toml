@@ -1,4 +1,4 @@
-# Kolme git-cliff configuration
+# Kolme git-cliff configuration - Keep a Changelog style
 
 [git]
 tag_pattern = "v[0-9]*"
@@ -10,20 +10,24 @@ output = "CHANGELOG.md"
 [changelog]
 group_by = "title"
 header = """
-# Kolme Changelog
+# Changelog
 
-All notable changes to this project are documented in this file. This changelog is generated automatically from commit history using [git-cliff](https://github.com/orhun/git-cliff) and follows the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this changelog is generated automatically from commit history using [git-cliff](https://github.com/orhun/git-cliff).
 
 """
 
-group_titles.Features = "Features"
-group_titles."Bug Fixes" = "Bug Fixes"
+group_titles.Added = "Added"
+group_titles.Changed = "Changed"
+group_titles.Deprecated = "Deprecated"
+group_titles.Removed = "Removed"
+group_titles.Fixed = "Fixed"
+group_titles.Security = "Security"
 group_titles.Documentation = "Documentation"
-group_titles.Refactor = "Refactoring"
-group_titles.Performance = "Performance"
 group_titles.Tests = "Tests"
-group_titles."Build System" = "Build System"
-group_titles."Continuous Integration" = "Continuous Integration"
+group_titles.Build = "Build System"
+group_titles.CI = "Continuous Integration"
 group_titles.Chores = "Chores"
 
 group = """
@@ -32,9 +36,9 @@ group = """
 
 body = """
 {% if version %}
-## Version {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}
-## Unreleased
+## [Unreleased]
 {% endif %}
 
 {% if commits | length == 0 %}
@@ -51,53 +55,63 @@ _No changes._
 
 footer = """
 ---
-This changelog is maintained for production releases. For more details, see the project repository.
+For previous versions and more details, see the project repository.
 """
 
 [[changelog.commit_groups]]
-title = "Features"
+title = "Added"
 regex = "^feat"
 order = 1
 
 [[changelog.commit_groups]]
-title = "Bug Fixes"
-regex = "^fix"
+title = "Changed"
+regex = "^(refactor|perf)"
 order = 2
+
+[[changelog.commit_groups]]
+title = "Deprecated"
+regex = "^deprecate"
+order = 3
+
+[[changelog.commit_groups]]
+title = "Removed"
+regex = "^remove"
+order = 4
+
+[[changelog.commit_groups]]
+title = "Fixed"
+regex = "^fix"
+order = 5
+
+[[changelog.commit_groups]]
+title = "Security"
+regex = "^security"
+order = 6
 
 [[changelog.commit_groups]]
 title = "Documentation"
 regex = "^docs"
-order = 3
-
-[[changelog.commit_groups]]
-title = "Refactoring"
-regex = "^refactor"
-order = 4
-
-[[changelog.commit_groups]]
-title = "Performance"
-regex = "^perf"
-order = 5
+order = 7
 
 [[changelog.commit_groups]]
 title = "Tests"
 regex = "^test"
-order = 6
-
-[[changelog.commit_groups]]
-title = "Build System"
-regex = "^build"
-order = 7
-
-[[changelog.commit_groups]]
-title = "Continuous Integration"
-regex = "^ci"
 order = 8
+
+[[changelog.commit_groups]]
+title = "Build"
+regex = "^build"
+order = 9
+
+[[changelog.commit_groups]]
+title = "CI"
+regex = "^ci"
+order = 10
 
 [[changelog.commit_groups]]
 title = "Chores"
 regex = "^chore"
-order = 9
+order = 11
 
 [commit_parsers]
 conventional = true
