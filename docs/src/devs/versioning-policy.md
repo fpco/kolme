@@ -161,6 +161,16 @@ Gossip modifications are less severe than the changes above. They impact the net
 
 ## Changelog
 
-*FIXME* when ready, document how we use git-cliff to generate changelogs.
+Kolme uses [git-cliff](https://github.com/orhun/git-cliff) to generate and manage its changelog, following the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+- The changelog is maintained in `CHANGELOG.md` at the repository root.
+- Changelog entries are generated from commit messages using `git-cliff`, grouped by type (Features, Bug Fixes, Refactoring, etc.).
+- All contributors should use the Conventional Commits format for their commit messages. This is enforced in CI.
+- For legacy or non-conventional commits, git-cliff will group them under "Other changes." If important changes are missing from the changelog, they can be added manually before a release.
+- To generate or update the changelog, run:
+  ```
+  git-cliff -c .git-cliff.toml -o CHANGELOG.md --tag-pattern "v[0-9]*"
+  ```
+- The changelog is updated and committed as part of the release process.
 
 We're going to follow the "bump right before" strategy of bumping version numbers in Cargo.toml files just before cutting a release. That means that the repo will always have the _newest released version number_ in the Cargo.toml files.
