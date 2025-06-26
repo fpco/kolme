@@ -11,9 +11,7 @@ use store::KolmeConstructLock;
 pub use store::KolmeStore;
 use utils::trigger::TriggerSubscriber;
 
-#[cfg(feature = "pass_through")]
-use std::sync::OnceLock;
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::HashMap, ops::Deref, sync::OnceLock};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -58,6 +56,8 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     /// If this version is different from the active version running on the chain,
     /// we cannot produce blocks or execute blocks with reproducibility.
     code_version: String,
+    /// A channel for requesting new blocks to be synced from the network.
+    block_requester: OnceLock<tokio::sync::mpsc::Sender<BlockHeight>>,
 }
 
 /// Access to a specific block height.
@@ -493,14 +493,13 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block: Arc<SignedBlock<App::Message>>,
     ) -> Result<()> {
         // Don't accept blocks we already have
-        let kolme = self.read();
-        if kolme.get_next_height() > signed_block.height() {
+        if self.has_block(signed_block.height()).await? {
             anyhow::bail!(
-                "Tried to add block (with state) with height {}, but next expected height is {}",
-                signed_block.height(),
-                kolme.get_next_height()
+                "Tried to add block with height {}, but it's already present in the store.",
+                signed_block.height()
             );
         }
+        let kolme = self.read();
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
         anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
@@ -626,6 +625,7 @@ impl<App: KolmeApp> Kolme<App> {
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
             latest_block: parking_lot::RwLock::new(None),
             code_version: code_version.into(),
+            block_requester: OnceLock::new(),
         };
 
         let kolme = Kolme {
@@ -671,9 +671,26 @@ impl<App: KolmeApp> Kolme<App> {
                 return Ok(storable_block.block);
             }
 
+            // Only use the state sync requester if we have a gap in blocks, otherwise
+            // normal mechanisms for filling in blocks will work.
+            if self.read().get_next_height() > height {
+                if let Some(requester) = self.inner.block_requester.get() {
+                    requester.send(height).await.ok();
+                }
+            }
+
             // Wait for more data
             recv.listen().await;
         }
+    }
+
+    /// Set the block requester
+    ///
+    /// Current kept pub(crate) as it's only used by the gossip mechanism.
+    ///
+    /// If there's already a block requester set, this is a no-op.
+    pub(crate) fn set_block_requester(&self, requester: tokio::sync::mpsc::Sender<BlockHeight>) {
+        self.inner.block_requester.set(requester).ok();
     }
 
     /// Wait until a block with height greater than or equal to the given height gets published

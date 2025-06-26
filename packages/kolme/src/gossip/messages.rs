@@ -16,6 +16,15 @@ pub(super) enum BlockRequest {
     BlockWithStateAtHeight(BlockHeight),
     /// Request a Merkle layer
     Merkle(Sha256Hash),
+    /// Notify a node that the given peer has the given block for transfer.
+    BlockAvailable {
+        height: BlockHeight,
+        #[serde(
+            serialize_with = "serialize_peer_id",
+            deserialize_with = "deserialize_peer_id"
+        )]
+        peer: PeerId,
+    },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -44,6 +53,14 @@ pub(super) enum GossipMessage<App: KolmeApp> {
     BroadcastTx {
         tx: Arc<SignedTransaction<App::Message>>,
     },
+    RequestBlockContents {
+        height: BlockHeight,
+        #[serde(
+            serialize_with = "serialize_peer_id",
+            deserialize_with = "deserialize_peer_id"
+        )]
+        peer: PeerId,
+    },
 }
 
 impl<App: KolmeApp> Display for GossipMessage<App> {
@@ -60,6 +77,9 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
             }
             GossipMessage::BroadcastTx { tx } => {
                 write!(f, "Broadcast {}", tx.hash())
+            }
+            GossipMessage::RequestBlockContents { height, peer } => {
+                write!(f, "Request block contents {height} for {peer}")
             }
         }
     }
