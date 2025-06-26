@@ -4,7 +4,7 @@ use crate::*;
 
 /// Allows a value to be locked with a pre-computed Merkle hash.
 pub struct MerkleLockable<T> {
-    locked: Arc<OnceLock<Arc<MerkleContents>>>,
+    pub(super) locked: Arc<OnceLock<Arc<MerkleContents>>>,
     inner: Arc<T>,
 }
 
