@@ -68,6 +68,13 @@ impl KolmeStoreInMemory {
             .map_err(KolmeStoreError::custom)
     }
 
+    pub(crate) async fn has_block(
+        &self,
+        height: BlockHeight,
+    ) -> Result<bool, kolme_store::KolmeStoreError> {
+        Ok(self.0.read().await.blocks.contains_key(&height))
+    }
+
     pub(crate) async fn get_height_for_tx(
         &self,
         txhash: super::TxHash,

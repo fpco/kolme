@@ -65,9 +65,13 @@ pub struct MerkleContents {
 /// The contents of a single layer of a merkle data structure.
 ///
 /// This is an intermediate data structure used for interacting with storage.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MerkleLayerContents {
     /// The contents of this layer.
+    #[serde(
+        serialize_with = "serialize_base64",
+        deserialize_with = "deserialize_base64"
+    )]
     pub payload: Arc<[u8]>,
     /// The hashes of the direct children of this layer.
     pub children: SmallVec<[Sha256Hash; 16]>,

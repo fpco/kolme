@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use solana_client::nonblocking::pubsub_client::PubsubClient;
 use store::KolmeConstructLock;
 pub use store::KolmeStore;
+use utils::trigger::TriggerSubscriber;
 
 #[cfg(feature = "pass_through")]
 use std::sync::OnceLock;
@@ -480,12 +481,16 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Validate and append the given block.
+    ///
+    /// Note that this does not execute the transaction, since this
+    /// is used by state sync and other cases where such execution is
+    /// not necessarily possible. Instead, it validates signatures
+    /// and hashes.
+    ///
+    /// The state values must already be in the store.
     pub async fn add_block_with_state(
         &self,
         signed_block: Arc<SignedBlock<App::Message>>,
-        framework_state: Arc<MerkleContents>,
-        app_state: Arc<MerkleContents>,
-        logs: Arc<MerkleContents>,
     ) -> Result<()> {
         // Don't accept blocks we already have
         let kolme = self.read();
@@ -507,27 +512,19 @@ impl<App: KolmeApp> Kolme<App> {
         let framework_state = Arc::new(
             self.inner
                 .store
-                .store_and_load::<FrameworkState>(
-                    &self.inner.merkle_manager,
-                    block.framework_state,
-                    framework_state,
-                )
+                .load::<FrameworkState>(&self.inner.merkle_manager, block.framework_state)
                 .await?,
         );
         let app_state = Arc::new(
             self.inner
                 .store
-                .store_and_load::<App::State>(
-                    &self.inner.merkle_manager,
-                    block.app_state,
-                    app_state,
-                )
+                .load::<App::State>(&self.inner.merkle_manager, block.app_state)
                 .await?,
         );
         let logs = Arc::<[Vec<String>]>::from(
             self.inner
                 .store
-                .store_and_load::<Vec<Vec<String>>>(&self.inner.merkle_manager, block.logs, logs)
+                .load::<Vec<Vec<String>>>(&self.inner.merkle_manager, block.logs)
                 .await?,
         );
 
@@ -651,7 +648,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Subscribe to get a notification each time an entry is added to the mempool.
-    pub fn subscribe_mempool_additions(&self) -> tokio::sync::watch::Receiver<usize> {
+    pub fn subscribe_mempool_additions(&self) -> TriggerSubscriber {
         self.inner.mempool.subscribe_additions()
     }
 
@@ -675,9 +672,7 @@ impl<App: KolmeApp> Kolme<App> {
             }
 
             // Wait for more data
-            recv.changed()
-                .await
-                .context("wait_for_block: unexpected end of stream from store.subscribe()")?;
+            recv.listen().await;
         }
     }
 
@@ -961,6 +956,25 @@ impl<App: KolmeApp> Kolme<App> {
     pub fn get_code_version(&self) -> &String {
         &self.inner.code_version
     }
+
+    /// Get the Merkle layer for this hash, if available.
+    pub async fn get_merkle_layer(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
+        self.inner.store.get_merkle_layer(hash).await
+    }
+
+    /// Add a Merkle layer for this hash.
+    ///
+    /// Invariant: you must ensure that the payload matches the hash, and that all children are already stored.
+    pub(crate) async fn add_merkle_layer(
+        &self,
+        hash: Sha256Hash,
+        layer: &MerkleLayerContents,
+    ) -> Result<()> {
+        self.inner.store.add_merkle_layer(hash, layer).await
+    }
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -973,6 +987,16 @@ impl<App: KolmeApp> Kolme<App> {
             .store
             .load_block(&self.inner.merkle_manager, height)
             .await
+    }
+
+    /// Check if the given block is available in storage.
+    pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
+        self.inner.store.has_block(height).await
+    }
+
+    /// Check if the given Merkle hash is stored in the backing store.
+    pub async fn has_merkle_hash(&self, hash: Sha256Hash) -> Result<bool, MerkleSerialError> {
+        self.inner.store.has_merkle_hash(hash).await
     }
 
     /// Get the block height for the given transaction, if present.

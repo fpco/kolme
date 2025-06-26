@@ -1,8 +1,8 @@
 use anyhow::Context as _;
 use kolme_store::{KolmeStoreError, StorableBlock};
 use merkle_map::{
-    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialize,
-    Sha256Hash,
+    MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError, MerkleSerialize,
+    MerkleSerializeRaw, Sha256Hash,
 };
 use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Executor, Postgres};
 use std::{
@@ -147,6 +147,20 @@ impl KolmeStorePurePostgres {
             logs,
             block: Arc::new(block),
         })
+    }
+
+    pub async fn has_block(&self, height: u64) -> Result<bool, KolmeStoreError> {
+        let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
+        sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM blocks WHERE height=$1)",
+            height_i64,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(KolmeStoreError::custom)?
+        .ok_or(KolmeStoreError::Other(
+            "Impossible empty result from a SELECT EXISTS query in has_block".to_owned(),
+        ))
     }
 
     pub async fn load_rendered_block(&self, height: u64) -> Result<String, KolmeStoreError> {
@@ -329,27 +343,17 @@ impl KolmeStorePurePostgres {
         }
     }
 
-    pub async fn store_and_load<T: MerkleDeserializeRaw>(
+    pub async fn load<T: MerkleDeserializeRaw>(
         &self,
         merkle_manager: &MerkleManager,
-        contents: &MerkleContents,
-    ) -> Result<T, KolmeStoreError> {
+        hash: Sha256Hash,
+    ) -> Result<T, MerkleSerialError> {
         let mut store = self.new_store();
 
-        merkle_manager
-            .save_merkle_contents(&mut store, contents)
-            .await?;
-        let result = merkle_manager
-            .load::<T, _>(&mut store, contents.hash)
-            .await
-            .map_err(KolmeStoreError::custom)?;
-
-        self.consume_stores(&self.pool, [store]).await?;
-
-        Ok(result)
+        merkle_manager.load::<T, _>(&mut store, hash).await
     }
 
-    fn new_store(&self) -> merkle::PurePostgresMerkleStore<'_> {
+    pub fn new_store(&self) -> merkle::PurePostgresMerkleStore<'_> {
         merkle::PurePostgresMerkleStore {
             pool: &self.pool,
             merkle_cache: &self.merkle_cache,
@@ -357,6 +361,17 @@ impl KolmeStorePurePostgres {
             childrens_to_insert: Vec::new(),
             hashes_to_insert: Vec::new(),
         }
+    }
+
+    pub async fn save<T: MerkleSerializeRaw>(
+        &self,
+        merkle_manager: &MerkleManager,
+        value: &T,
+    ) -> Result<Arc<merkle_map::MerkleContents>, KolmeStoreError> {
+        let mut store = self.new_store();
+        let contents = merkle_manager.save(&mut store, value).await?;
+        self.consume_stores(&self.pool, [store]).await?;
+        Ok(contents)
     }
 
     async fn consume_stores(

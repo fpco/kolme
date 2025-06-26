@@ -129,7 +129,7 @@ async fn multiple_processors_fjall() {
     checker(x, y, z).await.unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 100)]
+#[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 100))]
 #[serial]
 async fn multiple_processors_postgres() {
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
@@ -187,7 +187,6 @@ async fn multiple_processors_inner(
         None
     };
 
-    kolme::init_logger(false, None);
     let mut kolmes = vec![];
     const PROCESSOR_COUNT: usize = 10;
     const CLIENT_COUNT: usize = 100;

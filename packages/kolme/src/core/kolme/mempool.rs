@@ -1,12 +1,13 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use parking_lot::RwLock;
+use utils::trigger::{Trigger, TriggerSubscriber};
 
 use crate::*;
 
 pub struct Mempool<AppMessage> {
     txs: Arc<RwLock<Queue<AppMessage>>>,
-    notify: Arc<tokio::sync::watch::Sender<usize>>,
+    notify: Trigger,
 }
 
 type Queue<AppMessage> = VecDeque<(TxHash, Arc<SignedTransaction<AppMessage>>)>;
@@ -24,7 +25,7 @@ impl<AppMessage> Mempool<AppMessage> {
     pub(super) fn new() -> Self {
         Self {
             txs: Default::default(),
-            notify: Arc::new(tokio::sync::watch::channel(0).0),
+            notify: Trigger::new("mempool"),
         }
     }
 
@@ -34,7 +35,7 @@ impl<AppMessage> Mempool<AppMessage> {
             if self.txs.read().len() == size {
                 break;
             }
-            recv.changed().await.unwrap();
+            recv.listen().await;
         }
     }
 
@@ -49,7 +50,7 @@ impl<AppMessage> Mempool<AppMessage> {
             if let Some(pair) = self.txs.read().front() {
                 break pair.clone();
             }
-            recv.changed().await.ok();
+            recv.listen().await;
         }
     }
 
@@ -66,16 +67,16 @@ impl<AppMessage> Mempool<AppMessage> {
             }
         }
         if modified {
-            self.notify.send_modify(|x| *x += 1);
+            self.notify.trigger();
         }
     }
 
     pub(super) fn add(&self, tx: Arc<SignedTransaction<AppMessage>>) {
         self.txs.write().push_back((tx.hash(), tx));
-        self.notify.send_modify(|x| *x += 1);
+        self.notify.trigger();
     }
 
-    pub(super) fn subscribe_additions(&self) -> tokio::sync::watch::Receiver<usize> {
+    pub(super) fn subscribe_additions(&self) -> TriggerSubscriber {
         // NOTE: For now, this also notifies on removals, which is fine for our
         // use cases. If that becomes a problem in the future, we can tweak this.
         self.notify.subscribe()

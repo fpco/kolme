@@ -91,13 +91,12 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_sample_sanity() {
     TestTasks::start(test_sample_sanity_inner, ()).await;
 }
 
 async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
-    init_logger(false, None);
     let tempfile = tempfile::tempdir().unwrap();
 
     let kolme = Kolme::new(

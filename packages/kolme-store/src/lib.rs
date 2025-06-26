@@ -3,6 +3,7 @@ use std::sync::Arc;
 use merkle_map::{MerkleDeserialize, MerkleSerialError, MerkleSerialize, Sha256Hash};
 
 /// Contents of a block to be stored in a database.
+#[derive(Debug)]
 pub struct StorableBlock<Block, FrameworkState, AppState> {
     pub height: u64,
     pub blockhash: Sha256Hash,
