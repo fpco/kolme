@@ -156,7 +156,7 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
         Ok(MerkleLockable::new(tree))
     }
 
-    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
         self.locked.set(contents.clone()).ok();
     }
 }
