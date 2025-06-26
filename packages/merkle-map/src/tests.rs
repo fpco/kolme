@@ -92,11 +92,12 @@ async fn load_should_have_locked_status() {
     let tree_contents = manager.save(&mut store, &tree).await.unwrap();
     tree.assert_locked_status(true);
 
-    let mut same_tree: MerkleMap<u8, u8> = manager.load(&mut store, tree_contents.hash).await.unwrap();
+    let mut same_tree: MerkleMap<u8, u8> =
+        manager.load(&mut store, tree_contents.hash).await.unwrap();
     assert_eq!(same_tree, tree);
     same_tree.assert_locked_status(true);
 
-    same_tree.insert(5,5);
+    same_tree.insert(5, 5);
     same_tree.assert_locked_status(false);
 }
 
