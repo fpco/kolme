@@ -385,6 +385,8 @@ impl<App: KolmeApp> Gossip<App> {
                 Some(height) = block_requester_rx.recv() => {
                     if let Err(e) = self.state_sync.lock().await.add_needed_block(height, None).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
+                    } else {
+                        self.trigger_state_sync.trigger();
                     }
                 }
             }

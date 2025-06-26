@@ -671,8 +671,12 @@ impl<App: KolmeApp> Kolme<App> {
                 return Ok(storable_block.block);
             }
 
-            if let Some(requester) = self.inner.block_requester.get() {
-                requester.send(height).await.ok();
+            // Only use the state sync requester if we have a gap in blocks, otherwise
+            // normal mechanisms for filling in blocks will work.
+            if self.read().get_next_height() > height {
+                if let Some(requester) = self.inner.block_requester.get() {
+                    requester.send(height).await.ok();
+                }
             }
 
             // Wait for more data

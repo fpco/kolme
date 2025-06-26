@@ -208,5 +208,19 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     let from_kolme1 = kolme1.load_block(older).await.unwrap();
     assert_eq!(from_gossip.hash().0, from_kolme1.blockhash);
 
-    // TODO Launch archiver and check blocks sync
+    // OK, now launch the archive and try the same thing with every block.
+    testtasks.spawn_persistent(Archiver::new(kolme_state_transfer.clone()).run());
+
+    for height in 0..latest_block_height.0 {
+        let height = BlockHeight(height);
+        let from_gossip = tokio::time::timeout(
+            tokio::time::Duration::from_secs(3),
+            kolme_state_transfer.wait_for_block(height),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let from_kolme1 = kolme1.load_block(height).await.unwrap();
+        assert_eq!(from_gossip.hash().0, from_kolme1.blockhash);
+    }
 }
