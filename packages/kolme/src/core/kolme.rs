@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use solana_client::nonblocking::pubsub_client::PubsubClient;
 use store::KolmeConstructLock;
 pub use store::KolmeStore;
+use utils::trigger::TriggerSubscriber;
 
 #[cfg(feature = "pass_through")]
 use std::sync::OnceLock;
@@ -647,7 +648,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Subscribe to get a notification each time an entry is added to the mempool.
-    pub fn subscribe_mempool_additions(&self) -> tokio::sync::watch::Receiver<usize> {
+    pub fn subscribe_mempool_additions(&self) -> TriggerSubscriber {
         self.inner.mempool.subscribe_additions()
     }
 
@@ -671,9 +672,7 @@ impl<App: KolmeApp> Kolme<App> {
             }
 
             // Wait for more data
-            recv.changed()
-                .await
-                .context("wait_for_block: unexpected end of stream from store.subscribe()")?;
+            recv.listen().await;
         }
     }
 

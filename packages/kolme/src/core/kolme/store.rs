@@ -15,6 +15,7 @@ use kolme_store_postgresql::{
 use lru::LruCache;
 use parking_lot::RwLock;
 use tokio::sync::OwnedSemaphorePermit;
+use utils::trigger::{Trigger, TriggerSubscriber};
 
 const BLOCK_CACHE_SIZE: usize = 60;
 
@@ -22,7 +23,7 @@ const BLOCK_CACHE_SIZE: usize = 60;
 pub struct KolmeStore<App: KolmeApp> {
     inner: KolmeStoreInner,
     block_cache: Arc<RwLock<BlockCacheMap<App>>>,
-    notify: tokio::sync::watch::Sender<usize>,
+    notify: Trigger,
 }
 
 #[allow(type_alias_bounds)]
@@ -40,12 +41,11 @@ enum KolmeStoreInner {
 impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
     fn from(inner: KolmeStoreInner) -> Self {
         let cache = BlockCacheMap::<App>::new(NonZeroUsize::new(BLOCK_CACHE_SIZE).unwrap());
-        let notify = tokio::sync::watch::Sender::new(0);
 
         Self {
             inner,
             block_cache: Arc::new(RwLock::new(cache)),
-            notify,
+            notify: Trigger::new("notify"),
         }
     }
 }
@@ -474,11 +474,11 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     fn trigger_notify(&self) {
-        self.notify.send_modify(|x| *x += 1);
+        self.notify.trigger();
     }
 
     /// Subscribe to receive notifications of new data becoming available in the store.
-    pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<usize> {
+    pub(crate) fn subscribe(&self) -> TriggerSubscriber {
         self.notify.subscribe()
     }
 

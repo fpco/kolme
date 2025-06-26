@@ -24,6 +24,7 @@ use state_sync::{DataRequest, StateSyncStatus};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
+use utils::trigger::Trigger;
 
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
@@ -36,9 +37,9 @@ pub struct Gossip<App: KolmeApp> {
     // human-readable name for an instance
     local_display_name: String,
     /// Trigger a broadcast of our latest block height.
-    trigger_broadcast_height: tokio::sync::watch::Sender<u64>,
+    trigger_broadcast_height: Trigger,
     /// Trigger a check of the state sync.
-    trigger_state_sync: tokio::sync::watch::Sender<u64>,
+    trigger_state_sync: Trigger,
     /// Switches to true once we have our first success received message
     watch_network_ready: tokio::sync::watch::Sender<bool>,
     /// Status of state syncs, if present.
@@ -309,8 +310,6 @@ impl GossipBuilder {
             }
         }
 
-        let (trigger_broadcast_height, _) = tokio::sync::watch::channel(0);
-        let (trigger_state_sync, _) = tokio::sync::watch::channel(0);
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
         let state_sync = Mutex::new(StateSyncStatus::new(kolme.clone()));
@@ -322,8 +321,8 @@ impl GossipBuilder {
             sync_mode: self.sync_mode,
             data_load_validation: self.data_load_validation,
             local_peer_id,
-            trigger_broadcast_height,
-            trigger_state_sync,
+            trigger_broadcast_height: Trigger::new("broadcast_height"),
+            trigger_state_sync: Trigger::new("state_sync"),
             watch_network_ready,
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             state_sync,
@@ -375,11 +374,11 @@ impl<App: KolmeApp> Gossip<App> {
                     self.broadcast_mempool_entries(&mut swarm);
                 }.await,
                 // When we're specifically triggered for it, also notify for latest block height
-                _ = trigger_broadcast_height.changed() => async {self.broadcast_latest_block(&mut swarm)}.await,
+                _ = trigger_broadcast_height.listen() => async {self.broadcast_latest_block(&mut swarm)}.await,
                 // Same with state sync
-                _ = trigger_state_sync.changed() => async { self.process_state_sync(&mut swarm).await }.await,
+                _ = trigger_state_sync.listen() => async { self.process_state_sync(&mut swarm).await }.await,
                 // And any time we add something new to the mempool, broadcast all items.
-                _ = mempool_additions.changed() => async {self.broadcast_mempool_entries(&mut swarm)}.await,
+                _ = mempool_additions.listen() => async {self.broadcast_mempool_entries(&mut swarm)}.await,
             }
         }
     }
@@ -560,7 +559,7 @@ impl<App: KolmeApp> Gossip<App> {
             }
             GossipMessage::RequestBlockHeights(_) => {
                 tracing::debug!("{local_display_name}: got block heights request message");
-                self.trigger_broadcast_height.send_modify(|old| *old += 1);
+                self.trigger_broadcast_height.trigger();
             }
             GossipMessage::ReportBlockHeight(report) => {
                 tracing::debug!("{local_display_name}: got block height report message");
@@ -684,7 +683,7 @@ impl<App: KolmeApp> Gossip<App> {
                     .add_pending_block(block, peer)
                     .await
                 {
-                    Ok(()) => self.trigger_state_sync.send_modify(|old| *old += 1),
+                    Ok(()) => self.trigger_state_sync.trigger(),
                     Err(e) => {
                         tracing::error!("{local_display_name}: error adding pending block: {e}")
                     }
@@ -703,7 +702,7 @@ impl<App: KolmeApp> Gossip<App> {
                     .add_merkle_layer(hash, contents, peer)
                     .await
                 {
-                    Ok(()) => self.trigger_state_sync.send_modify(|old| *old += 1),
+                    Ok(()) => self.trigger_state_sync.trigger(),
                     Err(e) => tracing::error!(
                         "{local_display_name}: error adding Merkle layer contents for {hash}: {e}"
                     ),
@@ -773,7 +772,7 @@ impl<App: KolmeApp> Gossip<App> {
                 .add_needed_block(their_highest, peer)
                 .await
             {
-                Ok(()) => self.trigger_state_sync.send_modify(|old| *old += 1),
+                Ok(()) => self.trigger_state_sync.trigger(),
                 Err(e) => tracing::error!(
                     "{}: error adding needed block: {e}",
                     self.local_display_name
