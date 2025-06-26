@@ -61,6 +61,7 @@ pub(super) enum DataRequest {
 }
 
 /// Status of a request for data.
+#[derive(Debug)]
 struct RequestStatus {
     /// When was the last time we tried with a new peer? If it's too long
     /// ago, we need to find new peers to query.
@@ -70,15 +71,23 @@ struct RequestStatus {
 }
 
 impl RequestStatus {
-    fn new(peer: PeerId) -> Self {
+    fn new(peer: Option<PeerId>) -> Self {
         RequestStatus {
             last_new_peer: Instant::now(),
-            peers: std::iter::once(peer).collect(),
+            peers: peer.into_iter().collect(),
         }
     }
 
     fn need_new_peers(&self) -> bool {
         self.last_new_peer.elapsed().as_secs() > MAX_NEW_PEER_DELAY
+    }
+
+    fn add_peer(&mut self, peer: PeerId) {
+        if self.peers.len() >= REQUEST_COUNT {
+            debug_assert!(self.peers.len() == REQUEST_COUNT);
+            self.peers.remove(0);
+        }
+        self.peers.push(peer);
     }
 }
 
@@ -99,13 +108,19 @@ impl<App: KolmeApp> StateSyncStatus<App> {
     pub(super) async fn add_needed_block(
         &mut self,
         height: BlockHeight,
-        peer: PeerId,
+        peer: Option<PeerId>,
     ) -> Result<()> {
         if !self.kolme.has_block(height).await? {
             self.needed_blocks.insert(height, RequestStatus::new(peer));
             self.queue.push_front(PendingData::Block(height));
         }
         Ok(())
+    }
+
+    pub(super) fn add_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
+        if let Some(status) = self.needed_blocks.get_mut(&height) {
+            status.add_peer(peer);
+        }
     }
 
     pub(super) async fn add_pending_block(
@@ -124,7 +139,8 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                 if !self.kolme.has_merkle_hash(hash).await? {
                     has_all = false;
                     self.reverse_blocks.entry(hash).or_default().insert(height);
-                    self.needed_layers.insert(hash, RequestStatus::new(peer));
+                    self.needed_layers
+                        .insert(hash, RequestStatus::new(Some(peer)));
                     self.queue.push_back(PendingData::Merkle(hash));
                 }
             }
@@ -153,7 +169,8 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                 if !self.kolme.has_merkle_hash(*child).await? {
                     has_all = false;
                     self.reverse_layers.entry(*child).or_default().insert(hash);
-                    self.needed_layers.insert(*child, RequestStatus::new(peer));
+                    self.needed_layers
+                        .insert(*child, RequestStatus::new(Some(peer)));
                     self.queue.push_back(PendingData::Merkle(*child));
                 }
             }

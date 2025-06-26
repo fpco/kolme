@@ -354,6 +354,9 @@ impl<App: KolmeApp> Gossip<App> {
 
         let mut mempool_additions = self.kolme.subscribe_mempool_additions();
 
+        let (block_requester, mut block_requester_rx) = tokio::sync::mpsc::channel(8);
+        self.kolme.set_block_requester(block_requester);
+
         loop {
             tokio::select! {
                 // Our local Kolme generated a notification to be sent through the
@@ -378,7 +381,12 @@ impl<App: KolmeApp> Gossip<App> {
                 // Same with state sync
                 _ = trigger_state_sync.listen() => async { self.process_state_sync(&mut swarm).await }.await,
                 // And any time we add something new to the mempool, broadcast all items.
-                _ = mempool_additions.listen() => async {self.broadcast_mempool_entries(&mut swarm)}.await,
+                _ = mempool_additions.listen() => self.broadcast_mempool_entries(&mut swarm),
+                Some(height) = block_requester_rx.recv() => {
+                    if let Err(e) = self.state_sync.lock().await.add_needed_block(height, None).await {
+                        tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
+                    }
+                }
             }
         }
     }
@@ -502,7 +510,8 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                     Ok(message) => {
                         tracing::debug!("{local_display_name}: Received message: {message}");
-                        if let Err(e) = self.handle_message(message, peers_with_blocks).await {
+                        if let Err(e) = self.handle_message(message, peers_with_blocks, swarm).await
+                        {
                             tracing::warn!(
                                 "{local_display_name}: Error while handling message: {e}"
                             );
@@ -538,6 +547,7 @@ impl<App: KolmeApp> Gossip<App> {
         &self,
         message: GossipMessage<App>,
         peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
+        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) -> Result<()> {
         let local_display_name = self.local_display_name.clone();
         match message {
@@ -574,6 +584,25 @@ impl<App: KolmeApp> Gossip<App> {
             }
             GossipMessage::BroadcastTx { tx } => {
                 self.kolme.propose_transaction(tx);
+            }
+            GossipMessage::RequestBlockContents { height, peer } => {
+                match self.kolme.has_block(height).await {
+                    Err(e) => {
+                        tracing::warn!(
+                            "{local_display_name}: RequestBlockContents error on {height}: {e}"
+                        );
+                    }
+                    Ok(false) => (),
+                    Ok(true) => {
+                        swarm.behaviour_mut().request_response.send_request(
+                            &peer,
+                            BlockRequest::BlockAvailable {
+                                height,
+                                peer: self.peer_id(),
+                            },
+                        );
+                    }
+                }
             }
         }
 
@@ -665,6 +694,10 @@ impl<App: KolmeApp> Gossip<App> {
                     )
                 }
             },
+            BlockRequest::BlockAvailable { height, peer } => {
+                self.state_sync.lock().await.add_block_peer(height, peer);
+                self.trigger_state_sync.trigger();
+            }
         }
     }
 
@@ -769,7 +802,7 @@ impl<App: KolmeApp> Gossip<App> {
                 .state_sync
                 .lock()
                 .await
-                .add_needed_block(their_highest, peer)
+                .add_needed_block(their_highest, Some(peer))
                 .await
             {
                 Ok(()) => self.trigger_state_sync.trigger(),
@@ -823,15 +856,23 @@ impl<App: KolmeApp> Gossip<App> {
                     current_peers,
                     request_new_peers,
                 } => {
+                    if request_new_peers || current_peers.is_empty() {
+                        let msg = GossipMessage::RequestBlockContents {
+                            height,
+                            peer: self.peer_id(),
+                        };
+                        if let Err(e) = msg.publish(self, swarm) {
+                            tracing::warn!(
+                                "{}: error requesting block contents for {height}: {e}",
+                                self.local_display_name
+                            );
+                        }
+                    }
                     for peer in current_peers {
                         swarm
                             .behaviour_mut()
                             .request_response
                             .send_request(&peer, BlockRequest::BlockWithStateAtHeight(height));
-                    }
-                    if request_new_peers {
-                        // https://github.com/fpco/kolme/issues/349
-                        tracing::warn!("TODO: Implement new peer discovery for blocks: {height}");
                     }
                 }
                 DataRequest::GetMerkle {
