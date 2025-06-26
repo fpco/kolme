@@ -14,8 +14,6 @@ use smallvec::SmallVec;
 use crate::*;
 
 /// Status of state syncing.
-///
-/// TODO: Write up a doc explaining how this process works.
 pub(super) struct StateSyncStatus<App: KolmeApp> {
     kolme: Kolme<App>,
     /// A queue of data requests we need to process.
