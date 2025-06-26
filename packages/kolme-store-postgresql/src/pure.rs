@@ -259,8 +259,6 @@ impl KolmeStorePurePostgres {
         .execute(&mut *tx)
         .await;
 
-        tx.commit().await.map_err(KolmeStoreError::custom)?;
-
         if let Err(e) = res {
             // If the block already exists in the database, ignore the error
             if let Some(db_error) = e.as_database_error() {
@@ -296,6 +294,8 @@ impl KolmeStorePurePostgres {
                 }
             }
             return Err(KolmeStoreError::custom(e));
+        } else {
+            tx.commit().await.map_err(KolmeStoreError::custom)?;
         }
 
         self.latest_block
