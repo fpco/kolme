@@ -53,8 +53,7 @@ impl KolmeStoreFjall {
     pub fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
         self.merkle
             .handle
-            .get(block_key(height))
-            .map(|x| x.is_some())
+            .contains_key(block_key(height))
             .map_err(KolmeStoreError::custom)
     }
 
