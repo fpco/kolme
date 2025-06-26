@@ -132,22 +132,16 @@ impl KolmeStorePostgres {
 
     pub async fn has_block(&self, height: u64) -> Result<bool, KolmeStoreError> {
         let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
-        let count = sqlx::query_scalar!(
-            r#"
-                SELECT COUNT(*)
-                FROM blocks
-                WHERE height=$1
-            "#,
+        sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM blocks WHERE height=$1)",
             height_i64,
         )
         .fetch_one(&self.pool)
         .await
         .map_err(KolmeStoreError::custom)?
         .ok_or(KolmeStoreError::Other(
-            "Impossible empty result from a COUNT(*) query in has_block".to_owned(),
-        ))?;
-        debug_assert!(count < 2);
-        Ok(count >= 1)
+            "Impossible empty result from a SELECT EXISTS query in has_block".to_owned(),
+        ))
     }
 
     pub async fn load_rendered_block(&self, height: u64) -> Result<String, KolmeStoreError> {
