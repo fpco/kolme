@@ -82,7 +82,7 @@ pub trait MerkleDeserialize: Sized {
         version: usize,
     ) -> Result<Self, MerkleSerialError>;
 
-    fn set_merkle_contents(&self, _contents: Arc<MerkleContents>) {}
+    fn set_merkle_contents(&self, _contents: &Arc<MerkleContents>) {}
 }
 
 pub trait MerkleDeserializeRaw: Sized {
@@ -90,7 +90,7 @@ pub trait MerkleDeserializeRaw: Sized {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError>;
 
-    fn set_merkle_contents_raw(&self, _contents: Arc<MerkleContents>) {}
+    fn set_merkle_contents_raw(&self, _contents: &Arc<MerkleContents>) {}
 }
 
 /// A backing store for raw blobs used by a [MerkleMap].

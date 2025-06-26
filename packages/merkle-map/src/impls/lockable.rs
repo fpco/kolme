@@ -4,7 +4,7 @@ use crate::*;
 
 /// Allows a value to be locked with a pre-computed Merkle hash.
 pub struct MerkleLockable<T> {
-    locked: Arc<OnceLock<Arc<MerkleContents>>>,
+    pub(super) locked: Arc<OnceLock<Arc<MerkleContents>>>,
     inner: Arc<T>,
 }
 
@@ -60,8 +60,8 @@ impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleLockable<T> {
         T::merkle_deserialize_raw(deserializer).map(MerkleLockable::new)
     }
 
-    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
-        self.locked.set(contents).unwrap()
+    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
+        self.locked.set(contents.clone()).unwrap()
     }
 }
 

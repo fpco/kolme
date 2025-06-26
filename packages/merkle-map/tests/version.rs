@@ -222,12 +222,8 @@ async fn load_from_zero_helper(people: Vec<Person0>, to_modify: usize, new_stree
     }
 
     // Reserializing without any changes should produce the same hash, since it's already cached
-    // TODO: There's a separate bug in MerkleMap that prevents this test from passing,
-    // see #301
-    if false {
-        let parsed1_contents = manager.save(&mut store, &parsed1).await.unwrap();
-        assert_eq!(m0_contents.hash, parsed1_contents.hash);
-    }
+    let parsed1_contents = manager.save(&mut store, &parsed1).await.unwrap();
+    assert_eq!(m0_contents.hash, parsed1_contents.hash);
 
     // Should also work to load directly into Person2
     let parsed2 = manager.load(&mut store, m0_contents.hash).await.unwrap();

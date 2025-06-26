@@ -37,7 +37,7 @@ impl<T: MerkleSerialize + MerkleDeserialize> MerkleDeserializeRaw for T {
         }
     }
 
-    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
         MerkleDeserialize::set_merkle_contents(self, contents);
     }
 }

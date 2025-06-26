@@ -112,7 +112,7 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for Node<K,
         }
     }
 
-    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
         match self {
             Node::Leaf(lockable) => lockable.set_merkle_contents_raw(contents),
             Node::Tree(lockable) => lockable.set_merkle_contents_raw(contents),

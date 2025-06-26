@@ -111,7 +111,7 @@ impl MerkleManager {
         let mut deserializer = MerkleDeserializer::new(hash, payload, self.clone());
         let value = T::merkle_deserialize_raw(&mut deserializer)?;
         let contents = Arc::new(deserializer.finish()?);
-        value.set_merkle_contents_raw(contents);
+        value.set_merkle_contents_raw(&contents);
         Ok(value)
     }
 

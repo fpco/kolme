@@ -197,7 +197,7 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleM
         Node::merkle_deserialize_raw(deserializer).map(MerkleMap)
     }
 
-    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
         self.0.set_merkle_contents_raw(contents);
     }
 }
