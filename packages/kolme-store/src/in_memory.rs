@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
+use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use merkle_map::{
     MerkleDeserialize, MerkleManager, MerkleMemoryStore, MerkleSerialize, MerkleStore, Sha256Hash,
 };

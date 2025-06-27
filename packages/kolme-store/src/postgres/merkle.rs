@@ -3,10 +3,10 @@ use std::sync::Arc;
 use merkle_map::{MerkleStore, Sha256Hash};
 use smallvec::SmallVec;
 use sqlx::{
-    Decode, Encode, Postgres, Type,
     encode::IsNull,
     error::BoxDynError,
     postgres::{PgHasArrayType, PgTypeInfo},
+    Decode, Encode, Postgres, Type,
 };
 
 use super::MerkleCache;

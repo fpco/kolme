@@ -1,4 +1,4 @@
-use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
+use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, MerkleStore as _, Sha256Hash};
 use std::path::Path;
 
