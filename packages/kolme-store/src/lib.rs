@@ -1,6 +1,7 @@
 use std::sync::Arc;
 mod block;
 mod error;
+mod postgres;
 mod r#trait;
 
 use merkle_map::{MerkleDeserialize, MerkleSerialError, MerkleSerialize, Sha256Hash};
@@ -15,6 +16,10 @@ pub struct StorableBlock<Block, FrameworkState, AppState> {
     pub framework_state: Arc<FrameworkState>,
     pub app_state: Arc<AppState>,
     pub logs: Arc<[Vec<String>]>,
+pub enum KolmeConstructLock {
+    NoLocking,
+    Postgres { _lock: postgres::ConstructLock },
+    InProcess { _lock: OwnedSemaphorePermit },
 }
 
 impl<Block, FrameworkState, AppState> Clone for StorableBlock<Block, FrameworkState, AppState> {
