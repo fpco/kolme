@@ -126,7 +126,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(kolme.read().get_next_height(), BlockHeight::start());
-
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         processor.create_genesis_event().await.unwrap();
         assert_eq!(kolme.read().get_next_height(), BlockHeight::start().next());
@@ -156,8 +155,16 @@ mod tests {
             return;
         }
 
+        // NOTE: At startup, the postgres store hydrates the latest block height from
+        // with a query, thus, we need to recreate after clear so that we truly start from scratch
+        // another alternative could be just issuing the query (I think that's preferred)
+        {
+            let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+                .await
+                .unwrap();
+            store.clear_blocks().await.unwrap();
+        }
         let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
-        store.clear_blocks().await.unwrap();
         test_sample_sanity(store).await
     }
 }

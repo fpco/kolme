@@ -96,14 +96,23 @@ impl KolmeApp for SampleKolmeApp {
 async fn test_postgres_block_double_insertion() {
     let postgres_url =
         std::env::var("PROCESSOR_BLOCK_DB").expect("Variable PROCESSOR_BLOCK_DB was missing");
+
+    // NOTE: At startup, the postgres store hydrates the latest block height from
+    // with a query, thus, we need to recreate after clear so that we truly start from scratch
+    // another alternative could be just issuing the query (I think that's preferred)
+    {
+        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&postgres_url)
+            .await
+            .expect("Unable to start postgres store");
+        store
+            .clear_blocks()
+            .await
+            .expect("Unable to clear postgres store");
+    }
+
     let postgres = KolmeStore::new_postgres(&postgres_url)
         .await
         .expect("Unable to start postgres store");
-
-    postgres
-        .clear_blocks()
-        .await
-        .expect("Unable to clear postgres store");
 
     TestTasks::start(test_block_double_insertion, postgres).await;
 }
