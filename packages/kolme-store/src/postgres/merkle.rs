@@ -3,10 +3,10 @@ use std::sync::Arc;
 use merkle_map::{MerkleStore, Sha256Hash};
 use smallvec::SmallVec;
 use sqlx::{
+    Decode, Encode, Postgres, Type,
     encode::IsNull,
     error::BoxDynError,
     postgres::{PgHasArrayType, PgTypeInfo},
-    Decode, Encode, Postgres, Type,
 };
 
 use super::MerkleCache;
@@ -85,7 +85,7 @@ impl<'a> Encode<'a, Postgres> for ChildrenInner {
 impl<'a> Decode<'a, Postgres> for ChildrenInner {
     fn decode(_: <Postgres as sqlx::Database>::ValueRef<'a>) -> Result<Self, BoxDynError> {
         unreachable!(
-            "This could should not be called as this struct is not used for deserialization"
+            "This should should not be called as this struct is not used for deserialization"
         )
     }
 }

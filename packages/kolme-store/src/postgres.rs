@@ -1,15 +1,15 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
 use anyhow::Context as _;
 use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError,
     MerkleSerialize, MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
-use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Executor, Postgres};
+use sqlx::{Executor, Postgres, pool::PoolOptions, postgres::PgAdvisoryLock};
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, OnceLock, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
 };
 mod merkle;
@@ -98,6 +98,10 @@ impl Store {
             childrens.extend(store.childrens_to_insert);
         }
 
+        // NOTE: Here we use `query` instead of any of the `query!` macros
+        // as they do not play well with custom `Type`/`Decode`/`Encode`
+        // implementations and using Vec<u8> or [u8] types here would incur
+        // in extra allocations to prepare the types
         sqlx::query(
             r#"
             INSERT INTO merkle_contents(hash, payload, children)
