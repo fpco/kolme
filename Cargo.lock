@@ -4097,18 +4097,15 @@ dependencies = [
  "borsh 1.5.7",
  "cosmos",
  "cosmwasm-std",
- "fjall",
  "futures-util",
  "hex",
  "jiff",
  "kademlia-discovery",
  "kolme-solana-bridge-client",
  "kolme-store",
- "kolme-store-postgresql",
  "libp2p",
  "lru 0.14.0",
  "merkle-map",
- "merkle-store-fjall",
  "parking_lot",
  "quickcheck",
  "rand 0.8.5",
@@ -4170,23 +4167,16 @@ dependencies = [
 name = "kolme-store"
 version = "0.1.0"
 dependencies = [
- "merkle-map",
- "thiserror 2.0.12",
-]
-
-[[package]]
-name = "kolme-store-postgresql"
-version = "0.1.0"
-dependencies = [
  "anyhow",
+ "enum_dispatch",
  "fjall",
- "kolme-store",
  "merkle-map",
- "merkle-store-fjall",
+ "quickcheck",
  "serde",
  "serde_json",
  "smallvec",
  "sqlx",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
 ]
@@ -4886,16 +4876,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tinyvec",
  "tokio",
-]
-
-[[package]]
-name = "merkle-store-fjall"
-version = "0.1.0"
-dependencies = [
- "fjall",
- "merkle-map",
- "quickcheck",
- "smallvec",
 ]
 
 [[package]]

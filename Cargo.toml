@@ -6,9 +6,7 @@ members = [
   "packages/integration-tests",
   "packages/kolme",
   "packages/kolme-store",
-  "packages/kolme-store-postgresql",
   "packages/merkle-map",
-  "packages/merkle-store-fjall",
   "packages/shared",
   "packages/test-runner",
 ]
@@ -28,14 +26,11 @@ jiff = { version = "0.2.3", features = ["serde"] }
 rust_decimal = "1.37.1"
 kolme = { path = "packages/kolme" }
 kolme-store = { path = "packages/kolme-store" }
-kolme-store-postgresql = { path = "packages/kolme-store-postgresql" }
 libp2p = { version = "0.55" }
 merkle-map = { path = "packages/merkle-map" }
-merkle-store-fjall = { path = "packages/merkle-store-fjall" }
 quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
 test-log = { version = "0.2", features = ["trace"] }
-thiserror = "2.0.12"
 
 [workspace.lints.clippy]
 unused_async = "deny"
