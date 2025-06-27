@@ -2,6 +2,7 @@ use std::sync::Arc;
 mod block;
 mod error;
 mod fjall;
+mod in_memory;
 mod postgres;
 mod r#trait;
 
