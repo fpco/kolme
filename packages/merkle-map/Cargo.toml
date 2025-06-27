@@ -15,7 +15,7 @@ shared = { workspace = true, features = ["realcryptography"] }
 thiserror = "2.0.12"
 tinyvec = { version = "1.9.0", features = ["alloc"] }
 jiff = { workspace = true }
-smallvec = { workspace = true, features = ["serde"] }
+smallvec = { workspace = true }
 
 [dev-dependencies]
 paste = "1.0.15"
