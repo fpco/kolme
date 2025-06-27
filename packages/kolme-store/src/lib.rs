@@ -1,6 +1,7 @@
 use std::sync::Arc;
 mod block;
 mod error;
+mod fjall;
 mod postgres;
 mod r#trait;
 
