@@ -1,4 +1,4 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, MerkleStore as _, Sha256Hash};
 use std::path::Path;
 
@@ -94,6 +94,7 @@ impl KolmeBackingStore for Store {
             .load(&mut store, hash)
             .await
             .map_err(KolmeStoreError::custom)
+            .map(Some)
     }
 
     async fn has_block(&self, height: u64) -> Result<bool, KolmeStoreError> {

@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
 use merkle_map::{
     MerkleDeserialize, MerkleManager, MerkleMemoryStore, MerkleSerialize, MerkleStore, Sha256Hash,
 };
@@ -74,6 +74,7 @@ impl KolmeBackingStore for Store {
             .load(&mut guard.merkle, hash)
             .await
             .map_err(KolmeStoreError::custom)
+            .map(Some)
     }
 
     async fn has_block(&self, height: u64) -> Result<bool, KolmeStoreError> {
