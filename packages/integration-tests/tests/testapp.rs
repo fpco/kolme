@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
-use futures_util::future::join_all;
 use futures_util::StreamExt;
+use futures_util::future::join_all;
 use kolme::ApiNotification;
 use kolme::{
-    testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
-    ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
-    MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor,
-    Transaction, ValidatorSet,
+    AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight, ExecutionContext, GenesisInfo,
+    Kolme, KolmeApp, KolmeStore, MerkleDeserialize, MerkleDeserializer, MerkleSerialError,
+    MerkleSerialize, MerkleSerializer, Message, Processor, Transaction, ValidatorSet,
+    testtasks::TestTasks,
 };
 use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Error;
-use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
 
 const SECRET_KEY_HEX: &str = "bd9c12efb8c473746404dfd893dd06ad8e62772c341d5de9136fec808c5bed92";
 
@@ -177,15 +177,13 @@ where
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_websocket_notifications_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
     TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;
 }
 
-#[test_log::test(tokio::test)]
-#[serial_test::serial]
+#[tokio::test]
 async fn test_websocket_notifications_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;
@@ -467,14 +465,11 @@ async fn test_rejected_transaction_insufficient_balance_inner(
     let tx_withdraw = Arc::new(
         kolme
             .read()
-            .create_signed_transaction(
-                &secret,
-                vec![Message::Bank(BankMessage::Transfer {
-                    asset: AssetId(1),
-                    dest: kolme::AccountId(0),
-                    amount: dec!(500),
-                })],
-            )
+            .create_signed_transaction(&secret, vec![Message::Bank(BankMessage::Transfer {
+                asset: AssetId(1),
+                dest: kolme::AccountId(0),
+                amount: dec!(500),
+            })])
             .unwrap(),
     );
 
