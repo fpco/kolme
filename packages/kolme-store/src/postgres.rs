@@ -107,6 +107,7 @@ impl Store {
             INSERT INTO merkle_contents(hash, payload, children)
             SELECT t.hash, t.payload, t.children
             FROM UNNEST($1::bytea[], $2::bytea[], $3::children[]) as t(hash, payload, children)
+            ON CONFLICT (hash) DO NOTHING
             "#,
         )
         .bind(hashes)
