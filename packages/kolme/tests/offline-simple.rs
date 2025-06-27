@@ -147,17 +147,16 @@ mod tests {
         const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
         let block_db_str = match std::env::var(ENVVAR) {
             Ok(x) => x,
-            Err(e) => panic!("Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}")
+            Err(e) => panic!(
+                "Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}"
+            ),
         };
         if block_db_str == "SKIP" {
             println!("Skipping test due to no local database being available");
             return;
         }
 
-        let tempdir = tempfile::tempdir().unwrap();
-        let store = KolmeStore::new_postgres_with_fjall(&block_db_str, tempdir.path())
-            .await
-            .unwrap();
+        let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
         store.clear_blocks().await.unwrap();
         test_sample_sanity(store).await
     }
