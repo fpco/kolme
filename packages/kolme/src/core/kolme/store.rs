@@ -1,20 +1,13 @@
-mod fjall;
-mod in_memory;
-
+use crate::core::*;
 use std::{num::NonZeroUsize, path::Path};
 
-use crate::core::*;
-
-use fjall::KolmeStoreFjall;
-use in_memory::KolmeStoreInMemory;
-use kolme_store::{KolmeStoreError, StorableBlock};
-use kolme_store_postgresql::{
-    sqlx::{pool::PoolOptions, Postgres},
-    ConstructLock, KolmeStorePostgres, KolmeStorePurePostgres,
+use kolme_store::sqlx::{pool::PoolOptions, Postgres};
+use kolme_store::{
+    KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
+    StorableBlock,
 };
 use lru::LruCache;
 use parking_lot::RwLock;
-use tokio::sync::OwnedSemaphorePermit;
 use utils::trigger::{Trigger, TriggerSubscriber};
 
 const BLOCK_CACHE_SIZE: usize = 60;
@@ -30,14 +23,6 @@ pub struct KolmeStore<App: KolmeApp> {
 type BlockCacheMap<App: KolmeApp> =
     LruCache<BlockHeight, StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>;
 
-#[derive(Clone)]
-enum KolmeStoreInner {
-    Fjall(KolmeStoreFjall),
-    Postgres(KolmeStorePostgres),
-    InMemory(in_memory::KolmeStoreInMemory),
-    PurePostgres(KolmeStorePurePostgres),
-}
-
 impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
     fn from(inner: KolmeStoreInner) -> Self {
         let cache = BlockCacheMap::<App>::new(NonZeroUsize::new(BLOCK_CACHE_SIZE).unwrap());
@@ -50,24 +35,11 @@ impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
     }
 }
 
-pub enum KolmeConstructLock {
-    NoLocking,
-    Postgres { _lock: ConstructLock },
-    InMemory { _permit: OwnedSemaphorePermit },
-}
-
 impl<App: KolmeApp> KolmeStore<App> {
-    pub async fn new_postgres_with_fjall(url: &str, fjall_dir: impl AsRef<Path>) -> Result<Self> {
-        KolmeStorePostgres::new(url, fjall_dir)
-            .await
-            .map(|x| KolmeStoreInner::Postgres(x).into())
-            .map_err(anyhow::Error::from)
-    }
-
     pub async fn new_postgres(url: &str) -> Result<Self> {
-        KolmeStorePurePostgres::new(url)
+        KolmeStoreInner::new_postgres(url)
             .await
-            .map(|x| KolmeStoreInner::PurePostgres(x).into())
+            .map(KolmeStore::from)
             .map_err(anyhow::Error::from)
     }
 
@@ -75,18 +47,18 @@ impl<App: KolmeApp> KolmeStore<App> {
         url: &str,
         options: PoolOptions<Postgres>,
     ) -> Result<Self> {
-        KolmeStorePurePostgres::new_with_options(url, options)
+        KolmeStoreInner::new_postgres_with_options(url, options)
             .await
-            .map(|x| KolmeStoreInner::PurePostgres(x).into())
+            .map(KolmeStore::from)
             .map_err(anyhow::Error::from)
     }
 
     pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
-        KolmeStoreFjall::new(dir).map(|x| KolmeStoreInner::Fjall(x).into())
+        KolmeStoreInner::new_fjall(dir).map(KolmeStore::from)
     }
 
     pub fn new_in_memory() -> Self {
-        KolmeStoreInner::InMemory(KolmeStoreInMemory::default()).into()
+        KolmeStoreInner::new_in_memory().into()
     }
 
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
@@ -125,18 +97,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     /// Very dangerous function! Intended for testing. Deletes all blocks in the database.
     pub async fn clear_blocks(&self) -> Result<(), KolmeStoreError> {
         self.block_cache.write().clear();
-        match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => {
-                kolme_store_postgres.clear_blocks().await
-            }
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
-                kolme_store_postgres.clear_blocks().await
-            }
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                kolme_store_in_memory.clear_blocks().await
-            }
-            KolmeStoreInner::Fjall(kolme_store_fjall) => kolme_store_fjall.clear_blocks(),
-        }
+        self.inner.clear_blocks().await
     }
 
     /// Delete the given block height.
@@ -144,35 +105,12 @@ impl<App: KolmeApp> KolmeStore<App> {
     /// Currently only implemented for the in-memory store, since this is intended
     /// exclusively for test cases.
     pub async fn delete_block(&self, height: BlockHeight) -> Result<()> {
-        match &self.inner {
-            KolmeStoreInner::Fjall(_)
-            | KolmeStoreInner::Postgres(_)
-            | KolmeStoreInner::PurePostgres(_) => Err(anyhow::anyhow!(
-                "KolmeStore::delete_block only supports InMemory"
-            )),
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                self.block_cache.write().pop(&height);
-                kolme_store_in_memory.delete_block(height).await;
-                Ok(())
-            }
-        }
+        self.inner.delete_block(height.0).await?;
+        Ok(())
     }
 
     pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
-        match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => Ok(KolmeConstructLock::Postgres {
-                _lock: kolme_store_postgres.take_construct_lock().await?,
-            }),
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
-                Ok(KolmeConstructLock::Postgres {
-                    _lock: kolme_store_postgres.take_construct_lock().await?,
-                })
-            }
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => Ok(KolmeConstructLock::InMemory {
-                _permit: kolme_store_in_memory.take_construct_lock().await,
-            }),
-            KolmeStoreInner::Fjall(_kolme_store_fjall) => Ok(KolmeConstructLock::NoLocking),
-        }
+        Ok(self.inner.take_construct_lock().await?)
     }
 
     pub(crate) async fn has_merkle_hash(
@@ -181,24 +119,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     ) -> Result<bool, MerkleSerialError> {
         // TODO consider if we should look at the merkle manager's cache first
         // for efficiency, probably yes
-        match &self.inner {
-            KolmeStoreInner::Fjall(store) => {
-                let mut merkle = store.merkle.clone();
-                merkle.contains_hash(hash).await
-            }
-            KolmeStoreInner::Postgres(store) => {
-                let mut merkle = store.get_merkle_store().clone();
-                merkle.contains_hash(hash).await
-            }
-            KolmeStoreInner::InMemory(store) => {
-                let mut merkle = store.get_merkle_store().await;
-                merkle.contains_hash(hash).await
-            }
-            KolmeStoreInner::PurePostgres(store) => {
-                let mut merkle = store.new_store();
-                merkle.contains_hash(hash).await
-            }
-        }
+        self.inner.has_merkle_hash(hash).await
     }
 
     pub(crate) async fn add_merkle_layer(
@@ -210,42 +131,14 @@ impl<App: KolmeApp> KolmeStore<App> {
         for child in &layer.children {
             anyhow::ensure!(self.has_merkle_hash(*child).await?);
         }
-        match &self.inner {
-            KolmeStoreInner::Fjall(store) => {
-                let mut merkle = store.merkle.clone();
-                merkle.save_by_hash(hash, layer).await
-            }
-            KolmeStoreInner::Postgres(store) => {
-                let mut merkle = store.get_merkle_store().clone();
-                merkle.save_by_hash(hash, layer).await
-            }
-            KolmeStoreInner::InMemory(store) => {
-                let mut merkle = store.get_merkle_store().await;
-                merkle.save_by_hash(hash, layer).await
-            }
-            KolmeStoreInner::PurePostgres(store) => {
-                let mut merkle = store.new_store();
-                merkle.save_by_hash(hash, layer).await
-            }
-        }
-        .map_err(anyhow::Error::from)
+
+        self.inner.add_merkle_layer(hash, layer).await
     }
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
     pub async fn load_latest_block(&self) -> Result<Option<BlockHeight>> {
-        Ok(match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => kolme_store_postgres
-                .load_latest_block()
-                .map(|x| x.map(BlockHeight))?,
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => kolme_store_postgres
-                .load_latest_block()
-                .map(|x| x.map(BlockHeight))?,
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                kolme_store_in_memory.load_latest_block().await?
-            }
-            KolmeStoreInner::Fjall(kolme_store_fjall) => kolme_store_fjall.load_latest_block()?,
-        })
+        Ok(self.inner.load_latest_block().await?.map(BlockHeight))
     }
 
     pub async fn load_block(
@@ -257,33 +150,7 @@ impl<App: KolmeApp> KolmeStore<App> {
             return Ok(Some(storable.clone()));
         }
 
-        let res = match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => {
-                kolme_store_postgres
-                    .load_block(merkle_manager, height.0)
-                    .await
-            }
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
-                kolme_store_postgres
-                    .load_block(merkle_manager, height.0)
-                    .await
-            }
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                kolme_store_in_memory
-                    .load_block::<App>(merkle_manager, height)
-                    .await
-            }
-            KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                kolme_store_fjall
-                    .load_block::<App>(merkle_manager, height)
-                    .await
-            }
-        };
-        match res {
-            Err(KolmeStoreError::BlockNotFound { height: _ }) => Ok(None),
-            Err(e) => Err(e.into()),
-            Ok(block) => Ok(Some(block)),
-        }
+        Ok(self.inner.load_block(merkle_manager, height.0).await?)
     }
 
     pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
@@ -291,18 +158,7 @@ impl<App: KolmeApp> KolmeStore<App> {
             return Ok(true);
         }
 
-        match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => {
-                kolme_store_postgres.has_block(height.0).await
-            }
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
-                kolme_store_postgres.has_block(height.0).await
-            }
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                kolme_store_in_memory.has_block(height).await
-            }
-            KolmeStoreInner::Fjall(kolme_store_fjall) => kolme_store_fjall.has_block(height),
-        }
+        self.inner.has_block(height.0).await
     }
 
     pub async fn load_signed_block(
@@ -313,58 +169,22 @@ impl<App: KolmeApp> KolmeStore<App> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.block.clone()));
         }
-        let res = match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => kolme_store_postgres
-                .load_rendered_block(height.0)
-                .await
-                .and_then(|s| {
-                    serde_json::from_str(&s)
-                        .map_err(KolmeStoreError::custom)
-                        .map(Arc::new)
-                }),
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => kolme_store_postgres
-                .load_rendered_block(height.0)
-                .await
-                .and_then(|s| {
-                    serde_json::from_str(&s)
-                        .map_err(KolmeStoreError::custom)
-                        .map(Arc::new)
-                }),
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => kolme_store_in_memory
-                .load_block::<App>(merkle_manager, height)
-                .await
-                .map(|x| x.block),
-            KolmeStoreInner::Fjall(kolme_store_fjall) => kolme_store_fjall
-                .load_block::<App>(merkle_manager, height)
-                .await
-                .map(|x| x.block),
-        };
-        match res {
-            Err(KolmeStoreError::BlockNotFound { height: _ }) => Ok(None),
-            Err(e) => Err(e.into()),
-            Ok(block) => Ok(Some(block)),
-        }
+
+        Ok(self
+            .inner
+            .load_signed_block::<SignedBlock<App::Message>, FrameworkState, App::State>(
+                merkle_manager,
+                height.0,
+            )
+            .await?)
     }
 
     pub(super) async fn get_height_for_tx(&self, txhash: TxHash) -> Result<Option<BlockHeight>> {
-        match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => kolme_store_postgres
-                .get_height_for_tx(txhash.0)
-                .await
-                .map(|x| x.map(BlockHeight))
-                .map_err(anyhow::Error::from),
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => kolme_store_postgres
-                .get_height_for_tx(txhash.0)
-                .await
-                .map(|x| x.map(BlockHeight))
-                .map_err(anyhow::Error::from),
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                kolme_store_in_memory.get_height_for_tx(txhash).await
-            }
-            KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                kolme_store_fjall.get_height_for_tx(txhash)
-            }
-        }
+        Ok(self
+            .inner
+            .get_height_for_tx(txhash.0)
+            .await?
+            .map(BlockHeight))
     }
 
     pub(super) async fn add_block(
@@ -383,25 +203,7 @@ impl<App: KolmeApp> KolmeStore<App> {
             .await?;
         self.save(merkle_manager, &block.logs, inner.logs).await?;
 
-        let insertion_result = match &self.inner {
-            KolmeStoreInner::Postgres(kolme_store_postgres) => {
-                kolme_store_postgres.add_block(merkle_manager, &block).await
-            }
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
-                kolme_store_postgres.add_block(merkle_manager, &block).await
-            }
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                kolme_store_in_memory
-                    .add_block::<App>(merkle_manager, &block)
-                    .await
-            }
-            KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                kolme_store_fjall
-                    .add_block::<App>(merkle_manager, &block)
-                    .await
-            }
-        };
-
+        let insertion_result = self.inner.add_block(merkle_manager, &block).await;
         match insertion_result {
             Err(KolmeStoreError::MatchingBlockAlreadyInserted { .. }) | Ok(_) => {
                 self.block_cache
@@ -423,23 +225,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         value: &T,
         expected: Sha256Hash,
     ) -> Result<()> {
-        let actual = match &self.inner {
-            KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                let mut store = kolme_store_fjall.merkle.clone();
-                merkle_manager.save(&mut store, value).await?
-            }
-            KolmeStoreInner::Postgres(kolme_store_postgres) => {
-                let mut store = kolme_store_postgres.get_merkle_store().clone();
-                merkle_manager.save(&mut store, value).await?
-            }
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
-                kolme_store_postgres.save(merkle_manager, value).await?
-            }
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                let mut store = kolme_store_in_memory.get_merkle_store().await;
-                merkle_manager.save(&mut store, value).await?
-            }
-        };
+        let actual = self.inner.save(merkle_manager, value).await?;
         anyhow::ensure!(
             expected == actual.hash,
             "Hash mismatch, expected {expected} but received {}",
@@ -454,23 +240,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         merkle_manager: &MerkleManager,
         hash: Sha256Hash,
     ) -> Result<T, MerkleSerialError> {
-        match &self.inner {
-            KolmeStoreInner::Fjall(kolme_store_fjall) => {
-                let mut store = kolme_store_fjall.merkle.clone();
-                merkle_manager.load(&mut store, hash).await
-            }
-            KolmeStoreInner::Postgres(kolme_store_postgres) => {
-                let mut store = kolme_store_postgres.get_merkle_store().clone();
-                merkle_manager.load(&mut store, hash).await
-            }
-            KolmeStoreInner::PurePostgres(kolme_store_postgres) => {
-                kolme_store_postgres.load(merkle_manager, hash).await
-            }
-            KolmeStoreInner::InMemory(kolme_store_in_memory) => {
-                let mut store = kolme_store_in_memory.get_merkle_store().await;
-                merkle_manager.load(&mut store, hash).await
-            }
-        }
+        self.inner.load(merkle_manager, hash).await
     }
 
     fn trigger_notify(&self) {
@@ -486,23 +256,6 @@ impl<App: KolmeApp> KolmeStore<App> {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
-        match &self.inner {
-            KolmeStoreInner::Fjall(store) => {
-                let mut merkle = store.merkle.clone();
-                merkle.load_by_hash(hash).await
-            }
-            KolmeStoreInner::Postgres(store) => {
-                let mut merkle = store.get_merkle_store().clone();
-                merkle.load_by_hash(hash).await
-            }
-            KolmeStoreInner::InMemory(store) => {
-                let mut merkle = store.get_merkle_store().await;
-                merkle.load_by_hash(hash).await
-            }
-            KolmeStoreInner::PurePostgres(store) => {
-                let mut merkle = store.new_store();
-                merkle.load_by_hash(hash).await
-            }
-        }
+        self.inner.get_merkle_layer(hash).await
     }
 }

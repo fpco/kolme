@@ -4,10 +4,9 @@ mod store;
 
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
-use kolme_store::{KolmeStoreError, StorableBlock};
+use kolme_store::{KolmeConstructLock, KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
 use solana_client::nonblocking::pubsub_client::PubsubClient;
-use store::KolmeConstructLock;
 pub use store::KolmeStore;
 use utils::trigger::TriggerSubscriber;
 
@@ -153,7 +152,9 @@ impl<App: KolmeApp> Kolme<App> {
             let new_when = new_latest.when;
 
             if new_height < old_height {
-                tracing::warn!("Got a latest block of {new_height}, which is less than last known value of {old_height}");
+                tracing::warn!(
+                    "Got a latest block of {new_height}, which is less than last known value of {old_height}"
+                );
                 Err(())
             } else if old_when >= new_when {
                 Err(())
@@ -240,8 +241,8 @@ impl<App: KolmeApp> Kolme<App> {
                         Ok(pubkey) => pubkey,
                         Err(e) => {
                             tracing::warn!(
-                            "Received invalid signature on a FailedTransaction notification: {e}"
-                        );
+                                "Received invalid signature on a FailedTransaction notification: {e}"
+                            );
                             continue;
                         }
                     };
@@ -252,7 +253,9 @@ impl<App: KolmeApp> Kolme<App> {
                             .get_validator_set()
                             .processor
                     {
-                        tracing::warn!("Received a FailedTransaction notification from {pubkey}, which is not the processor, ignoring");
+                        tracing::warn!(
+                            "Received a FailedTransaction notification from {pubkey}, which is not the processor, ignoring"
+                        );
                         continue;
                     }
                     if txhash_orig == failed.message.as_inner().txhash {
@@ -361,11 +364,18 @@ impl<App: KolmeApp> Kolme<App> {
 
         let actual_parent = kolme.get_current_block_hash();
         let block_parent = signed_block.0.message.as_inner().parent;
-        anyhow::ensure!(actual_parent == block_parent, "Tried to add block height {}, but actual parent has block hash {actual_parent} and block specifies {block_parent}", signed_block.height());
+        anyhow::ensure!(
+            actual_parent == block_parent,
+            "Tried to add block height {}, but actual parent has block hash {actual_parent} and block specifies {block_parent}",
+            signed_block.height()
+        );
 
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
-        anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+        anyhow::ensure!(
+            expected_processor == actual_processor,
+            "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
+        );
 
         // Ensure the max height is respected if present
         if let Some(max_height) = signed_block.tx().0.message.as_inner().max_height {
@@ -502,7 +512,10 @@ impl<App: KolmeApp> Kolme<App> {
         let kolme = self.read();
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
-        anyhow::ensure!(expected_processor == actual_processor, "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}");
+        anyhow::ensure!(
+            expected_processor == actual_processor,
+            "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
+        );
 
         let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
@@ -1057,14 +1070,14 @@ impl<App: KolmeApp> KolmeRead<App> {
                         chain: chain.to_cosmos_chain().unwrap(),
                         code_id: *code_id,
                         validator_set: self.get_framework_state().get_validator_set().clone(),
-                    })
+                    });
                 }
                 BridgeContract::NeededSolanaBridge { program_id } => {
                     return Some(GenesisAction::InstantiateSolana {
                         chain: chain.to_solana_chain().unwrap(),
                         program_id: program_id.clone(),
                         validator_set: self.get_framework_state().get_validator_set().clone(),
-                    })
+                    });
                 }
                 BridgeContract::Deployed(_) => (),
             }
