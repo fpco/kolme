@@ -1,15 +1,15 @@
-use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
+use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use anyhow::Context as _;
 use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError,
     MerkleSerialize, MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
-use sqlx::{Executor, Postgres, pool::PoolOptions, postgres::PgAdvisoryLock};
+use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Executor, Postgres};
 use std::{
     collections::HashMap,
     sync::{
-        Arc, OnceLock, RwLock,
         atomic::{AtomicU64, Ordering},
+        Arc, OnceLock, RwLock,
     },
 };
 mod merkle;
