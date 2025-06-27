@@ -7,8 +7,6 @@ use merkle_map::{
     MerkleSerialError, MerkleSerialize, MerkleSerializeRaw, Sha256Hash,
 };
 
-// NOTE: I'm using the `impl Future<...>` idiom instead of `async fn`
-// in case we want to restrict the futures further (e.g Sync and Send or anything else)
 #[enum_dispatch(KolmeStore)]
 #[allow(async_fn_in_trait)]
 pub trait KolmeBackingStore {
