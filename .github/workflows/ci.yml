@@ -4,12 +4,11 @@ on:
   push:
     branches:
       - main
-
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tests:
@@ -21,70 +20,91 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Setup system
         uses: ./.github/actions/setup-system
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache-prefix-key: tests
       - name: Run tests
+        env:
+          RUSTC_WRAPPER: sccache
         run: just test
+      - name: sccache stats
+        run: sccache --show-stats
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint-${{ runner.os }}
       - name: Setup system
         uses: ./.github/actions/setup-system
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache-prefix-key: lint
-      - name: Cargo fmt
-        run: just fmt
-      - name: Clippy check
-        run: just clippy
-      - name: Install cargo-machete
-        uses: clechasseur/rs-cargo@8435b10f6e71c2e3d4d3b7573003a8ce4bfc6386 # v2.0.6
-        with:
-          command: install
-          args: cargo-machete@0.7.0
-      - name: Machete
-        uses: clechasseur/rs-cargo@8435b10f6e71c2e3d4d3b7573003a8ce4bfc6386 # v2.0.6
+      - name: Run lint checks
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          just fmt
+          just clippy
+      - name: Install and run cargo-machete
+        uses: clechasseur/rs-cargo@v2
         with:
           command: machete
-      - name: Install cargo-audit
-        uses: clechasseur/rs-cargo@8435b10f6e71c2e3d4d3b7573003a8ce4bfc6386 # v2.0.6
-        with:
-          command: install
-          args: cargo-audit@0.21.1 --locked
+          install: cargo-machete@0.7.0
       - name: Cargo audit
-        uses: rustsec/audit-check@dd51754d4e59da7395a4cd9b593f0ff2d61a9b95
+        uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          # RUSTSEC-2023-0071: timing attack looks to be inapplicable
-          # Taken from the six-sigma-v2 repository.
           ignore: "RUSTSEC-2023-0071,RUSTSEC-2025-0009,RUSTSEC-2022-0093,RUSTSEC-2024-0344"
+      - name: Show sccache stats
+        if: always()
+        run: sccache --show-stats
 
   solana-contract:
-    name: Build & Test the Solana bridge contract
+    name: Build & Test Solana Contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: solana-${{ runner.os }}
       - name: Setup just
-        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+        uses: extractions/setup-just@v2
       - name: Setup system
         uses: ./.github/actions/setup-system
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache-prefix-key: solana
-      - name: Install build tools
+      - name: Install Solana tools
         run: |
           curl --proto '=https' --tlsv1.2 -sSfL https://solana-install.solana.workers.dev | bash
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
           echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-      - name: Test
+      - name: Test Solana contract
         working-directory: solana
+        env:
+          RUSTC_WRAPPER: sccache
         run: just test
+      - name: Show sccache stats
+        if: always()
+        run: sccache --show-stats
