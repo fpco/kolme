@@ -126,7 +126,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(kolme.read().get_next_height(), BlockHeight::start());
-
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         processor.create_genesis_event().await.unwrap();
         assert_eq!(kolme.read().get_next_height(), BlockHeight::start().next());
@@ -147,18 +146,25 @@ mod tests {
         const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
         let block_db_str = match std::env::var(ENVVAR) {
             Ok(x) => x,
-            Err(e) => panic!("Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}")
+            Err(e) => panic!(
+                "Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}"
+            ),
         };
         if block_db_str == "SKIP" {
             println!("Skipping test due to no local database being available");
             return;
         }
 
-        let tempdir = tempfile::tempdir().unwrap();
-        let store = KolmeStore::new_postgres_with_fjall(&block_db_str, tempdir.path())
-            .await
-            .unwrap();
-        store.clear_blocks().await.unwrap();
+        // NOTE: At startup, the postgres store hydrates the latest block height from
+        // with a query, thus, we need to recreate after clear so that we truly start from scratch
+        // another alternative could be just issuing the query (I think that's preferred)
+        {
+            let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+                .await
+                .unwrap();
+            store.clear_blocks().await.unwrap();
+        }
+        let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
         test_sample_sanity(store).await
     }
 }

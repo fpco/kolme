@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeSet, HashSet},
-    path::PathBuf,
     sync::{Arc, OnceLock},
 };
 
@@ -9,7 +8,6 @@ use kolme::testtasks::TestTasks;
 use kolme::*;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
-use serial_test::serial;
 
 #[derive(Clone)]
 pub struct SampleKolmeApp {
@@ -95,43 +93,8 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[derive(Clone)]
-enum KolmeMerkleTestStore {
-    Postgres,
-    Fjall,
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 100)]
-#[serial]
-async fn multiple_processors_fjall() {
-    const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
-    let block_db_str = match std::env::var(ENVVAR) {
-        Ok(x) => x,
-        Err(e) => panic!(
-            "Please set the {ENVVAR} environment variable to either SKIP or a PostgreSQL connection string: {e}"
-        ),
-    };
-    if block_db_str == "SKIP" {
-        println!("Skipping test due to no local database being available");
-        return;
-    }
-
-    // Wipe out the database so we have a fresh run
-    let temp = tempfile::TempDir::new().unwrap();
-    let merkle_store = KolmeMerkleTestStore::Fjall;
-
-    let (x, y, z) = TestTasks::start(
-        multiple_processors_inner,
-        (block_db_str, temp.path().to_owned(), merkle_store),
-    )
-    .await;
-    println!("Finished checking results of all clients, moving on to checker");
-    checker(x, y, z).await.unwrap();
-}
-
 #[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 100))]
-#[serial]
-async fn multiple_processors_postgres() {
+async fn multiple_processors() {
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
     let block_db_str = match std::env::var(ENVVAR) {
         Ok(x) => x,
@@ -145,21 +108,14 @@ async fn multiple_processors_postgres() {
     }
 
     // Wipe out the database so we have a fresh run
-    let temp = tempfile::TempDir::new().unwrap();
-    let merkle_store = KolmeMerkleTestStore::Postgres;
-
-    let (x, y, z) = TestTasks::start(
-        multiple_processors_inner,
-        (block_db_str, temp.path().to_owned(), merkle_store),
-    )
-    .await;
+    let (x, y, z) = TestTasks::start(multiple_processors_inner, block_db_str).await;
     println!("Finished checking results of all clients, moving on to checker");
     checker(x, y, z).await.unwrap();
 }
 
 async fn multiple_processors_inner(
     test_tasks: TestTasks,
-    (block_db_str, fjall_dir, merkle_store): (String, PathBuf, KolmeMerkleTestStore),
+    block_db_str: String,
 ) -> (
     Arc<[Kolme<SampleKolmeApp>]>,
     Arc<Mutex<HashSet<TxHash>>>,
@@ -170,18 +126,9 @@ async fn multiple_processors_inner(
     } else if block_db_str == "FJALL" {
         Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
-        let store = match merkle_store.clone() {
-            KolmeMerkleTestStore::Fjall => {
-                KolmeStore::<SampleKolmeApp>::new_postgres_with_fjall(&block_db_str, &fjall_dir)
-                    .await
-                    .unwrap()
-            }
-            KolmeMerkleTestStore::Postgres => {
-                KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
-                    .await
-                    .unwrap()
-            }
-        };
+        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+            .await
+            .unwrap();
 
         store.clear_blocks().await.unwrap();
         None
@@ -191,29 +138,19 @@ async fn multiple_processors_inner(
     const PROCESSOR_COUNT: usize = 10;
     const CLIENT_COUNT: usize = 100;
 
-    for i in 0..PROCESSOR_COUNT {
-        let store = match &store {
-            Some(store) => store.clone(),
-            None => {
-                let mut dir = fjall_dir.clone();
-                dir.push(i.to_string());
-                match merkle_store.clone() {
-                    KolmeMerkleTestStore::Fjall => {
-                        KolmeStore::<SampleKolmeApp>::new_postgres_with_fjall(&block_db_str, &dir)
-                            .await
-                            .unwrap()
-                    }
-                    KolmeMerkleTestStore::Postgres => {
-                        KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
-                            .await
-                            .unwrap()
-                    }
-                }
-            }
-        };
-        let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
-            .await
-            .unwrap();
+    for _ in 0..PROCESSOR_COUNT {
+        let kolme = Kolme::new(
+            SampleKolmeApp::default(),
+            DUMMY_CODE_VERSION,
+            match &store {
+                Some(store) => store.clone(),
+                None => KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+                    .await
+                    .unwrap(),
+            },
+        )
+        .await
+        .unwrap();
 
         // TODO Ideally we would like to speed up things so this test runs much faster.
         // However, at the moment, sometimes transactions take more than
