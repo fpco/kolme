@@ -4,12 +4,13 @@ use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError,
     MerkleSerialize, MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
+use parking_lot::RwLock;
 use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Executor, Postgres};
 use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, OnceLock, RwLock,
+        Arc, OnceLock,
     },
 };
 mod merkle;
