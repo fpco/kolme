@@ -19,7 +19,7 @@ postgres:
 test:
     cargo run --bin test-runner
 
-[working-directory: "packages/kolme-store-postgresql"]
+[working-directory: "packages/kolme-store"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
     # TODO: On my end I need this so that docker has time to launch the container
     sleep 3

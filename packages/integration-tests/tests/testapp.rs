@@ -177,15 +177,13 @@ where
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_websocket_notifications_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
     TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;
 }
 
-#[test_log::test(tokio::test)]
-#[serial_test::serial]
+#[tokio::test]
 async fn test_websocket_notifications_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;

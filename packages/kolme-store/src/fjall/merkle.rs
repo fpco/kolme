@@ -20,10 +20,6 @@ impl MerkleFjallStore {
             .map_err(MerkleSerialError::custom)?;
         Ok(Self { keyspace, handle })
     }
-
-    pub fn get_keyspace(&self) -> &fjall::Keyspace {
-        &self.keyspace
-    }
 }
 
 struct Keys {
