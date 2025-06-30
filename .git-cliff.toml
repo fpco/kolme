@@ -1,0 +1,103 @@
+# Kolme git-cliff configuration
+
+[git]
+tag_pattern = "v[0-9]*"
+repository = "https://github.com/fpco/kolme"
+
+[cli]
+output = "CHANGELOG.md"
+
+[changelog]
+group_by = "title"
+header = """
+# Kolme Changelog
+
+All notable changes to this project are documented in this file. This changelog is generated automatically from commit history using [git-cliff](https://github.com/orhun/git-cliff) and follows the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+"""
+
+group_titles.Features = "Features"
+group_titles."Bug Fixes" = "Bug Fixes"
+group_titles.Documentation = "Documentation"
+group_titles.Refactor = "Refactoring"
+group_titles.Performance = "Performance"
+group_titles.Tests = "Tests"
+group_titles."Build System" = "Build System"
+group_titles."Continuous Integration" = "Continuous Integration"
+group_titles.Chores = "Chores"
+
+group = """
+### {{ group | upper_first }}
+"""
+
+body = """
+{% if version %}
+## Version {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}
+## Unreleased
+{% endif %}
+
+{% if commits | length == 0 %}
+_No changes._
+{% else %}
+{% for group, commits in commits | group_by(attribute="group") %}
+{{ group }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }} ({{ commit.id | truncate(length=7) }})
+{% endfor %}
+{% endfor %}
+{% endif %}
+"""
+
+footer = """
+---
+This changelog is maintained for production releases. For more details, see the project repository.
+"""
+
+[[changelog.commit_groups]]
+title = "Features"
+regex = "^feat"
+order = 1
+
+[[changelog.commit_groups]]
+title = "Bug Fixes"
+regex = "^fix"
+order = 2
+
+[[changelog.commit_groups]]
+title = "Documentation"
+regex = "^docs"
+order = 3
+
+[[changelog.commit_groups]]
+title = "Refactoring"
+regex = "^refactor"
+order = 4
+
+[[changelog.commit_groups]]
+title = "Performance"
+regex = "^perf"
+order = 5
+
+[[changelog.commit_groups]]
+title = "Tests"
+regex = "^test"
+order = 6
+
+[[changelog.commit_groups]]
+title = "Build System"
+regex = "^build"
+order = 7
+
+[[changelog.commit_groups]]
+title = "Continuous Integration"
+regex = "^ci"
+order = 8
+
+[[changelog.commit_groups]]
+title = "Chores"
+regex = "^chore"
+order = 9
+
+[commit_parsers]
+conventional = true
