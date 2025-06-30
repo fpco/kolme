@@ -76,7 +76,6 @@ jobs:
           # Taken from the six-sigma-v2 repository.
           ignore: "RUSTSEC-2023-0071,RUSTSEC-2025-0009,RUSTSEC-2022-0093,RUSTSEC-2024-0344"
       - name: Show sccache stats
-        if: always()
         run: sccache --show-stats
 
   solana-contract:
@@ -109,5 +108,4 @@ jobs:
           RUSTC_WRAPPER: sccache
         run: just test
       - name: Show sccache stats
-        if: always()
         run: sccache --show-stats
