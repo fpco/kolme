@@ -233,17 +233,14 @@ async fn sync_merkle_layer() {
 async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
     const IDENT: &str = "sync-merkle";
     let store1 = KolmeStore::new_in_memory();
-    let kolme1 = Kolme::new(
-        SampleKolmeApp::new(IDENT),
-        DUMMY_CODE_VERSION,
-        store1.clone(),
-    )
-    .await
-    .unwrap();
+    let kolme1 = Kolme::new(SampleKolmeApp::new(IDENT), DUMMY_CODE_VERSION, store1.clone())
+        .await
+        .unwrap();
 
     testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
 
-    for _ in 0..5 {
+    // Send several transactions to generate Merkle layers
+    for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
         kolme1
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
@@ -251,12 +248,15 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     }
 
-    let target_height = BlockHeight(5);
-    let block = kolme1.load_block(target_height).await.unwrap();
-    let Some(layer_hash) = block.inner().message.merkle_hash else {
-        panic!("Block missing merkle hash");
+    // Pick an actual Merkle layer hash from reverse_layers
+    let reverse_layers = kolme1.read().get_framework_state().reverse_layers.clone();
+    let Some((&layer_hash, _)) = reverse_layers.iter().next() else {
+        panic!("No Merkle layers found in reverse_layers map");
     };
 
+    assert!(kolme1.has_merkle_hash(layer_hash).await.unwrap());
+
+    // Launch gossip for the first node
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme1")
@@ -265,35 +265,40 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
             .run(),
     );
 
+    // Second node with mismatched code version to trigger state sync
     let kolme2 = Kolme::new(
         SampleKolmeApp::new(IDENT),
-        "incorrect version",
+        "mismatch-version",
         KolmeStore::new_in_memory(),
     )
     .await
     .unwrap();
 
+    assert!(!kolme2.has_merkle_hash(layer_hash).await.unwrap());
+
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme2")
-            .set_sync_mode(
-                SyncMode::StateTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
+            .set_sync_mode(SyncMode::StateTransfer, DataLoadValidation::ValidateDataLoads)
             .build(kolme2.clone())
             .unwrap()
             .run(),
     );
 
-    let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        loop {
-            if kolme2.has_merkle_hash(layer_hash).await.unwrap() {
-                break;
+    // Wait until the layer is synced via gossip
+    let synced = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        async {
+            loop {
+                if kolme2.has_merkle_hash(layer_hash).await.unwrap() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    })
-    .await;
+        },
+    )
+    .await
+    .is_ok();
 
-    assert!(result.is_ok(), "Layer sync failed within timeout");
+    assert!(synced, "kolme2 failed to sync Merkle layer {layer_hash:?} within timeout");
 }
