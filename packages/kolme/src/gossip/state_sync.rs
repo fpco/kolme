@@ -347,6 +347,24 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 
         Ok(())
     }
+
+    pub(super) async fn add_needed_layer(
+        &mut self,
+        hash: Sha256Hash,
+        peer: Option<PeerId>,
+    ) -> Result<()> {
+        if !self.kolme.has_merkle_hash(hash).await? {
+            self.needed_layers.insert(hash, RequestStatus::new(peer));
+            self.queue.push_back(PendingData::Merkle(hash));
+        }
+        Ok(())
+    }
+
+    pub(super) fn add_layer_peer(&mut self, hash: Sha256Hash, peer: PeerId) {
+        if let Some(status) = self.needed_layers.get_mut(&hash) {
+            status.add_peer(peer);
+        }
+    }
 }
 
 const REQUEST_COUNT: usize = 4;

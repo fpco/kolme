@@ -224,3 +224,76 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
         assert_eq!(from_gossip.hash().0, from_kolme1.blockhash);
     }
 }
+
+#[test_log::test(tokio::test)]
+async fn sync_merkle_layer() {
+    TestTasks::start(sync_merkle_layer_inner, ()).await;
+}
+
+async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
+    const IDENT: &str = "sync-merkle";
+    let store1 = KolmeStore::new_in_memory();
+    let kolme1 = Kolme::new(
+        SampleKolmeApp::new(IDENT),
+        DUMMY_CODE_VERSION,
+        store1.clone(),
+    )
+    .await
+    .unwrap();
+
+    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
+
+    for _ in 0..5 {
+        let secret = SecretKey::random(&mut rand::thread_rng());
+        kolme1
+            .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+            .await
+            .unwrap();
+    }
+
+    let target_height = BlockHeight(5);
+    let block = kolme1.load_block(target_height).await.unwrap();
+    let Some(layer_hash) = block.inner().message.merkle_hash else {
+        panic!("Block missing merkle hash");
+    };
+
+    testtasks.try_spawn_persistent(
+        GossipBuilder::new()
+            .set_local_display_name("kolme1")
+            .build(kolme1.clone())
+            .unwrap()
+            .run(),
+    );
+
+    let kolme2 = Kolme::new(
+        SampleKolmeApp::new(IDENT),
+        "incorrect version",
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+
+    testtasks.try_spawn_persistent(
+        GossipBuilder::new()
+            .set_local_display_name("kolme2")
+            .set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+            .build(kolme2.clone())
+            .unwrap()
+            .run(),
+    );
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if kolme2.has_merkle_hash(layer_hash).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+
+    assert!(result.is_ok(), "Layer sync failed within timeout");
+}

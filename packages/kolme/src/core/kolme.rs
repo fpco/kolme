@@ -57,6 +57,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     code_version: String,
     /// A channel for requesting new blocks to be synced from the network.
     block_requester: OnceLock<tokio::sync::mpsc::Sender<BlockHeight>>,
+    layer_requester: OnceLock<tokio::sync::mpsc::Sender<Sha256Hash>>,
 }
 
 /// Access to a specific block height.
@@ -639,6 +640,7 @@ impl<App: KolmeApp> Kolme<App> {
             latest_block: parking_lot::RwLock::new(None),
             code_version: code_version.into(),
             block_requester: OnceLock::new(),
+            layer_requester: OnceLock::new(),
         };
 
         let kolme = Kolme {
@@ -704,6 +706,15 @@ impl<App: KolmeApp> Kolme<App> {
     /// If there's already a block requester set, this is a no-op.
     pub(crate) fn set_block_requester(&self, requester: tokio::sync::mpsc::Sender<BlockHeight>) {
         self.inner.block_requester.set(requester).ok();
+    }
+
+    /// Set the layer requester
+    ///
+    /// Current kept pub(crate) as it's only used by the gossip mechanism.
+    ///
+    /// If there's already a layer requester set, this is a no-op.
+    pub(crate) fn set_layer_requester(&self, requester: tokio::sync::mpsc::Sender<Sha256Hash>) {
+        self.inner.layer_requester.set(requester).ok();
     }
 
     /// Wait until a block with height greater than or equal to the given height gets published
