@@ -252,13 +252,12 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     }
 
-    // Pick an actual Merkle layer hash from reverse_layers
-    let reverse_layers = kolme1.read().get_framework_state().reverse_layers.clone();
-    let Some((&layer_hash, _)) = reverse_layers.iter().next() else {
-        panic!("No Merkle layers found in reverse_layers map");
-    };
+    // Extract a Merkle root hash from a known block
+    let height = BlockHeight(5);
+    let storable_block = kolme1.load_block(height).await.unwrap();
+    let merkle_root = storable_block.block.as_ref().app_state_hash();
 
-    assert!(kolme1.has_merkle_hash(layer_hash).await.unwrap());
+    assert!(kolme1.has_merkle_hash(merkle_root).await.unwrap());
 
     // Launch gossip for the first node
     testtasks.try_spawn_persistent(
@@ -278,7 +277,7 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    assert!(!kolme2.has_merkle_hash(layer_hash).await.unwrap());
+    assert!(!kolme2.has_merkle_hash(merkle_root).await.unwrap());
 
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
@@ -295,7 +294,7 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
     // Wait until the layer is synced via gossip
     let synced = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {
-            if kolme2.has_merkle_hash(layer_hash).await.unwrap() {
+            if kolme2.has_merkle_hash(merkle_root).await.unwrap() {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -306,6 +305,6 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
 
     assert!(
         synced,
-        "kolme2 failed to sync Merkle layer {layer_hash:?} within timeout"
+        "kolme2 failed to sync Merkle layer {merkle_root:?} within timeout"
     );
 }
