@@ -99,6 +99,7 @@ impl<App: KolmeApp> Submitter<App> {
                 Notification::NewBlock(_) => (),
                 Notification::GenesisInstantiation {
                     chain: _,
+                    tx_hash: _,
                     contract: _,
                 } => continue,
                 Notification::FailedTransaction { .. } => continue,
@@ -128,7 +129,7 @@ impl<App: KolmeApp> Submitter<App> {
     }
 
     async fn handle_genesis(&mut self, genesis_action: GenesisAction) -> Result<()> {
-        let (contract_addr, chain) = match genesis_action {
+        let (contract_addr, txhash, chain) = match genesis_action {
             GenesisAction::InstantiateCosmos {
                 chain,
                 code_id,
@@ -146,7 +147,7 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let addr = cosmos::instantiate(&cosmos, seed_phrase, code_id, args).await?;
 
-                (addr, chain.into())
+                (addr, None, chain.into())
             }
             GenesisAction::InstantiateSolana {
                 chain,
@@ -163,14 +164,15 @@ impl<App: KolmeApp> Submitter<App> {
 
                 let client = self.kolme.read().get_solana_client(chain).await;
 
-                solana::instantiate(&client, keypair, &program_id, args).await?;
+                let txhash = solana::instantiate(&client, keypair, &program_id, args).await?;
 
-                (program_id, chain.into())
+                (program_id, Some(txhash), chain.into())
             }
         };
 
         self.kolme.notify(Notification::GenesisInstantiation {
             chain,
+            tx_hash: txhash,
             contract: contract_addr,
         });
         self.genesis_created.insert(chain);

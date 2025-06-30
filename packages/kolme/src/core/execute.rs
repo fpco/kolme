@@ -168,10 +168,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             Message::Listener {
                 chain,
+                tx_hash,
                 event,
                 event_id,
             } => {
-                self.listener(*chain, event, *event_id)?;
+                self.listener(*chain, tx_hash.clone(), event, *event_id)?;
             }
             Message::Approve {
                 chain,
@@ -196,6 +197,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     fn listener(
         &mut self,
         chain: ExternalChain,
+        tx_hash: Option<ExternalTxHash>,
         event: &BridgeEvent,
         event_id: BridgeEventId,
     ) -> Result<()> {
@@ -219,6 +221,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     event_id,
                     PendingBridgeEvent {
                         event: event.clone(),
+                        tx_hash,
                         attestations: BTreeSet::new(),
                     },
                 );
@@ -335,6 +338,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                             .deposit(asset_config.asset_id, amount)?;
                     }
                     self.log_event(LogEvent::ProcessedBridgeEvent(LogBridgeEvent::Regular {
+                        tx_hash: pending.tx_hash,
                         bridge_event_id: event_id,
                         account_id,
                     }))?;

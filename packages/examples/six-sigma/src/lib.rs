@@ -875,6 +875,7 @@ mod tests {
                     .and_then(|log_event| match log_event {
                         LogEvent::ProcessedBridgeEvent(LogBridgeEvent::Regular {
                             bridge_event_id: event_id,
+                            tx_hash: _,
                             account_id,
                         }) => (event_id == bridge_event_id).then_some(account_id),
                         _ => unreachable!(),

@@ -90,7 +90,12 @@ impl<App: KolmeApp> Listener<App> {
                 return Ok(contracts);
             }
 
-            if let Notification::GenesisInstantiation { chain, contract } = receiver.recv().await? {
+            if let Notification::GenesisInstantiation {
+                chain,
+                tx_hash,
+                contract,
+            } = receiver.recv().await?
+            {
                 if chain.name() != name {
                     continue;
                 }
@@ -147,6 +152,7 @@ impl<App: KolmeApp> Listener<App> {
                             &self.secret,
                             vec![Message::Listener {
                                 chain,
+                                tx_hash,
                                 event: BridgeEvent::Instantiated { contract },
                                 event_id: BridgeEventId::start(),
                             }],
