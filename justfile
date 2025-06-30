@@ -51,3 +51,6 @@ run-integration-tests: setup-localosmo
 [working-directory: "packages/kolme"]
 run-store-tests $PROCESSOR_BLOCK_DB="postgres://postgres:postgres@localhost:45921/postgres": sqlx-prepare
     cargo test --test store
+
+changelog:
+    git-cliff -c .git-cliff.toml -o new-changelog.md --tag-pattern "v[0-9]*"
