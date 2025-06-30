@@ -233,9 +233,13 @@ async fn sync_merkle_layer() {
 async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
     const IDENT: &str = "sync-merkle";
     let store1 = KolmeStore::new_in_memory();
-    let kolme1 = Kolme::new(SampleKolmeApp::new(IDENT), DUMMY_CODE_VERSION, store1.clone())
-        .await
-        .unwrap();
+    let kolme1 = Kolme::new(
+        SampleKolmeApp::new(IDENT),
+        DUMMY_CODE_VERSION,
+        store1.clone(),
+    )
+    .await
+    .unwrap();
 
     testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
 
@@ -279,26 +283,29 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme2")
-            .set_sync_mode(SyncMode::StateTransfer, DataLoadValidation::ValidateDataLoads)
+            .set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
             .build(kolme2.clone())
             .unwrap()
             .run(),
     );
 
     // Wait until the layer is synced via gossip
-    let synced = tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        async {
-            loop {
-                if kolme2.has_merkle_hash(layer_hash).await.unwrap() {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let synced = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if kolme2.has_merkle_hash(layer_hash).await.unwrap() {
+                break;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
     .await
     .is_ok();
 
-    assert!(synced, "kolme2 failed to sync Merkle layer {layer_hash:?} within timeout");
+    assert!(
+        synced,
+        "kolme2 failed to sync Merkle layer {layer_hash:?} within timeout"
+    );
 }
