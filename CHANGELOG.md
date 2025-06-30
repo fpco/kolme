@@ -8,7 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Implement a `Trigger` mechanism. (80cd518…)
+- Improved state sync and archiving
+  - Incremental state sync (a9ceea1…)
+  - Sync older blocks on demand via state sync. (909536f…)
+  - Add the archiver component for synchronizing older blocks. (f6ed91d…)
+
 ### Fixed
+
+- Remove linker line from cargo configuration (828b467…)
 
 ### Changed
 
