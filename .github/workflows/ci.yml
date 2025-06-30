@@ -21,7 +21,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.4
       - name: Rust cache
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.6
       - name: Rust cache
@@ -64,14 +64,16 @@ jobs:
           just fmt
           just clippy
       - name: Install and run cargo-machete
-        uses: clechasseur/rs-cargo@v2
+        uses: clechasseur/rs-cargo@8435b10f6e71c2e3d4d3b7573003a8ce4bfc6386 # v2.0.6
         with:
           command: machete
           install: cargo-machete@0.7.0
       - name: Cargo audit
-        uses: rustsec/audit-check@v2
+        uses: rustsec/audit-check@dd51754d4e59da7395a4cd9b593f0ff2d61a9b95
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2023-0071: timing attack looks to be inapplicable
+          # Taken from the six-sigma-v2 repository.
           ignore: "RUSTSEC-2023-0071,RUSTSEC-2025-0009,RUSTSEC-2022-0093,RUSTSEC-2024-0344"
       - name: Show sccache stats
         if: always()
@@ -82,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.6
       - name: Rust cache
@@ -90,7 +92,7 @@ jobs:
         with:
           shared-key: solana-${{ runner.os }}
       - name: Setup just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
       - name: Setup system
         uses: ./.github/actions/setup-system
         with:
