@@ -57,7 +57,6 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     code_version: String,
     /// A channel for requesting new blocks to be synced from the network.
     block_requester: OnceLock<tokio::sync::mpsc::Sender<BlockHeight>>,
-    layer_requester: OnceLock<tokio::sync::mpsc::Sender<Sha256Hash>>,
 }
 
 /// Access to a specific block height.

@@ -231,6 +231,7 @@ async fn sync_merkle_layer() {
 }
 
 async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
+    // kolme1 creates blocks and Merkle layers
     const IDENT: &str = "sync-merkle";
     let store1 = KolmeStore::new_in_memory();
     let kolme1 = Kolme::new(
@@ -241,9 +242,6 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
-
-    // Send several transactions to generate Merkle layers
     for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
         kolme1
@@ -252,14 +250,26 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     }
 
-    // Extract a Merkle root hash from a known block
+    // Take a Merkle root hash from a known block
     let height = BlockHeight(5);
     let storable_block = kolme1.load_block(height).await.unwrap();
     let merkle_root = storable_block.block.as_ref().hash().0;
 
     assert!(kolme1.has_merkle_hash(merkle_root).await.unwrap());
 
-    // Launch gossip for the first node
+    // kolme2 starts and will receive the Merkle hash via gossip from kolme1
+    let store2 = KolmeStore::new_in_memory();
+    let kolme2 = Kolme::new(
+        SampleKolmeApp::new(IDENT),
+        DUMMY_CODE_VERSION,
+        store2.clone(),
+    )
+    .await
+    .unwrap();
+
+    assert!(!kolme2.has_merkle_hash(merkle_root).await.unwrap());
+
+    // Launch gossip in kolme1 so it can share its state
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme1")
@@ -268,17 +278,7 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
             .run(),
     );
 
-    // Second node with mismatched code version to trigger state sync
-    let kolme2 = Kolme::new(
-        SampleKolmeApp::new(IDENT),
-        "mismatch-version",
-        KolmeStore::new_in_memory(),
-    )
-    .await
-    .unwrap();
-
-    assert!(!kolme2.has_merkle_hash(merkle_root).await.unwrap());
-
+    // Launch gossip in kolme2 so it can sync from kolme1
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme2")
@@ -291,20 +291,62 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
             .run(),
     );
 
-    // Wait until the layer is synced via gossip
-    let synced = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+    // Wait for kolme2 to sync the Merkle hash from kolme1
+    let synced2 = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if kolme2.has_merkle_hash(merkle_root).await.unwrap() {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            sleep(Duration::from_millis(100)).await;
         }
     })
     .await
     .is_ok();
 
     assert!(
-        synced,
-        "kolme2 failed to sync Merkle layer {merkle_root:?} within timeout"
+        synced2,
+        "kolme2 failed to sync Merkle layer {merkle_root:?} from kolme1"
+    );
+
+    // DO NOT start gossip on kolme1 again, simulate it's offline now
+
+    // kolme3 tries to sync the Merkle hash, and must get it from kolme2
+    let kolme3 = Kolme::new(
+        SampleKolmeApp::new(IDENT),
+        "mismatch-version",
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+
+    assert!(!kolme3.has_merkle_hash(merkle_root).await.unwrap());
+
+    testtasks.try_spawn_persistent(
+        GossipBuilder::new()
+            .set_local_display_name("kolme3")
+            .set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+            .build(kolme3.clone())
+            .unwrap()
+            .run(),
+    );
+
+    // Confirm that kolme3 successfully synced the Merkle layer
+    let synced3 = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if kolme3.has_merkle_hash(merkle_root).await.unwrap() {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .is_ok();
+
+    assert!(
+        synced3,
+        "kolme3 failed to sync Merkle layer {merkle_root:?} from other nodes within timeout"
     );
 }
