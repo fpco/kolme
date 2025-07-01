@@ -255,7 +255,7 @@ async fn sync_merkle_layer_inner(testtasks: TestTasks, (): ()) {
     // Extract a Merkle root hash from a known block
     let height = BlockHeight(5);
     let storable_block = kolme1.load_block(height).await.unwrap();
-    let merkle_root = storable_block.block.as_ref().app_state_hash();
+    let merkle_root = storable_block.block.as_ref().hash().0;
 
     assert!(kolme1.has_merkle_hash(merkle_root).await.unwrap());
 
