@@ -127,6 +127,10 @@ async fn setup_fjall(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)> {
 async fn clear_postgres() {
     let url = std::env::var("PROCESSOR_BLOCK_DB").expect("PROCESSOR_BLOCK_DB variable missing");
     let pool = sqlx::PgPool::connect(&url).await.unwrap();
+    sqlx::migrate!("../kolme-store/migrations")
+        .run(&pool)
+        .await
+        .expect("Unable to run migrations");
 
     sqlx::query("TRUNCATE TABLE blocks")
         .execute(&pool)
@@ -141,6 +145,7 @@ async fn clear_postgres() {
 async fn setup_postgres() -> Result<(Kolme<TestApp>, SocketAddr)> {
     let app = TestApp::default();
     let url = std::env::var("PROCESSOR_BLOCK_DB").expect("PROCESSOR_BLOCK_DB variable missing");
+    clear_postgres().await;
     let store = KolmeStore::new_postgres(&url).await?;
     let code_version = app.genesis.version.clone();
     let kolme = Kolme::new(app, code_version, store).await?;
@@ -187,7 +192,6 @@ async fn test_websocket_notifications_fjall() {
 async fn test_websocket_notifications_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;
-    clear_postgres().await;
 }
 
 async fn test_websocket_notifications_inner(
@@ -246,7 +250,6 @@ async fn test_validate_tx_valid_signature_fjall() {
 async fn test_validate_tx_valid_signature_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_validate_tx_valid_signature_inner, (kolme, addr)).await;
-    clear_postgres().await;
 }
 
 async fn test_validate_tx_valid_signature_inner(
@@ -334,7 +337,6 @@ async fn test_execute_transaction_genesis_postgres() {
         }),
     )
     .await;
-    clear_postgres().await;
 }
 
 type Connection =
@@ -386,7 +388,6 @@ async fn test_validate_tx_invalid_nonce_fjall() {
 async fn test_validate_tx_invalid_nonce_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_validate_tx_invalid_nonce_inner, (kolme, addr)).await;
-    clear_postgres().await;
 }
 
 async fn test_validate_tx_invalid_nonce_inner(
@@ -446,7 +447,6 @@ async fn test_rejected_transaction_insufficient_balance_postgres() {
         (kolme, addr),
     )
     .await;
-    clear_postgres().await;
 }
 
 async fn test_rejected_transaction_insufficient_balance_inner(
@@ -503,7 +503,6 @@ async fn test_many_transactions_fjall() {
 async fn test_many_transactions_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_many_transactions_inner, (kolme, addr, wait_for_nonce)).await;
-    clear_postgres().await;
 }
 
 type NoncePoller = for<'a> fn(
@@ -606,7 +605,6 @@ async fn test_concurrent_transactions_fjall() {
 async fn test_concurrent_transactions_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_concurrent_transactions_inner, (kolme, addr)).await;
-    clear_postgres().await;
 }
 
 async fn test_concurrent_transactions_inner(
