@@ -23,3 +23,5 @@ target/
 
 # Generated when running solana-test-validator
 test-ledger/
+.env
+.envrc
