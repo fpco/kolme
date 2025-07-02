@@ -320,7 +320,7 @@ pub struct ChainState {
     /// This field is used to ensure that sufficient balances are available
     /// for fund transfers. Listeners can update these values by submitting
     /// known token balances. This can account for tokens that were added
-    /// by direct transfer, without trigger a smart contract execution.
+    /// by direct transfer, without triggering a smart contract execution.
     pub assets: BTreeMap<AssetId, Decimal>,
 }
 

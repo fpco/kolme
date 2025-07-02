@@ -189,6 +189,15 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.add(tx);
     }
 
+    /// Proposes a new transaction. This method is distinguished from
+    /// `propose_transaction` by its intended user, as it is designed
+    /// for exclusive invocation by the Gossip layer.
+    ///
+    /// Note that this will not detect any issues if the transaction is rejected.
+    pub fn gossip_propose_transaction(&self, tx: Arc<SignedTransaction<App::Message>>) {
+        self.inner.mempool.gossip_add(tx);
+    }
+
     /// How long should we wait for a transaction to land before giving up?
     ///
     /// This affects [Self::propose_and_await_transaction] and [Self::sign_propose_await_transaction].
@@ -670,8 +679,14 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.get_entries()
     }
 
+    /// Get all entries currently in the mempool that should be
+    /// broadcasted
+    pub fn get_mempool_broadcast_entries(&self) -> Vec<Arc<SignedTransaction<App::Message>>> {
+        self.inner.mempool.get_broadcast_entries()
+    }
+
     /// Wait until the given block is published
-    /// **Warning** this founction could block if fast sync gets involved as the given height could be skipped
+    /// **Warning** this function could block if fast sync gets involved as the given height could be skipped
     pub async fn wait_for_block(
         &self,
         height: BlockHeight,

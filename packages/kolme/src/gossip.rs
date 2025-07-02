@@ -434,7 +434,7 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     fn broadcast_mempool_entries(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
-        for tx in self.kolme.get_mempool_entries() {
+        for tx in self.kolme.get_mempool_broadcast_entries() {
             let txhash = tx.hash();
             let msg = GossipMessage::BroadcastTx { tx };
             if let Err(e) = msg.publish(self, swarm) {
@@ -585,7 +585,9 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             GossipMessage::BroadcastTx { tx } => {
-                self.kolme.propose_transaction(tx);
+                // We use gossip_propose_transaction method because we don't
+                // want to broadcast the same message to the network.
+                self.kolme.gossip_propose_transaction(tx);
             }
             GossipMessage::RequestBlockContents { height, peer } => {
                 match self.kolme.has_block(height).await {

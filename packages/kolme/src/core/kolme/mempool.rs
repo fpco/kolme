@@ -10,7 +10,19 @@ pub struct Mempool<AppMessage> {
     notify: Trigger,
 }
 
-type Queue<AppMessage> = VecDeque<(TxHash, Arc<SignedTransaction<AppMessage>>)>;
+#[derive(PartialEq)]
+enum Source {
+    GossipLayer,
+    NonGossipLayer
+}
+
+pub struct QueueMessage<AppMessage> {
+    hash: TxHash,
+    message: Arc<SignedTransaction<AppMessage>>,
+    source: Source,
+}
+
+type Queue<AppMessage> = VecDeque<QueueMessage<AppMessage>>;
 
 impl<AppMessage> Clone for Mempool<AppMessage> {
     fn clone(&self) -> Self {
@@ -41,14 +53,14 @@ impl<AppMessage> Mempool<AppMessage> {
 
     pub(super) async fn peek(&self) -> (TxHash, Arc<SignedTransaction<AppMessage>>) {
         if let Some(pair) = self.txs.read().front() {
-            return pair.clone();
+            return (pair.hash, pair.message.clone());
         }
 
         let mut recv = self.notify.subscribe();
 
         loop {
             if let Some(pair) = self.txs.read().front() {
-                break pair.clone();
+                break (pair.hash, pair.message.clone());
             }
             recv.listen().await;
         }
@@ -59,7 +71,7 @@ impl<AppMessage> Mempool<AppMessage> {
         let mut modified = false;
         let mut i = 0;
         while i < guard.len() {
-            if guard[i].0 == hash {
+            if guard[i].hash == hash {
                 modified = true;
                 guard.remove(i);
             } else {
@@ -72,7 +84,22 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     pub(super) fn add(&self, tx: Arc<SignedTransaction<AppMessage>>) {
-        self.txs.write().push_back((tx.hash(), tx));
+        let message = QueueMessage {
+            hash: tx.hash(),
+            message: tx,
+            source: Source::NonGossipLayer,
+        };
+        self.txs.write().push_back(message);
+        self.notify.trigger();
+    }
+
+    pub(super) fn gossip_add(&self, tx: Arc<SignedTransaction<AppMessage>>) {
+        let message = QueueMessage {
+            hash: tx.hash(),
+            message: tx,
+            source: Source::GossipLayer,
+        };
+        self.txs.write().push_back(message);
         self.notify.trigger();
     }
 
@@ -83,6 +110,10 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     pub(super) fn get_entries(&self) -> Vec<Arc<SignedTransaction<AppMessage>>> {
-        self.txs.read().iter().map(|(_, tx)| tx.clone()).collect()
+        self.txs.read().iter().map(|item| item.message.clone()).collect()
+    }
+
+    pub(super) fn get_broadcast_entries(&self) -> Vec<Arc<SignedTransaction<AppMessage>>> {
+        self.txs.read().iter().filter(|item| item.source == Source::NonGossipLayer).map(|item| item.message.clone()).collect()
     }
 }
