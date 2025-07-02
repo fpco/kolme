@@ -5,10 +5,18 @@ use std::sync::{
 
 use tokio::sync::mpsc::error::TryRecvError;
 
+/// A utility for managing asynchronous tasks within a test environment.
+/// It allows spawning tasks, tracking their execution, and handling errors.
 #[derive(Clone)]
 pub struct TestTasks {
+    /// A watch channel sender used to signal whether tasks should continue running.
+    /// When set to `false`, it indicates that tasks should gracefully shut down.
     send_keep_running: tokio::sync::watch::Sender<bool>,
+    /// A channel sender for reporting errors that occur within spawned tasks.
+    /// Any task that panics or returns an error will send the error through this channel.
     send_error: tokio::sync::mpsc::Sender<anyhow::Error>,
+    /// An atomic counter for the number of currently running, non-persistent tasks.
+    /// This is used to determine when all tasks have completed.
     running_count: Arc<AtomicUsize>,
 }
 
