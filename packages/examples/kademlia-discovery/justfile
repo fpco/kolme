@@ -1,0 +1,11 @@
+# List all recipes
+default:
+	just --list --unsorted
+
+# Run validator
+validator:
+	cargo run -- validators 2001
+
+# Run client
+client:
+	cargo run -- client --validator /ip4/127.0.0.1/tcp/2001 --continous
