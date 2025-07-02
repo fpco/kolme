@@ -198,6 +198,25 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
             .run(),
     );
 
+    let kolme_state_transfer2 = Kolme::new(
+        SampleKolmeApp::new(IDENT),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+    testtasks.try_spawn_persistent(
+        GossipBuilder::new()
+            .set_local_display_name("kolme_state_transfer2")
+            .set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+            .build(kolme_state_transfer.clone())
+            .unwrap()
+            .run(),
+    );
+
     // Due to data size, it can take a bit to transfer the entire state
     let latest_from_gossip = tokio::time::timeout(
         tokio::time::Duration::from_secs(30),
@@ -207,4 +226,12 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     .unwrap()
     .unwrap();
     assert_eq!(latest_from_gossip.hash(), BlockHash(latest_block.blockhash));
+    let latest_from_gossip2 = tokio::time::timeout(
+        tokio::time::Duration::from_secs(30),
+        kolme_state_transfer2.wait_for_block(latest_block_height),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(latest_from_gossip2.hash(), BlockHash(latest_block.blockhash));
 }
