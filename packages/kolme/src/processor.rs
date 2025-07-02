@@ -5,9 +5,20 @@ use kolme_store::KolmeStoreError;
 use crate::*;
 
 pub struct Processor<App: KolmeApp> {
+    /// The main Kolme instance, providing access to the application
+    /// state, store, and other core components.
     kolme: Kolme<App>,
+    /// A collection of secret keys available to this processor,
+    /// indexed by their corresponding public keys.  This allows the
+    /// processor to sign messages with the correct key, especially
+    /// during key rotation.
     secrets: HashMap<PublicKey, SecretKey>,
+    /// A channel sender used to signal when the processor has
+    /// completed its initial setup and is ready to begin processing
+    /// transactions.
     ready: tokio::sync::watch::Sender<bool>,
+    /// The time duration between emitting notifications about the
+    /// latest block height.
     latest_block_delay: tokio::time::Duration,
 }
 
