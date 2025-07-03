@@ -37,6 +37,19 @@ futures-util = "0.3.31"
 tokio-tungstenite = "0.26.2"
 jiff = "0.2.5"
 sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio"] }
+criterion = { version = "0.6.0", features = ["async_tokio"] }
+merkle-map.workspace = true
+smallvec.workspace = true
+parking_lot = "0.12.4"
+tempdir = "0.3.7"
+fjall.workspace = true
 
 [lints]
 workspace = true
+
+[profile.bench]
+debug = true
+
+[[bench]]
+name = "insertion"
+harness = false
