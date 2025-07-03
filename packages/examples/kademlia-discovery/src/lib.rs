@@ -5,7 +5,7 @@ use anyhow::Result;
 use kolme::*;
 use libp2p::identity::Keypair;
 use tokio::task::JoinSet;
-use tokio::time::{timeout, Duration};
+use tokio::time::{self, timeout, Duration};
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
@@ -131,9 +131,14 @@ pub async fn validators(port: u16) -> Result<()> {
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
+    // Processor consumes mempool transactions and add new transactions into blockchain storage.
     set.spawn(processor.run());
+    // Listens bridge events. Based on bridge event ID, fetches the
+    // event from chain and then constructs a tx which leads to adding
+    // new mempool entry.
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run(ChainName::Cosmos));
+    // Approves pending bridge actions.
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
     let gossip = GossipBuilder::new()
@@ -162,7 +167,12 @@ pub async fn validators(port: u16) -> Result<()> {
     Ok(())
 }
 
-pub async fn client(validator_addr: &str, signing_secret: SecretKey) -> Result<()> {
+pub async fn client(
+    validator_addr: &str,
+    signing_secret: SecretKey,
+    continous: bool,
+) -> Result<()> {
+    // Corresponding to the one in ../assets/validator-keypair.pem
     const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
 
     kolme::init_logger(true, None);
@@ -196,16 +206,21 @@ pub async fn client(validator_addr: &str, signing_secret: SecretKey) -> Result<(
     }
 
     kolme.resync().await?;
-    let orig_next_height = kolme.read().get_next_height();
-    println!("Original next height: {orig_next_height}");
+    loop {
+        let orig_next_height = kolme.read().get_next_height();
+        println!("Original next height: {orig_next_height}");
 
-    let block = kolme
-        .sign_propose_await_transaction(
-            &signing_secret,
-            vec![Message::App(KademliaTestMessage::SayHi {})],
-        )
-        .await?;
-    println!("New block landed: {}", block.height());
-
-    Ok(())
+        // Adds tx to mempool.
+        let block = kolme
+            .sign_propose_await_transaction(
+                &signing_secret,
+                vec![Message::App(KademliaTestMessage::SayHi {})],
+            )
+            .await?;
+        println!("New block landed: {}", block.height());
+        if !continous {
+            break Ok(());
+        }
+        time::sleep(Duration::from_secs(1)).await;
+    }
 }
