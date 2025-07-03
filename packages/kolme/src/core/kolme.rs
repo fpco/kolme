@@ -676,20 +676,25 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
+        tracing::warn!("Waiting {height}");
         // First subscribe to avoid a race condition...
         let mut recv = self.inner.store.subscribe();
         loop {
             // And then check if we're at the requested height.
             if let Some(storable_block) = self.get_block(height).await? {
+                tracing::warn!("Waiting {height}: gotcha");
                 return Ok(storable_block.block);
             }
 
             // Only use the state sync requester if we have a gap in blocks, otherwise
             // normal mechanisms for filling in blocks will work.
             if self.read().get_next_height() > height {
+                tracing::warn!("Waiting/requesting {height}");
                 if let Some(requester) = self.inner.block_requester.get() {
                     requester.send(height).await.ok();
                 }
+            } else {
+                tracing::warn!("Waiting/not requesting {height}, next: {}", self.read().get_next_height());
             }
 
             // Wait for more data

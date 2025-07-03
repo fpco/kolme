@@ -237,7 +237,7 @@ impl GossipBuilder {
                         StreamProtocol::new("/request-block/1"),
                         ProtocolSupport::Full,
                     )],
-                    libp2p::request_response::Config::default(),
+                    libp2p::request_response::Config::default().with_max_concurrent_streams(100),
                 );
 
                 // Kademlia
@@ -705,7 +705,15 @@ impl<App: KolmeApp> Gossip<App> {
 
     async fn handle_response(&self, response: BlockResponse<App::Message>, peer: PeerId) {
         let local_display_name = self.local_display_name.clone();
-        tracing::debug!("{local_display_name}: response");
+        let t = match response {
+            BlockResponse::Block(_) => "br:b".into(),
+            BlockResponse::BlockWithState { ref block } => {
+                format!("br:bws({})", block.height())
+            }
+            BlockResponse::HeightNotFound(_) => "br:hnf".into(),
+            BlockResponse::Merkle { hash, .. } => format!("br:m({hash})"),
+        };
+        tracing::info!("{local_display_name}: response {t} from  {peer}");
         match response {
             BlockResponse::Block(block) => {
                 self.add_block(block).await;
@@ -766,7 +774,7 @@ impl<App: KolmeApp> Gossip<App> {
 
         let our_next = self.kolme.read().get_next_height();
 
-        tracing::debug!(
+        tracing::info!(
             "{}: In catch_up, their_node=={their_next}, peer=={peer}, our_next=={our_next}",
             self.local_display_name
         );
@@ -859,6 +867,7 @@ impl<App: KolmeApp> Gossip<App> {
                     request_new_peers,
                 } => {
                     if request_new_peers || current_peers.is_empty() {
+                        tracing::info!("{}: Requesting {height}", self.local_display_name);
                         let msg = GossipMessage::RequestBlockContents {
                             height,
                             peer: self.peer_id(),
@@ -882,6 +891,7 @@ impl<App: KolmeApp> Gossip<App> {
                     current_peers,
                     request_new_peers,
                 } => {
+                    tracing::info!("{}: Requesting merkle {hash}", self.local_display_name);
                     for peer in current_peers {
                         swarm
                             .behaviour_mut()
