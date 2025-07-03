@@ -212,7 +212,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
                 SyncMode::StateTransfer,
                 DataLoadValidation::ValidateDataLoads,
             )
-            .build(kolme_state_transfer.clone())
+            .build(kolme_state_transfer2.clone())
             .unwrap()
             .run(),
     );
