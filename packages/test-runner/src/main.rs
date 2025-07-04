@@ -8,7 +8,6 @@ const DOCKER_COMPOSE_DIR: &str = "packages/integration-tests";
 fn main() -> Result<()> {
     println!("In parallel: building tests, building contracts, launching local Osmosis");
     try_join(|s| {
-        s.spawn(build_tests);
         s.spawn(build_contracts);
         s.spawn(launch_local_osmo);
     })?;
@@ -16,27 +15,6 @@ fn main() -> Result<()> {
     println!("Running test suite");
     run_test_suite()?;
     Ok(())
-}
-
-fn build_tests() -> Result<()> {
-    (|| {
-        let status = std::process::Command::new("cargo")
-            .arg("build")
-            .arg("--release")
-            .arg("--workspace")
-            .arg("--all-targets")
-            .spawn()?
-            .wait()
-            .context("Error while building tests")?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "Failure status code for build_tests: {status}"
-            ))
-        }
-    })()
-    .context("Failure while building test executables")
 }
 
 fn build_contracts() -> Result<()> {
@@ -82,8 +60,8 @@ fn launch_local_osmo() -> Result<()> {
 fn run_test_suite() -> Result<()> {
     (|| {
         let status = std::process::Command::new("cargo")
-            .arg("test")
-            .arg("--release")
+            .arg("nextest")
+            .arg("run")
             .arg("--workspace")
             .env("RUST_BACKTRACE", "1")
             .env(

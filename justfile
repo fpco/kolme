@@ -27,14 +27,8 @@ sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgre
     cargo sqlx migrate run
     cargo sqlx prepare
 
-build-optimizer-image:
-    ./.ci/build-optimizer-image.sh
-
 build-contracts:
-    docker run --rm -v "$(pwd)":/code \
-      --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
-      --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-      ghcr.io/fpco/kolme/cosmwasm-optimizer:1.84
+	./.ci/build-contracts.sh
 
 [working-directory: "packages/integration-tests"]
 drop-integration-tests-db:
@@ -54,3 +48,7 @@ run-store-tests $PROCESSOR_BLOCK_DB="postgres://postgres:postgres@localhost:4592
 
 changelog:
     git-cliff -c .git-cliff.toml -o new-changelog.md --tag-pattern "v[0-9]*"
+
+# cargo compile
+cargo-compile:
+	cargo test --workspace --no-run --locked

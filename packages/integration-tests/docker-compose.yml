@@ -1,8 +1,7 @@
 services:
   localosmosis:
     container_name: localosmosis
-    build:
-      context: ./docker-resources/localosmosis
+    image: "ghcr.io/fpco/cosmos-images/localosmosis:4d7201300db93ca95b7d494e4d7d9d266f1b0dc9"
     ports:
       - "127.0.0.1:26657:26657"
       - "127.0.0.1:1317:1317"
