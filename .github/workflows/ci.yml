@@ -36,11 +36,6 @@ jobs:
         with:
           workspaces: |
             .
-      - name: Setup system
-        uses: ./.github/actions/setup-system
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache-prefix-key: tests
       - name: Compile
         run: just cargo-compile
       - name: Run tests
