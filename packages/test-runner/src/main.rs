@@ -42,10 +42,8 @@ fn launch_local_osmo() -> Result<()> {
 fn run_test_suite() -> Result<()> {
     (|| {
         let status = std::process::Command::new("cargo")
-            .arg("nextest")
-            .arg("run")
+            .arg("test")
             .arg("--workspace")
-            .env("RUST_BACKTRACE", "1")
             .env(
                 "PROCESSOR_BLOCK_DB",
                 "psql://postgres:postgres@localhost:45921/postgres",
