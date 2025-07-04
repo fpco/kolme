@@ -8,6 +8,7 @@ use axum::{
     routing::{get, put},
     Json,
 };
+use kolme_store::StorableBlock;
 use reqwest::{Method, StatusCode};
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
@@ -115,26 +116,57 @@ async fn get_block<App: KolmeApp>(
         logs: &'a [Vec<String>],
     }
 
+    fn block_response<App: KolmeApp, F>(
+        block: &StorableBlock<SignedBlock<App::Message>, F, App::State>,
+    ) -> axum::response::Response {
+        let resp: Response<'_, App> = Response {
+            blockhash: block.blockhash,
+            txhash: block.txhash,
+            block: &block.block,
+            logs: &block.logs,
+        };
+        Json(resp).into_response()
+    }
+
+    fn error_reponse(e: anyhow::Error) -> axum::response::Response {
+        let mut res = e.to_string().into_response();
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+
+        res
+    }
+
+    fn null() -> axum::response::Response {
+        Json(serde_json::json!(null)).into_response()
+    }
+
     match kolme.get_block(height).await {
-        Ok(Some(block)) => {
-            let resp: Response<'_, App> = Response {
-                blockhash: block.blockhash,
-                txhash: block.txhash,
-                block: &block.block,
-                logs: &block.logs,
-            };
-
-            Json(resp).into_response()
+        Ok(Some(block)) => block_response::<App, _>(&block),
+        Ok(None) => {
+            // workaround for missed blocks during sync
+            if height < kolme.read().get_next_height() {
+                let res = tokio::time::timeout(BLOCK_WAIT, kolme.wait_for_block(height)).await;
+                match res {
+                    Err(_elapsed) => {
+                        tracing::warn!("Couldn't retrieve block {height} in time");
+                        null()
+                    }
+                    Ok(Err(err)) => error_reponse(err),
+                    Ok(Ok(_block)) => match kolme.get_block(height).await {
+                        Ok(None) => null(),
+                        Ok(Some(block)) => block_response::<App, _>(&block),
+                        Err(err) => error_reponse(err),
+                    },
+                }
+            } else {
+                null()
+            }
         }
-        Ok(None) => Json(serde_json::json!(null)).into_response(),
-        Err(e) => {
-            let mut res = e.to_string().into_response();
-            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-
-            res
-        }
+        Err(e) => error_reponse(e),
     }
 }
+
+// we don't have good estimations ATM so using an arbitrary number
+const BLOCK_WAIT: tokio::time::Duration = tokio::time::Duration::from_secs(3);
 
 async fn ws_handler<App: KolmeApp>(
     ws: WebSocketUpgrade,
