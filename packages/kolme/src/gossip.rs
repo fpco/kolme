@@ -4,8 +4,9 @@ mod state_sync;
 use std::{
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
+    num::NonZeroUsize,
     str::FromStr,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::*;
@@ -44,6 +45,8 @@ pub struct Gossip<App: KolmeApp> {
     watch_network_ready: tokio::sync::watch::Sender<bool>,
     /// Status of state syncs, if present.
     state_sync: Mutex<StateSyncStatus<App>>,
+    /// LRU cache for notifications received via P2p layer
+    lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
 }
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
@@ -326,6 +329,7 @@ impl GossipBuilder {
             watch_network_ready,
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             state_sync,
+            lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
         })
     }
 }
@@ -362,7 +366,7 @@ impl<App: KolmeApp> Gossip<App> {
                 // Our local Kolme generated a notification to be sent through the
                 // rest of the p2p network
                 notification = subscription.recv() =>
-                async {self.handle_notification(&mut swarm, notification)}.await,
+                {self.handle_notification(&mut swarm, notification)},
                 // A new event was generated from the p2p network
                 event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &peers_with_blocks_tx).await,
                 // A peer reported a known height higher than we have, so
@@ -461,6 +465,13 @@ impl<App: KolmeApp> Gossip<App> {
                 return;
             }
         };
+
+        if let Some(hash) = notification.hash() {
+            if self.notification_hash_exists(&hash) {
+                tracing::info!("Skipping publish to p2p layer");
+                return;
+            }
+        }
         if let Err(e) = GossipMessage::Notification(notification).publish(self, swarm) {
             tracing::warn!(
                 "{}: Error when handling notification: {e}",
@@ -555,6 +566,9 @@ impl<App: KolmeApp> Gossip<App> {
         match message {
             GossipMessage::Notification(msg) => {
                 tracing::debug!("{local_display_name}: got notification message");
+                if let Some(hash) = &msg.hash() {
+                    self.check_and_update_notification_lru(hash);
+                }
                 match &msg {
                     Notification::NewBlock(block) => {
                         self.add_block(block.clone()).await;
@@ -898,6 +912,36 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
         }
+    }
+
+    // Returns true if the notfication should be skipped publishing to the p2p network
+    fn notification_hash_exists(&self, hash: &Sha256Hash) -> bool {
+        let expiry = { self.lru_notifications.read().peek(hash).cloned() };
+        match expiry {
+            Some(instant) => {
+                let elapsed = instant.elapsed();
+                if elapsed > Duration::from_secs(60) {
+                    // Let's allow it to be submitted to the gossip network again
+                    false
+                } else {
+                    true
+                }
+            }
+            None => false,
+        }
+    }
+
+    fn update_notification_lru(&self, hash: Sha256Hash) {
+        let mut lru = self.lru_notifications.write();
+        lru.push(hash, Instant::now());
+    }
+
+    fn check_and_update_notification_lru(&self, hash: &Sha256Hash) -> bool {
+        let exists = self.notification_hash_exists(hash);
+        if !exists {
+            self.update_notification_lru(*hash);
+        }
+        exists
     }
 }
 

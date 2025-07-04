@@ -20,7 +20,11 @@ enum Cmd {
     /// Run a test of connecting over Kademlia
     Client {
         /// Address to connect to validators on
+        #[clap(long)]
         validator: String,
+        /// Run continously by proposing new txs
+        #[clap(long)]
+        continous: bool,
     },
 }
 
@@ -32,8 +36,16 @@ async fn main() -> Result<()> {
 async fn main_inner() -> Result<()> {
     match Opt::parse().cmd {
         Cmd::Validators { port } => validators(port).await,
-        Cmd::Client { validator } => {
-            client(&validator, SecretKey::random(&mut rand::thread_rng())).await
+        Cmd::Client {
+            validator,
+            continous,
+        } => {
+            client(
+                &validator,
+                SecretKey::random(&mut rand::thread_rng()),
+                continous,
+            )
+            .await
         }
     }
 }
