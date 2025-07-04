@@ -44,6 +44,7 @@ fn run_test_suite() -> Result<()> {
         let status = std::process::Command::new("cargo")
             .arg("test")
             .arg("--workspace")
+            .arg("--locked")
             .env(
                 "PROCESSOR_BLOCK_DB",
                 "psql://postgres:postgres@localhost:45921/postgres",

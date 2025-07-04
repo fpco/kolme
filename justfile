@@ -17,7 +17,7 @@ postgres:
     docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
 
 test:
-    cargo run --bin test-runner
+    cargo run --locked --bin test-runner
 
 [working-directory: "packages/kolme-store"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
