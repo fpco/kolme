@@ -1,0 +1,44 @@
+services:
+  localosmosis:
+    container_name: localosmosis
+    build:
+      context: ./docker-resources/localosmosis
+    ports:
+      - "127.0.0.1:26657:26657"
+      - "127.0.0.1:1317:1317"
+      - "127.0.0.1:9090:9090"
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - ./local-workspace:/var/workspace
+
+  postgres:
+    container_name: postgres
+    image: "postgres:16"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    expose:
+      - 5432
+    ports:
+      - "45921:5432"
+
+  benchmarks:
+    container_name: benchmarks
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres/postgres
+    volumes:
+      - ../../target:/kolme/target
+    build:
+      context: ../../
+      dockerfile: packages/integration-tests/docker-resources/benches/Dockerfile
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: '20G'
+        reservations:
+          cpus: '2'
+          memory: '2G'
