@@ -6,32 +6,14 @@ use join_set::try_join;
 const DOCKER_COMPOSE_DIR: &str = "packages/integration-tests";
 
 fn main() -> Result<()> {
-    println!("In parallel: building tests, building contracts, launching local Osmosis");
+    println!("In parallel: Launching local Osmosis and postgres");
     try_join(|s| {
-        s.spawn(build_contracts);
         s.spawn(launch_local_osmo);
     })?;
 
     println!("Running test suite");
     run_test_suite()?;
     Ok(())
-}
-
-fn build_contracts() -> Result<()> {
-    (|| {
-        let status = std::process::Command::new("just")
-            .arg("build-contracts")
-            .spawn()?
-            .wait()?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "Failure status code for build_contracts: {status}"
-            ))
-        }
-    })()
-    .context("Failure while building contracts")
 }
 
 fn launch_local_osmo() -> Result<()> {

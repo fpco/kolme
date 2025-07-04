@@ -39,6 +39,8 @@ jobs:
             .
       - name: Compile
         run: just cargo-compile
+      - name: Build contracts
+        run: just build-contracts
       - name: Run tests
         run: just test
 

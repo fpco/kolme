@@ -19,6 +19,8 @@ static WASM_FILE: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut file = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     file.push("..");
     file.push("..");
+    file.push("..");
+    file.push("wasm");
     file.push("artifacts");
     file.push("kolme_cosmos_bridge.wasm");
     file.canonicalize().unwrap()
