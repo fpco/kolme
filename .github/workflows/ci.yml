@@ -37,6 +37,15 @@ jobs:
           cache-on-failure: true
           workspaces: |
             .
+      - name: Cache contract builds
+        uses: actions/cache@v4
+        with:
+          key: contracts-${{ hashFiles('Cargo.toml') }}-${{hashFiles('Cargo.lock')}}-${{ hashFiles('./.ci/build-contracts.sh')}} }
+          restore-keys: |
+            contracts-${{ hashFiles('Cargo.toml') }}
+            contracts
+          path: |
+            wasm
       - name: Compile
         run: just cargo-compile
       - name: Build contracts
