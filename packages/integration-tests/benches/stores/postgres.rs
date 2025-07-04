@@ -1,5 +1,6 @@
 use super::{core::RawMerkleMap, r#trait::StoreEnv};
 use kolme::{MerkleLayerContents, Sha256Hash};
+use merkle::MerklePostgresStore;
 use parking_lot::RwLock;
 use std::{collections::HashMap, sync::Arc};
 
@@ -10,19 +11,47 @@ pub struct StoreOptions {
 
 type MerkleCache = Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>;
 
+#[derive(Clone)]
 pub struct Store {
     pool: sqlx::PgPool,
     merkle_cache: MerkleCache,
+}
+
+impl Store {
+    async fn consume_merkle<'a>(merkle_store: MerklePostgresStore<'a>) {
+        let hashes = merkle_store.hashes_to_insert;
+        let payloads = merkle_store.payloads_to_insert;
+        let childrens = merkle_store.childrens_to_insert;
+
+        sqlx::query(
+            r#"
+            INSERT INTO merkle_contents(hash, payload, children)
+            SELECT t.hash, t.payload, t.children
+            FROM UNNEST($1::bytea[], $2::bytea[], $3::children[]) as t(hash, payload, children)
+            ON CONFLICT (hash) DO NOTHING
+            "#,
+        )
+        .bind(hashes)
+        .bind(payloads)
+        .bind(childrens)
+        .execute(merkle_store.pool)
+        .await
+        .expect("Unable to insert MerkleMap hash contents");
+    }
 }
 
 impl StoreEnv for Store {
     type Params = StoreOptions;
 
     async fn new(params: Self::Params) -> Self {
-        Store {
-            pool: sqlx::PgPool::connect(&params.url)
+        let pool = sqlx::PgPool::connect(&params.url)
                 .await
-                .expect("Unable to connect to postgres"),
+                .expect("Unable to connect to postgres");
+
+        sqlx::migrate!().run(&pool).await.expect("Unable to complete migrations");
+
+        Store {
+            pool,
             merkle_cache: Arc::new(RwLock::new(Default::default())),
         }
     }
@@ -41,24 +70,7 @@ impl StoreEnv for Store {
             .await
             .expect("Unable to save MekrleMap");
 
-        let hashes = merkle_store.hashes_to_insert;
-        let payloads = merkle_store.payloads_to_insert;
-        let childrens = merkle_store.childrens_to_insert;
-
-        sqlx::query(
-            r#"
-            INSERT INTO merkle_contents(hash, payload, children)
-            SELECT t.hash, t.payload, t.children
-            FROM UNNEST($1::bytea[], $2::bytea[], $3::children[]) as t(hash, payload, children)
-            ON CONFLICT (hash) DO NOTHING
-            "#,
-        )
-        .bind(hashes)
-        .bind(payloads)
-        .bind(childrens)
-        .execute(&self.pool)
-        .await
-        .expect("Unable to insert MerkleMap hash contents");
+        Self::consume_merkle(merkle_store).await;
     }
 
     async fn cleanup(&mut self) {

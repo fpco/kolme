@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use criterion::{BenchmarkGroup, measurement::Measurement};
+use criterion::{measurement::Measurement, BenchmarkGroup};
 use kolme::MerkleMap;
 use tokio::runtime::Handle;
 
@@ -14,7 +14,7 @@ where
     M: Measurement,
 {
     handle: Handle,
-    group: BenchmarkGroup<'a, M>,
+    pub group: BenchmarkGroup<'a, M>,
 }
 
 impl<'a, M> BenchmarkGroupRunner<'a, M>

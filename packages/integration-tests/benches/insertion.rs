@@ -6,17 +6,13 @@ mod stores {
     pub mod r#trait;
 }
 
-use std::ops::Range;
-
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use kolme::MerkleMap;
 use rand::{Rng as _, RngCore as _};
 use stores::core::{BenchmarkGroupRunner, RawMerkleMap};
 
-fn generate_merkle_map(map_size: Range<usize>, content_size: Range<usize>) -> RawMerkleMap {
+fn generate_merkle_map(map_size: usize, content_size: usize) -> RawMerkleMap {
     let mut rng = rand::thread_rng();
-    let map_size = rng.gen_range(map_size);
-    let content_size = rng.gen_range(content_size);
     let mut merkle_map = MerkleMap::default();
 
     for _ in 0..map_size {
@@ -44,31 +40,16 @@ fn update_merkle_map(probability_to_update: f64, merkle_map: &mut RawMerkleMap) 
     }
 }
 
-const MAP_SIZES: [Range<usize>; 1] = [
-    // 0..16,
-    // 16..256,
-    // 256..4096,
-    4096..65535,
-];
-const CONTENT_SIZES: [Range<usize>; 1] = [
-    0..1024,
-    // 1024..10240,
-    // 10240..102400
-];
-const UPDATE_PERCENTS: [f64; 1] = [
-    0.0,
-    // 0.25,
-    // 0.5,
-    // 0.75,
-    // 1.0
-];
+const MAP_SIZES: [usize; 5] = [4, 16, 256, 4096, 65535];
+const CONTENT_SIZES: [usize; 5] = [64, 256, 1024, 10240, 102400];
+const UPDATE_PERCENTS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 
 fn reserialization_benchmarks(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().expect("Unable to construct Tokio runtime");
     let group = c.benchmark_group("Reserialization");
     let mut runner = BenchmarkGroupRunner::new(group, runtime.handle().clone());
     let postgres_options = stores::postgres::StoreOptions {
-        url: "postgres://postgres:postgres@localhost:45921/postgres".to_owned(),
+        url: std::env::var("DATABASE_URL").expect("DATABASE_URL env variable missing"),
     };
     let fjall_options = stores::fjall::StoreOptions {
         dirname: "fjall-dir",
@@ -87,27 +68,23 @@ fn reserialization_benchmarks(c: &mut Criterion) {
         });
 
     for (update_percent, map_size, content_size) in sizes {
-        // runner.run_reserialization::<stores::fjall::Store, _, _>(
-        //     format!(
-        //         "Fjall ({}%) [{}-{}] [{}-{}]",
-        //         update_percent * 100.0,
-        //         map_size.start,
-        //         map_size.end,
-        //         content_size.start,
-        //         content_size.end
-        //     ),
-        //     fjall_options.clone(),
-        //     || generate_merkle_map(map_size.clone(), content_size.clone()),
-        //     |map| update_merkle_map(0.2, map),
-        // );
+        runner.run_reserialization::<stores::fjall::Store, _, _>(
+            format!(
+                "Fjall ({}%) [{}] [{}]",
+                update_percent * 100.0,
+                map_size,
+                content_size,
+            ),
+            fjall_options.clone(),
+            || generate_merkle_map(map_size.clone(), content_size.clone()),
+            |map| update_merkle_map(0.2, map),
+        );
         runner.run_reserialization::<stores::postgres::Store, _, _>(
             format!(
-                "Postgres ({}%) [{}-{}] [{}-{}]",
+                "Postgres ({}%) [{}] [{}]",
                 update_percent * 100.,
-                map_size.start,
-                map_size.end,
-                content_size.start,
-                content_size.end
+                map_size,
+                content_size,
             ),
             postgres_options.clone(),
             || generate_merkle_map(map_size.clone(), content_size.clone()),
@@ -121,7 +98,7 @@ fn initial_insertion_benchmarks(c: &mut Criterion) {
     let group = c.benchmark_group("Initial insertion");
     let mut runner = BenchmarkGroupRunner::new(group, runtime.handle().clone());
     let postgres_options = stores::postgres::StoreOptions {
-        url: "postgres://postgres:postgres@localhost:45921/postgres".to_owned(),
+        url: std::env::var("DATABASE_URL").expect("DATABASE_URL env variable missing"),
     };
     let fjall_options = stores::fjall::StoreOptions {
         dirname: "fjall-dir",
@@ -134,27 +111,25 @@ fn initial_insertion_benchmarks(c: &mut Criterion) {
 
     for (map_size, content_size) in sizes {
         runner.run_initial::<stores::fjall::Store, _>(
-            format!(
-                "Fjall [{}-{}] [{}-{}]",
-                map_size.start, map_size.end, content_size.start, content_size.end
-            ),
+            format!("Fjall [{}] [{}]", map_size, content_size),
             fjall_options.clone(),
             || generate_merkle_map(map_size.clone(), content_size.clone()),
         );
         runner.run_initial::<stores::postgres::Store, _>(
-            format!(
-                "Postgres [{}-{}] [{}-{}]",
-                map_size.start, map_size.end, content_size.start, content_size.end
-            ),
+            format!("Postgres [{}] [{}]", map_size, content_size),
             postgres_options.clone(),
             || generate_merkle_map(map_size.clone(), content_size.clone()),
         );
     }
+
+    runner.group.finish();
 }
 
 criterion_group!(
-    insertions,
-    // initial_insertion_benchmarks,
-    reserialization_benchmarks
+    name = insertions;
+    config = Criterion::default().sample_size(500);
+    targets =
+        initial_insertion_benchmarks,
+        reserialization_benchmarks
 );
 criterion_main!(insertions);
