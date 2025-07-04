@@ -567,7 +567,7 @@ impl<App: KolmeApp> Gossip<App> {
             GossipMessage::Notification(msg) => {
                 tracing::debug!("{local_display_name}: got notification message");
                 if let Some(hash) = &msg.hash() {
-                    self.check_and_update_notification_lru(&hash);
+                    self.check_and_update_notification_lru(hash);
                 }
                 match &msg {
                     Notification::NewBlock(block) => {
@@ -939,7 +939,7 @@ impl<App: KolmeApp> Gossip<App> {
     fn check_and_update_notification_lru(&self, hash: &Sha256Hash) -> bool {
         let exists = self.notification_hash_exists(hash);
         if !exists {
-            self.update_notification_lru(hash.clone());
+            self.update_notification_lru(*hash);
         }
         exists
     }
