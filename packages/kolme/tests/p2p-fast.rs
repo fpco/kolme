@@ -1,8 +1,10 @@
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::{collections::BTreeSet, str::FromStr, sync::LazyLock};
 
 use anyhow::Result;
 
+use gossip::Keypair;
 use kolme::{testtasks::TestTasks, *};
+use libp2p::Multiaddr;
 
 // We only want one copy of this test running at a time
 // to avoid mDNS Gossip confusion
@@ -154,10 +156,19 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
 
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
+    const LISTEN_PORT: u16 = 5892;
+    let kolme1_keypair = Keypair::generate_ed25519();
+    let kolme1_peer_id = kolme1_keypair.public().to_peer_id();
+    let kolme1_multiaddr =
+        Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{LISTEN_PORT}")).unwrap();
+
     // And now launch a gossip node for this Kolme
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme1")
+            .disable_mdns()
+            .add_listen_port(LISTEN_PORT)
+            .set_keypair(kolme1_keypair)
             .build(kolme1)
             .unwrap()
             .run(),
@@ -175,6 +186,8 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme_block_transfer")
+            .disable_mdns()
+            .add_bootstrap(kolme1_peer_id, kolme1_multiaddr.clone())
             .set_sync_mode(
                 SyncMode::BlockTransfer,
                 DataLoadValidation::ValidateDataLoads,
@@ -196,6 +209,8 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("kolme_state_transfer")
+            .disable_mdns()
+            .add_bootstrap(kolme1_peer_id, kolme1_multiaddr)
             .set_sync_mode(
                 SyncMode::StateTransfer,
                 DataLoadValidation::ValidateDataLoads,
