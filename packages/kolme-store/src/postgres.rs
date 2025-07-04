@@ -146,7 +146,7 @@ impl Store {
 
 impl KolmeBackingStore for Store {
     async fn clear_blocks(&self) -> Result<(), KolmeStoreError> {
-        sqlx::query!("DELETE FROM blocks")
+        sqlx::query!("TRUNCATE blocks")
             .execute(&self.pool)
             .await
             .map(|_| ())
