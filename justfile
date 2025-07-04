@@ -51,4 +51,4 @@ changelog:
 
 # cargo compile
 cargo-compile:
-	cargo test --workspace --no-run --locked
+	cargo test --workspace --release --no-run --locked
