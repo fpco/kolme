@@ -27,7 +27,7 @@ jobs:
           sudo apt install libudev-dev libusb-1.0-0-dev libhidapi-dev mold -y
       - uses: taiki-e/install-action@v2
         with:
-          tool: just@1.25.2,nextest@0.9.99
+          tool: just@1.40.0,nextest@0.9.99
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.84.0
