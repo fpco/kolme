@@ -1,17 +1,9 @@
-use std::{
-    collections::BTreeSet,
-    sync::{Arc, LazyLock},
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::Result;
 
 use kolme::{testtasks::TestTasks, *};
 use tokio::time::{timeout, Duration};
-
-// We only want one copy of this test running at a time
-// to avoid mDNS Gossip confusion
-static P2P_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
-    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
@@ -109,7 +101,6 @@ impl KolmeApp for SampleKolmeApp {
 
 #[test_log::test(tokio::test)]
 async fn sanity() {
-    let _guard = P2P_TEST_LOCK.lock().await;
     TestTasks::start(sanity_inner, ()).await;
 }
 
@@ -130,17 +121,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(
         Processor::new(kolme_processor.clone(), my_secret_key().clone()).run(),
     );
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_sync_mode(
-                SyncMode::BlockTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-            .set_local_display_name("sanity-processor")
-            .build(kolme_processor)
-            .unwrap()
-            .run(),
-    );
+    let discovery = testtasks.launch_kademlia_discovery(kolme_processor, "sanity-processor");
 
     let tempfile_client = tempfile::tempdir().unwrap();
     let kolme_client = Kolme::new(
@@ -150,13 +131,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_local_display_name("sanity-client")
-            .build(kolme_client.clone())
-            .unwrap()
-            .run(),
-    );
+    testtasks.launch_kademlia_client(kolme_client.clone(), "sanity-client", &discovery);
 
     let secret = SecretKey::random(&mut rand::thread_rng());
     timeout(

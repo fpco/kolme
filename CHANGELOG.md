@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - Incremental state sync (a9ceea1…)
   - Sync older blocks on demand via state sync. (909536f…)
   - Add the archiver component for synchronizing older blocks. (f6ed91d…)
+- New config mechanism for listeners in gossip, using the `GossipListener` type.
 
 ### Fixed
 
@@ -26,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Ignores BlockDoubleInserted error from underlying store
 - Rename error variants to be more descriptive
 - Remove unneeded async/await
+- Remove mDNS support entirely. Tests all use Kademlia discovery.
 
 ## [v0.1.0] - 2025-06-13
 

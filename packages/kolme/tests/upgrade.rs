@@ -141,13 +141,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     .await
     .unwrap();
     testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), processor.clone()).run());
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_local_display_name("kolme1")
-            .build(kolme1.clone())
-            .unwrap()
-            .run(),
-    );
+    let discovery = testtasks.launch_kademlia_discovery(kolme1.clone(), "kolme1");
 
     // And we'll launch the v2 processor immediately too, even though it won't do anything yet
     let store2 = KolmeStore::new_fjall(tempdir.path()).unwrap();
@@ -155,13 +149,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
         .await
         .unwrap();
     testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), processor.clone()).run());
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_local_display_name("kolme2")
-            .build(kolme2.clone())
-            .unwrap()
-            .run(),
-    );
+    testtasks.launch_kademlia_client(kolme2.clone(), "kolme2", &discovery);
 
     let client = SecretKey::random(&mut rand::thread_rng());
     const HI_COUNT1: u64 = 10;

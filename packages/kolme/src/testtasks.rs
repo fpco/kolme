@@ -1,3 +1,5 @@
+mod kademlia_helper;
+
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize},
     Arc,
