@@ -19,8 +19,12 @@ async fn kademlia_discovery_inner(testtasks: TestTasks, (): ()) {
 }
 
 async fn kademlia_discovery_client(port: u16, signing_secret: SecretKey) -> Result<()> {
-    client(&format!("/dns4/localhost/tcp/{port}"), signing_secret, false)
-        .await
-        .unwrap();
+    client(
+        &format!("/dns4/localhost/tcp/{port}"),
+        signing_secret,
+        false,
+    )
+    .await
+    .unwrap();
     Ok(())
 }
