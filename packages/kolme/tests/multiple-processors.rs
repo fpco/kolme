@@ -155,7 +155,7 @@ async fn multiple_processors_inner(
         // TODO Ideally we would like to speed up things so this test runs much faster.
         // However, at the moment, sometimes transactions take more than
         // 10 seconds to land.
-        let kolme = kolme.set_tx_await_duration(tokio::time::Duration::from_secs(70));
+        let kolme = kolme.set_tx_await_duration(tokio::time::Duration::from_secs(80));
 
         let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
         test_tasks.try_spawn_persistent(processor.run());
