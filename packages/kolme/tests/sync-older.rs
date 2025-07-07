@@ -203,7 +203,7 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     assert_eq!(from_gossip.hash().0, from_kolme1.blockhash);
 
     // OK, now launch the archive and try the same thing with every block.
-    testtasks.spawn_persistent(Archiver::new(kolme_state_transfer.clone()).run());
+    testtasks.try_spawn_persistent(Archiver::new(kolme_state_transfer.clone()).run());
 
     for height in 0..latest_block_height.0 {
         let height = BlockHeight(height);

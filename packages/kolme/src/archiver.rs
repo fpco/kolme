@@ -12,7 +12,7 @@ impl<App: KolmeApp> Archiver<App> {
         Archiver { kolme }
     }
 
-    pub async fn run(self) {
+    pub async fn run(self) -> Result<()> {
         // TODO make this more efficient by storing the known-archived-through
         // in the data store. Waiting until we simplify our data stores to make this easier to do.
         let mut next_to_archive = BlockHeight::start();
