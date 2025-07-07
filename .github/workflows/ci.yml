@@ -33,15 +33,15 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache-prefix-key: tests
-      - uses: dorny/paths-filter@v3
+      - uses: step-security/changed-files@v46
         id: contracts
         with:
           filters: |
             contracts:
-              - 'contracts/**'
-              - '.ci/**'
+              - contracts/**
+              - .ci/**
       - name: Cache contract builds
-        if: ${{ (steps.contracts.outputs.contracts == 'true' || github.ref == 'refs/heads/main') }}
+        if: ${{ (steps.contracts.outputs.any_changed == 'true' || github.ref == 'refs/heads/main') }}
         uses: actions/cache@v4
         with:
           key: contracts-${{ hashFiles('Cargo.toml') }}-${{hashFiles('Cargo.lock')}}-${{ hashFiles('./.ci/build-contracts.sh')}} }
@@ -51,7 +51,7 @@ jobs:
           path: |
             wasm
       - name: Build contracts
-        if: ${{ (steps.contracts.outputs.contracts == 'true' || github.ref == 'refs/heads/main') }}
+        if: ${{ (steps.contracts.outputs.any_changed == 'true' || github.ref == 'refs/heads/main') }}
         run: just build-contracts
       - name: Run tests
         env:
