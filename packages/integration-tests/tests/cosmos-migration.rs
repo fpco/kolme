@@ -178,7 +178,7 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
 
     // Upload the contract again
     let mut wasm_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    wasm_file.push("../../artifacts/kolme_cosmos_bridge.wasm");
+    wasm_file.push("../../wasm/artifacts/kolme_cosmos_bridge.wasm");
     let new_code_id = cosmos
         .store_code_path(&submitter_wallet, &wasm_file)
         .await

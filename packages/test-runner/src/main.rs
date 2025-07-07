@@ -9,7 +9,6 @@ fn main() -> Result<()> {
     println!("In parallel: building tests, building contracts, launching local Osmosis");
     try_join(|s| {
         s.spawn(build_tests);
-        s.spawn(build_contracts);
         s.spawn(launch_local_osmo);
     })?;
 
@@ -37,23 +36,6 @@ fn build_tests() -> Result<()> {
         }
     })()
     .context("Failure while building test executables")
-}
-
-fn build_contracts() -> Result<()> {
-    (|| {
-        let status = std::process::Command::new("just")
-            .arg("build-contracts")
-            .spawn()?
-            .wait()?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "Failure status code for build_contracts: {status}"
-            ))
-        }
-    })()
-    .context("Failure while building contracts")
 }
 
 fn launch_local_osmo() -> Result<()> {

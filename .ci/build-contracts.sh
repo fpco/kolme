@@ -11,7 +11,7 @@ WASM_DIR="$(pwd)/wasm"
 TARGET_CACHE="$WASM_DIR/target"
 REGISTRY_CACHE="$WASM_DIR/registry"
 CARGO_GIT_CACHE="$WASM_DIR/git"
-ARTIFACTS="$(pwd)/artifacts"
+ARTIFACTS="$WASM_DIR/artifacts"
 
 OPTIMIZER_VERSION="ghcr.io/fpco/cosmos-images/cosmwasm-optimizer:3703be0654109bd04d6e4e1f7d2707ea905a28eb"
 
