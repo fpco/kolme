@@ -12,11 +12,10 @@ use std::{
 use crate::*;
 use messages::*;
 
-use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
-    mdns, noise,
+    noise,
     request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
@@ -49,25 +48,79 @@ pub struct Gossip<App: KolmeApp> {
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
 }
 
-// We create a custom network behaviour that combines Gossipsub and Mdns.
+// We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
 #[derive(NetworkBehaviour)]
 struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 'static> {
     gossipsub: gossipsub::Behaviour,
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
-    mdns: Toggle<mdns::tokio::Behaviour>,
     kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
+}
+
+/// Config for a Gossip listener.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct GossipListener {
+    pub proto: GossipProto,
+    pub ip: GossipIp,
+    /// Use 0 to grab an available port.
+    pub port: u16,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum GossipProto {
+    Tcp,
+    Quic,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum GossipIp {
+    Ip4,
+    Ip6,
+}
+
+impl GossipListener {
+    /// Generates a random listener with an available port.
+    pub fn random() -> Result<Self> {
+        let port = std::net::TcpListener::bind("0.0.0.0:0")?
+            .local_addr()?
+            .port();
+        Ok(Self {
+            proto: GossipProto::Tcp,
+            ip: GossipIp::Ip4,
+            port,
+        })
+    }
+
+    /// Produce the Multiaddr for this listener.
+    pub fn multiaddr(&self) -> Multiaddr {
+        match format!(
+            "{}/{}/{}{}",
+            match self.ip {
+                GossipIp::Ip4 => "/ip4/0.0.0.0",
+                GossipIp::Ip6 => "/ip6/::",
+            },
+            match self.proto {
+                GossipProto::Tcp => "tcp",
+                GossipProto::Quic => "udp",
+            },
+            self.port,
+            match self.proto {
+                GossipProto::Tcp => "",
+                GossipProto::Quic => "/quic-v1",
+            }
+        )
+        .parse()
+        {
+            Ok(addr) => addr,
+            Err(e) => panic!("GossipListener::multiaddr failed on {self:?}: {e}"),
+        }
+    }
 }
 
 pub struct GossipBuilder {
     keypair: Option<Keypair>,
     bootstrap: Vec<(PeerId, Multiaddr)>,
-    disable_quic: bool,
-    disable_tcp: bool,
-    disable_ip4: bool,
-    disable_ip6: bool,
-    disable_mdns: bool,
-    listen_ports: Vec<u16>,
+    listeners: Vec<GossipListener>,
     /// See [libp2p::gossipsub::Configbuilder::heartbeat_interval]
     heartbeat_interval: Duration,
     sync_mode: SyncMode,
@@ -80,12 +133,7 @@ impl Default for GossipBuilder {
         Self {
             keypair: Default::default(),
             bootstrap: Default::default(),
-            disable_quic: Default::default(),
-            disable_tcp: Default::default(),
-            disable_ip4: Default::default(),
-            disable_ip6: Default::default(),
-            disable_mdns: Default::default(),
-            listen_ports: Default::default(),
+            listeners: vec![],
             // This is set to aid debugging by not cluttering the log space
             heartbeat_interval: Duration::from_secs(10),
             sync_mode: Default::default(),
@@ -113,11 +161,7 @@ pub enum SyncMode {
 
 impl GossipBuilder {
     pub fn new() -> Self {
-        Self {
-            disable_ip6: true,
-            disable_quic: true,
-            ..Self::default()
-        }
+        Self::default()
     }
 
     pub fn add_bootstrap(mut self, peer: PeerId, address: Multiaddr) -> Self {
@@ -130,36 +174,11 @@ impl GossipBuilder {
         self
     }
 
-    pub fn disable_quic(mut self) -> Self {
-        self.disable_quic = true;
-        self
-    }
-
-    pub fn disable_tcp(mut self) -> Self {
-        self.disable_tcp = true;
-        self
-    }
-
-    pub fn disable_ip4(mut self) -> Self {
-        self.disable_ip4 = true;
-        self
-    }
-
-    pub fn disable_ip6(mut self) -> Self {
-        self.disable_ip6 = true;
-        self
-    }
-
-    pub fn disable_mdns(mut self) -> Self {
-        self.disable_mdns = true;
-        self
-    }
-
-    /// Add a listen port
+    /// Add a listener
     ///
-    /// If none are provided, a random port is selected per interface
-    pub fn add_listen_port(mut self, port: u16) -> Self {
-        self.listen_ports.push(port);
+    /// If none are provided, one random listener is set up.
+    pub fn add_listener(mut self, listener: GossipListener) -> Self {
+        self.listeners.push(listener);
         self
     }
 
@@ -227,14 +246,6 @@ impl GossipBuilder {
                     gossipsub_config,
                 )?;
 
-                let mdns = if !self.disable_mdns {
-                    Some(mdns::tokio::Behaviour::new(
-                        mdns::Config::default(),
-                        key.public().to_peer_id(),
-                    )?)
-                } else {
-                    None
-                };
                 let request_response = libp2p::request_response::cbor::Behaviour::new(
                     [(
                         StreamProtocol::new("/request-block/1"),
@@ -257,7 +268,6 @@ impl GossipBuilder {
 
                 Ok(KolmeBehaviour {
                     gossipsub,
-                    mdns: Toggle::from(mdns),
                     request_response,
                     kademlia,
                 })
@@ -270,46 +280,11 @@ impl GossipBuilder {
         // And subscribe
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
-        // Begin listening based on the config
-        fn add_listen<AppMessage: serde::de::DeserializeOwned + Send + Sync>(
-            swarm: &mut Swarm<KolmeBehaviour<AppMessage>>,
-            is_quic: bool,
-            is_ip6: bool,
-            port: u16,
-        ) -> Result<()> {
-            swarm.listen_on(
-                format!(
-                    "{}/{}/{port}{}",
-                    if is_ip6 { "/ip6/::" } else { "/ip4/0.0.0.0" },
-                    if is_quic { "udp" } else { "tcp" },
-                    if is_quic { "/quic-v1" } else { "" }
-                )
-                .parse()?,
-            )?;
-            Ok(())
-        }
-        let add_port = |swarm: &mut Swarm<KolmeBehaviour<App::Message>>, port: u16| -> Result<()> {
-            // Listen on all interfaces and whatever port the OS assigns
-            if !self.disable_quic && !self.disable_ip4 {
-                add_listen(swarm, true, false, port)?;
-            }
-            if !self.disable_tcp && !self.disable_ip4 {
-                add_listen(swarm, false, false, port)?;
-            }
-            if !self.disable_quic && !self.disable_ip6 {
-                add_listen(swarm, true, true, port)?;
-            }
-            if !self.disable_tcp && !self.disable_ip6 {
-                add_listen(swarm, false, true, port)?;
-            }
-            Ok(())
-        };
-
-        if self.listen_ports.is_empty() {
-            add_port(&mut swarm, 0)?;
+        if self.listeners.is_empty() {
+            swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
         } else {
-            for port in &self.listen_ports {
-                add_port(&mut swarm, *port)?;
+            for listener in &self.listeners {
+                swarm.listen_on(listener.multiaddr())?;
             }
         }
 
@@ -497,15 +472,6 @@ impl<App: KolmeApp> Gossip<App> {
                     "{local_display_name}: New listener {listener_id} on {address}, {:?}",
                     swarm.local_peer_id()
                 );
-            }
-            SwarmEvent::Behaviour(KolmeBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
-                for (peer, address) in peers {
-                    tracing::info!(
-                        "{local_display_name}: Discovered new peer over mDNS: {peer} @ {address}"
-                    );
-                    // TODO do we need to manually add mDNS peers to Kademlia?
-                    swarm.behaviour_mut().kademlia.add_address(&peer, address);
-                }
             }
             SwarmEvent::Behaviour(KolmeBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                 propagation_source,
