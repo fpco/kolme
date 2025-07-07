@@ -22,7 +22,6 @@ fn launch_local_osmo() -> Result<()> {
             .arg("compose")
             .arg("up")
             .arg("-d")
-            .arg("localosmosis")
             .arg("postgres")
             .current_dir(DOCKER_COMPOSE_DIR)
             .spawn()?
@@ -43,7 +42,6 @@ fn run_test_suite() -> Result<()> {
     (|| {
         let status = std::process::Command::new("cargo")
             .arg("test")
-            .arg("--release")
             .arg("--workspace")
             .arg("--locked")
             .env(

@@ -13,8 +13,7 @@ fmt:
 lint: fmt check clippy
 
 postgres:
-    docker compose -f ./packages/integration-tests/docker-compose.yml down
-    docker compose -f ./packages/integration-tests/docker-compose.yml up -d postgres
+	docker run --name kolme_pg -d -it -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
 
 test:
     cargo run --locked --bin test-runner
@@ -51,4 +50,8 @@ changelog:
 
 # cargo compile
 cargo-compile:
-	cargo test --workspace --release --no-run --locked
+	cargo test --workspace --no-run --locked
+
+# cargo test
+cargo-test:
+	xargs -a test-skip-list.txt -I {} echo --skip {} | xargs cargo test --workspace --locked --

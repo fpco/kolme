@@ -55,10 +55,12 @@ jobs:
             wasm
       - name: Compile
         run: just cargo-compile
+      - name: Postgres
+        run: just postgres
       - name: Build contracts
         run: just build-contracts
       - name: Run tests
-        run: just test
+        run: just cargo-test
 
   lint:
     name: Lint
