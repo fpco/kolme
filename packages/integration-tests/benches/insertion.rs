@@ -41,7 +41,7 @@ fn update_merkle_map(probability_to_update: f64, merkle_map: &mut RawMerkleMap) 
 }
 
 const MAP_SIZES: [usize; 5] = [4, 16, 256, 4096, 65535];
-const CONTENT_SIZES: [usize; 5] = [64, 256, 1024, 10240, 102400];
+const CONTENT_SIZES: [usize; 5] = [64, 256, 1024, 10240, 20480];
 const UPDATE_PERCENTS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 
 fn reserialization_benchmarks(c: &mut Criterion) {

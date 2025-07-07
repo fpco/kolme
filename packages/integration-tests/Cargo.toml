@@ -20,8 +20,12 @@ kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-c
 solana-client = "2.2.7"
 spl-token-client = "0.14.0"
 solana-commitment-config = "2.2.1"
+plotters = "0.3.7"
+regex = "1.11.1"
+plotters-svg = "0.3.7"
 
 [dev-dependencies]
+regex = "1.11.1"
 example-six-sigma = { path = "../examples/six-sigma" }
 example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
 strum = { version = "0.27.1", features = ["derive"] }
@@ -53,3 +57,6 @@ debug = true
 [[bench]]
 name = "insertion"
 harness = false
+
+[[bin]]
+name = "generate_benchmark_charts"

@@ -48,7 +48,7 @@ impl StoreEnv for Store {
                 .await
                 .expect("Unable to connect to postgres");
 
-        sqlx::migrate!().run(&pool).await.expect("Unable to complete migrations");
+        sqlx::migrate!().set_ignore_missing(true).run(&pool).await.expect("Unable to complete migrations");
 
         Store {
             pool,
