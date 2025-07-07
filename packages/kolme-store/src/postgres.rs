@@ -48,7 +48,7 @@ impl Store {
         let pool = options
             .connect(url)
             .await
-            .with_context(|| "Could not connect to the database")
+            .context("Could not connect to the database")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         sqlx::migrate!()
