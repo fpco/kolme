@@ -60,6 +60,7 @@ impl TestTasks {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct KademliaDiscovery {
     peer: PeerId,
     addr: Multiaddr,
