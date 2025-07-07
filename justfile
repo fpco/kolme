@@ -41,7 +41,7 @@ test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
 [working-directory: "packages/kolme-store"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
     # TODO: On my end I need this so that docker has time to launch the container
-    sleep 3
+    sleep 6
     cargo sqlx database reset -y
     cargo sqlx migrate run
     cargo sqlx prepare
@@ -83,3 +83,14 @@ cargo-contract-tests:
 # Slow tests
 cargo-slow-tests:
 	xargs -a stress-test-list.txt cargo test --release --workspace --locked --
+
+set positional-arguments
+
+[working-directory: "packages/integration-tests"]
+profile-insertions \
+    insertion_filter \
+    reserialization_filter \
+    $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres" \
+    $SQLX_OFFLINE="true": postgres
+    sleep 5
+    CARGO_PROFILE_BENCH_DEBUG=true INITIAL_FILTER_REGEX="$1" RESERIALIZATION_FILTER_REGEX="$2" cargo flamegraph --bench insertion -- --bench
