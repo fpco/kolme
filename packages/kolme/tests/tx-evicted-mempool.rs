@@ -196,9 +196,7 @@ async fn client(kolme: Kolme<SampleKolmeApp>, sender: oneshot::Sender<()>) -> Re
         )
         .await;
         match res {
-            Ok(Ok(_height)) => {
-                ()
-            }
+            Ok(Ok(_height)) => (),
             Ok(Err(e)) => panic!("Error when checking if {txhash} is found: {e}"),
             Err(e) => panic!("txhash {txhash} not found after timeout: {e}"),
         }
