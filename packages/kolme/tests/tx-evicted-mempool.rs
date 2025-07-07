@@ -156,23 +156,20 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
             break;
         }
     }
-    match receiver.await {
-        _ => {
-            // Give it some time to catch up
+    receiver.await.ok();
+    // Give it some time to catch up
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let mut attempt = 0;
+    loop {
+        if attempt == 5 {
+            panic!("Mempool is not empty after {attempt} retries");
+        }
+        let mempool = kolme.get_mempool_entries();
+        if mempool.is_empty() {
+            break;
+        } else {
+            attempt += 1;
             tokio::time::sleep(Duration::from_secs(3)).await;
-            let mut attempt = 0;
-            loop {
-                if attempt == 5 {
-                    panic!("Mempool is not empty after {attempt} retries");
-                }
-                let mempool = kolme.get_mempool_entries();
-                if mempool.len() == 0 {
-                    break;
-                } else {
-                    attempt += 1;
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                }
-            }
         }
     }
     Ok(())
