@@ -1,16 +1,14 @@
 services:
   localosmosis:
     container_name: localosmosis
-    build:
-      context: ./docker-resources/localosmosis
+    image: "ghcr.io/fpco/cosmos-images/localosmosis:3703be0654109bd04d6e4e1f7d2707ea905a28eb"
     ports:
       - "127.0.0.1:26657:26657"
       - "127.0.0.1:1317:1317"
       - "127.0.0.1:9090:9090"
       - "127.0.0.1:9091:9091"
-    volumes:
-      - ./local-workspace:/var/workspace
-
+    networks:
+      - app_net
   postgres:
     container_name: postgres
     image: "postgres:16"
@@ -20,3 +18,10 @@ services:
       POSTGRES_DB: postgres
     ports:
       - "127.0.0.1:45921:5432"
+    networks:
+      - app_net
+
+
+networks:
+  app_net:
+    driver: bridge
