@@ -22,7 +22,7 @@ cosmwasm-std = "2.2.2"
 base64 = "0.22.1"
 jiff = { workspace = true }
 kolme-store.workspace = true
-libp2p = { workspace = true, features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "dns", "gossipsub", "macros", "quic", "request-response", "cbor", "rsa"] }
+libp2p = { workspace = true, features = ["tcp", "noise", "gossipsub", "yamux", "tokio", "kad", "ping", "dns", "macros", "quic", "request-response", "cbor", "rsa"] }
 merkle-map = { workspace = true }
 parking_lot = "0.12.3"
 rand = "0.8"
