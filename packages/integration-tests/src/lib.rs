@@ -1,9 +1,6 @@
 pub mod setup;
 
-use std::{
-    path::PathBuf,
-    sync::LazyLock,
-};
+use std::{path::PathBuf, sync::LazyLock};
 
 use anyhow::Result;
 use cosmos::{CodeId, Cosmos, CosmosNetwork, Wallet};
