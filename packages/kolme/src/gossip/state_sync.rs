@@ -399,4 +399,4 @@ impl<App: KolmeApp> StateSyncStatus<App> {
     }
 }
 
-const REQUEST_COUNT: usize = 4;
+const REQUEST_COUNT: usize = 16;
