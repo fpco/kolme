@@ -25,7 +25,7 @@ stop-localosmosis:
 
 localosmosis:
 	-just stop-localosmosis
-	docker run --name localosmosis -d -it --cpus="0.5" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:3703be0654109bd04d6e4e1f7d2707ea905a28eb
+	docker run --name localosmosis -d -it --cpus="1" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:3703be0654109bd04d6e4e1f7d2707ea905a28eb
 
 test:
     cargo run --locked --bin test-runner
