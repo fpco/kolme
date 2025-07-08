@@ -24,3 +24,5 @@ wasm/
 
 # Generated when running solana-test-validator
 test-ledger/
+flake.nix
+flake.lock
