@@ -8,7 +8,7 @@ anyhow.workspace = true
 merkle-map.workspace = true
 thiserror = "2.0.12"
 tracing = "0.1.41"
-sqlx = { version = "0.8.5", features = ["macros", "migrate", "runtime-tokio", "postgres"], default-features = false }
+sqlx = { version = "0.8.5", features = ["macros", "migrate", "runtime-tokio", "postgres", "tls-rustls"], default-features = false }
 tokio.workspace = true
 serde_json.workspace = true
 serde.workspace = true

@@ -1654,6 +1654,21 @@ pub enum Notification<AppMessage> {
     LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
 }
 
+impl<AppMessage> Notification<AppMessage> {
+    pub(crate) fn hash(&self) -> Option<Sha256Hash> {
+        match self {
+            Notification::NewBlock(signed_block) => Some(signed_block.hash().0),
+            Notification::GenesisInstantiation { .. } => None,
+            Notification::FailedTransaction(signed_tagged_json) => {
+                Some(signed_tagged_json.message_hash())
+            }
+            Notification::LatestBlock(signed_tagged_json) => {
+                Some(signed_tagged_json.message_hash())
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FailedTransaction {
     pub txhash: TxHash,

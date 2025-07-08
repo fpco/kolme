@@ -1,13 +1,8 @@
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 
 use kolme::{testtasks::TestTasks, *};
-
-// We only want one copy of this test running at a time
-// to avoid mDNS Gossip confusion
-static P2P_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
-    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// In the future, move to an example and convert the binary to a library.
 #[derive(Clone, Debug)]
@@ -105,7 +100,6 @@ impl KolmeApp for SampleKolmeApp {
 
 #[test_log::test(tokio::test)]
 async fn fast_sync() {
-    let _guard = P2P_TEST_LOCK.lock().await;
     TestTasks::start(fast_sync_inner, ()).await
 }
 
@@ -154,14 +148,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
 
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
-    // And now launch a gossip node for this Kolme
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_local_display_name("kolme1")
-            .build(kolme1)
-            .unwrap()
-            .run(),
-    );
+    let discovery = testtasks.launch_kademlia_discovery(kolme1, "kolme1");
 
     // Launching a new Kolme with a new gossip set to BlockTransfer should fail
     // at syncing blocks, since the source gossip doesn't have the early blocks
@@ -172,16 +159,16 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_local_display_name("kolme_block_transfer")
-            .set_sync_mode(
+    testtasks.launch_kademlia_client_with(
+        kolme_block_transfer.clone(),
+        "kolme_block_transfer",
+        &discovery,
+        |gossip| {
+            gossip.set_sync_mode(
                 SyncMode::BlockTransfer,
                 DataLoadValidation::ValidateDataLoads,
             )
-            .build(kolme_block_transfer.clone())
-            .unwrap()
-            .run(),
+        },
     );
 
     // We'll check at the end of the run to confirm that this never received the latest block.
@@ -193,16 +180,16 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.try_spawn_persistent(
-        GossipBuilder::new()
-            .set_local_display_name("kolme_state_transfer")
-            .set_sync_mode(
+    testtasks.launch_kademlia_client_with(
+        kolme_state_transfer.clone(),
+        "kolme_state_transfer",
+        &discovery,
+        |gossip| {
+            gossip.set_sync_mode(
                 SyncMode::StateTransfer,
                 DataLoadValidation::ValidateDataLoads,
             )
-            .build(kolme_state_transfer.clone())
-            .unwrap()
-            .run(),
+        },
     );
 
     // We should be able to sync the latest block within a few seconds
