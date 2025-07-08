@@ -48,7 +48,7 @@ jobs:
       - uses: step-security/changed-files@v46
         id: contracts
         with:
-          filters: |
+          files: |
             contracts:
               - contracts/**
               - .ci/**
@@ -104,8 +104,6 @@ jobs:
           cache-on-failure: true
           workspaces: |
             .
-      - name: Compile
-        run: just cargo-compile
       - name: Postgres
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:45921/postgres?sslmode=disable
