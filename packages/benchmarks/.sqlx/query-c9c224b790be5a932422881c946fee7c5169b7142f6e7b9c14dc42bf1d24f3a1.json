@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            TRUNCATE TABLE merkle_contents\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "c9c224b790be5a932422881c946fee7c5169b7142f6e7b9c14dc42bf1d24f3a1"
+}

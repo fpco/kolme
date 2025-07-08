@@ -86,7 +86,7 @@ cargo-slow-tests:
 
 set positional-arguments
 
-[working-directory: "packages/integration-tests"]
+[working-directory: "packages/benchmarks"]
 profile-insertions \
     insertion_filter \
     reserialization_filter \

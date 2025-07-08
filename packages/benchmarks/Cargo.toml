@@ -1,0 +1,57 @@
+[package]
+name = "benchmarks"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
+
+[features]
+artifacts = ["dep:regex", "dep:plotters", "dep:plotters-svg"]
+
+[dependencies]
+kolme = { workspace = true, features = ["pass_through"] }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+tracing = "0.1.41"
+plotters = { version = "0.3.7", optional = true }
+regex = { version = "1.11.1", optional = true }
+plotters-svg = { version = "0.3.7", optional = true }
+
+[dev-dependencies]
+regex = "1.11.1"
+example-six-sigma = { path = "../examples/six-sigma" }
+example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
+test-log = { workspace = true }
+strum = { version = "0.27.1", features = ["derive"] }
+futures = "0.3.31"
+backon = "1.4.1"
+hex = { workspace = true }
+cosmwasm-std = "2.2.2"
+tempfile = "3.19.1"
+pretty_assertions = "1.4.1"
+rand = "0.8"
+axum = { version = "0.8.3", features = ["ws"] }
+futures-util = "0.3.31"
+tokio-tungstenite = "0.26.2"
+jiff = "0.2.5"
+serial_test = "3.2.0"
+sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio"] }
+criterion = { version = "0.6.0", features = ["async_tokio"] }
+merkle-map.workspace = true
+smallvec.workspace = true
+parking_lot = "0.12.4"
+tempdir = "0.3.7"
+fjall.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "insertion"
+harness = false
+
+[[bin]]
+name = "generate_benchmark_artifacts"
+required-features = ["artifacts"]
