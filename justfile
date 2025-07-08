@@ -72,3 +72,7 @@ cargo-test:
 # Contract related tests
 cargo-contract-tests:
 	xargs -a contract-test-list.txt cargo test --workspace --locked --
+
+# Slow tests
+cargo-slow-tests:
+	xargs -a stress-test-list.txt cargo test --release --workspace --locked --
