@@ -92,8 +92,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_postgres_block_double_insertion() {
+    kolme::init_logger(true, None);
     let postgres_url =
         std::env::var("PROCESSOR_BLOCK_DB").expect("Variable PROCESSOR_BLOCK_DB was missing");
 
@@ -117,12 +118,12 @@ async fn test_postgres_block_double_insertion() {
     TestTasks::start(test_block_double_insertion, postgres).await;
 }
 
-// #[test_log::test(tokio::test)]
+// #[tokio::test]
 // async fn test_in_memory_block_double_insertion() {
 //     TestTasks::start(test_block_double_insertion, KolmeStore::new_in_memory()).await;
 // }
 
-// #[test_log::test(tokio::test)]
+// #[tokio::test]
 // async fn test_fjall_block_double_insertion() {
 //     let fjall = KolmeStore::new_fjall("logs.fjall").expect("Unable to start postgres store");
 //

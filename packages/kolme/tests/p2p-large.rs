@@ -109,8 +109,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn large_sync() {
+    kolme::init_logger(true, None);
     TestTasks::start(large_sync_inner, ()).await
 }
 

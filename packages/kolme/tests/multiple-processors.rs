@@ -93,8 +93,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 100))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 100)]
 async fn multiple_processors() {
+    kolme::init_logger(true, None);
     const ENVVAR: &str = "PROCESSOR_BLOCK_DB";
     let block_db_str = match std::env::var(ENVVAR) {
         Ok(x) => x,

@@ -18,9 +18,10 @@ const COSMOS_SUBMITTER_SEED: &str = "notice oak worry limit wrap speak medal onl
 
 const LOCALHOST: &str = "http://localhost:3000";
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 #[ignore = "depends on local Solana validator and localosmosis thus hidden from default tests"]
 async fn bridge_transfer() {
+    init_logger(true, None);
     use example_solana_cosmos_bridge::{BridgeMessage, SolanaCosmosBridgeApp, ASSET_ID};
 
     deploy_solana_bridge().await.unwrap();
@@ -216,9 +217,10 @@ async fn bridge_transfer() {
     handle.abort();
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 #[ignore = "depends on local Solana validator which needs to be restarted after each test thus hidden from default tests"]
 async fn solana_listener_catchup() {
+    init_logger(true, None);
     use example_six_sigma::{SixSigmaApp, StoreType};
 
     deploy_solana_bridge().await.unwrap();

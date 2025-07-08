@@ -579,8 +579,9 @@ mod tests {
 
     use super::*;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn basic_pass_through_scenario() {
+        init_logger(true, None);
         println!("In");
         tracing::debug!("starting basic pass through scenario");
         let passthrough = PassThrough::new();

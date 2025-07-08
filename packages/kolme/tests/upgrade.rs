@@ -102,8 +102,9 @@ impl KolmeApp for SampleKolmeApp2 {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_upgrade() {
+    kolme::init_logger(true, None);
     TestTasks::start(test_upgrade_inner, ()).await.unwrap();
 }
 

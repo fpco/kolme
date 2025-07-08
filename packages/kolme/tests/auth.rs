@@ -91,8 +91,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_sample_sanity() {
+    init_logger(true, None);
     TestTasks::start(test_sample_sanity_inner, ()).await;
 }
 
