@@ -107,11 +107,11 @@ impl KolmeApp for SampleKolmeApp {
 #[tokio::test]
 async fn test_balances() {
     init_logger(true, None);
-    get_cosmos_connection().await.unwrap();
     TestTasks::start(test_balances_inner, ()).await;
 }
 
 async fn test_balances_inner(testtasks: TestTasks, (): ()) {
+    let cosmos = get_cosmos_connection().await.unwrap();
     let submitter_seed = SeedPhrase::random();
     let submitter_wallet = submitter_seed
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
@@ -124,7 +124,6 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
         .unwrap()
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
         .unwrap();
-    let cosmos = CosmosNetwork::OsmosisLocal.connect().await.unwrap();
     for wallet in [&submitter_wallet, &user_wallet] {
         let mut builder = TxBuilder::default();
         builder.add_message(MsgSend {

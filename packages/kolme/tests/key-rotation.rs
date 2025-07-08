@@ -215,8 +215,9 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     assert_ne!(kolme2.get_tx_height(txhash).await.unwrap(), None);
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_total_replace() {
+    init_logger(true, None);
     TestTasks::start(test_total_replace_inner, ()).await;
 }
 

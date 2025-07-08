@@ -98,8 +98,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn fast_sync() {
+    kolme::init_logger(true, None);
     TestTasks::start(fast_sync_inner, ()).await
 }
 

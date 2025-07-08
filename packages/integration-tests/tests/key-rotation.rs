@@ -150,17 +150,21 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_cosmos_contract_update_self() {
+    init_logger(true, None);
     TestTasks::start(test_cosmos_contract_update_inner, true).await;
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_cosmos_contract_update_set() {
+    init_logger(true, None);
     TestTasks::start(test_cosmos_contract_update_inner, false).await;
 }
 
 async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: bool) {
+    let cosmos = integration_tests::get_cosmos_connection().await.unwrap();
+
     static WALLET_LOCK: LazyLock<tokio::sync::Mutex<()>> =
         LazyLock::new(|| tokio::sync::Mutex::const_new(()));
 
@@ -177,8 +181,6 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         .unwrap()
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
         .unwrap();
-
-    let cosmos = CosmosNetwork::OsmosisLocal.connect().await.unwrap();
 
     {
         let _guard = WALLET_LOCK.lock().await;
@@ -407,15 +409,17 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
     assert_eq!(get_balance().await, 3_000_000);
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 #[ignore = "depends on local Solana validator which needs to be restarted after each test thus hidden from default tests"]
 async fn solana_contract_update_self() {
+    init_logger(true, None);
     test_solana_contract_update(true).await;
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 #[ignore = "depends on local Solana validator which needs to be restarted after each test thus hidden from default tests"]
 async fn solana_contract_update_set() {
+    init_logger(true, None);
     test_solana_contract_update(false).await;
 }
 

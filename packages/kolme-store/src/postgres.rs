@@ -5,7 +5,11 @@ use merkle_map::{
     MerkleSerialize, MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
 use parking_lot::RwLock;
-use sqlx::{pool::PoolOptions, postgres::PgAdvisoryLock, Executor, Postgres};
+use sqlx::{
+    pool::PoolOptions,
+    postgres::{PgAdvisoryLock, PgConnectOptions},
+    Executor, Postgres,
+};
 use std::{
     collections::HashMap,
     sync::{
@@ -38,15 +42,16 @@ pub struct Store {
 
 impl Store {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
-        Self::new_with_options(url, PoolOptions::new().max_connections(5)).await
+        let connect_options = url.parse()?;
+        Self::new_with_options(connect_options, PoolOptions::new().max_connections(5)).await
     }
 
     pub async fn new_with_options(
-        url: &str,
+        connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
     ) -> anyhow::Result<Self> {
         let pool = options
-            .connect(url)
+            .connect_with(connect)
             .await
             .context("Could not connect to the database")
             .inspect_err(|err| tracing::error!("{err:?}"))?;

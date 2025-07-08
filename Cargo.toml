@@ -29,7 +29,6 @@ libp2p = { version = "0.55" }
 merkle-map = { path = "packages/merkle-map" }
 quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
-test-log = { version = "0.2", features = ["trace"] }
 
 [workspace.lints.clippy]
 unused_async = "deny"

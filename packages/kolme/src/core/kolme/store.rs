@@ -1,6 +1,7 @@
 use crate::core::*;
 use std::{num::NonZeroUsize, path::Path};
 
+use kolme_store::sqlx::postgres::PgConnectOptions;
 use kolme_store::sqlx::{pool::PoolOptions, Postgres};
 use kolme_store::{
     KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
@@ -44,10 +45,10 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     pub async fn new_postgres_with_options(
-        url: &str,
+        connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
     ) -> Result<Self> {
-        KolmeStoreInner::new_postgres_with_options(url, options)
+        KolmeStoreInner::new_postgres_with_options(connect, options)
             .await
             .map(KolmeStore::from)
             .map_err(anyhow::Error::from)

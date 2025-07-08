@@ -92,8 +92,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_invalid_hashes() {
+    kolme::init_logger(true, None);
     TestTasks::start(test_invalid_hashes_inner, ()).await;
 }
 

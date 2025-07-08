@@ -98,8 +98,9 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn sync_older() {
+    kolme::init_logger(true, None);
     TestTasks::start(sync_older_inner, ()).await
 }
 

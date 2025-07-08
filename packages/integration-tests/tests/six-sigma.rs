@@ -18,10 +18,10 @@ use tokio::process::{Child, Command};
 use example_six_sigma::*;
 use kolme::*;
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 #[ignore = "depends on localosmosis thus hidden from default tests, also doesn't work with pass-through enable"]
 async fn basic_scenario() {
-    tracing::debug!("starting");
+    init_logger(true, None);
     prebuild().await.unwrap();
     let log_file = NamedTempFile::new().unwrap();
     let mut app = start_the_app(log_file.path().to_path_buf()).unwrap();

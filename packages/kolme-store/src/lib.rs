@@ -16,7 +16,7 @@ use merkle_map::{
 use postgres::Store as KolmePostgresStore;
 pub use r#trait::KolmeBackingStore;
 pub use sqlx;
-use sqlx::{pool::PoolOptions, Postgres};
+use sqlx::{pool::PoolOptions, postgres::PgConnectOptions, Postgres};
 use std::{path::Path, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -41,11 +41,11 @@ impl KolmeStore {
         ))
     }
     pub async fn new_postgres_with_options(
-        url: &str,
+        connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
     ) -> anyhow::Result<Self> {
         Ok(KolmeStore::KolmePostgresStore(
-            postgres::Store::new_with_options(url, options).await?,
+            postgres::Store::new_with_options(connect, options).await?,
         ))
     }
 
