@@ -6,6 +6,10 @@ use std::{
 use anyhow::Result;
 use kolme::testtasks::TestTasks;
 use kolme::*;
+use kolme_store::sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    Executor,
+};
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 
@@ -127,12 +131,30 @@ async fn multiple_processors_inner(
     } else if block_db_str == "FJALL" {
         Some(KolmeStore::new_fjall("fjall-dir").unwrap())
     } else {
-        let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
-            .await
-            .unwrap();
-
-        store.clear_blocks().await.unwrap();
         None
+    };
+
+    let store_pool = match store {
+        Some(_) => None,
+        None => {
+            let random_u64: u64 = rand::random();
+            let db_name = format!("test_db_{random_u64}");
+
+            let maintenance_pool = PgPoolOptions::new()
+                .max_connections(5)
+                .connect(&block_db_str)
+                .await
+                .expect("Failed to create maintenance pool");
+            maintenance_pool
+                .execute(format!(r#"CREATE DATABASE "{}""#, db_name).as_str())
+                .await
+                .unwrap();
+
+            let options: PgConnectOptions = block_db_str.parse().unwrap();
+            let options = options.database(&db_name);
+            maintenance_pool.set_connect_options(options.clone());
+            Some((options, maintenance_pool))
+        }
     };
 
     let mut kolmes = vec![];
@@ -145,9 +167,15 @@ async fn multiple_processors_inner(
             DUMMY_CODE_VERSION,
             match &store {
                 Some(store) => store.clone(),
-                None => KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+                None => {
+                    let (options, pool) = store_pool.clone().unwrap();
+                    KolmeStore::<SampleKolmeApp>::new_postgres_with_options(
+                        options,
+                        pool.options().clone(),
+                    )
                     .await
-                    .unwrap(),
+                    .unwrap()
+                }
             },
         )
         .await

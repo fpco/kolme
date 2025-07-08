@@ -15,6 +15,9 @@ lint: fmt check clippy
 stop-postgres:
 	docker stop kolme_pg && docker rm kolme_pg
 
+psql:
+    env PGPASSWORD=postgres psql -U postgres -h localhost -p 45921
+
 postgres:
 	-just stop-postgres
 	docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
@@ -69,11 +72,11 @@ cargo-compile:
 
 # cargo test
 cargo-test:
-	cat contract-test-list.txt stress-test-list.txt | xargs -I {} echo --skip {} | xargs cargo test --workspace --locked --
+	cat contract-test-list.txt stress-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
 
 # Contract related tests
 cargo-contract-tests:
-	xargs -a contract-test-list.txt cargo test --workspace --locked --
+	xargs -a contract-test-list.txt cargo nextest run --workspace --profile=ci --locked --
 
 # Slow tests
 cargo-slow-tests:

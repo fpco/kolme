@@ -12,6 +12,8 @@ use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use shared::cryptography::SecretKey;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::Executor;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
@@ -124,29 +126,34 @@ async fn setup_fjall(db_path: &Path) -> Result<(Kolme<TestApp>, SocketAddr)> {
     Ok((kolme, addr))
 }
 
-async fn clear_postgres() {
-    let url = std::env::var("PROCESSOR_BLOCK_DB").expect("PROCESSOR_BLOCK_DB variable missing");
-    let pool = sqlx::PgPool::connect(&url).await.unwrap();
-    sqlx::migrate!("../kolme-store/migrations")
-        .run(&pool)
-        .await
-        .expect("Unable to run migrations");
-
-    sqlx::query("TRUNCATE TABLE blocks")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("TRUNCATE TABLE merkle_contents")
-        .execute(&pool)
-        .await
-        .unwrap();
-}
-
 async fn setup_postgres() -> Result<(Kolme<TestApp>, SocketAddr)> {
     let app = TestApp::default();
     let url = std::env::var("PROCESSOR_BLOCK_DB").expect("PROCESSOR_BLOCK_DB variable missing");
-    clear_postgres().await;
-    let store = KolmeStore::new_postgres(&url).await?;
+    let random_u64: u64 = rand::random();
+    let db_name = format!("test_db_{random_u64}");
+
+    let maintenance_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("Failed to create maintenance pool");
+
+    maintenance_pool
+        .execute(format!(r#"CREATE DATABASE "{}""#, db_name).as_str())
+        .await?;
+
+    let options: PgConnectOptions = url.parse().unwrap();
+    let options = options.database(&db_name);
+    maintenance_pool.set_connect_options(options.clone());
+
+    sqlx::migrate!("../kolme-store/migrations")
+        .run(&maintenance_pool)
+        .await
+        .expect("Unable to run migrations");
+
+    let store =
+        KolmeStore::new_postgres_with_options(options, PgPoolOptions::new().max_connections(2))
+            .await?;
     let code_version = app.genesis.version.clone();
     let kolme = Kolme::new(app, code_version, store).await?;
 
@@ -189,7 +196,6 @@ async fn test_websocket_notifications_fjall() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_websocket_notifications_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;
@@ -239,7 +245,6 @@ async fn test_websocket_notifications_inner(
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_validate_tx_valid_signature_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
@@ -247,7 +252,6 @@ async fn test_validate_tx_valid_signature_fjall() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_validate_tx_valid_signature_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_validate_tx_valid_signature_inner, (kolme, addr)).await;
@@ -298,7 +302,6 @@ async fn test_validate_tx_valid_signature_inner(
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_execute_transaction_genesis_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
@@ -316,7 +319,6 @@ async fn test_execute_transaction_genesis_fjall() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_execute_transaction_genesis_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(
@@ -377,7 +379,6 @@ async fn test_execute_transaction_genesis_inner(
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_validate_tx_invalid_nonce_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
@@ -385,7 +386,6 @@ async fn test_validate_tx_invalid_nonce_fjall() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_validate_tx_invalid_nonce_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_validate_tx_invalid_nonce_inner, (kolme, addr)).await;
@@ -428,7 +428,6 @@ async fn test_validate_tx_invalid_nonce_inner(
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_rejected_transaction_insufficient_balance_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
@@ -440,7 +439,6 @@ async fn test_rejected_transaction_insufficient_balance_fjall() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_rejected_transaction_insufficient_balance_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(
@@ -492,7 +490,6 @@ async fn test_rejected_transaction_insufficient_balance_inner(
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_many_transactions_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
@@ -500,7 +497,6 @@ async fn test_many_transactions_fjall() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_many_transactions_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_many_transactions_inner, (kolme, addr, wait_for_nonce)).await;
@@ -594,7 +590,6 @@ async fn test_many_transactions_inner(
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_concurrent_transactions_fjall() {
     let db_path = tempfile::tempdir().unwrap();
     let (kolme, addr) = setup_fjall(db_path.path()).await.unwrap();
@@ -602,7 +597,6 @@ async fn test_concurrent_transactions_fjall() {
 }
 
 #[tokio::test]
-#[serial_test::serial]
 async fn test_concurrent_transactions_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_concurrent_transactions_inner, (kolme, addr)).await;

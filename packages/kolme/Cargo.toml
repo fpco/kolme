@@ -51,4 +51,3 @@ workspace = true
 quickcheck = { workspace = true }
 tempfile = "3.18.0"
 kademlia-discovery = { path = "../examples/kademlia-discovery" }
-serial_test = "3.2.0"

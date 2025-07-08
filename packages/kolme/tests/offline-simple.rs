@@ -118,6 +118,11 @@ impl KolmeApp for SampleKolmeApp {
 
 #[cfg(test)]
 mod tests {
+    use kolme_store::sqlx::{
+        postgres::{PgConnectOptions, PgPoolOptions},
+        Executor,
+    };
+
     use super::*;
 
     async fn test_sample_sanity(store: KolmeStore<SampleKolmeApp>) {
@@ -155,16 +160,25 @@ mod tests {
             return;
         }
 
-        // NOTE: At startup, the postgres store hydrates the latest block height from
-        // with a query, thus, we need to recreate after clear so that we truly start from scratch
-        // another alternative could be just issuing the query (I think that's preferred)
-        {
-            let store = KolmeStore::<SampleKolmeApp>::new_postgres(&block_db_str)
+        let random_u64: u64 = rand::random();
+        let db_name = format!("test_db_{random_u64}");
+        let maintenance_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&block_db_str)
+            .await
+            .expect("Failed to create maintenance pool");
+        maintenance_pool
+            .execute(format!(r#"CREATE DATABASE "{}""#, db_name).as_str())
+            .await
+            .unwrap();
+        let options: PgConnectOptions = block_db_str.parse().unwrap();
+        let options = options.database(&db_name);
+        maintenance_pool.set_connect_options(options.clone());
+
+        let store =
+            KolmeStore::new_postgres_with_options(options, maintenance_pool.options().clone())
                 .await
                 .unwrap();
-            store.clear_blocks().await.unwrap();
-        }
-        let store = KolmeStore::new_postgres(&block_db_str).await.unwrap();
         test_sample_sanity(store).await
     }
 }
