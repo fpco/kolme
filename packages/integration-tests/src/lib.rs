@@ -1,24 +1,16 @@
 pub mod setup;
 
-use std::{
-    path::{Path, PathBuf},
-    sync::LazyLock,
-};
+use std::{path::PathBuf, sync::LazyLock};
 
 use anyhow::Result;
 use cosmos::{CodeId, Cosmos, CosmosNetwork, Wallet};
 use shared::types::Sha256Hash;
 
-static DOCKER_COMPOSE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .canonicalize()
-        .unwrap()
-});
-
 static WASM_FILE: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut file = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     file.push("..");
     file.push("..");
+    file.push("wasm");
     file.push("artifacts");
     file.push("kolme_cosmos_bridge.wasm");
     file.canonicalize().unwrap()
@@ -27,46 +19,11 @@ static WASM_FILE: LazyLock<PathBuf> = LazyLock::new(|| {
 static WASM_CONTENTS: LazyLock<Vec<u8>> = LazyLock::new(|| std::fs::read(&*WASM_FILE).unwrap());
 
 pub async fn prepare_local_contract(wallet: &Wallet) -> Result<CodeId> {
-    ensure_docker_compose_running().await?;
     let cosmos = get_cosmos_connection().await?;
     upload_contract(&cosmos, wallet).await
 }
 
-async fn ensure_docker_compose_running() -> Result<()> {
-    let output = tokio::process::Command::new("docker")
-        .args(["compose", "ls", "--format", "json"])
-        .current_dir(&*DOCKER_COMPOSE_DIR)
-        .output()
-        .await?;
-    anyhow::ensure!(
-        output.status.success(),
-        "Could not check if Docker Compose is running, got status: {}.\nstdout:\n\n{}\n\nstderr:\n\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-
-    let serde_json::Value::Array(values) = serde_json::from_slice(&output.stdout)? else {
-        anyhow::bail!("Non-JSON output from docker compose ls --format json");
-    };
-
-    if values.is_empty() {
-        let status = tokio::process::Command::new("docker")
-            .args(["compose", "up", "-d"])
-            .current_dir(&*DOCKER_COMPOSE_DIR)
-            .spawn()?
-            .wait()
-            .await?;
-        anyhow::ensure!(
-            status.success(),
-            "docker compose up exited with status {status}"
-        );
-    }
-
-    Ok(())
-}
-
-async fn get_cosmos_connection() -> Result<Cosmos> {
+pub async fn get_cosmos_connection() -> Result<Cosmos> {
     const ATTEMPTS: u32 = 150;
     for i in 1..=ATTEMPTS {
         tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
@@ -76,7 +33,7 @@ async fn get_cosmos_connection() -> Result<Cosmos> {
             return Ok(cosmos);
         }
         if i % 10 == 0 {
-            println!("Still trying to connect to Local Osmosis, attempt {i}/{ATTEMPTS}")
+            tracing::info!("Still trying to connect to Local Osmosis, attempt {i}/{ATTEMPTS}")
         }
     }
     Err(anyhow::anyhow!(

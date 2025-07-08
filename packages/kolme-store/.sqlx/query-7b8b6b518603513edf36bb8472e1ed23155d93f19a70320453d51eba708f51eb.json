@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM blocks",
+  "query": "TRUNCATE blocks",
   "describe": {
     "columns": [],
     "parameters": {
@@ -8,5 +8,5 @@
     },
     "nullable": []
   },
-  "hash": "de862ad2cabdbe2ed6fdaebe3fb098a44978337234c1cac92179994c8a9c6eac"
+  "hash": "7b8b6b518603513edf36bb8472e1ed23155d93f19a70320453d51eba708f51eb"
 }

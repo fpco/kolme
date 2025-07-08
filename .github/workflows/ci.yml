@@ -4,8 +4,14 @@ on:
   push:
     branches:
       - main
-
   pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+  RUSTUP_MAX_RETRIES: 10
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,30 +28,90 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
-      - name: Configure sccache GHA
-        uses: actions/github-script@v7
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install libudev-dev libusb-1.0-0-dev libhidapi-dev mold -y
+      - uses: taiki-e/install-action@v2
         with:
-          script: |
-            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+          tool: just@1.40.0,nextest@0.9.99,sqlx-cli
+      - uses: dtolnay/rust-toolchain@master
         with:
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Setup system
-        uses: ./.github/actions/setup-system
+          toolchain: 1.84.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache-prefix-key: tests
+          cache-workspace-crates: true
+          cache-on-failure: true
+          workspaces: |
+            .
+      - uses: step-security/changed-files@v46
+        id: contracts
+        with:
+          files: |
+            contracts:
+              - contracts/**
+              - .ci/**
+      - name: Cache contract builds
+        uses: actions/cache@v4
+        id: contract-cache
+        with:
+          key: contracts-${{ hashFiles('Cargo.toml') }}-${{hashFiles('Cargo.lock')}}-${{ hashFiles('./.ci/build-contracts.sh')}} }
+          restore-keys: |
+            contracts-${{ hashFiles('Cargo.toml') }}
+            contracts
+          path: |
+            wasm
+      - name: Compile
+        run: just cargo-compile
+      - name: Postgres
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:45921/postgres?sslmode=disable
+        run: just postgres
+      - name: Build contracts
+        if: ${{ (steps.contract-cache.outputs.cache-hit == false || steps.contracts.outputs.any_changed == 'true') }}
+        run: just build-contracts
       - name: Run tests
         env:
-          RUSTC_WRAPPER: sccache
-        run: just test
-      - name: sccache stats
-        run: sccache --show-stats
+          PROCESSOR_BLOCK_DB: psql://postgres:postgres@localhost:45921/postgres
+        run: just cargo-test
+      - name: Start localosmosis
+        run: just localosmosis
+      - name: Contract tests
+        run: just cargo-contract-tests
+
+  release:
+    name: Relase based tests
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install libudev-dev libusb-1.0-0-dev libhidapi-dev mold -y
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.40.0,nextest@0.9.99,sqlx-cli
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.84.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-workspace-crates: true
+          cache-on-failure: true
+          workspaces: |
+            .
+      - name: Postgres
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:45921/postgres?sslmode=disable
+        run: just postgres
+      - name: Run tests
+        env:
+          PROCESSOR_BLOCK_DB: psql://postgres:postgres@localhost:45921/postgres
+        run: just cargo-slow-tests
 
   lint:
     name: Lint

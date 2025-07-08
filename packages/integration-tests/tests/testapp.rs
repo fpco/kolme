@@ -189,6 +189,7 @@ async fn test_websocket_notifications_fjall() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_websocket_notifications_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
     TestTasks::start(test_websocket_notifications_inner, (kolme, addr)).await;

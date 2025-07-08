@@ -8,7 +8,6 @@ members = [
   "packages/kolme-store",
   "packages/merkle-map",
   "packages/shared",
-  "packages/test-runner",
 ]
 
 [workspace.dependencies]
