@@ -281,8 +281,9 @@ impl<App: KolmeApp> StateSyncStatus<App> {
             }
             if self.pending_layers.contains_key(hash) || self.kolme.has_merkle_hash(*hash).await? {
                 to_remove.push(*hash);
+            } else {
+                self.active_layers.push(*hash);
             }
-            self.active_layers.push(*hash);
         }
         for hash in to_remove {
             self.needed_layers.remove(&hash);
