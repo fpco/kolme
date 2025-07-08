@@ -25,6 +25,14 @@ pub(super) enum BlockRequest {
         )]
         peer: PeerId,
     },
+    LayerAvailable {
+        hash: Sha256Hash,
+        #[serde(
+            serialize_with = "serialize_peer_id",
+            deserialize_with = "deserialize_peer_id"
+        )]
+        peer: PeerId,
+    },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -61,6 +69,14 @@ pub(super) enum GossipMessage<App: KolmeApp> {
         )]
         peer: PeerId,
     },
+    RequestLayerContents {
+        hash: Sha256Hash,
+        #[serde(
+            serialize_with = "serialize_peer_id",
+            deserialize_with = "deserialize_peer_id"
+        )]
+        peer: PeerId,
+    },
 }
 
 impl<App: KolmeApp> Display for GossipMessage<App> {
@@ -80,6 +96,9 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
             }
             GossipMessage::RequestBlockContents { height, peer } => {
                 write!(f, "Request block contents {height} for {peer}")
+            }
+            GossipMessage::RequestLayerContents { hash, peer } => {
+                write!(f, "Request layer contents {hash} for {peer}")
             }
         }
     }

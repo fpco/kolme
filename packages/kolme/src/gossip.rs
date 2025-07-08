@@ -586,6 +586,23 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                 }
             }
+            GossipMessage::RequestLayerContents { hash, peer } => {
+                match self.kolme.has_merkle_hash(hash).await {
+                    Err(e) => tracing::warn!(
+                        "{local_display_name}: RequestLayerContents error on {hash}: {e}"
+                    ),
+                    Ok(false) => (),
+                    Ok(true) => {
+                        swarm.behaviour_mut().request_response.send_request(
+                            &peer,
+                            BlockRequest::LayerAvailable {
+                                hash,
+                                peer: self.peer_id(),
+                            },
+                        );
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -678,6 +695,10 @@ impl<App: KolmeApp> Gossip<App> {
             },
             BlockRequest::BlockAvailable { height, peer } => {
                 self.state_sync.lock().await.add_block_peer(height, peer);
+                self.trigger_state_sync.trigger();
+            }
+            BlockRequest::LayerAvailable { hash, peer } => {
+                self.state_sync.lock().await.add_layer_peer(hash, peer);
                 self.trigger_state_sync.trigger();
             }
         }
@@ -862,18 +883,23 @@ impl<App: KolmeApp> Gossip<App> {
                     current_peers,
                     request_new_peers,
                 } => {
+                    if request_new_peers || current_peers.is_empty() {
+                        let msg = GossipMessage::RequestLayerContents {
+                            hash,
+                            peer: self.peer_id(),
+                        };
+                        if let Err(e) = msg.publish(self, swarm) {
+                            tracing::warn!(
+                                "{}: error requesting layer contents for {hash}: {e}",
+                                self.local_display_name
+                            );
+                        }
+                    }
                     for peer in current_peers {
                         swarm
                             .behaviour_mut()
                             .request_response
                             .send_request(&peer, BlockRequest::Merkle(hash));
-                    }
-
-                    if request_new_peers {
-                        // https://github.com/fpco/kolme/issues/349
-                        tracing::warn!(
-                            "TODO: Implement new peer discovery for merkle layers: {hash}"
-                        );
                     }
                 }
             }

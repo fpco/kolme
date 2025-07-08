@@ -347,6 +347,12 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 
         Ok(())
     }
+
+    pub(super) fn add_layer_peer(&mut self, hash: Sha256Hash, peer: PeerId) {
+        if let Some(status) = self.needed_layers.get_mut(&hash) {
+            status.add_peer(peer);
+        }
+    }
 }
 
 const REQUEST_COUNT: usize = 4;
