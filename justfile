@@ -18,6 +18,7 @@ stop-postgres:
 postgres:
 	-just stop-postgres
 	docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
+	sleep 1
 	cd packages/kolme-store && sqlx database reset -y
 
 stop-localosmosis:
