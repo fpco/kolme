@@ -41,6 +41,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          cache-workspace-crates: true
           cache-on-failure: true
           workspaces: |
             .
@@ -64,6 +65,8 @@ jobs:
       - name: Compile
         run: just cargo-compile
       - name: Postgres
+        env:
+          DATABASE_URL: psql://postgres:postgres@localhost:45921/postgres
         run: just postgres
       - name: Build contracts
         if: ${{ (steps.contract-cache.outputs.cache-hit == false || steps.contracts.outputs.any_changed == 'true') }}
