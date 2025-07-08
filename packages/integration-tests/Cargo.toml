@@ -5,9 +5,6 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
-[features]
-artifacts = ["dep:regex", "dep:plotters", "dep:plotters-svg"]
-
 [dependencies]
 kolme = { workspace = true, features = ["pass_through"] }
 anyhow = { workspace = true }
@@ -23,9 +20,6 @@ kolme-solana-bridge-client = { path = "../../solana/crates/kolme-solana-bridge-c
 solana-client = "2.2.7"
 spl-token-client = "0.14.0"
 solana-commitment-config = "2.2.1"
-plotters = { version = "0.3.7", optional = true }
-regex = { version = "1.11.1", optional = true }
-plotters-svg = { version = "0.3.7", optional = true }
 
 [dev-dependencies]
 regex = "1.11.1"
@@ -53,14 +47,3 @@ fjall.workspace = true
 
 [lints]
 workspace = true
-
-[profile.bench]
-debug = true
-
-[[bench]]
-name = "insertion"
-harness = false
-
-[[bin]]
-name = "generate_benchmark_artifacts"
-required-features = ["artifacts"]
