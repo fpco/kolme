@@ -163,6 +163,8 @@ async fn test_cosmos_contract_update_set() {
 }
 
 async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: bool) {
+    let cosmos = integration_tests::get_cosmos_connection().await.unwrap();
+
     static WALLET_LOCK: LazyLock<tokio::sync::Mutex<()>> =
         LazyLock::new(|| tokio::sync::Mutex::const_new(()));
 
@@ -179,8 +181,6 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         .unwrap()
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
         .unwrap();
-
-    let cosmos = CosmosNetwork::OsmosisLocal.connect().await.unwrap();
 
     {
         let _guard = WALLET_LOCK.lock().await;

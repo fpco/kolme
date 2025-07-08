@@ -4,7 +4,7 @@ use cosmos::{
     proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
     SeedPhrase, TxBuilder,
 };
-use integration_tests::prepare_local_contract;
+use integration_tests::{get_cosmos_connection, prepare_local_contract};
 use kolme::*;
 use testtasks::TestTasks;
 
@@ -101,6 +101,7 @@ async fn test_cosmos_migrate() {
 async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
     // Ensure we have exclusive access to the master wallet
     // and fund our local wallet.
+    let cosmos = get_cosmos_connection().await.unwrap();
     let submitter_seed = SeedPhrase::random();
     let submitter_wallet = submitter_seed
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
@@ -109,7 +110,7 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
         .unwrap()
         .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
         .unwrap();
-    let cosmos = CosmosNetwork::OsmosisLocal.connect().await.unwrap();
+
     let mut builder = TxBuilder::default();
     builder.add_message(MsgSend {
         from_address: master_wallet.get_address_string(),
