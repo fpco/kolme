@@ -4,7 +4,7 @@
 // site called "State sync implementation". Recommendation: read that before reading
 // the code below.
 use std::{
-    collections::{hash_map, HashMap, HashSet, VecDeque},
+    collections::{btree_map, HashMap, HashSet},
     time::Instant,
 };
 
@@ -16,21 +16,23 @@ use crate::*;
 /// Status of state syncing.
 pub(super) struct StateSyncStatus<App: KolmeApp> {
     kolme: Kolme<App>,
-    /// A queue of data requests we need to process.
-    queue: VecDeque<PendingData>,
     /// Blocks we're interested in but haven't received any info on yet.
-    needed_blocks: HashMap<BlockHeight, RequestStatus>,
+    needed_blocks: BTreeMap<BlockHeight, RequestStatus>,
+    /// The block we are currently in the process of requesting, if any.
+    active_block: Option<BlockHeight>,
     /// Blocks we have info on but still need to get the full Merkle data for.
-    pending_blocks: HashMap<BlockHeight, Arc<SignedBlock<App::Message>>>,
+    pending_blocks: BTreeMap<BlockHeight, Arc<SignedBlock<App::Message>>>,
     /// A reverse map of missing top-level hashes to pending blocks.
     ///
     /// This allows us to efficiently discover which blocks should be
     /// checked when a new Merkle contents is fully discovered.
     reverse_blocks: HashMap<Sha256Hash, HashSet<BlockHeight>>,
     /// Layers we're interested in but haven't received any info on yet.
-    needed_layers: HashMap<Sha256Hash, RequestStatus>,
+    needed_layers: BTreeMap<Sha256Hash, RequestStatus>,
+    /// Layers that we are actively requesting right now.
+    active_layers: SmallVec<[Sha256Hash; REQUEST_COUNT]>,
     /// Merkle layers that don't yet have the full content for the children.
-    pending_layers: HashMap<Sha256Hash, MerkleLayerContents>,
+    pending_layers: BTreeMap<Sha256Hash, MerkleLayerContents>,
     /// A reverse map for pending layers: parents waiting on children.
     ///
     /// Every time we discover a layer with unknown children, we fill in
@@ -40,32 +42,27 @@ pub(super) struct StateSyncStatus<App: KolmeApp> {
     reverse_layers: HashMap<Sha256Hash, HashSet<Sha256Hash>>,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum PendingData {
-    Block(BlockHeight),
-    Merkle(Sha256Hash),
+#[derive(Debug)]
+pub(super) struct DataRequest<T> {
+    pub(super) data: T,
+    pub(super) current_peers: SmallVec<[PeerId; REQUEST_COUNT]>,
+    pub(super) request_new_peers: bool,
 }
 
 #[derive(Debug)]
-pub(super) enum DataRequest {
-    GetBlock {
-        height: BlockHeight,
-        current_peers: SmallVec<[PeerId; REQUEST_COUNT]>,
-        request_new_peers: bool,
-    },
-    GetMerkle {
-        hash: Sha256Hash,
-        current_peers: SmallVec<[PeerId; REQUEST_COUNT]>,
-        request_new_peers: bool,
-    },
+enum ShouldRequest {
+    DontRequest,
+    RequestNoPeers,
+    RequestWithPeers,
 }
 
 /// Status of a request for data.
 #[derive(Debug)]
 struct RequestStatus {
-    /// When was the last time we tried with a new peer? If it's too long
-    /// ago, we need to find new peers to query.
-    last_new_peer: Instant,
+    /// When was the last time we made a request?
+    ///
+    /// This starts off as [None]. The first time we make a request, we use the original peer only. Thereafter, we always request new peers as well.
+    last_sent: Option<Instant>,
     /// Peers we can query for the data.
     peers: SmallVec<[PeerId; REQUEST_COUNT]>,
 }
@@ -73,21 +70,52 @@ struct RequestStatus {
 impl RequestStatus {
     fn new(peer: Option<PeerId>) -> Self {
         RequestStatus {
-            last_new_peer: Instant::now(),
+            last_sent: None,
             peers: peer.into_iter().collect(),
         }
     }
 
-    fn need_new_peers(&self) -> bool {
-        self.last_new_peer.elapsed().as_secs() > MAX_NEW_PEER_DELAY
-    }
-
     fn add_peer(&mut self, peer: PeerId) {
+        // Don't add a duplicate
+        if self.peers.contains(&peer) {
+            return;
+        }
+
+        // If we had no peers previously, reset the last_sent so
+        // that we'll immediately make a request.
+        if self.peers.is_empty() {
+            self.last_sent = None;
+        }
+
         if self.peers.len() >= REQUEST_COUNT {
             debug_assert!(self.peers.len() == REQUEST_COUNT);
             self.peers.remove(0);
         }
         self.peers.push(peer);
+    }
+
+    /// Check if we should try this request again.
+    ///
+    /// This will automatically update the [last_sent] field if a request
+    /// should be made.
+    fn should_request(&mut self) -> ShouldRequest {
+        let res = match self.last_sent {
+            None => ShouldRequest::RequestNoPeers,
+            Some(last_sent) => {
+                if last_sent.elapsed().as_secs() < 2 {
+                    ShouldRequest::DontRequest
+                } else {
+                    ShouldRequest::RequestWithPeers
+                }
+            }
+        };
+        match res {
+            ShouldRequest::DontRequest => (),
+            ShouldRequest::RequestNoPeers | ShouldRequest::RequestWithPeers => {
+                self.last_sent = Some(Instant::now())
+            }
+        }
+        res
     }
 }
 
@@ -95,12 +123,13 @@ impl<App: KolmeApp> StateSyncStatus<App> {
     pub(super) fn new(kolme: Kolme<App>) -> Self {
         StateSyncStatus {
             kolme,
-            queue: VecDeque::new(),
-            needed_blocks: HashMap::new(),
-            pending_blocks: HashMap::new(),
+            needed_blocks: BTreeMap::new(),
+            active_block: None,
+            pending_blocks: BTreeMap::new(),
             reverse_blocks: HashMap::new(),
-            needed_layers: HashMap::new(),
-            pending_layers: HashMap::new(),
+            needed_layers: BTreeMap::new(),
+            active_layers: SmallVec::new(),
+            pending_layers: BTreeMap::new(),
             reverse_layers: HashMap::new(),
         }
     }
@@ -110,9 +139,10 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         height: BlockHeight,
         peer: Option<PeerId>,
     ) -> Result<()> {
-        if !self.kolme.has_block(height).await? {
-            self.needed_blocks.insert(height, RequestStatus::new(peer));
-            self.queue.push_front(PendingData::Block(height));
+        if !self.kolme.has_block(height).await? && !self.pending_blocks.contains_key(&height) {
+            self.needed_blocks
+                .entry(height)
+                .or_insert(RequestStatus::new(peer));
         }
         Ok(())
     }
@@ -141,7 +171,6 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                     self.reverse_blocks.entry(hash).or_default().insert(height);
                     self.needed_layers
                         .insert(hash, RequestStatus::new(Some(peer)));
-                    self.queue.push_back(PendingData::Merkle(hash));
                 }
             }
 
@@ -170,8 +199,8 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                     has_all = false;
                     self.reverse_layers.entry(*child).or_default().insert(hash);
                     self.needed_layers
-                        .insert(*child, RequestStatus::new(Some(peer)));
-                    self.queue.push_back(PendingData::Merkle(*child));
+                        .entry(*child)
+                        .or_insert(RequestStatus::new(Some(peer)));
                 }
             }
 
@@ -185,90 +214,104 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         Ok(())
     }
 
-    pub(super) async fn get_requests(&mut self) -> Result<SmallVec<[DataRequest; REQUEST_COUNT]>> {
-        // How many items have we processed? We use this to ensure we don't cycle back.
-        let mut processed = 0;
-        // And how many items were in the queue in the first place?
-        let total = self.queue.len();
-        // Result value
-        let mut res = SmallVec::new();
+    /// Get any needed block data request, if relevant.
+    pub(super) async fn get_block_request(&mut self) -> Result<Option<DataRequest<BlockHeight>>> {
+        // First, clear out an existing block request if it's already been fulfilled.
+        if let Some(height) = self.active_block {
+            if self.pending_blocks.contains_key(&height) || self.kolme.has_block(height).await? {
+                self.active_block = None;
+            }
+        }
 
-        while res.len() < REQUEST_COUNT && processed < total {
-            let Some(item) = self.queue.pop_front() else {
+        // Next, if we don't have an active block, put in the next needed block.
+        // Prune any blocks in the list that don't need to be there.
+        while self.active_block.is_none() {
+            let Some((height, _)) = self.needed_blocks.first_key_value() else {
                 break;
             };
-
-            processed += 1;
-
-            match self.make_data_request(item).await {
-                Ok(None) => {
-                    // Don't need to process this item anymore, don't add it back.
-                }
-                Ok(Some(request)) => {
-                    // Still an active item, add the request and push to the back of the queue.
-                    self.queue.push_back(item);
-                    res.push(request);
-                }
-                Err(e) => {
-                    // Some error... maybe we should just report here and continue. Instead, we'll raise for now.
-                    self.queue.push_back(item);
-                    return Err(e);
-                }
+            let height = *height;
+            if self.pending_blocks.contains_key(&height) || self.kolme.has_block(height).await? {
+                self.needed_blocks.remove(&height);
             }
+            self.active_block = Some(height);
+        }
+
+        // If there's an active block, determine if we should send back a data request or not.
+        let Some(height) = self.active_block else {
+            return Ok(None);
+        };
+        let Some(status) = self.needed_blocks.get_mut(&height) else {
+            // This should never happen. We'll ignore in prod, but want
+            // our test suites to fail.
+            debug_assert!(false);
+            return Ok(None);
+        };
+
+        let request_new_peers = match status.should_request() {
+            ShouldRequest::DontRequest => {
+                return Ok(None);
+            }
+            ShouldRequest::RequestNoPeers => false,
+            ShouldRequest::RequestWithPeers => true,
+        };
+
+        Ok(Some(DataRequest {
+            data: height,
+            current_peers: status.peers.clone(),
+            request_new_peers,
+        }))
+    }
+
+    pub(super) async fn get_layer_requests(
+        &mut self,
+    ) -> Result<SmallVec<[DataRequest<Sha256Hash>; REQUEST_COUNT]>> {
+        // First, clear out an existing layer requests that have already been fulfilled.
+        for (idx, hash) in self.active_layers.clone().into_iter().enumerate().rev() {
+            if self.pending_layers.contains_key(&hash) || self.kolme.has_merkle_hash(hash).await? {
+                self.active_layers.remove(idx);
+            }
+        }
+
+        // Next, while we haven't filled our active queue, keep filling in more
+        // from the needed layers.
+        let mut to_remove = SmallVec::<[Sha256Hash; REQUEST_COUNT]>::new();
+        for hash in self.needed_layers.keys() {
+            if self.active_layers.len() >= REQUEST_COUNT {
+                break;
+            }
+            if self.pending_layers.contains_key(hash) || self.kolme.has_merkle_hash(*hash).await? {
+                to_remove.push(*hash);
+            }
+            self.active_layers.push(*hash);
+        }
+        for hash in to_remove {
+            self.needed_layers.remove(&hash);
+        }
+
+        let mut res = SmallVec::new();
+
+        for hash in &self.active_layers {
+            let Some(status) = self.needed_layers.get_mut(hash) else {
+                // This should never happen. We'll ignore in prod, but want
+                // our test suites to fail.
+                debug_assert!(false);
+                continue;
+            };
+
+            let request_new_peers = match status.should_request() {
+                ShouldRequest::DontRequest => continue,
+                ShouldRequest::RequestNoPeers => false,
+                ShouldRequest::RequestWithPeers => true,
+            };
+
+            res.push(DataRequest {
+                data: *hash,
+                current_peers: status.peers.clone(),
+                request_new_peers,
+            });
         }
 
         Ok(res)
-    }
-
-    /// Returns None if the data request is no longer needed.
-    async fn make_data_request(&mut self, item: PendingData) -> Result<Option<DataRequest>> {
-        match item {
-            PendingData::Block(height) => {
-                // We either got the block fully in the database, or it's already pending.
-                // Either way, nothing else to be done.
-                if self.kolme.has_block(height).await? || self.pending_blocks.contains_key(&height)
-                {
-                    return Ok(None);
-                }
-                match self.needed_blocks.get(&height) {
-                    Some(status) => Ok(Some(DataRequest::GetBlock {
-                        height,
-                        current_peers: status.peers.clone(),
-                        request_new_peers: status.need_new_peers(),
-                    })),
-                    None => {
-                        // This shouldn't happen. If it's not in needed, it should be in pending.
-                        debug_assert!(false);
-                        Ok(None)
-                    }
-                }
-            }
-            PendingData::Merkle(hash) => {
-                // Either already in the database or we have the layer
-                // pending the children, either way, no need to request it anymore.
-                // However, we should process it in case it was added to the database
-                // elsewhere.
-                if self.kolme.has_merkle_hash(hash).await?
-                    || self.pending_layers.contains_key(&hash)
-                {
-                    self.process_available_hash(hash).await?;
-                    return Ok(None);
-                }
-
-                match self.needed_layers.get(&hash) {
-                    Some(status) => Ok(Some(DataRequest::GetMerkle {
-                        hash,
-                        current_peers: status.peers.clone(),
-                        request_new_peers: status.need_new_peers(),
-                    })),
-                    None => {
-                        // This shouldn't happen. If it's not in needed, it should be in pending.
-                        debug_assert!(false);
-                        Ok(None)
-                    }
-                }
-            }
-        }
     }
 
     async fn process_available_block(&mut self, height: BlockHeight) -> Result<()> {
@@ -279,7 +322,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         } else {
             // Get it from pending... if it's not there, we have a problem.
             match self.pending_blocks.entry(height) {
-                hash_map::Entry::Occupied(entry) => {
+                btree_map::Entry::Occupied(entry) => {
                     let signed_block = entry.get().clone();
 
                     let block = signed_block.0.message.as_inner();
@@ -293,7 +336,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                     entry.remove_entry();
                     Ok(())
                 }
-                hash_map::Entry::Vacant(_) => {
+                btree_map::Entry::Vacant(_) => {
                     debug_assert!(false);
                     Ok(())
                 }
@@ -308,7 +351,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         } else {
             // Get it from pending... if it's not there, we have a problem.
             match self.pending_layers.entry(hash) {
-                hash_map::Entry::Occupied(entry) => {
+                btree_map::Entry::Occupied(entry) => {
                     // Check if all the children are stored.
                     for child in &entry.get().children {
                         if !self.kolme.has_merkle_hash(*child).await? {
@@ -322,7 +365,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 
                     entry.remove_entry();
                 }
-                hash_map::Entry::Vacant(_) => {
+                btree_map::Entry::Vacant(_) => {
                     debug_assert!(false);
                     return Ok(());
                 }
@@ -356,4 +399,3 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 }
 
 const REQUEST_COUNT: usize = 4;
-const MAX_NEW_PEER_DELAY: u64 = 5;

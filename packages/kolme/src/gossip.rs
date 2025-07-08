@@ -842,68 +842,85 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn process_state_sync(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
-        let requests = match self.state_sync.lock().await.get_requests().await {
-            Ok(requests) => requests,
-            Err(e) => {
-                tracing::error!(
-                    "{}: unable to get state sync requests: {e}",
+        if let Err(e) = self.process_state_sync_blocks(swarm).await {
+            tracing::error!(
+                "{}: unable to get state sync block requests: {e}",
+                self.local_display_name
+            );
+        };
+        if let Err(e) = self.process_state_sync_layers(swarm).await {
+            tracing::error!(
+                "{}: unable to get state sync layers requests: {e}",
+                self.local_display_name
+            );
+        };
+    }
+
+    async fn process_state_sync_blocks(
+        &self,
+        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
+    ) -> Result<()> {
+        let Some(DataRequest {
+            data: height,
+            current_peers,
+            request_new_peers,
+        }) = self.state_sync.lock().await.get_block_request().await?
+        else {
+            return Ok(());
+        };
+        if request_new_peers || current_peers.is_empty() {
+            let msg = GossipMessage::RequestBlockContents {
+                height,
+                peer: self.peer_id(),
+            };
+            if let Err(e) = msg.publish(self, swarm) {
+                tracing::warn!(
+                    "{}: error requesting block contents for {height}: {e}",
                     self.local_display_name
                 );
-                return;
-            }
-        };
-        for request in requests {
-            match request {
-                DataRequest::GetBlock {
-                    height,
-                    current_peers,
-                    request_new_peers,
-                } => {
-                    if request_new_peers || current_peers.is_empty() {
-                        let msg = GossipMessage::RequestBlockContents {
-                            height,
-                            peer: self.peer_id(),
-                        };
-                        if let Err(e) = msg.publish(self, swarm) {
-                            tracing::warn!(
-                                "{}: error requesting block contents for {height}: {e}",
-                                self.local_display_name
-                            );
-                        }
-                    }
-                    for peer in current_peers {
-                        swarm
-                            .behaviour_mut()
-                            .request_response
-                            .send_request(&peer, BlockRequest::BlockWithStateAtHeight(height));
-                    }
-                }
-                DataRequest::GetMerkle {
-                    hash,
-                    current_peers,
-                    request_new_peers,
-                } => {
-                    if request_new_peers || current_peers.is_empty() {
-                        let msg = GossipMessage::RequestLayerContents {
-                            hash,
-                            peer: self.peer_id(),
-                        };
-                        if let Err(e) = msg.publish(self, swarm) {
-                            tracing::warn!(
-                                "{}: error requesting layer contents for {hash}: {e}",
-                                self.local_display_name
-                            );
-                        }
-                    }
-                    for peer in current_peers {
-                        swarm
-                            .behaviour_mut()
-                            .request_response
-                            .send_request(&peer, BlockRequest::Merkle(hash));
-                    }
-                }
             }
         }
+        for peer in current_peers {
+            swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&peer, BlockRequest::BlockWithStateAtHeight(height));
+        }
+        Ok(())
+    }
+
+    async fn process_state_sync_layers(
+        &self,
+        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
+    ) -> Result<()> {
+        let requests = self.state_sync.lock().await.get_layer_requests().await?;
+        for DataRequest {
+            data: hash,
+            current_peers,
+            request_new_peers,
+        } in requests
+        {
+            if request_new_peers || current_peers.is_empty() {
+                let msg = GossipMessage::RequestLayerContents {
+                    hash,
+                    peer: self.peer_id(),
+                };
+                if let Err(e) = msg.publish(self, swarm) {
+                    tracing::warn!(
+                        "{}: error requesting layer contents for {hash}: {e}",
+                        self.local_display_name
+                    );
+                }
+            }
+            for peer in current_peers {
+                swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_request(&peer, BlockRequest::Merkle(hash));
+            }
+        }
+
+        Ok(())
     }
 
     // Returns true if the notfication should be skipped publishing to the p2p network
