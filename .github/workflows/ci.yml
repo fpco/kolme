@@ -34,7 +34,7 @@ jobs:
           sudo apt install libudev-dev libusb-1.0-0-dev libhidapi-dev mold -y
       - uses: taiki-e/install-action@v2
         with:
-          tool: just@1.40.0,nextest@0.9.99
+          tool: just@1.40.0,nextest@0.9.99,sqlx-cli
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.84.0
@@ -44,8 +44,16 @@ jobs:
           cache-on-failure: true
           workspaces: |
             .
+      - uses: step-security/changed-files@v46
+        id: contracts
+        with:
+          filters: |
+            contracts:
+              - contracts/**
+              - .ci/**
       - name: Cache contract builds
         uses: actions/cache@v4
+        id: contract-cache
         with:
           key: contracts-${{ hashFiles('Cargo.toml') }}-${{hashFiles('Cargo.lock')}}-${{ hashFiles('./.ci/build-contracts.sh')}} }
           restore-keys: |
@@ -58,6 +66,7 @@ jobs:
       - name: Postgres
         run: just postgres
       - name: Build contracts
+        if: ${{ (steps.contract-cache.outputs.cache-hit == false || steps.contracts.outputs.any_changed == 'true') }}
         run: just build-contracts
       - name: Run tests
         env:
