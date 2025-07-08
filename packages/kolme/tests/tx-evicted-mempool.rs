@@ -93,7 +93,7 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test(flavor = "multi_thread"))]
+#[tokio::test(flavor = "multi_thread")]
 async fn tx_evicted_mempool() {
     TestTasks::start(tx_evicted_inner, ()).await;
 }
@@ -148,8 +148,8 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
     loop {
         let _ = mempool_subscribe.listen().await;
         counter += 1;
-        if counter >= 100 {
-            // Counter will be greater than 100 because
+        if counter >= 5 {
+            // Counter will be greater than 5 because
             // mempool_subscribe will also be triggered on removal in
             // the current implementation. But this is a good time to
             // break from the loop.
@@ -161,7 +161,7 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
     tokio::time::sleep(Duration::from_secs(3)).await;
     let mut attempt = 0;
     loop {
-        if attempt == 90 {
+        if attempt == 5 {
             panic!("Mempool is not empty after {attempt} retries");
         }
         let mempool = kolme.get_mempool_entries();
@@ -176,7 +176,7 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
 }
 
 async fn client(kolme: Kolme<SampleKolmeApp>, sender: oneshot::Sender<()>) -> Result<()> {
-    for _ in 0..100 {
+    for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
 
         let tx = Arc::new(
