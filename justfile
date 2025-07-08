@@ -18,7 +18,7 @@ stop-postgres:
 psql:
     env PGPASSWORD=postgres psql -U postgres -h localhost -p 45921
 
-postgres:
+postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres":
 	-just stop-postgres
 	docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
 	sleep 3	# To resolve issue in CI
@@ -31,7 +31,9 @@ localosmosis:
 	-just stop-localosmosis
 	docker run --name localosmosis -d -it --cpus="1" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:a013a07d2bbff37bb72b6c3134854c7622666d84
 
-test:
+test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
+	just postgres
+	just localosmosis
 	just cargo-test
 	just cargo-contract-tests
 	just cargo-slow-tests
