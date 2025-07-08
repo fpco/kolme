@@ -426,7 +426,10 @@ impl KolmeBackingStore for Store {
         layer: &MerkleLayerContents,
     ) -> anyhow::Result<()> {
         let mut merkle = self.new_store();
-        Ok(merkle.save_by_hash(hash, layer).await?)
+        merkle.save_by_hash(hash, layer).await?;
+        self.consume_stores(&self.pool, [merkle]).await?;
+
+        Ok(())
     }
 
     async fn save<T: MerkleSerializeRaw>(
