@@ -29,7 +29,9 @@ localosmosis:
 	docker run --name localosmosis -d -it --cpus="1" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:3703be0654109bd04d6e4e1f7d2707ea905a28eb
 
 test:
-    cargo run --locked --bin test-runner
+	just cargo-test
+	just cargo-contract-tests
+	just cargo-slow-tests
 
 [working-directory: "packages/kolme-store"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
