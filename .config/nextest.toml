@@ -1,0 +1,7 @@
+[test-groups]
+serial-integration = { max-threads = 1 }
+
+[[profile.ci.overrides]]
+filter = 'test(test_cosmos_migrate) | test(=test_cosmos_contract_update_self) | test(=test_cosmos_contract_update_set)'
+platform = 'cfg(unix)'
+test-group = 'serial-integration'
