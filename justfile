@@ -12,8 +12,20 @@ fmt:
 
 lint: fmt check clippy
 
+stop-postgres:
+	docker stop kolme_pg && docker rm kolme_pg
+
 postgres:
-	docker run --name kolme_pg -d -it -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
+	-just stop-postgres
+	docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
+	cd packages/kolme-store && sqlx database reset -y
+
+stop-localosmosis:
+	docker stop localosmosis && docker rm localosmosis
+
+localosmosis:
+	-just stop-localosmosis
+	docker run --name localosmosis -d -it --cpus="0.5" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:3703be0654109bd04d6e4e1f7d2707ea905a28eb
 
 test:
     cargo run --locked --bin test-runner
@@ -54,4 +66,8 @@ cargo-compile:
 
 # cargo test
 cargo-test:
-	xargs -a test-skip-list.txt -I {} echo --skip {} | xargs cargo test --workspace --locked --
+	cat contract-test-list.txt stress-test-list.txt | xargs -I {} echo --skip {} | xargs cargo test --workspace --locked --
+
+# Contract related tests
+cargo-contract-tests:
+	xargs -a contract-test-list.txt cargo test --workspace --locked --

@@ -4,7 +4,7 @@ use cosmos::{
     proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
     SeedPhrase, TxBuilder,
 };
-use integration_tests::prepare_local_contract;
+use integration_tests::{get_cosmos_connection, prepare_local_contract};
 use kolme::*;
 use rust_decimal::dec;
 use testtasks::TestTasks;
@@ -104,8 +104,10 @@ impl KolmeApp for SampleKolmeApp {
     }
 }
 
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn test_balances() {
+    init_logger(true, None);
+    get_cosmos_connection().await.unwrap();
     TestTasks::start(test_balances_inner, ()).await;
 }
 
