@@ -90,7 +90,7 @@ mod cw_impls {
 }
 
 /// A binary value representing a SHA256 hash.
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub struct Sha256Hash([u8; 32]);
 
 #[derive(thiserror::Error, Debug)]
