@@ -66,7 +66,7 @@ jobs:
         run: just cargo-compile
       - name: Postgres
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:45921/postgres
+          DATABASE_URL: postgres://postgres:postgres@localhost:45921/postgres?sslmode=disable
         run: just postgres
       - name: Build contracts
         if: ${{ (steps.contract-cache.outputs.cache-hit == false || steps.contracts.outputs.any_changed == 'true') }}
