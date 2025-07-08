@@ -357,9 +357,6 @@ impl<App: KolmeApp> Gossip<App> {
         let (block_requester, mut block_requester_rx) = tokio::sync::mpsc::channel(8);
         self.kolme.set_block_requester(block_requester);
 
-        let (layer_requester, mut layer_requester_rx) = tokio::sync::mpsc::channel(8);
-        self.kolme.set_layer_requester(layer_requester);
-
         loop {
             tokio::select! {
                 // Our local Kolme generated a notification to be sent through the
@@ -390,11 +387,6 @@ impl<App: KolmeApp> Gossip<App> {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
                     } else {
                         self.trigger_state_sync.trigger();
-                    }
-                }
-                Some(hash) = layer_requester_rx.recv() => {
-                    if let Err(e) = self.state_sync.lock().await.add_needed_layer(hash, None).await {
-                        tracing::warn!("{}: error when adding requested layer {hash}: {e}", self.local_display_name);
                     }
                 }
             }
