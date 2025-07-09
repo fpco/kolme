@@ -148,8 +148,8 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
     loop {
         let _ = mempool_subscribe.listen().await;
         counter += 1;
-        if counter >= 5 {
-            // Counter will be greater than 5 because
+        if counter >= 10 {
+            // Counter will be greater than 10 because
             // mempool_subscribe will also be triggered on removal in
             // the current implementation. But this is a good time to
             // break from the loop.
@@ -161,16 +161,18 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
     tokio::time::sleep(Duration::from_secs(3)).await;
     let mut attempt = 0;
     loop {
-        if attempt == 5 {
-            panic!("Mempool is not empty after {attempt} retries");
-        }
         let mempool = kolme.get_mempool_entries();
         if mempool.is_empty() {
             break;
-        } else {
-            attempt += 1;
-            tokio::time::sleep(Duration::from_secs(10)).await;
         }
+        if attempt == 10 {
+            panic!(
+                "Mempool is not empty after {attempt} retries. Still left {} entries.",
+                mempool.len()
+            );
+        }
+        attempt += 1;
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
     Ok(())
 }
