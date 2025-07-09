@@ -1,5 +1,8 @@
+LOCALOSMOSIS_VERSION := "a013a07d2bbff37bb72b6c3134854c7622666d84"
+POSTGRES_VERSION := "15.3-alpine"
+
 default:
-    just --list
+    just --list --unsorted
 
 check:
     cargo check --workspace --tests --all-features
@@ -20,7 +23,7 @@ psql:
 
 postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres":
 	-just stop-postgres
-	docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
+	docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:{{POSTGRES_VERSION}}
 	sleep 3	# To resolve issue in CI
 	cd packages/kolme-store && sqlx database reset -y
 
@@ -29,7 +32,7 @@ stop-localosmosis:
 
 localosmosis:
 	-just stop-localosmosis
-	docker run --name localosmosis -d -it --cpus="1" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:a013a07d2bbff37bb72b6c3134854c7622666d84
+	docker run --name localosmosis -d -it --cpus="1" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:{{LOCALOSMOSIS_VERSION}}
 
 test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
 	just postgres
@@ -75,3 +78,11 @@ cargo-contract-tests:
 # Slow tests
 cargo-slow-tests:
 	xargs -a stress-test-list.txt cargo nextest run --workspace --locked --
+
+# Cache docker images by saving it under wasm
+cache-docker-images:
+	mkdir -p wasm/images
+	-[ -f wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar ] || docker pull ghcr.io/fpco/cosmos-images/localosmosis:{{LOCALOSMOSIS_VERSION}} && docker save ghcr.io/fpco/cosmos-images/localosmosis:{{LOCALOSMOSIS_VERSION}} > wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar
+	-[ -f wasm/images/postgres_{{POSTGRES_VERSION}}.tar ] || docker pull postgres:{{POSTGRES_VERSION}} && docker save postgres:{{POSTGRES_VERSION}} > wasm/images/postgres_{{POSTGRES_VERSION}}.tar
+	-docker load -i ./wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar
+	-docker load -i ./wasm/images/postgres_{{POSTGRES_VERSION}}.tar

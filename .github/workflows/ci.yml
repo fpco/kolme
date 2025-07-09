@@ -56,12 +56,14 @@ jobs:
         uses: actions/cache@v4
         id: contract-cache
         with:
-          key: contracts-${{ hashFiles('Cargo.toml') }}-${{hashFiles('Cargo.lock')}}-${{ hashFiles('./.ci/build-contracts.sh')}} }
+          key: contracts-${{ hashFiles('contracts/cosmos/Cargo.toml') }}-${{ hashFiles('./.ci/build-contracts.sh')}} }
           restore-keys: |
-            contracts-${{ hashFiles('Cargo.toml') }}
+            contracts-${{ hashFiles('contracts/cosmos/Cargo.toml') }}
             contracts
           path: |
             wasm
+      - name: Cache docker images
+        run: just cache-docker-images
       - name: Compile
         run: just cargo-compile
       - name: Build contracts
