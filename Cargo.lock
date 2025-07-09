@@ -4095,6 +4095,7 @@ dependencies = [
  "solana-commitment-config",
  "solana-signature",
  "solana-transaction-status-client-types",
+ "sqlx",
  "strum 0.27.1",
  "tempfile",
  "thiserror 2.0.12",
@@ -10910,6 +10911,7 @@ dependencies = [
  "sha2 0.10.9",
  "smallvec",
  "thiserror 2.0.12",
+ "time",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -10993,6 +10995,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror 2.0.12",
+ "time",
  "tracing",
  "whoami",
 ]
@@ -11030,6 +11033,7 @@ dependencies = [
  "sqlx-core",
  "stringprep",
  "thiserror 2.0.12",
+ "time",
  "tracing",
  "whoami",
 ]
@@ -11054,6 +11058,7 @@ dependencies = [
  "serde_urlencoded",
  "sqlx-core",
  "thiserror 2.0.12",
+ "time",
  "tracing",
  "url",
 ]

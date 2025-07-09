@@ -398,14 +398,10 @@ impl<App: KolmeApp> Kolme<App> {
             loads,
         } = self
             .read()
-            .execute_transaction(
-                &block.tx,
-                block.timestamp,
-                BlockDataHandling::PriorData {
-                    loads: signed_block.0.message.as_inner().loads.clone().into(),
-                    validation: data_load_validation,
-                },
-            )
+            .execute_transaction(&block.tx, block.timestamp, BlockDataHandling::PriorData {
+                loads: signed_block.0.message.as_inner().loads.clone().into(),
+                validation: data_load_validation,
+            })
             .await?;
         anyhow::ensure!(loads == block.loads);
 
@@ -448,21 +444,18 @@ impl<App: KolmeApp> Kolme<App> {
 
         self.inner
             .store
-            .add_block(
-                &self.inner.merkle_manager,
-                StorableBlock {
-                    height: signed_block.height().0,
-                    blockhash: signed_block.hash().0,
-                    txhash: signed_block.tx().hash().0,
-                    block: signed_block.clone(),
-                    // TODO possible future optimization, either use MerkleLockable
-                    // around these fields or pass in the _contents values from
-                    // above to avoid double-serialization
-                    framework_state: framework_state.clone(),
-                    app_state: app_state.clone(),
-                    logs: logs.clone(),
-                },
-            )
+            .add_block(&self.inner.merkle_manager, StorableBlock {
+                height: signed_block.height().0,
+                blockhash: signed_block.hash().0,
+                txhash: signed_block.tx().hash().0,
+                block: signed_block.clone(),
+                // TODO possible future optimization, either use MerkleLockable
+                // around these fields or pass in the _contents values from
+                // above to avoid double-serialization
+                framework_state: framework_state.clone(),
+                app_state: app_state.clone(),
+                logs: logs.clone(),
+            })
             .await?;
 
         self.inner.mempool.drop_tx(signed_block.tx().hash());
@@ -542,18 +535,15 @@ impl<App: KolmeApp> Kolme<App> {
 
         self.inner
             .store
-            .add_block(
-                &self.inner.merkle_manager,
-                StorableBlock {
-                    height: signed_block.height().0,
-                    blockhash: signed_block.hash().0,
-                    txhash: signed_block.tx().hash().0,
-                    block: signed_block.clone(),
-                    framework_state: framework_state.clone(),
-                    app_state: app_state.clone(),
-                    logs: logs.clone(),
-                },
-            )
+            .add_block(&self.inner.merkle_manager, StorableBlock {
+                height: signed_block.height().0,
+                blockhash: signed_block.hash().0,
+                txhash: signed_block.tx().hash().0,
+                block: signed_block.clone(),
+                framework_state: framework_state.clone(),
+                app_state: app_state.clone(),
+                logs: logs.clone(),
+            })
             .await?;
 
         self.inner.mempool.drop_tx(txhash);
@@ -1047,6 +1037,26 @@ impl<App: KolmeApp> Kolme<App> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
+    }
+
+    /// Marks the current block to not be resynced by the Archiver
+    pub async fn archive_block(&self, height: BlockHeight) -> Result<()> {
+        self.inner
+            .store
+            .archive_block(height)
+            .await
+            .with_context(|| format!("Unable to mark block {} as archived", height.0))
+    }
+
+    /// Obtains the latest block synced by the Archiver, if it exists
+    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>> {
+        Ok(self
+            .inner
+            .store
+            .get_latest_archived_block_height()
+            .await
+            .context("Unable to retrieve latest archived block height")?
+            .map(BlockHeight))
     }
 }
 

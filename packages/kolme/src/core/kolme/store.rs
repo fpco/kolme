@@ -2,7 +2,7 @@ use crate::core::*;
 use std::{num::NonZeroUsize, path::Path};
 
 use kolme_store::sqlx::postgres::PgConnectOptions;
-use kolme_store::sqlx::{pool::PoolOptions, Postgres};
+use kolme_store::sqlx::{Postgres, pool::PoolOptions};
 use kolme_store::{
     KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
     StorableBlock,
@@ -134,6 +134,14 @@ impl<App: KolmeApp> KolmeStore<App> {
         }
 
         self.inner.add_merkle_layer(hash, layer).await
+    }
+
+    pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<()> {
+        self.inner.archive_block(height.0).await
+    }
+
+    pub(crate) async fn get_latest_archived_block_height(&self) -> Result<Option<u64>> {
+        self.inner.get_latest_archived_block_height().await
     }
 }
 
