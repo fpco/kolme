@@ -76,6 +76,7 @@ jobs:
           PROCESSOR_BLOCK_DB: psql://postgres:postgres@localhost:45921/postgres
         run: just cargo-test
       - name: Slow tests
+        if: ${{ github.ref == 'refs/heads/main' }}
         env:
           PROCESSOR_BLOCK_DB: psql://postgres:postgres@localhost:45921/postgres
         run: just cargo-slow-tests
@@ -83,39 +84,6 @@ jobs:
         run: just localosmosis
       - name: Contract tests
         run: just cargo-contract-tests
-
-  release:
-    name: Relase based tests
-    runs-on: ubuntu-latest
-    if: ${{ github.ref == 'refs/heads/main' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install libudev-dev libusb-1.0-0-dev libhidapi-dev mold -y
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.40.0,nextest@0.9.99,sqlx-cli
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.84.0
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-workspace-crates: true
-          cache-on-failure: true
-          workspaces: |
-            .
-      - name: Postgres
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:45921/postgres?sslmode=disable
-        run: just postgres
-      - name: Run tests
-        env:
-          PROCESSOR_BLOCK_DB: psql://postgres:postgres@localhost:45921/postgres
-        run: just cargo-slow-tests
 
   lint:
     name: Lint
