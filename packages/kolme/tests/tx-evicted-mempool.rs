@@ -127,8 +127,8 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    test_tasks.try_spawn(client(kolme.clone(), sender));
     test_tasks.launch_kademlia_client(kolme.clone(), "kolme-client", &discovery);
+    test_tasks.try_spawn(client(kolme.clone(), sender));
 
     let kolme = Kolme::new(
         SampleKolmeApp::default(),
@@ -137,8 +137,8 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
+    test_tasks.launch_kademlia_client(kolme.clone(), "kolme-no-op", &discovery);
     test_tasks.try_spawn(no_op_node(kolme.clone(), receiver));
-    test_tasks.launch_kademlia_client(kolme, "kolme-no-op", &discovery);
 }
 
 async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()>) -> Result<()> {
