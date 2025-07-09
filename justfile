@@ -54,10 +54,6 @@ drop-integration-tests-db:
     rm -rf six-sigma-app.fjall
 
 [working-directory: "packages/integration-tests"]
-setup-localosmo:
-    cargo run --release --example setup-localosmo
-
-[working-directory: "packages/integration-tests"]
 run-integration-tests: setup-localosmo
     RUST_LOG=info,kolme=debug,six_sigma=debug cargo t -- --ignored --nocapture
 
