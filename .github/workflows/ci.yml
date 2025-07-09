@@ -33,11 +33,11 @@ jobs:
           tool: just@1.40.0,nextest@0.9.99,sqlx-cli
       - uses: dtolnay/rust-toolchain@master
         with:
-          prefix-key: "v0-kolme"
           toolchain: 1.84.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: "v0-kolme"
           cache-workspace-crates: true
           cache-on-failure: true
           workspaces: |
