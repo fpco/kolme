@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeSet,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -94,7 +94,6 @@ impl KolmeApp for SampleKolmeApp {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn tx_evicted_mempool() {
     TestTasks::start(tx_evicted_inner, ()).await;
 }
@@ -127,7 +126,8 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    test_tasks.try_spawn(client(kolme.clone(), sender));
+    let mutex = Arc::new(Mutex::new(Vec::new()));
+    test_tasks.try_spawn(client(kolme.clone(), sender, mutex.clone()));
     test_tasks.launch_kademlia_client(kolme.clone(), "kolme-client", &discovery);
 
     let kolme = Kolme::new(
@@ -137,11 +137,15 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    test_tasks.try_spawn(no_op_node(kolme.clone(), receiver));
+    test_tasks.try_spawn(no_op_node(kolme.clone(), receiver, mutex));
     test_tasks.launch_kademlia_client(kolme, "kolme-no-op", &discovery);
 }
 
-async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()>) -> Result<()> {
+async fn no_op_node(
+    kolme: Kolme<SampleKolmeApp>,
+    receiver: oneshot::Receiver<()>,
+    data: Arc<Mutex<Vec<TxHash>>>,
+) -> Result<()> {
     let mut counter = 0;
 
     let mut mempool_subscribe = kolme.subscribe_mempool_additions();
@@ -158,6 +162,9 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
         }
     }
     receiver.await.ok();
+    let hashes = data.lock().unwrap().clone();
+    assert_eq!(hashes.len(), 10, "Ten transactions expected");
+
     // Give it some time to catch up
     tokio::time::sleep(Duration::from_secs(3)).await;
     let mut attempt = 0;
@@ -166,7 +173,16 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
         if mempool.is_empty() {
             break;
         }
-        if attempt == 10 {
+        if attempt == 3 {
+            for (index, hash) in hashes.iter().enumerate() {
+                let height = kolme.get_tx_height(*hash).await.unwrap();
+                if height.is_none() {
+                    println!("{hash} with {index} not present");
+                }
+            }
+            for tx in &mempool {
+                println!("Mempool hash: {}", tx.hash());
+            }
             panic!(
                 "Mempool is not empty after {attempt} retries. Still left {} entries.",
                 mempool.len()
@@ -178,7 +194,11 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
     Ok(())
 }
 
-async fn client(kolme: Kolme<SampleKolmeApp>, sender: oneshot::Sender<()>) -> Result<()> {
+async fn client(
+    kolme: Kolme<SampleKolmeApp>,
+    sender: oneshot::Sender<()>,
+    data: Arc<Mutex<Vec<TxHash>>>,
+) -> Result<()> {
     for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
 
@@ -188,18 +208,10 @@ async fn client(kolme: Kolme<SampleKolmeApp>, sender: oneshot::Sender<()>) -> Re
                 .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
         );
         let txhash = tx.hash();
+        // We propose and wait till we hear from gossip layer that a
+        // new block with the same hash has come
         kolme.propose_and_await_transaction(tx).await.unwrap();
-
-        let res = tokio::time::timeout(
-            tokio::time::Duration::from_secs(100),
-            kolme.wait_for_tx(txhash),
-        )
-        .await;
-        match res {
-            Ok(Ok(_height)) => (),
-            Ok(Err(e)) => panic!("Error when checking if {txhash} is found: {e}"),
-            Err(e) => panic!("txhash {txhash} not found after timeout: {e}"),
-        }
+        data.lock().unwrap().push(txhash);
     }
     sender.send(()).ok();
     Ok(())
