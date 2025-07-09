@@ -1,4 +1,4 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
 use anyhow::Context as _;
 use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError,
@@ -6,15 +6,15 @@ use merkle_map::{
 };
 use parking_lot::RwLock;
 use sqlx::{
+    Executor, Postgres,
     pool::PoolOptions,
     postgres::{PgAdvisoryLock, PgConnectOptions},
-    Executor, Postgres,
 };
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, OnceLock,
+        atomic::{AtomicU64, Ordering},
     },
 };
 mod merkle;
@@ -38,6 +38,7 @@ pub struct Store {
     pool: sqlx::PgPool,
     merkle_cache: MerkleCache,
     latest_block: Arc<OnceLock<AtomicU64>>,
+    latest_archived_block: Arc<OnceLock<AtomicU64>>,
 }
 
 impl Store {
@@ -62,16 +63,33 @@ impl Store {
             .context("Unable to execute migrations")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
 
-        let latest_block =
-            sqlx::query_scalar!("SELECT height FROM blocks ORDER BY height DESC LIMIT 1")
-                .fetch_optional(&pool)
-                .await
-                .context("Unable to fetch latest block height from DB")
-                .inspect_err(|err| tracing::error!("{err:?}"))?;
+        let latest_block_query = sqlx::query_scalar!(
+            r#"
+            SELECT height
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1
+            "#
+        )
+        .fetch_optional(&pool);
+        let latest_archived_block_query = sqlx::query_scalar!(
+            r#"
+            SELECT height as "height!" FROM latest_archived_block_height
+            "#
+        )
+        .fetch_optional(&pool);
+
+        let (latest_block, latest_archived_block) =
+            tokio::try_join!(latest_block_query, latest_archived_block_query)
+                .context("Unable to query for latest height and archived block height")?;
 
         Ok(Self {
             pool,
             latest_block: Arc::new(match latest_block {
+                Some(height) => OnceLock::from(AtomicU64::new(height as u64)),
+                None => OnceLock::new(),
+            }),
+            latest_archived_block: Arc::new(match latest_archived_block {
                 Some(height) => OnceLock::from(AtomicU64::new(height as u64)),
                 None => OnceLock::new(),
             }),
@@ -455,5 +473,52 @@ impl KolmeBackingStore for Store {
         let mut store = self.new_store();
 
         merkle_manager.load::<T, _>(&mut store, hash).await
+    }
+
+    async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
+        Ok(self
+            .latest_archived_block
+            .get()
+            .map(|height| height.load(Ordering::Relaxed)))
+    }
+
+    async fn archive_block(&self, height: u64) -> anyhow::Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Unable to start database")?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO archived_blocks(height, archived_at)
+            VALUES ($1, now())
+            ON CONFLICT(height) DO UPDATE
+            SET archived_at = now()
+            "#,
+            height as i64
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Unable to store latest archived block height")?;
+
+        sqlx::query!(
+            r#"
+            REFRESH MATERIALIZED VIEW latest_archived_block_height
+            "#,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Unable to refresh materialized view")?;
+
+        tx.commit()
+            .await
+            .context("Unable to commit archive block height changes")?;
+
+        self.latest_archived_block
+            .get_or_init(|| AtomicU64::new(height))
+            .fetch_max(height, Ordering::SeqCst);
+
+        Ok(())
     }
 }
