@@ -21,7 +21,7 @@ psql:
 postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres":
 	-just stop-postgres
 	docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
-	sleep 3	# To resolve issue in CI
+	sleep 5	# To resolve issue in CI
 	cd packages/kolme-store && sqlx database reset -y
 
 stop-localosmosis:
@@ -83,14 +83,3 @@ cargo-contract-tests:
 # Slow tests
 cargo-slow-tests:
 	xargs -a stress-test-list.txt cargo test --release --workspace --locked --
-
-set positional-arguments
-
-[working-directory: "packages/benchmarks"]
-profile-insertions \
-    insertion_filter \
-    reserialization_filter \
-    $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres" \
-    $SQLX_OFFLINE="true": postgres
-    sleep 5
-    CARGO_PROFILE_BENCH_DEBUG=true INITIAL_FILTER_REGEX="$1" RESERIALIZATION_FILTER_REGEX="$2" cargo flamegraph --bench insertion -- --bench
