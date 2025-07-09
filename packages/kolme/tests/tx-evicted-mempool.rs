@@ -148,8 +148,8 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
     loop {
         let _ = mempool_subscribe.listen().await;
         counter += 1;
-        if counter >= 5 {
-            // Counter will be greater than 5 because
+        if counter >= 10 {
+            // Counter will be greater than 10 because
             // mempool_subscribe will also be triggered on removal in
             // the current implementation. But this is a good time to
             // break from the loop.
