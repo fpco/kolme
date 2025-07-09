@@ -81,11 +81,9 @@ cargo-slow-tests:
 
 # Cache docker images by saving it under wasm
 cache-docker-images:
-	ls wasm
 	mkdir -p wasm/images
 	ls wasm/images
-	-[ -f wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar ] || docker pull ghcr.io/fpco/cosmos-images/localosmosis:{{LOCALOSMOSIS_VERSION}} && docker save ghcr.io/fpco/cosmos-images/localosmosis:{{LOCALOSMOSIS_VERSION}} -o wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar
-	-[ -f wasm/images/postgres_{{POSTGRES_VERSION}}.tar ] || docker pull postgres:{{POSTGRES_VERSION}} && docker save postgres:{{POSTGRES_VERSION}} -o wasm/images/postgres_{{POSTGRES_VERSION}}.tar
+	-[ -f wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar ] || (docker pull ghcr.io/fpco/cosmos-images/localosmosis:{{LOCALOSMOSIS_VERSION}} && docker save ghcr.io/fpco/cosmos-images/localosmosis:{{LOCALOSMOSIS_VERSION}} -o wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar)
+	-[ -f wasm/images/postgres_{{POSTGRES_VERSION}}.tar ] || (docker pull postgres:{{POSTGRES_VERSION}} && docker save postgres:{{POSTGRES_VERSION}} -o wasm/images/postgres_{{POSTGRES_VERSION}}.tar)
 	-docker load -i ./wasm/images/localosmosis_{{LOCALOSMOSIS_VERSION}}.tar
 	-docker load -i ./wasm/images/postgres_{{POSTGRES_VERSION}}.tar
-	ls wasm/images
