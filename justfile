@@ -71,7 +71,7 @@ cargo-compile:
 cargo-test:
 	cat contract-test-list.txt stress-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
 
-# Contract related tests
+# contract related tests
 cargo-contract-tests:
 	xargs -a contract-test-list.txt cargo nextest run --workspace --profile=ci --locked --
 
