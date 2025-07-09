@@ -28,10 +28,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install libudev-dev libusb-1.0-0-dev libhidapi-dev mold -y
+      - name: Install depdendencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libudev-dev libusb-1.0-0-dev libhidapi-dev mold
       - uses: taiki-e/install-action@v2
         with:
           tool: just@1.40.0,nextest@0.9.99,sqlx-cli
