@@ -74,4 +74,4 @@ cargo-contract-tests:
 
 # Slow tests
 cargo-slow-tests:
-	xargs -a stress-test-list.txt cargo test --release --workspace --locked --
+	xargs -a stress-test-list.txt cargo nextest --workspace --locked --
