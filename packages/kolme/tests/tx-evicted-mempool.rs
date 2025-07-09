@@ -199,19 +199,6 @@ async fn client(
     sender: oneshot::Sender<()>,
     data: Arc<Mutex<Vec<TxHash>>>,
 ) -> Result<()> {
-    // Wait so that both no-op-node and processor be ready for our
-    // messages.
-    // Thought process: What happens if they are a little late
-
-    // Processor: The client's propose_and_await_transaction would
-    // fail. Reason: No block will be produced and no new block will
-    // be put on the p2p layer.
-
-    // No op node: Could it happen that client has broadcast tx and it
-    // has been received by processor and no-op. Processor has
-    // broadcasted new block that no-op node has missed it ?
-
-    // tokio::time::sleep(Duration::from_secs(2)).await;
     for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
 
