@@ -1799,7 +1799,7 @@ mod tests {
         ($value_type: ty, $test_name: ident) => {
             quickcheck! {
                 fn $test_name(value: $value_type) -> quickcheck::TestResult {
-                    let manager = MerkleManager::default();
+                    let manager = MerkleManager::new(1024);
                     let serialized = manager.serialize(&value).unwrap();
                     let deserialized = manager
                         .deserialize::<$value_type>(serialized.hash, serialized.payload.clone())

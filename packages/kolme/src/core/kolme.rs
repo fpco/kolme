@@ -82,6 +82,11 @@ impl<App: KolmeApp> Clone for Kolme<App> {
     }
 }
 
+// ATM we use a speculative cache bound. For cache values with avarage size of 1kb
+// and assuming pessimistic overhead of 2x this should result in merkle cache
+// not getting larger than 512M
+const MERKLE_CACHE_SIZE: usize = 262_144; // 2^^18
+
 impl<App: KolmeApp> Kolme<App> {
     /// Lock the local storage and the database.
     ///
@@ -621,7 +626,7 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
-        let merkle_manager = MerkleManager::default();
+        let merkle_manager = MerkleManager::new(MERKLE_CACHE_SIZE);
         let current_block =
             MaybeBlockInfo::<App>::load(&store, app.genesis_info(), &merkle_manager).await?;
         let inner = KolmeInner {
