@@ -1,16 +1,14 @@
 default:
     just --list
 
-check:
-    cargo check --workspace --tests --all-features
+cargo-clippy-check:
+	cargo clippy --no-deps --workspace --locked --tests --benches --examples -- -Dwarnings
 
-clippy:
-    cargo clippy --no-deps --workspace --tests -- -Dwarnings
-
-fmt:
+cargo-fmt-check:
     cargo fmt --all --check
 
-lint: fmt check clippy
+fmt:
+	cargo fmt --all
 
 stop-postgres:
 	docker stop kolme_pg && docker rm kolme_pg
