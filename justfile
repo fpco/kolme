@@ -67,7 +67,7 @@ changelog:
 cargo-compile:
 	cargo test --workspace --no-run --locked
 
-# cargo test
+# Cargo test
 cargo-test:
 	cat contract-test-list.txt stress-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
 
