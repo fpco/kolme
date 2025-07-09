@@ -282,7 +282,6 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     }
 
-    tracing::info!("Requesting archiver to stop");
     while kolme.get_latest_archived_block().await.unwrap() != Some(BlockHeight(10)) {
         tokio::task::yield_now().await;
     }
@@ -306,6 +305,10 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
         .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
         .await
         .unwrap();
+
+    while kolme.get_latest_archived_block().await.unwrap() != Some(BlockHeight(11)) {
+        tokio::task::yield_now().await;
+    }
 
     let latest_archived_height =
         sqlx::query_scalar!(r#"SELECT height as "height!" FROM latest_archived_block_height"#)
