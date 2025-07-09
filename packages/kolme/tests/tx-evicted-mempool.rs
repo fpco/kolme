@@ -161,16 +161,15 @@ async fn no_op_node(kolme: Kolme<SampleKolmeApp>, receiver: oneshot::Receiver<()
     tokio::time::sleep(Duration::from_secs(3)).await;
     let mut attempt = 0;
     loop {
-        if attempt == 10 {
-            panic!("Mempool is not empty after {attempt} retries");
-        }
         let mempool = kolme.get_mempool_entries();
         if mempool.is_empty() {
             break;
-        } else {
-            attempt += 1;
-            tokio::time::sleep(Duration::from_secs(10)).await;
         }
+        if attempt == 10 {
+            panic!("Mempool is not empty after {attempt} retries. Still left {} entries.", mempool.len());
+        }
+        attempt += 1;
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
     Ok(())
 }
