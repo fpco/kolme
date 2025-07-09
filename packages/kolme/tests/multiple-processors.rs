@@ -112,15 +112,29 @@ async fn multiple_processors() {
         return;
     }
 
+    let processor_count = match std::env::var("KOLME_PROCESSOR_COUNT") {
+        Ok(x) => x.parse().unwrap_or(3usize),
+        Err(_) => 3,
+    };
+
+    let client_count = match std::env::var("KOLME_CLIENT_COUNT") {
+        Ok(x) => x.parse().unwrap_or(5usize),
+        Err(_) => 5,
+    };
+
     // Wipe out the database so we have a fresh run
-    let (x, y, z) = TestTasks::start(multiple_processors_inner, block_db_str).await;
+    let (x, y, z) = TestTasks::start(
+        multiple_processors_inner,
+        (block_db_str, processor_count, client_count),
+    )
+    .await;
     println!("Finished checking results of all clients, moving on to checker");
     checker(x, y, z).await.unwrap();
 }
 
 async fn multiple_processors_inner(
     test_tasks: TestTasks,
-    block_db_str: String,
+    (block_db_str, processor_count, client_count): (String, usize, usize),
 ) -> (
     Arc<[Kolme<SampleKolmeApp>]>,
     Arc<Mutex<HashSet<TxHash>>>,
@@ -158,10 +172,8 @@ async fn multiple_processors_inner(
     };
 
     let mut kolmes = vec![];
-    const PROCESSOR_COUNT: usize = 10;
-    const CLIENT_COUNT: usize = 100;
 
-    for _ in 0..PROCESSOR_COUNT {
+    for _ in 0..processor_count {
         let kolme = Kolme::new(
             SampleKolmeApp::default(),
             DUMMY_CODE_VERSION,
@@ -196,7 +208,7 @@ async fn multiple_processors_inner(
     let all_txhashes = Arc::new(Mutex::new(HashSet::new()));
     let highest_block = Arc::new(Mutex::new(BlockHeight::start()));
 
-    for _ in 0..CLIENT_COUNT {
+    for _ in 0..client_count {
         test_tasks.try_spawn(client(
             kolmes.clone(),
             all_txhashes.clone(),
