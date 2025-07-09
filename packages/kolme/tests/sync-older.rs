@@ -186,13 +186,11 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
 
     // Now try an older block with get_block... it should give nothing.
     let older = BlockHeight(5);
-    assert!(
-        kolme_state_transfer
-            .get_block(older)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(kolme_state_transfer
+        .get_block(older)
+        .await
+        .unwrap()
+        .is_none());
 
     // But waiting should work
     let from_gossip = tokio::time::timeout(
@@ -297,7 +295,7 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
 
     assert_eq!(
         initial_heights.iter().map(|r| r.height).collect::<Vec<_>>(),
-        (0..11).into_iter().collect::<Vec<_>>(),
+        (0..11).collect::<Vec<_>>(),
         "Block heights were not archived correctly"
     );
 

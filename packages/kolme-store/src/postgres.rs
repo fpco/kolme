@@ -1,4 +1,4 @@
-use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
+use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use anyhow::Context as _;
 use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError,
@@ -6,15 +6,15 @@ use merkle_map::{
 };
 use parking_lot::RwLock;
 use sqlx::{
-    Executor, Postgres,
     pool::PoolOptions,
     postgres::{PgAdvisoryLock, PgConnectOptions},
+    Executor, Postgres,
 };
 use std::{
     collections::HashMap,
     sync::{
-        Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
     },
 };
 mod merkle;

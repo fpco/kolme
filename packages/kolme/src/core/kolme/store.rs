@@ -2,7 +2,7 @@ use crate::core::*;
 use std::{num::NonZeroUsize, path::Path};
 
 use kolme_store::sqlx::postgres::PgConnectOptions;
-use kolme_store::sqlx::{Postgres, pool::PoolOptions};
+use kolme_store::sqlx::{pool::PoolOptions, Postgres};
 use kolme_store::{
     KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
     StorableBlock,
