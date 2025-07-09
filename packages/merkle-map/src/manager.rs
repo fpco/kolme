@@ -1,19 +1,19 @@
 //! Helper types and functions for buffer reading and writing.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
 
+use lru::LruCache;
+use parking_lot::Mutex;
 use shared::types::Sha256Hash;
 use smallvec::SmallVec;
 
 use crate::*;
 
 /// Primary interface for loading and saving data with merkle-map.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MerkleManager {
-    cache: Arc<parking_lot::RwLock<HashMap<Sha256Hash, Arc<[u8]>>>>,
+    //cache: Arc<parking_lot::RwLock<HashMap<Sha256Hash, Arc<[u8]>>>>,
+    cache: Arc<Mutex<LruCache<Sha256Hash, Arc<[u8]>>>>,
 }
 
 impl MerkleSerialError {
@@ -29,6 +29,13 @@ impl std::fmt::Debug for MerkleContents {
 }
 
 impl MerkleManager {
+    pub fn new(cache_size: usize) -> Self {
+        let cache = LruCache::new(NonZeroUsize::new(cache_size).unwrap());
+        Self {
+            cache: Arc::new(Mutex::new(cache)),
+        }
+    }
+
     /// Serialize a value into a [MerkleContents] for later storage.
     pub fn serialize<T: MerkleSerializeRaw + ?Sized>(
         &self,
@@ -41,7 +48,7 @@ impl MerkleManager {
         let mut serializer = MerkleSerializer::new(self.clone());
         value.merkle_serialize_raw(&mut serializer)?;
         let mut contents = serializer.finish();
-        let existing_payload = self.cache.read().get(&contents.hash).cloned();
+        let existing_payload = self.cache.lock().get(&contents.hash).cloned();
         match existing_payload {
             Some(payload) => {
                 // Reuse existing memory
@@ -49,7 +56,7 @@ impl MerkleManager {
             }
             None => {
                 let payload = contents.payload.clone();
-                self.cache.write().insert(contents.hash, payload);
+                self.cache.lock().put(contents.hash, payload);
             }
         }
 
@@ -142,7 +149,7 @@ impl MerkleManager {
         store: &mut Store,
         hash: Sha256Hash,
     ) -> Result<Arc<[u8]>, MerkleSerialError> {
-        if let Some(payload) = self.cache.read().get(&hash) {
+        if let Some(payload) = self.cache.lock().get(&hash) {
             return Ok(payload.clone());
         }
 
@@ -156,7 +163,7 @@ impl MerkleManager {
             let future = Box::pin(self.get_or_load_payload(store, child));
             future.await?;
         }
-        self.cache.write().insert(hash, payload.clone());
+        self.cache.lock().put(hash, payload.clone());
 
         Ok(payload)
     }
@@ -165,7 +172,7 @@ impl MerkleManager {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<T>, MerkleSerialError> {
-        let Some(payload) = self.cache.read().get(&hash).cloned() else {
+        let Some(payload) = self.cache.lock().get(&hash).cloned() else {
             return Ok(None);
         };
         self.deserialize(hash, payload).map(Some)

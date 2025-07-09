@@ -4839,6 +4839,7 @@ dependencies = [
  "arrayvec",
  "base64 0.22.1",
  "jiff",
+ "lru 0.14.0",
  "parameterized",
  "parking_lot",
  "paste",

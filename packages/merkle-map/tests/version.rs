@@ -204,7 +204,7 @@ async fn load_from_zero_helper(people: Vec<Person0>, to_modify: usize, new_stree
         m2.insert(idx, Person2::from(person));
     }
 
-    let manager = MerkleManager::default();
+    let manager = MerkleManager::new(1024);
     let mut store = MerkleMemoryStore::default();
     let m0_contents = manager.save(&mut store, &m0).await.unwrap();
 
