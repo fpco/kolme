@@ -87,6 +87,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Install depdendencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libudev-dev libusb-1.0-0-dev libhidapi-dev mold
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
