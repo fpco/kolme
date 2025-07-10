@@ -51,6 +51,7 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
         contents: MerkleLayerContents,
     },
     HeightNotFound(BlockHeight),
+    MerkleNotFound(Sha256Hash),
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

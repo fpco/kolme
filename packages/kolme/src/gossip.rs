@@ -643,7 +643,10 @@ impl<App: KolmeApp> Gossip<App> {
                         );
                         return;
                     }
-                    Ok(None) => BlockResponse::HeightNotFound(height),
+                    Ok(None) => {
+                        tracing::warn!("{local_display_name}: Received a request for block {height}, but didn't have it.");
+                        BlockResponse::HeightNotFound(height)
+                    }
                     Ok(Some(storable_block)) => {
                         #[cfg(debug_assertions)]
                         {
@@ -670,29 +673,30 @@ impl<App: KolmeApp> Gossip<App> {
                     );
                 }
             }
-            BlockRequest::Merkle(hash) => match self.kolme.get_merkle_layer(hash).await {
-                // We didn't have it, in theory we could send a message back about this, but
-                // skipping for now
-                Ok(None) => {
-                    tracing::warn!("{local_display_name}: Received a request for merkle layer {hash}, but didn't have it.");
-                }
-                Ok(Some(contents)) => {
-                    if let Err(e) = swarm
-                        .behaviour_mut()
-                        .request_response
-                        .send_response(channel, BlockResponse::Merkle { hash, contents })
-                    {
-                        tracing::warn!(
-                            "{local_display_name}: Unable to answer Merkle request: {e:?}"
-                        );
+            BlockRequest::Merkle(hash) => {
+                let res = match self.kolme.get_merkle_layer(hash).await {
+                    // We didn't have it, in theory we could send a message back about this, but
+                    // skipping for now
+                    Ok(None) => {
+                        tracing::warn!("{local_display_name}: Received a request for merkle layer {hash}, but didn't have it.");
+                        BlockResponse::MerkleNotFound(hash)
                     }
+                    Ok(Some(contents)) => BlockResponse::Merkle { hash, contents },
+                    Err(e) => {
+                        tracing::warn!(
+                            "{local_display_name}: Error when loading Merkle layer for {hash}: {e}"
+                        );
+                        return;
+                    }
+                };
+                if let Err(e) = swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_response(channel, res)
+                {
+                    tracing::warn!("{local_display_name}: Unable to answer Merkle request: {e:?}");
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "{local_display_name}: Error when loading Merkle layer for {hash}: {e}"
-                    )
-                }
-            },
+            }
             BlockRequest::BlockAvailable { height, peer } => {
                 self.state_sync.lock().await.add_block_peer(height, peer);
                 self.trigger_state_sync.trigger();
@@ -727,8 +731,15 @@ impl<App: KolmeApp> Gossip<App> {
             }
             BlockResponse::HeightNotFound(height) => {
                 tracing::warn!(
-                    "{local_display_name}: Tried to find block height {height}, but peer didn't find it"
+                    "{local_display_name}: Tried to find block height {height}, but peer {peer} didn't find it"
                 );
+                self.state_sync.lock().await.remove_block_peer(height, peer);
+            }
+            BlockResponse::MerkleNotFound(hash) => {
+                tracing::warn!(
+                    "{local_display_name}: Tried to find merkle layer {hash}, but peer {peer} didn't find it"
+                );
+                self.state_sync.lock().await.remove_layer_peer(hash, peer);
             }
             BlockResponse::Merkle { hash, contents } => {
                 match self

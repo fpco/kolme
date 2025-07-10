@@ -117,6 +117,10 @@ async fn test_postgres_block_double_insertion() {
     kolme::init_logger(true, None);
     let postgres_url =
         std::env::var("PROCESSOR_BLOCK_DB").expect("Variable PROCESSOR_BLOCK_DB was missing");
+    if postgres_url == "SKIP" {
+        println!("Skipping test due to PROCESSOR_BLOCK_DB value of SKIP");
+        return;
+    }
 
     // NOTE: At startup, the postgres store hydrates the latest block height from
     // with a query, thus, we need to recreate after clear so that we truly start from scratch

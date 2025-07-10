@@ -117,6 +117,10 @@ impl RequestStatus {
         }
         res
     }
+
+    fn remove_peer(&mut self, peer: PeerId) {
+        self.peers.retain(|x| x != &peer);
+    }
 }
 
 impl<App: KolmeApp> StateSyncStatus<App> {
@@ -150,6 +154,12 @@ impl<App: KolmeApp> StateSyncStatus<App> {
     pub(super) fn add_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
         if let Some(status) = self.needed_blocks.get_mut(&height) {
             status.add_peer(peer);
+        }
+    }
+
+    pub(super) fn remove_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
+        if let Some(status) = self.needed_blocks.get_mut(&height) {
+            status.remove_peer(peer);
         }
     }
 
@@ -395,6 +405,12 @@ impl<App: KolmeApp> StateSyncStatus<App> {
     pub(super) fn add_layer_peer(&mut self, hash: Sha256Hash, peer: PeerId) {
         if let Some(status) = self.needed_layers.get_mut(&hash) {
             status.add_peer(peer);
+        }
+    }
+
+    pub(super) fn remove_layer_peer(&mut self, hash: Sha256Hash, peer: PeerId) {
+        if let Some(status) = self.needed_layers.get_mut(&hash) {
+            status.remove_peer(peer);
         }
     }
 }
