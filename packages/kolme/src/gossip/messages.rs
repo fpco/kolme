@@ -161,7 +161,7 @@ impl<App: KolmeApp> GossipMessage<App> {
         match result {
             Ok(_id) => Ok(true),
             Err(PublishError::Duplicate) => {
-                tracing::info!(
+                tracing::debug!(
                     "{}: Skipping sending duplicate message",
                     gossip.local_display_name
                 );

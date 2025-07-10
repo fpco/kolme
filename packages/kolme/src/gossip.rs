@@ -443,7 +443,7 @@ impl<App: KolmeApp> Gossip<App> {
 
         if let Some(hash) = notification.hash() {
             if self.notification_hash_exists(&hash) {
-                tracing::info!("Skipping publish to p2p layer");
+                tracing::debug!("Skipping publish to p2p layer");
                 return;
             }
         }
