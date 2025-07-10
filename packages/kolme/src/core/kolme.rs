@@ -1069,6 +1069,67 @@ impl<App: KolmeApp> Kolme<App> {
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
     }
+
+    /// Ensure that all states are stored directly as their own Merkle layers.
+    ///
+    /// This is a helper method to workaround a data integrity issue from older versions
+    /// of Kolme. This traverses all blocks in the store and ensures that the framework state, app state, and logs are stored directly in the merkle store. With older versions of Kolme, these were mistakenly only stored in the block data itself.
+    pub async fn fix_missing_layers(&self) -> Result<()> {
+        let mut height = BlockHeight::start();
+        let man = self.get_merkle_manager();
+        while self.has_block(height).await? {
+            tracing::info!("Attempting to fix missing layers for block height {height}");
+
+            let block = self.load_block(height).await.with_context(|| {
+                format!("fix_missing_layers: error while loading block height {height}")
+            })?;
+            {
+                let contents = man.serialize(&block.framework_state)?;
+                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
+                if !exists {
+                    tracing::info!(
+                        "Saving Merkle layer for {height}/framework_state: {}",
+                        contents.hash
+                    );
+                    self.inner
+                        .store
+                        .save(man, &block.framework_state, contents.hash)
+                        .await?;
+                }
+            }
+            {
+                let contents = man.serialize(&block.app_state)?;
+                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
+                if !exists {
+                    tracing::info!(
+                        "Saving Merkle layer for {height}/app_state: {}",
+                        contents.hash
+                    );
+                    self.inner
+                        .store
+                        .save(man, &block.app_state, contents.hash)
+                        .await?;
+                }
+            }
+            {
+                let contents = man.serialize(&block.logs)?;
+                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
+                println!("{height} logs: {exists}: {}", contents.hash);
+                if !exists {
+                    tracing::info!("Saving Merkle layer for {height}/logs: {}", contents.hash);
+                    self.inner
+                        .store
+                        .save(man, &block.logs, contents.hash)
+                        .await?;
+                }
+            }
+
+            height = height.next();
+        }
+
+        tracing::info!("Finished fixing missing layers, first missing block found is: {height}");
+        Ok(())
+    }
 }
 
 impl<App: KolmeApp> KolmeRead<App> {
