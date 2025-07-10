@@ -6,7 +6,7 @@ default:
 
 # Build
 build:
-  GIT_REV=$(git rev-parse HEAD) cargo build-sbf
+  GIT_REV=$(git rev-parse HEAD) cargo build-sbf -- --lib
 
 # Compile
 cargo-compile:
