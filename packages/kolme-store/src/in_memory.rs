@@ -30,6 +30,7 @@ struct Inner {
     blockhashes: BTreeMap<u64, Sha256Hash>,
     blocks: BTreeMap<u64, Sha256Hash>,
     txhashes: HashMap<Sha256Hash, u64>,
+    latest_archived_block: Option<u64>,
 }
 
 impl KolmeBackingStore for Store {
@@ -181,5 +182,14 @@ impl KolmeBackingStore for Store {
     {
         let mut merkle = self.get_merkle_store().await;
         merkle_manager.load(&mut merkle, hash).await
+    }
+
+    async fn archive_block(&self, height: u64) -> anyhow::Result<()> {
+        self.0.write().await.latest_archived_block = Some(height);
+        Ok(())
+    }
+
+    async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
+        Ok(self.0.read().await.latest_archived_block)
     }
 }

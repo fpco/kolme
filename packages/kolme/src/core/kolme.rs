@@ -1053,6 +1053,26 @@ impl<App: KolmeApp> Kolme<App> {
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
     }
+
+    /// Marks the current block to not be resynced by the Archiver
+    pub async fn archive_block(&self, height: BlockHeight) -> Result<()> {
+        self.inner
+            .store
+            .archive_block(height)
+            .await
+            .with_context(|| format!("Unable to mark block {} as archived", height.0))
+    }
+
+    /// Obtains the latest block synced by the Archiver, if it exists
+    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>> {
+        Ok(self
+            .inner
+            .store
+            .get_latest_archived_block_height()
+            .await
+            .context("Unable to retrieve latest archived block height")?
+            .map(BlockHeight))
+    }
 }
 
 impl<App: KolmeApp> KolmeRead<App> {

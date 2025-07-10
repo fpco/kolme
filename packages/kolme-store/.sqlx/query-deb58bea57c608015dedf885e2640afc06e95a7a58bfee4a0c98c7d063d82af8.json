@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT height FROM blocks ORDER BY height DESC LIMIT 1",
+  "query": "\n            SELECT height\n            FROM blocks\n            ORDER BY height DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "12a5f03433f08da8bc70ea0d727d04f70a29f933bbb0df83f91a0ce99404f6b4"
+  "hash": "deb58bea57c608015dedf885e2640afc06e95a7a58bfee4a0c98c7d063d82af8"
 }

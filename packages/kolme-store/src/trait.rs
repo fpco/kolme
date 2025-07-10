@@ -50,6 +50,9 @@ pub trait KolmeBackingStore {
         layer: &MerkleLayerContents,
     ) -> anyhow::Result<()>;
 
+    async fn archive_block(&self, height: u64) -> anyhow::Result<()>;
+    async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>>;
+
     async fn save<T>(
         &self,
         merkle_manager: &MerkleManager,
