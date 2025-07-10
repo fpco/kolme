@@ -5,6 +5,7 @@
 // the code below.
 use std::{
     collections::{btree_map, HashMap, HashSet},
+    fmt::Display,
     time::Instant,
 };
 
@@ -65,6 +66,24 @@ struct RequestStatus {
     last_sent: Option<Instant>,
     /// Peers we can query for the data.
     peers: SmallVec<[PeerId; REQUEST_COUNT]>,
+    /// Last time we updated the warning state.
+    ///
+    /// Warning state is to track how long a request has been unanswered. We update it (1) the first time we make a request and (2) every time we print out a warning.
+    warning_updated: Option<Instant>,
+}
+
+enum DataLabel {
+    Block(BlockHeight),
+    Merkle(Sha256Hash),
+}
+
+impl Display for DataLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            DataLabel::Block(height) => write!(f, "block {height}"),
+            DataLabel::Merkle(hash) => write!(f, "merkle layer {hash}"),
+        }
+    }
 }
 
 impl RequestStatus {
@@ -72,6 +91,7 @@ impl RequestStatus {
         RequestStatus {
             last_sent: None,
             peers: peer.into_iter().collect(),
+            warning_updated: None,
         }
     }
 
@@ -97,8 +117,9 @@ impl RequestStatus {
     /// Check if we should try this request again.
     ///
     /// This will automatically update the [last_sent] field if a request
-    /// should be made.
-    fn should_request(&mut self) -> ShouldRequest {
+    /// should be made. It's also responsible for printing warnings for
+    /// requests that are taking too long.
+    fn should_request(&mut self, label: DataLabel) -> ShouldRequest {
         let res = match self.last_sent {
             None => ShouldRequest::RequestNoPeers,
             Some(last_sent) => {
@@ -109,6 +130,17 @@ impl RequestStatus {
                 }
             }
         };
+
+        let now = Instant::now();
+        match self.warning_updated {
+            None => self.warning_updated = Some(now),
+            Some(warning_updated) => {
+                if now.duration_since(warning_updated).as_secs() >= WARNING_PERIOD_SECS {
+                    tracing::warn!("Still waiting on request for {label}");
+                    self.warning_updated = Some(now);
+                }
+            }
+        }
         match res {
             ShouldRequest::DontRequest => (),
             ShouldRequest::RequestNoPeers | ShouldRequest::RequestWithPeers => {
@@ -257,7 +289,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
             return Ok(None);
         };
 
-        let request_new_peers = match status.should_request() {
+        let request_new_peers = match status.should_request(DataLabel::Block(height)) {
             ShouldRequest::DontRequest => {
                 return Ok(None);
             }
@@ -309,7 +341,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                 continue;
             };
 
-            let request_new_peers = match status.should_request() {
+            let request_new_peers = match status.should_request(DataLabel::Merkle(*hash)) {
                 ShouldRequest::DontRequest => continue,
                 ShouldRequest::RequestNoPeers => false,
                 ShouldRequest::RequestWithPeers => true,
@@ -416,3 +448,4 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 }
 
 const REQUEST_COUNT: usize = 4;
+const WARNING_PERIOD_SECS: u64 = 5;
