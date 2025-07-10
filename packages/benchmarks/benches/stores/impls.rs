@@ -32,8 +32,8 @@ where
 
                     for _ in 0..iters {
                         let mut store = Store::new(params.clone()).await;
-                        let merkle_manager = MerkleManager::default();
                         let merkle_map = factory();
+                        let merkle_manager = kolme::MerkleManager::new(merkle_map.1);
 
                         let run_time = Instant::now();
                         store.run(&merkle_manager, merkle_map).await;
@@ -73,8 +73,8 @@ where
 
                     for _ in 0..iters {
                         let mut store = Store::new(params.clone()).await;
-                        let merkle_manager = MerkleManager::default();
                         let mut merkle_map = factory();
+                        let merkle_manager = kolme::MerkleManager::new(merkle_map.1);
                         store.run(&merkle_manager, merkle_map.clone()).await;
                         update(&mut merkle_map);
 

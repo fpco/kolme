@@ -23,7 +23,7 @@ fn generate_merkle_map(map_size: usize, content_size: usize) -> RawMerkleMap {
         merkle_map.insert(key, value);
     }
 
-    RawMerkleMap(merkle_map)
+    RawMerkleMap(merkle_map, map_size)
 }
 
 fn update_merkle_map(probability_to_update: f64, merkle_map: &mut RawMerkleMap) {

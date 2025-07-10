@@ -35,7 +35,7 @@ impl Filter {
 }
 
 #[derive(Default, Clone)]
-pub struct RawMerkleMap(pub MerkleMap<Vec<u8>, Vec<u8>>);
+pub struct RawMerkleMap(pub MerkleMap<Vec<u8>, Vec<u8>>, pub usize);
 
 pub struct BenchmarkGroupRunner<'a, M>
 where
