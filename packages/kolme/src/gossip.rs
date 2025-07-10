@@ -46,6 +46,8 @@ pub struct Gossip<App: KolmeApp> {
     state_sync: Mutex<StateSyncStatus<App>>,
     /// LRU cache for notifications received via P2p layer
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
+    /// Should we always try to sync the latest block?
+    sync_latest: bool,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -126,6 +128,7 @@ pub struct GossipBuilder {
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
     local_display_name: Option<String>,
+    sync_latest: bool,
 }
 
 impl Default for GossipBuilder {
@@ -139,6 +142,7 @@ impl Default for GossipBuilder {
             sync_mode: Default::default(),
             data_load_validation: Default::default(),
             local_display_name: Default::default(),
+            sync_latest: true,
         }
     }
 }
@@ -201,6 +205,15 @@ impl GossipBuilder {
 
     pub fn set_local_display_name(mut self, display_name: &str) -> Self {
         self.local_display_name = Some(String::from(display_name));
+        self
+    }
+
+    /// Do not attempt to sync the latest block
+    ///
+    /// This is useful when running an archive node, where we would like to sync
+    /// older blocks before newer block.
+    pub fn disable_sync_latest(mut self) -> Self {
+        self.sync_latest = false;
         self
     }
 
@@ -305,6 +318,7 @@ impl GossipBuilder {
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             state_sync,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
+            sync_latest: self.sync_latest,
         })
     }
 }
@@ -766,6 +780,13 @@ impl<App: KolmeApp> Gossip<App> {
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         report_block_height: Option<ReportBlockHeight>,
     ) {
+        if !self.sync_latest {
+            tracing::debug!(
+                "{}: exiting catch_up immediately, gossip mode set to not sync latest",
+                self.local_display_name
+            );
+            return;
+        }
         let ReportBlockHeight {
             next: their_next,
             peer,
