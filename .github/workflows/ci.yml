@@ -110,7 +110,7 @@ jobs:
           path: |
             ~/.cargo/bin
       - name: Setup solana
-        if: steps.solana-cache.outputs.cache-hit == 'false' || steps.solana-cache.outputs.cache-hit == ""
+        if: steps.solana-cache.outputs.cache-hit == 'false' || steps.solana-cache.outputs.cache-hit == ''
         working-directory: solana
         run: just download-solana
       - name: Compile
