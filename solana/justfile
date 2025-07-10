@@ -1,4 +1,4 @@
-SOLANA_VERSION = "2.2.18"
+SOLANA_VERSION := "2.2.18"
 
 # List all recipes
 default:
