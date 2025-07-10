@@ -92,14 +92,23 @@ jobs:
         with:
           packages: libudev-dev libusb-1.0-0-dev libhidapi-dev mold
       - name: Rust cache
-        id: solana-cache
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v2-solana"
-          cache-bin: true
+          prefix-key: "v4-solana"
+          # https://github.com/Swatinem/rust-cache/issues/237
+          cache-bin: false
       - uses: taiki-e/install-action@v2
         with:
           tool: just@1.40.0
+      - name: Cache contract builds
+        uses: actions/cache@v4
+        id: solana-cache
+        with:
+          key: solana-${{ hashFiles('solana/justfile') }}
+          restore-keys: |
+            solana
+          path: |
+            ~/.cargo/bin
       - name: Setup solana
         if: steps.solana-cache.outputs.cache-hit == 'false'
         working-directory: solana
