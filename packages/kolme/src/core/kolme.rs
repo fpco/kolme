@@ -681,24 +681,40 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
+        // Optimization for the common case.
+        if let Some(storable_block) = self.get_block(height).await? {
+            return Ok(storable_block.block);
+        }
+
         // First subscribe to avoid a race condition...
         let mut recv = self.inner.store.subscribe();
+        let mut last_warning = std::time::Instant::now();
         loop {
             // And then check if we're at the requested height.
             if let Some(storable_block) = self.get_block(height).await? {
                 return Ok(storable_block.block);
             }
 
-            // Only use the state sync requester if we have a gap in blocks, otherwise
-            // normal mechanisms for filling in blocks will work.
-            if self.read().get_next_height() > height {
-                if let Some(requester) = self.inner.block_requester.get() {
-                    requester.send(height).await.ok();
-                }
+            if let Some(requester) = self.inner.block_requester.get() {
+                requester.send(height).await.ok();
             }
 
-            // Wait for more data
-            recv.listen().await;
+            // Only wait up to 5 seconds for a new event, if that doesn't happen,
+            // check again in case an archiver or similar filled in an old
+            // block without triggering an event.
+            //
+            // TODO: investigate this more closely, maybe we need gossip to generate
+            // a notification every time a new block is added.
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), recv.listen())
+                .await
+                .ok();
+
+            // If we've waited too long, print a warning.
+            let now = std::time::Instant::now();
+            if now.duration_since(last_warning).as_secs() >= 30 {
+                tracing::warn!("Still waiting for block {height}");
+                last_warning = now;
+            };
         }
     }
 
