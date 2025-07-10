@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "contracts/cosmos",
   "packages/examples/*",
+  "packages/benchmarks",
   "packages/integration-tests",
   "packages/kolme",
   "packages/kolme-store",

@@ -23,7 +23,6 @@ plotters-svg = { version = "0.3.7", optional = true }
 regex = "1.11.1"
 example-six-sigma = { path = "../examples/six-sigma" }
 example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
-test-log = { workspace = true }
 strum = { version = "0.27.1", features = ["derive"] }
 futures = "0.3.31"
 backon = "1.4.1"
