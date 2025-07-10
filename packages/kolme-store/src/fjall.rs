@@ -10,20 +10,13 @@ const LATEST_ARCHIVED_HEIGHT_KEY: &[u8] = b"LATEST";
 #[derive(Clone)]
 pub struct Store {
     pub(super) merkle: merkle::MerkleFjallStore,
-    latest_archived_height: fjall::PartitionHandle,
 }
 
 impl Store {
     pub fn new(fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
         let merkle = merkle::MerkleFjallStore::new(fjall_dir)?;
-        let latest_archived_height = merkle
-            .keyspace
-            .open_partition("archived", Default::default())?;
 
-        Ok(Self {
-            merkle,
-            latest_archived_height,
-        })
+        Ok(Self { merkle })
     }
 }
 
@@ -213,7 +206,8 @@ impl KolmeBackingStore for Store {
     }
 
     async fn archive_block(&self, height: u64) -> anyhow::Result<()> {
-        self.latest_archived_height
+        self.merkle
+            .handle
             .insert(LATEST_ARCHIVED_HEIGHT_KEY, height.to_be_bytes())
             .context("Unable to update partition with given height")?;
 
@@ -222,7 +216,8 @@ impl KolmeBackingStore for Store {
 
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
         Ok(self
-            .latest_archived_height
+            .merkle
+            .handle
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
             .context("Unable to retrieve latest height")?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
