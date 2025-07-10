@@ -87,6 +87,8 @@ impl<App: KolmeApp> Submitter<App> {
             .collect::<Vec<_>>();
 
         if chains.is_empty() {
+            tracing::info!("Submitter does not support any of the configured chains. Exiting...");
+
             return Ok(());
         }
 
@@ -191,8 +193,11 @@ impl<App: KolmeApp> Submitter<App> {
         let Some(processor) = processor else {
             return Ok(());
         };
+
         if let Some(last) = self.last_submitted.get(&chain) {
             if *last >= action_id {
+                tracing::info!("Skipping submitting action {action_id} on chain {chain} - already submitted. Next expected action id: {}", last.next());
+
                 return Ok(());
             }
         }

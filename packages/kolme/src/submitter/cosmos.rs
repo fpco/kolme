@@ -46,6 +46,8 @@ pub async fn execute(
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload: &str,
 ) -> Result<String> {
+    tracing::info!("Executing signed message on bridge: {contract}");
+
     let msg = ExecuteMsg::Signed {
         processor,
         approvers: approvals.values().copied().collect(),

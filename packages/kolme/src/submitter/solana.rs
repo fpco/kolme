@@ -15,6 +15,8 @@ pub async fn instantiate(
     program_id: &str,
     set: ValidatorSet,
 ) -> Result<()> {
+    tracing::info!("Instantiate new contract: {program_id}");
+
     let data = InitializeIxData { set };
 
     let program_pubkey = Pubkey::from_str(program_id)?;
@@ -34,6 +36,8 @@ pub async fn execute(
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: String,
 ) -> Result<String> {
+    tracing::info!("Executing signed message on bridge: {program_id}");
+
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
     let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
