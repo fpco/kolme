@@ -95,10 +95,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-solana"
-      - uses: psibi/install-action@c72791d81af61349f8c1870780d45f7348ee1871
-        # Temporary till this gets merged: https://github.com/taiki-e/install-action/pull/1038
+      - uses: taiki-e/install-action@v2
         with:
-          tool: agave@2.2.18,just@1.40.0
+          tool: just@1.40.0
+      - name: Setup solana
+        working-directory: solana
+        run: just download-solana
       - name: Build
         working-directory: solana
         run: just build
