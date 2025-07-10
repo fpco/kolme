@@ -196,7 +196,7 @@ impl<App: KolmeApp> Submitter<App> {
 
         if let Some(last) = self.last_submitted.get(&chain) {
             if *last >= action_id {
-                tracing::info!("Skipping submutting action {action_id} on chain {chain} - already submitted. Next expected action id: {}", last.next());
+                tracing::info!("Skipping submitting action {action_id} on chain {chain} - already submitted. Next expected action id: {}", last.next());
 
                 return Ok(());
             }
