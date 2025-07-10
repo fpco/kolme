@@ -4,12 +4,8 @@ default:
 
 # Build
 build:
-  GIT_REV=$(git rev-parse HEAD) cargo build-sbf
-
-# cargo compile
-cargo-compile:
-  cargo test --workspace --no-run --locked
+  GIT_REV=$(git rev-parse HEAD) cargo build-sbf --locked
 
 # Test
 test:
-  cargo test -p testing
+  cargo test --locked -p testing

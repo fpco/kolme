@@ -99,9 +99,6 @@ jobs:
         # Temporary till this gets merged: https://github.com/taiki-e/install-action/pull/1038
         with:
           tool: agave@2.2.18,just@1.40.0
-      - name: Compile
-        working-directory: solana
-        run: just cargo-compile
       - name: Build
         working-directory: solana
         run: just build
