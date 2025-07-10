@@ -39,7 +39,7 @@ test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
 [working-directory: "packages/kolme-store"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
     # TODO: On my end I need this so that docker has time to launch the container
-    sleep 3
+    sleep 6
     cargo sqlx database reset -y
     cargo sqlx migrate run
     cargo sqlx prepare
