@@ -98,6 +98,9 @@ jobs:
           cache-workspace-crates: true
           # https://github.com/Swatinem/rust-cache/issues/237
           cache-bin: false
+          workspaces: |
+            .
+            solana
       - uses: taiki-e/install-action@v2
         with:
           tool: just@1.40.0
