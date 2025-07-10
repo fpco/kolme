@@ -18,7 +18,7 @@ impl StoreEnv for Store {
     type Params = StoreOptions;
 
     async fn new(params: Self::Params) -> Self {
-        let dir = tempdir::TempDir::new(&params.dirname).unwrap();
+        let dir = tempdir::TempDir::new(params.dirname).unwrap();
         Store {
             store: MerkleFjallStore::new(&dir).expect("Unable to construct fjall handle"),
             _dirname: params.dirname,

@@ -18,7 +18,7 @@ pub struct Store {
 }
 
 impl Store {
-    async fn consume_merkle<'a>(merkle_store: MerklePostgresStore<'a>) {
+    async fn consume_merkle(merkle_store: MerklePostgresStore<'_>) {
         let hashes = merkle_store.hashes_to_insert;
         let payloads = merkle_store.payloads_to_insert;
         let childrens = merkle_store.childrens_to_insert;

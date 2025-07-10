@@ -5,10 +5,9 @@ use super::{
     r#trait::{BenchmarkGroupExt, StoreEnv},
 };
 use criterion::{measurement::Measurement, BenchmarkGroup};
-use kolme::MerkleManager;
 use tokio::runtime::Handle;
 
-impl<'a, M> BenchmarkGroupExt for BenchmarkGroup<'a, M>
+impl<M> BenchmarkGroupExt for BenchmarkGroup<'_, M>
 where
     M: Measurement<Value = Duration>,
 {
@@ -23,9 +22,9 @@ where
         MapFactory: Fn() -> RawMerkleMap,
     {
         self.bench_function(name, |b| {
-            let ref factory = factory;
+            let factory = &factory;
             b.to_async(&handle).iter_custom(|iters| {
-                let ref factory = factory;
+                let factory = &factory;
                 let params = params.clone();
                 async move {
                     let mut time = Duration::default();
@@ -61,11 +60,11 @@ where
         MapUpdater: Fn(&mut RawMerkleMap),
     {
         self.bench_function(name, |b| {
-            let ref factory = factory;
-            let ref update = update;
+            let factory = &factory;
+            let update = &update;
             b.to_async(&handle).iter_custom(|iters| {
-                let ref factory = factory;
-                let ref update = update;
+                let factory = &factory;
+                let update = &update;
                 let params = params.clone();
 
                 async move {

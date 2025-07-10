@@ -59,12 +59,12 @@ fn reserialization_benchmarks(c: &mut Criterion) {
         .flat_map(|map_size| {
             CONTENT_SIZES
                 .into_iter()
-                .map(move |content_size| (map_size.clone(), content_size))
+                .map(move |content_size| (map_size, content_size))
         })
         .flat_map(|(msize, csize)| {
             UPDATE_PERCENTS
                 .into_iter()
-                .map(move |update| (update, msize.clone(), csize.clone()))
+                .map(move |update| (update, msize, csize))
         });
 
     for (update_percent, map_size, content_size) in sizes {
@@ -75,8 +75,8 @@ fn reserialization_benchmarks(c: &mut Criterion) {
                 map_size,
                 content_size,
             ),
-            fjall_options.clone(),
-            || generate_merkle_map(map_size.clone(), content_size.clone()),
+            fjall_options,
+            || generate_merkle_map(map_size, content_size),
             |map| update_merkle_map(0.2, map),
         );
         runner.run_reserialization::<stores::postgres::Store, _, _>(
@@ -87,7 +87,7 @@ fn reserialization_benchmarks(c: &mut Criterion) {
                 content_size,
             ),
             postgres_options.clone(),
-            || generate_merkle_map(map_size.clone(), content_size.clone()),
+            || generate_merkle_map(map_size, content_size),
             |map| update_merkle_map(update_percent, map),
         );
     }
@@ -106,19 +106,19 @@ fn initial_insertion_benchmarks(c: &mut Criterion) {
     let sizes = MAP_SIZES.into_iter().flat_map(|map_size| {
         CONTENT_SIZES
             .into_iter()
-            .map(move |content_size| (map_size.clone(), content_size))
+            .map(move |content_size| (map_size, content_size))
     });
 
     for (map_size, content_size) in sizes {
         runner.run_initial::<stores::fjall::Store, _>(
             format!("Fjall [{}] [{}]", map_size, content_size),
-            fjall_options.clone(),
-            || generate_merkle_map(map_size.clone(), content_size.clone()),
+            fjall_options,
+            || generate_merkle_map(map_size, content_size),
         );
         runner.run_initial::<stores::postgres::Store, _>(
             format!("Postgres [{}] [{}]", map_size, content_size),
             postgres_options.clone(),
-            || generate_merkle_map(map_size.clone(), content_size.clone()),
+            || generate_merkle_map(map_size, content_size),
         );
     }
 
