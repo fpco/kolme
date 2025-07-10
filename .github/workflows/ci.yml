@@ -115,8 +115,7 @@ jobs:
             ~/.cargo/bin
       - name: Setup dummy criterion
         # https://github.com/anza-xyz/agave/blob/96bef97b8077a97dc994f8a8a95d2dd27cd3eef9/platform-tools-sdk/sbf/scripts/install.sh#L93
-        working-directory: solana
-        run: touch criterion
+        run: mkdir -p ~/.cache/solana/v2.3.3/criterion
       - name: Setup solana
         if: steps.solana-cache.outputs.cache-hit == 'false' || steps.solana-cache.outputs.cache-hit == ''
         working-directory: solana
