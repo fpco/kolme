@@ -1,4 +1,4 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock, r#trait::KolmeBackingStore};
 use anyhow::Context as _;
 use merkle_map::{MerkleDeserialize, MerkleManager, MerkleSerialize, MerkleStore as _, Sha256Hash};
 use std::path::Path;
@@ -214,7 +214,7 @@ impl KolmeBackingStore for Store {
 
     async fn archive_block(&self, height: u64) -> anyhow::Result<()> {
         self.latest_archived_height
-            .insert(LATEST_ARCHIVED_HEIGHT_KEY, height.to_ne_bytes())
+            .insert(LATEST_ARCHIVED_HEIGHT_KEY, height.to_be_bytes())
             .context("Unable to update partition with given height")?;
 
         Ok(())
@@ -225,7 +225,7 @@ impl KolmeBackingStore for Store {
             .latest_archived_height
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
             .context("Unable to retrieve latest height")?
-            .map(|contents| u64::from_ne_bytes(std::array::from_fn(|i| contents[i]))))
+            .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
     }
 }
 
