@@ -82,7 +82,7 @@ jobs:
         run: just cargo-contract-tests
 
   solana-contract:
-    name: Solana Contract
+    name: Solana Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
