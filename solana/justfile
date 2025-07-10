@@ -20,9 +20,9 @@ test:
 download-solana:
 	curl -L -o solana-release.tar.bz2 https://github.com/anza-xyz/agave/releases/download/v{{SOLANA_VERSION}}/solana-release-x86_64-unknown-linux-gnu.tar.bz2
 	tar xjf solana-release.tar.bz2
-	-rm ~/.cargo/bin/perf-libs
-	-rm ~/.cargo/bin/platform-tools-sdk
-	-rm ~/.cargo/bin/deps
+	-rm -rf ~/.cargo/bin/perf-libs
+	-rm -rf ~/.cargo/bin/platform-tools-sdk
+	-rm -rf ~/.cargo/bin/deps
 	mv solana-release/bin/* ~/.cargo/bin/
 	rm solana-release.tar.bz2
 	rm -rf solana-release
