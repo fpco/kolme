@@ -4,7 +4,7 @@ default:
 
 # Build
 build:
-  GIT_REV=$(git rev-parse HEAD) cargo build-sbf --locked
+  GIT_REV=$(git rev-parse HEAD) cargo build-sbf
 
 # Test
 test:
