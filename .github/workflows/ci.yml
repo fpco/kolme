@@ -82,40 +82,25 @@ jobs:
         run: just cargo-contract-tests
 
   solana-contract:
-    name: Build & Test Solana Contract
+    name: Solana Contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
-      - name: Configure sccache GHA
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('SCCACHE_GHA_ENABLED', 'on');
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+        uses: actions/checkout@v4
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: solana-${{ runner.os }}
-      - name: Setup just
-        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
-      - name: Setup system
-        uses: ./.github/actions/setup-system
+          prefix-key: "v0-solana"
+      - uses: psibi/install-action@c72791d81af61349f8c1870780d45f7348ee1871
+        # Temporary till this gets merged: https://github.com/taiki-e/install-action/pull/1038
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache-prefix-key: solana
-      - name: Install Solana tools
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSfL https://solana-install.solana.workers.dev | bash
-          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
-          echo "/home/runner/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-      - name: Test Solana contract
+          tool: agave@2.2.18,just@1.40.0
+      - name: Compile
         working-directory: solana
-        env:
-          RUSTC_WRAPPER: sccache
+        run: just cargo-compile
+      - name: Build
+        working-directory: solana
+        run: just build
+      - name: Test
+        working-directory: solana
         run: just test
-      - name: Show sccache stats
-        run: sccache --show-stats

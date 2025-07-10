@@ -1,6 +1,15 @@
+# List all recipes
+default:
+	just --list --unsorted
+
+# Build
 build:
   GIT_REV=$(git rev-parse HEAD) cargo build-sbf
 
+# cargo compile
+cargo-compile:
+  cargo test --workspace --no-run --locked
+
+# Test
 test:
-  GIT_REV=$(git rev-parse HEAD) cargo build-sbf
   cargo test -p testing
