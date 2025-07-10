@@ -76,11 +76,6 @@ jobs:
         env:
           PROCESSOR_BLOCK_DB: psql://postgres:postgres@localhost:45921/postgres
         run: just cargo-test
-      - name: Slow tests
-        if: ${{ github.ref == 'refs/heads/main' }}
-        env:
-          PROCESSOR_BLOCK_DB: psql://postgres:postgres@localhost:45921/postgres
-        run: just cargo-slow-tests
       - name: Start localosmosis
         run: just localosmosis
       - name: Contract tests

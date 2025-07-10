@@ -64,12 +64,12 @@ cargo-compile:
 
 # cargo test
 cargo-test:
-	cat contract-test-list.txt stress-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
+	cat contract-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
 
 # Contract related tests
 cargo-contract-tests:
 	xargs -a contract-test-list.txt cargo nextest run --workspace --profile=ci --locked --
 
-# Slow tests
-cargo-slow-tests:
-	xargs -a stress-test-list.txt cargo nextest run --workspace --locked --
+# Stress test
+stress-test:
+	env KOLME_PROCESSOR_COUNT=10 KOLME_CLIENT_COUNT=100 cargo nextest run --workspace --locked -- multiple_processors
