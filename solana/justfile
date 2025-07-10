@@ -10,7 +10,7 @@ build:
 
 # Compile
 cargo-compile:
-  cargo test -p teseting --no-run --locked
+  cargo test -p testing --no-run --locked
 
 # Test
 test:

@@ -96,6 +96,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v1-solana"
+          cache-bin: true
       - uses: taiki-e/install-action@v2
         with:
           tool: just@1.40.0
