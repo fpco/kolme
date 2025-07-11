@@ -115,6 +115,7 @@ impl<App: KolmeApp> Kolme<App> {
                     return;
                 }
             }
+            Notification::EvictMempoolTransaction(_) => (),
         }
         // Ignore errors from notifications, it just means no one
         // is subscribed.
@@ -268,6 +269,7 @@ impl<App: KolmeApp> Kolme<App> {
                     }
                 }
                 Notification::LatestBlock(_) => continue,
+                Notification::EvictMempoolTransaction(_) => continue,
             }
 
             // Just in case we jumped some blocks, check if it landed in the interim.
@@ -586,11 +588,41 @@ impl<App: KolmeApp> Kolme<App> {
         Ok(())
     }
 
-    pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
+    pub async fn wait_on_mempool(
+        &self,
+        secret: Option<&SecretKey>,
+    ) -> Arc<SignedTransaction<App::Message>> {
         loop {
             let (txhash, tx) = self.inner.mempool.peek().await;
             match self.get_tx_height(txhash).await {
-                Ok(Some(_)) => self.inner.mempool.drop_tx(txhash),
+                Ok(Some(_)) => {
+                    // This means our store already has the tx hash. And this
+                    // transaction should be evicted from all nodes where it
+                    // is present in the mempool.
+                    if let Some(secret) = secret {
+                        match TaggedJson::new(txhash) {
+                            Ok(json) => {
+                                let kolme = self.read();
+                                match json.sign(secret) {
+                                    Ok(signed) => {
+                                        kolme.notify(Notification::EvictMempoolTransaction(
+                                            Arc::new(signed),
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "Error during signing of evict transaction: {e}"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Error during creation of tagged json: {e}");
+                            }
+                        }
+                    }
+                    self.inner.mempool.drop_tx(txhash);
+                }
                 Ok(None) => {
                     break tx;
                 }
@@ -735,6 +767,7 @@ impl<App: KolmeApp> Kolme<App> {
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::FailedTransaction { .. } => (),
                         Notification::LatestBlock(_) => (),
+                        Notification::EvictMempoolTransaction(_) => (),
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_block_gte: unexpected Closed"),
@@ -766,6 +799,7 @@ impl<App: KolmeApp> Kolme<App> {
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::FailedTransaction { .. } => (),
                         Notification::LatestBlock(_) => (),
+                        Notification::EvictMempoolTransaction(_) => (),
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
