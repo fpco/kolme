@@ -73,3 +73,7 @@ cargo-contract-tests:
 # Stress test
 stress-test:
 	env KOLME_PROCESSOR_COUNT=10 KOLME_CLIENT_COUNT=100 cargo nextest run --workspace --locked -- multiple_processors
+
+# Run exact test
+run-exact-test target:
+	cargo nextest run --no-capture -- --exact {{target}}
