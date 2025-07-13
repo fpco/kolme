@@ -135,6 +135,14 @@ impl<App: KolmeApp> KolmeStore<App> {
 
         self.inner.add_merkle_layer(hash, layer).await
     }
+
+    pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<()> {
+        self.inner.archive_block(height.0).await
+    }
+
+    pub(crate) async fn get_latest_archived_block_height(&self) -> Result<Option<u64>> {
+        self.inner.get_latest_archived_block_height().await
+    }
 }
 
 impl<App: KolmeApp> KolmeStore<App> {

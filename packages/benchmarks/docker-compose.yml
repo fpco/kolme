@@ -1,0 +1,20 @@
+services:
+  benchmarks:
+    container_name: benchmarks
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres/postgres
+    volumes:
+      - ../../target:/kolme/target
+    build:
+      context: ../../
+      dockerfile: packages/benchmarks/docker-resources/benches/Dockerfile
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: '20G'
+        reservations:
+          cpus: '2'
+          memory: '2G'

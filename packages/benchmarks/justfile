@@ -1,0 +1,8 @@
+set positional-arguments
+
+profile-insertions \
+    insertion_filter \
+    reserialization_filter \
+    $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres" \
+    $SQLX_OFFLINE="true":
+    CARGO_PROFILE_BENCH_DEBUG=true INITIAL_FILTER_REGEX="$1" RESERIALIZATION_FILTER_REGEX="$2" cargo flamegraph --bench insertion -- --bench

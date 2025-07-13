@@ -47,6 +47,7 @@ impl<App: KolmeApp> Processor<App> {
         }
         tracing::info!("Finished ensuring genesis event...");
 
+        let secret = self.get_correct_secret(&self.kolme.read())?;
         self.approve_actions_all(&chains).await;
 
         let producer_loop = async {
@@ -59,7 +60,7 @@ impl<App: KolmeApp> Processor<App> {
                 // as well to avoid needing to synchronize the state fully.
                 self.kolme.wait_for_active_version().await;
 
-                let tx = self.kolme.wait_on_mempool().await;
+                let tx = self.kolme.wait_on_mempool(Some(secret)).await;
                 let txhash = tx.hash();
                 let tx = Arc::unwrap_or_clone(tx);
 

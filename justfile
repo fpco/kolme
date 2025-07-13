@@ -39,7 +39,7 @@ test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
 [working-directory: "packages/kolme-store"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
     # TODO: On my end I need this so that docker has time to launch the container
-    sleep 3
+    sleep 6
     cargo sqlx database reset -y
     cargo sqlx migrate run
     cargo sqlx prepare
@@ -73,3 +73,7 @@ cargo-contract-tests:
 # Stress test
 stress-test:
 	env KOLME_PROCESSOR_COUNT=10 KOLME_CLIENT_COUNT=100 cargo nextest run --workspace --locked -- multiple_processors
+
+# Run exact test
+run-exact-test target:
+	cargo nextest run --no-capture -- --exact {{target}}

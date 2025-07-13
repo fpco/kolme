@@ -13,15 +13,34 @@ impl<App: KolmeApp> Archiver<App> {
     }
 
     pub async fn run(self) {
-        // TODO make this more efficient by storing the known-archived-through
-        // in the data store. Waiting until we simplify our data stores to make this easier to do.
-        let mut next_to_archive = BlockHeight::start();
+        let mut next_to_archive = self
+            .kolme
+            .get_latest_archived_block()
+            .await
+            .context("Unable to retrieve latest archived height")
+            .inspect_err(|err| tracing::warn!("{err:?}"))
+            .ok()
+            .flatten()
+            .map(|height| height.next())
+            .unwrap_or(BlockHeight::start());
+
         loop {
             // OK, we can wait for the next block, which will trigger a download.
             // Once we get it, then bump the next_to_archive.
             match self.kolme.wait_for_block(next_to_archive).await {
                 Ok(_) => {
                     tracing::info!("Archiver successfully waited for block {next_to_archive}");
+
+                    while let Err(err) = self
+                        .kolme
+                        .archive_block(next_to_archive)
+                        .await
+                        .context("Unable to store archived height")
+                    {
+                        tracing::warn!("Unable to save archiver block: {err:?}");
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    }
+
                     next_to_archive = next_to_archive.next();
                 }
                 Err(e) => {

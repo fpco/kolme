@@ -219,3 +219,120 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
         assert_eq!(from_gossip.hash().0, from_kolme1.blockhash);
     }
 }
+
+#[tokio::test]
+async fn sync_older_resume() {
+    kolme::init_logger(true, None);
+    TestTasks::start(sync_older_resume_inner, ()).await
+}
+
+async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
+    // Start kolme, execute a 10 transactions wait for each one
+    // validate that:
+    //
+    // - All transactions are archived
+    // - When the Archiver is reestarted
+    //   - Execute a new transaction
+    //   - Validate it was synced
+    //   - Validate that previous archived heights "updated_at" have not changed
+    const IDENT: &str = "sync-older";
+    let db_url = std::env::var("PROCESSOR_BLOCK_DB").expect("PROCESSOR_BLOCK_DB is missing");
+    // Clear db
+    let pool = sqlx::PgPool::connect(&db_url)
+        .await
+        .expect("Unable to connect to DB");
+
+    sqlx::query!("TRUNCATE TABLE blocks")
+        .execute(&pool)
+        .await
+        .expect("Unable to clear blocks table");
+    sqlx::query!("TRUNCATE TABLE merkle_contents")
+        .execute(&pool)
+        .await
+        .expect("Unable to clear merkle contents table");
+    sqlx::query!("TRUNCATE TABLE archived_blocks")
+        .execute(&pool)
+        .await
+        .expect("Unable to clear archived blocks table");
+    sqlx::query!("REFRESH MATERIALIZED VIEW latest_archived_block_height")
+        .execute(&pool)
+        .await
+        .expect("Unable to clear materialized view");
+
+    let store = KolmeStore::new_postgres(&db_url)
+        .await
+        .expect("Unable to start store");
+    let kolme = Kolme::new(
+        SampleKolmeApp::new(IDENT),
+        DUMMY_CODE_VERSION,
+        store.clone(),
+    )
+    .await
+    .unwrap();
+
+    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), my_secret_key()).run());
+    let kolme1 = kolme.clone();
+    let archiver_handle = tokio::task::spawn(Archiver::new(kolme1).run());
+
+    for _ in 0..10 {
+        let secret = SecretKey::random(&mut rand::thread_rng());
+        kolme
+            .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+            .await
+            .unwrap();
+    }
+
+    while kolme.get_latest_archived_block().await.unwrap() != Some(BlockHeight(10)) {
+        tokio::task::yield_now().await;
+    }
+    archiver_handle.abort();
+
+    let initial_heights = sqlx::query!("SELECT height, archived_at FROM archived_blocks")
+        .fetch_all(&pool)
+        .await
+        .expect("Unable to query archived blocks");
+
+    assert_eq!(
+        initial_heights.iter().map(|r| r.height).collect::<Vec<_>>(),
+        (0..11).collect::<Vec<_>>(),
+        "Block heights were not archived correctly"
+    );
+
+    testtasks.spawn_persistent(Archiver::new(kolme.clone()).run());
+    let secret = SecretKey::random(&mut rand::thread_rng());
+
+    kolme
+        .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
+        .await
+        .unwrap();
+
+    while kolme.get_latest_archived_block().await.unwrap() != Some(BlockHeight(11)) {
+        tokio::task::yield_now().await;
+    }
+
+    let latest_archived_height =
+        sqlx::query_scalar!(r#"SELECT height as "height!" FROM latest_archived_block_height"#)
+            .fetch_one(&pool)
+            .await
+            .expect("Unable to retrieve latest height");
+
+    assert_eq!(latest_archived_height, 11, "Latest height is not correct");
+
+    let past_heights =
+        sqlx::query!("SELECT height, archived_at FROM archived_blocks WHERE height <= 10")
+            .fetch_all(&pool)
+            .await
+            .expect("Unable to query archived blocks");
+
+    assert_eq!(
+        past_heights
+            .into_iter()
+            .map(|record| record.archived_at)
+            .collect::<Vec<_>>(),
+        initial_heights
+            .into_iter()
+            .map(|record| record.archived_at)
+            .collect::<Vec<_>>(),
+        "Previous heights were resynced"
+    );
+}

@@ -129,6 +129,7 @@ pub struct GossipBuilder {
     data_load_validation: DataLoadValidation,
     local_display_name: Option<String>,
     sync_latest: bool,
+    duplicate_cache_time: Duration,
 }
 
 impl Default for GossipBuilder {
@@ -143,6 +144,8 @@ impl Default for GossipBuilder {
             data_load_validation: Default::default(),
             local_display_name: Default::default(),
             sync_latest: true,
+            // Same default as libp2p_gossip
+            duplicate_cache_time: Duration::from_secs(60),
         }
     }
 }
@@ -170,6 +173,11 @@ impl GossipBuilder {
 
     pub fn add_bootstrap(mut self, peer: PeerId, address: Multiaddr) -> Self {
         self.bootstrap.push((peer, address));
+        self
+    }
+
+    pub fn set_duplicate_cache_time(mut self, cache_time: Duration) -> Self {
+        self.duplicate_cache_time = cache_time;
         self
     }
 
@@ -246,6 +254,7 @@ impl GossipBuilder {
 
                 // Set a custom gossipsub configuration
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
+                    .duplicate_cache_time(self.duplicate_cache_time)
                     .heartbeat_interval(self.heartbeat_interval)
                     .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message
                     // signing)
@@ -560,6 +569,29 @@ impl<App: KolmeApp> Gossip<App> {
                     // See propose_and_await_transaction for an example.
                     Notification::FailedTransaction(_) => (),
                     Notification::LatestBlock(_) => (),
+                    Notification::EvictMempoolTransaction(signed_json) => {
+                        let pubkey = signed_json.verify_signature();
+                        match pubkey {
+                            Ok(pubkey) => {
+                                let processor = self
+                                    .kolme
+                                    .read()
+                                    .get_framework_state()
+                                    .get_validator_set()
+                                    .processor;
+                                if pubkey != processor {
+                                    tracing::warn!("Evict transaction was signed by {pubkey}, but processor is {processor}");
+                                } else {
+                                    let txhash = signed_json.message.as_inner();
+                                    tracing::debug!("Transaction {txhash} evicted from mempool");
+                                    self.kolme.remove_from_mempool(*txhash);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Error verifying evict mempool signature: {e}")
+                            }
+                        }
+                    }
                 }
                 self.kolme.notify(msg);
             }
