@@ -172,7 +172,7 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
                     SyncMode::StateTransfer,
                     DataLoadValidation::ValidateDataLoads,
                 )
-                .set_sync_preference(gossip::SyncPreference::FromBeginning)
+                .set_sync_preference(gossip::SyncPreference::LatestThenBeginning)
         },
     );
 

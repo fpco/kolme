@@ -14,11 +14,16 @@ use smallvec::SmallVec;
 
 use crate::*;
 
+pub(super) enum SyncType {
+    Block,
+    State,
+}
+
 /// Status of state syncing.
 pub(super) struct StateSyncStatus<App: KolmeApp> {
     kolme: Kolme<App>,
     /// Blocks we're interested in but haven't received any info on yet.
-    needed_blocks: BTreeMap<BlockHeight, RequestStatus>,
+    needed_blocks: BTreeMap<BlockHeight, (RequestStatus, SyncType)>,
     /// The block we are currently in the process of requesting, if any.
     active_block: Option<BlockHeight>,
     /// Blocks we have info on but still need to get the full Merkle data for.
@@ -174,55 +179,65 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         &mut self,
         height: BlockHeight,
         peer: Option<PeerId>,
+        sync_type: SyncType,
     ) -> Result<()> {
         if !self.kolme.has_block(height).await? && !self.pending_blocks.contains_key(&height) {
             self.needed_blocks
                 .entry(height)
-                .or_insert(RequestStatus::new(peer));
+                .or_insert((RequestStatus::new(peer), sync_type));
         }
         Ok(())
     }
 
     pub(super) fn add_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
-        if let Some(status) = self.needed_blocks.get_mut(&height) {
+        if let Some((status, _)) = self.needed_blocks.get_mut(&height) {
             status.add_peer(peer);
         }
     }
 
     pub(super) fn remove_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
-        if let Some(status) = self.needed_blocks.get_mut(&height) {
+        if let Some((status, _)) = self.needed_blocks.get_mut(&height) {
             status.remove_peer(peer);
         }
     }
 
+    /// Returns [Some] if we should perform a block sync, None otherwise.
     pub(super) async fn add_pending_block(
         &mut self,
         block: Arc<SignedBlock<App::Message>>,
         peer: PeerId,
-    ) -> Result<()> {
+    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
         let height = block.height();
-        if !self.needed_blocks.contains_key(&height) || self.pending_blocks.contains_key(&height) {
-            return Ok(());
-        }
-        if !self.kolme.has_block(block.height()).await? {
-            let inner = block.0.message.as_inner();
-            let mut has_all = true;
-            for hash in [inner.framework_state, inner.app_state, inner.logs] {
-                if !self.kolme.has_merkle_hash(hash).await? {
-                    has_all = false;
-                    self.reverse_blocks.entry(hash).or_default().insert(height);
-                    self.needed_layers
-                        .insert(hash, RequestStatus::new(Some(peer)));
-                }
-            }
+        let Some((_status, sync_type)) = self.needed_blocks.get(&height) else {
+            return Ok(None);
+        };
 
-            self.pending_blocks.insert(height, block);
-            if has_all {
-                self.process_available_block(height).await?;
+        if let SyncType::Block = sync_type {
+            return Ok(Some(block));
+        }
+
+        if self.pending_blocks.contains_key(&height) || self.kolme.has_block(block.height()).await?
+        {
+            self.needed_blocks.remove(&height);
+            return Ok(None);
+        }
+
+        let inner = block.0.message.as_inner();
+        let mut has_all = true;
+        for hash in [inner.framework_state, inner.app_state, inner.logs] {
+            if !self.kolme.has_merkle_hash(hash).await? {
+                has_all = false;
+                self.reverse_blocks.entry(hash).or_default().insert(height);
+                self.needed_layers
+                    .insert(hash, RequestStatus::new(Some(peer)));
             }
         }
-        self.needed_blocks.remove(&height);
-        Ok(())
+
+        self.pending_blocks.insert(height, block);
+        if has_all {
+            self.process_available_block(height).await?;
+        }
+        Ok(None)
     }
 
     pub(super) async fn add_merkle_layer(
@@ -282,7 +297,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         let Some(height) = self.active_block else {
             return Ok(None);
         };
-        let Some(status) = self.needed_blocks.get_mut(&height) else {
+        let Some((status, _)) = self.needed_blocks.get_mut(&height) else {
             // This should never happen. We'll ignore in prod, but want
             // our test suites to fail.
             debug_assert!(false);

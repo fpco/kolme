@@ -20,7 +20,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
-use state_sync::{DataRequest, StateSyncStatus};
+use state_sync::{DataRequest, StateSyncStatus, SyncType};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
@@ -379,7 +379,7 @@ impl<App: KolmeApp> Gossip<App> {
                 event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &peers_with_blocks_tx).await,
                 // A peer reported a known height higher than we have, so
                 // try to synchronize with it
-                report_block_height = peers_with_blocks_rx.recv() => async {self.catch_up(&mut swarm,report_block_height).await}.await,
+                report_block_height = peers_with_blocks_rx.recv() => self.catch_up(report_block_height).await,
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
                 _ = interval.tick() => async {
@@ -395,7 +395,7 @@ impl<App: KolmeApp> Gossip<App> {
                 // And any time we add something new to the mempool, broadcast all items.
                 _ = mempool_additions.listen() => self.broadcast_mempool_entries(&mut swarm),
                 Some(height) = block_requester_rx.recv() => {
-                    if let Err(e) = self.state_sync.lock().await.add_needed_block(height, None).await {
+                    if let Err(e) = self.state_sync.lock().await.add_needed_block(height, None, SyncType::State).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
                     } else {
                         self.trigger_state_sync.trigger();
@@ -672,31 +672,10 @@ impl<App: KolmeApp> Gossip<App> {
     ) {
         let local_display_name = self.local_display_name.clone();
         match request {
-            BlockRequest::BlockAtHeight(height) => {
+            BlockRequest::BlockAtHeight(height) | BlockRequest::BlockWithStateAtHeight(height) => {
                 let res = match self.kolme.read().get_block(height).await {
                     Err(e) => {
                         tracing::warn!("{local_display_name}: Error querying block in gossip: {e}");
-                        return;
-                    }
-                    Ok(None) => BlockResponse::HeightNotFound(height),
-                    Ok(Some(storable_block)) => BlockResponse::Block(storable_block.block),
-                };
-                if let Err(e) = swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_response(channel, res)
-                {
-                    tracing::warn!(
-                        "{local_display_name}: Unable to answer BlockAtHeight request: {e:?}"
-                    );
-                }
-            }
-            BlockRequest::BlockWithStateAtHeight(height) => {
-                let res = match self.kolme.read().get_block(height).await {
-                    Err(e) => {
-                        tracing::warn!(
-                            "{local_display_name}: Error querying block (with state) in gossip: {e}"
-                        );
                         return;
                     }
                     Ok(None) => {
@@ -714,9 +693,7 @@ impl<App: KolmeApp> Gossip<App> {
                                 }
                             }
                         }
-                        BlockResponse::BlockWithState {
-                            block: storable_block.block,
-                        }
+                        BlockResponse::Block(storable_block.block)
                     }
                 };
                 if let Err(e) = swarm
@@ -725,7 +702,7 @@ impl<App: KolmeApp> Gossip<App> {
                     .send_response(channel, res)
                 {
                     tracing::warn!(
-                        "{local_display_name}: Unable to answer BlockWithStateAtHeight request: {e:?}"
+                        "{local_display_name}: Unable to answer BlockAtHeight request: {e:?}"
                     );
                 }
             }
@@ -768,10 +745,7 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
         tracing::debug!("{local_display_name}: response");
         match response {
-            BlockResponse::Block(block) => {
-                self.add_block(block).await;
-            }
-            BlockResponse::BlockWithState { block } => {
+            BlockResponse::Block(block) | BlockResponse::BlockWithState { block } => {
                 match self
                     .state_sync
                     .lock()
@@ -779,7 +753,8 @@ impl<App: KolmeApp> Gossip<App> {
                     .add_pending_block(block, peer)
                     .await
                 {
-                    Ok(()) => self.trigger_state_sync.trigger(),
+                    Ok(None) => self.trigger_state_sync.trigger(),
+                    Ok(Some(block)) => self.add_block(block).await,
                     Err(e) => {
                         tracing::error!("{local_display_name}: error adding pending block: {e}")
                     }
@@ -875,11 +850,7 @@ impl<App: KolmeApp> Gossip<App> {
     /// Catch up on the latest chain information, if needed.
     ///
     /// Both puts out a broadcast to find more peers, plus sends requests to those peers for latest height information and any missing blocks.
-    async fn catch_up(
-        &self,
-        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-        report_block_height: Option<ReportBlockHeight>,
-    ) {
+    async fn catch_up(&self, report_block_height: Option<ReportBlockHeight>) {
         let kolme = self.kolme.read();
         let our_next = kolme.get_next_height();
         let (next_to_sync, peer) = match self.get_next_to_sync(report_block_height, our_next).await
@@ -912,25 +883,26 @@ impl<App: KolmeApp> Gossip<App> {
             }
         };
 
-        if do_state {
-            match self
-                .state_sync
-                .lock()
-                .await
-                .add_needed_block(next_to_sync, Some(peer))
-                .await
-            {
-                Ok(()) => self.trigger_state_sync.trigger(),
-                Err(e) => tracing::error!(
-                    "{}: error adding needed block: {e}",
-                    self.local_display_name
-                ),
-            }
-        } else {
-            swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer, BlockRequest::BlockAtHeight(our_next));
+        match self
+            .state_sync
+            .lock()
+            .await
+            .add_needed_block(
+                next_to_sync,
+                Some(peer),
+                if do_state {
+                    SyncType::State
+                } else {
+                    SyncType::Block
+                },
+            )
+            .await
+        {
+            Ok(()) => self.trigger_state_sync.trigger(),
+            Err(e) => tracing::error!(
+                "{}: error adding needed block: {e}",
+                self.local_display_name
+            ),
         }
     }
 
