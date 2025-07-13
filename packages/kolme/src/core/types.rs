@@ -1652,6 +1652,14 @@ pub enum Notification<AppMessage> {
     FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
     /// Notification from the processor of the latest known block.
     LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
+    /// Instructs nodes to remove a transaction from their mempool.
+    ///
+    /// This is necessary when a node broadcasts a transaction that has already
+    /// been included in the blockchain. Other nodes, upon receiving this
+    //  notification, should evict the specified transaction from their mempool
+    /// to prevent broadcasting it again. The `TxHash` identifies the transaction
+    /// to be evicted.
+    EvictMempoolTransaction(Arc<SignedTaggedJson<TxHash>>),
 }
 
 impl<AppMessage> Notification<AppMessage> {
@@ -1663,6 +1671,9 @@ impl<AppMessage> Notification<AppMessage> {
                 Some(signed_tagged_json.message_hash())
             }
             Notification::LatestBlock(signed_tagged_json) => {
+                Some(signed_tagged_json.message_hash())
+            }
+            Notification::EvictMempoolTransaction(signed_tagged_json) => {
                 Some(signed_tagged_json.message_hash())
             }
         }

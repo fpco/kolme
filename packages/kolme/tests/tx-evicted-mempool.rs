@@ -98,6 +98,91 @@ async fn tx_evicted_mempool() {
     TestTasks::start(tx_evicted_inner, ()).await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn evicts_same_tx_mempool() {
+    init_logger(true, None);
+    TestTasks::start(evicts_same_tx_mempool_inner, ()).await;
+}
+
+async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
+    let kolme = Kolme::new(
+        SampleKolmeApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+    let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
+    test_tasks.try_spawn_persistent(processor.run());
+    let discovery = test_tasks.launch_kademlia_discovery_with(kolme.clone(), "kolme", |g| {
+        g.set_duplicate_cache_time(Duration::from_secs(1))
+    });
+
+    timeout(
+        Duration::from_secs(30),
+        kolme.wait_for_block(BlockHeight::start()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let kolme: Kolme<SampleKolmeApp> = Kolme::new(
+        SampleKolmeApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+    test_tasks.try_spawn(repeat_client(kolme.clone()));
+    test_tasks.launch_kademlia_client_with(kolme.clone(), "kolme-client", &discovery, |item| {
+        item.set_duplicate_cache_time(Duration::from_secs(2))
+    });
+}
+
+async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
+    let secret = SecretKey::random(&mut rand::thread_rng());
+
+    let tx = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
+    );
+    kolme
+        .propose_and_await_transaction(tx.clone())
+        .await
+        .unwrap();
+    let mut subscription = kolme.subscribe();
+
+    // Sleep more than libp2p cache duplication time
+    tracing::info!("Going to sleep till deduplication time expires");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    tracing::info!("Going to propose tx: {}", tx.hash());
+    kolme.propose_transaction(tx);
+    assert!(
+        !kolme.get_mempool_entries().is_empty(),
+        "Mempool should not be empty"
+    );
+    loop {
+        match subscription.recv().await {
+            Ok(note) => match note {
+                Notification::NewBlock(_) => (),
+                Notification::GenesisInstantiation { .. } => (),
+                Notification::FailedTransaction(_) => (),
+                Notification::LatestBlock(_) => (),
+                Notification::EvictMempoolTransaction(_) => {
+                    break;
+                }
+            },
+            Err(_) => panic!("Error from subscription"),
+        }
+    }
+    assert!(
+        kolme.get_mempool_entries().is_empty(),
+        "Mempool should be empty"
+    );
+    Ok(())
+}
+
 async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     let kolme = Kolme::new(
         SampleKolmeApp::default(),
