@@ -441,6 +441,7 @@ impl<App: KolmeApp> Kolme<App> {
         let framework_state = Arc::new(framework_state);
         let app_state = Arc::new(app_state);
         let logs: Arc<[_]> = logs.into();
+        let height = signed_block.height();
 
         let framework_state_contents = self.get_merkle_manager().serialize(&framework_state)?;
         anyhow::ensure!(
@@ -475,24 +476,32 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.drop_tx(signed_block.tx().hash());
 
         // Now do the write lock
-        let mut guard = self.inner.current_block.write();
+        {
+            let mut guard = self.inner.current_block.write();
 
-        if guard.get_next_height() > signed_block.height() {
-            return Ok(());
+            if guard.get_next_height() > signed_block.height() {
+                return Ok(());
+            }
+
+            *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
+                block: signed_block.clone(),
+                logs,
+                state: BlockState {
+                    blockhash: signed_block.hash(),
+                    framework_state,
+                    app_state,
+                },
+            }));
         }
 
-        *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
-            block: signed_block.clone(),
-            logs,
-            state: BlockState {
-                blockhash: signed_block.hash(),
-                framework_state,
-                app_state,
-            },
-        }));
-        std::mem::drop(guard);
-
         self.notify(Notification::NewBlock(signed_block));
+
+        // Update the archive if appropriate
+        if self.get_next_to_archive().await == height {
+            if let Err(e) = self.inner.store.archive_block(height).await {
+                tracing::warn!("Unable to mark block {height} as archived: {e}");
+            }
+        }
 
         Ok(())
     }
@@ -1183,6 +1192,20 @@ impl<App: KolmeApp> Kolme<App> {
             .await
             .context("Unable to retrieve latest archived block height")?
             .map(BlockHeight))
+    }
+
+    /// Get the next block to archive.
+    ///
+    /// This will report errors during data load and then return the earliest
+    /// block height, essentially restarting the archive process.
+    pub async fn get_next_to_archive(&self) -> BlockHeight {
+        match self.get_latest_archived_block().await {
+            Ok(None) => (),
+            Ok(Some(height)) => return height.next(),
+            Err(e) => tracing::warn!("Error loading archive value: {e}"),
+        };
+
+        BlockHeight::start()
     }
 }
 

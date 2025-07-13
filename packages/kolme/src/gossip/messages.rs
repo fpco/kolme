@@ -13,6 +13,7 @@ pub(super) enum BlockRequest {
     /// Return the contents of a specific block.
     BlockAtHeight(BlockHeight),
     /// Return both the raw block as well as the full app and framework state to go along with it.
+    /// TODO: Fairly certain this now has the exact same behavior as BlockAtHeight, can be removed.
     BlockWithStateAtHeight(BlockHeight),
     /// Request a Merkle layer
     Merkle(Sha256Hash),

@@ -33,6 +33,7 @@ pub struct Gossip<App: KolmeApp> {
     gossip_topic: IdentTopic,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
+    sync_preference: SyncPreference,
     local_peer_id: PeerId,
     // human-readable name for an instance
     local_display_name: String,
@@ -46,8 +47,6 @@ pub struct Gossip<App: KolmeApp> {
     state_sync: Mutex<StateSyncStatus<App>>,
     /// LRU cache for notifications received via P2p layer
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
-    /// Should we always try to sync the latest block?
-    sync_latest: bool,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -127,8 +126,8 @@ pub struct GossipBuilder {
     heartbeat_interval: Duration,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
+    sync_preference: SyncPreference,
     local_display_name: Option<String>,
-    sync_latest: bool,
     duplicate_cache_time: Duration,
 }
 
@@ -141,9 +140,9 @@ impl Default for GossipBuilder {
             // This is set to aid debugging by not cluttering the log space
             heartbeat_interval: Duration::from_secs(10),
             sync_mode: Default::default(),
+            sync_preference: Default::default(),
             data_load_validation: Default::default(),
             local_display_name: Default::default(),
-            sync_latest: true,
             // Same default as libp2p_gossip
             duplicate_cache_time: Duration::from_secs(60),
         }
@@ -164,6 +163,18 @@ pub enum SyncMode {
     StateTransferForUpgrade,
     /// Always do block sync, verifying each new block
     BlockTransfer,
+}
+
+/// Preference of how blocks are chosen for syncing.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncPreference {
+    /// Catch up to the latest block as quickly as possible and stop.
+    #[default]
+    JustLatest,
+    /// Prefer catching up from the beginning (for running an archive node).
+    FromBeginning,
+    /// First catch up to latest, then fill in everything historic.
+    LatestThenBeginning,
 }
 
 impl GossipBuilder {
@@ -216,12 +227,11 @@ impl GossipBuilder {
         self
     }
 
-    /// Do not attempt to sync the latest block
+    /// Set the sync preference.
     ///
-    /// This is useful when running an archive node, where we would like to sync
-    /// older blocks before newer block.
-    pub fn disable_sync_latest(mut self) -> Self {
-        self.sync_latest = false;
+    /// See [SyncPreference] for more details and default setting.
+    pub fn set_sync_preference(mut self, sync_preference: SyncPreference) -> Self {
+        self.sync_preference = sync_preference;
         self
     }
 
@@ -320,6 +330,7 @@ impl GossipBuilder {
             gossip_topic,
             sync_mode: self.sync_mode,
             data_load_validation: self.data_load_validation,
+            sync_preference: self.sync_preference,
             local_peer_id,
             trigger_broadcast_height: Trigger::new("broadcast_height"),
             trigger_state_sync: Trigger::new("state_sync"),
@@ -327,7 +338,6 @@ impl GossipBuilder {
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             state_sync,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
-            sync_latest: self.sync_latest,
         })
     }
 }
@@ -804,6 +814,64 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
+    /// Based on current state info and the sync preference, determine the next block to sync.
+    async fn get_next_to_sync(
+        &self,
+        report_block_height: Option<ReportBlockHeight>,
+        our_next: BlockHeight,
+    ) -> Result<Option<(BlockHeight, PeerId)>> {
+        let (do_latest, do_archive) = match self.sync_preference {
+            SyncPreference::JustLatest => (true, false),
+            SyncPreference::FromBeginning => (false, true),
+            SyncPreference::LatestThenBeginning => (true, true),
+        };
+
+        let ReportBlockHeight {
+            next: their_next,
+            peer,
+            timestamp: _,
+            latest_block: _,
+        } = match report_block_height {
+            Some(report) => report,
+            None => {
+                tracing::debug!(
+                    "{}: get_next_to_sync found no ReportBlockHeight",
+                    self.local_display_name
+                );
+                return Ok(None);
+            }
+        };
+
+        tracing::debug!(
+            "{}: In get_next_to_sync, their_next=={their_next}, peer=={peer}, our_next=={our_next}",
+            self.local_display_name
+        );
+
+        let their_highest = match their_next.prev() {
+            None => return Ok(None),
+            Some(highest) => highest,
+        };
+
+        // If we're checking for latest, see if there's anything new for us.
+        if do_latest && their_highest >= our_next {
+            return Ok(Some((our_next, peer)));
+        }
+
+        // Now see if we have any archive work
+        if do_archive {
+            let next_to_archive = self.kolme.get_next_to_archive().await;
+            if next_to_archive <= their_highest {
+                // We don't know for sure that the peer will have an older
+                // block, but we can request and, if it doesn't, we'll remove
+                // the peer from the list of peers to query in the future.
+                return Ok(Some((next_to_archive, peer)));
+            }
+        }
+
+        // We're totally caught up
+        Ok(None)
+    }
+
     /// Catch up on the latest chain information, if needed.
     ///
     /// Both puts out a broadcast to find more peers, plus sends requests to those peers for latest height information and any missing blocks.
@@ -812,55 +880,35 @@ impl<App: KolmeApp> Gossip<App> {
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         report_block_height: Option<ReportBlockHeight>,
     ) {
-        if !self.sync_latest {
-            tracing::debug!(
-                "{}: exiting catch_up immediately, gossip mode set to not sync latest",
-                self.local_display_name
-            );
-            return;
-        }
-        let ReportBlockHeight {
-            next: their_next,
-            peer,
-            timestamp: _,
-            latest_block,
-        } = match report_block_height {
-            Some(report) => report,
-            None => return,
+        let kolme = self.kolme.read();
+        let our_next = kolme.get_next_height();
+        let (next_to_sync, peer) = match self.get_next_to_sync(report_block_height, our_next).await
+        {
+            Ok(None) => {
+                tracing::debug!("{}: catch_up: no new node to sync", self.local_display_name);
+                return;
+            }
+            Ok(Some(pair)) => pair,
+            Err(e) => {
+                tracing::error!(
+                    "{}: error calling get_next_to_sync: {e}",
+                    self.local_display_name
+                );
+                return;
+            }
         };
-
-        let our_next = self.kolme.read().get_next_height();
-
-        tracing::debug!(
-            "{}: In catch_up, their_node=={their_next}, peer=={peer}, our_next=={our_next}",
-            self.local_display_name
-        );
-
-        let their_highest = match their_next.prev() {
-            None => return,
-            Some(highest) => highest,
-        };
-
-        if their_highest < our_next {
-            // They don't have any new blocks for us.
-            return;
-        }
-
-        if let Some(latest_block) = latest_block {
-            self.kolme.notify(Notification::LatestBlock(latest_block));
-        }
 
         let do_state = match self.sync_mode {
             // Only do a state transfer if we've fallen more than 1 block behind.
-            SyncMode::StateTransfer => their_highest != our_next,
+            SyncMode::StateTransfer => next_to_sync != our_next,
             SyncMode::StateTransferForUpgrade => {
-                todo!("Holding off on StateTransferForUpgrade until we handle upgrades")
+                // We only use state transfer if there are different code version and chain
+                // versions.
+                self.kolme.get_code_version() != self.kolme.read().get_chain_version()
             }
             SyncMode::BlockTransfer => {
-                // For now, we force a state transfer if the chain and
-                // code versions mismatch. In the future, we may decide
-                // to be a bit more selective about this for security.
-                self.kolme.get_code_version() != self.kolme.read().get_chain_version()
+                // Block transfer mode: we never allow a state transfer
+                false
             }
         };
 
@@ -869,7 +917,7 @@ impl<App: KolmeApp> Gossip<App> {
                 .state_sync
                 .lock()
                 .await
-                .add_needed_block(their_highest, Some(peer))
+                .add_needed_block(next_to_sync, Some(peer))
                 .await
             {
                 Ok(()) => self.trigger_state_sync.trigger(),
