@@ -20,13 +20,12 @@ use crate::*;
 pub(super) struct SyncManager<App: KolmeApp> {
     /// Blocks we're currently waiting on.
     needed_blocks: BTreeMap<BlockHeight, WaitingBlock<App::Message>>,
-    /// Blocks that need a given layer.
-    reverse_blocks: HashMap<Sha256Hash, HashSet<BlockHeight>>,
     /// Trigger [Gossip] to recheck sync requests.
     trigger: Trigger,
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 enum WaitingBlock<AppMessage> {
     /// We haven't received the basic block info yet.
     Needed(RequestStatus),
@@ -179,7 +178,6 @@ impl<App: KolmeApp> Default for SyncManager<App> {
     fn default() -> Self {
         SyncManager {
             needed_blocks: BTreeMap::new(),
-            reverse_blocks: HashMap::new(),
             trigger: Trigger::new("gossip::sync_manager"),
         }
     }
@@ -258,12 +256,6 @@ impl<App: KolmeApp> SyncManager<App> {
         }
     }
 
-    fn get_heights_for_layer(&self, hash: Sha256Hash) -> SmallVec<[BlockHeight; 4]> {
-        self.reverse_blocks
-            .get(&hash)
-            .map_or_else(SmallVec::new, |set| set.iter().copied().collect())
-    }
-
     pub(super) async fn add_merkle_layer(
         &mut self,
         gossip: &Gossip<App>,
@@ -271,29 +263,11 @@ impl<App: KolmeApp> SyncManager<App> {
         layer: MerkleLayerContents,
         peer: PeerId,
     ) -> Result<()> {
-        for height in self.get_heights_for_layer(hash) {
-            self.add_merkle_layer_for(gossip, height, hash, &layer, peer)
-                .await?;
-        }
-
-        self.reverse_blocks.remove(&hash);
-        self.trigger.trigger();
-        Ok(())
-    }
-
-    async fn add_merkle_layer_for(
-        &mut self,
-        gossip: &Gossip<App>,
-        height: BlockHeight,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-        peer: PeerId,
-    ) -> Result<()> {
-        let Some(waiting) = self.needed_blocks.get_mut(&height) else {
+        let Some(mut entry) = self.needed_blocks.first_entry() else {
             return Ok(());
         };
 
-        let pending = match waiting {
+        let pending = match entry.get_mut() {
             WaitingBlock::Needed(_) | WaitingBlock::Received { .. } => return Ok(()),
             WaitingBlock::Pending(pending) => pending,
         };
@@ -313,10 +287,6 @@ impl<App: KolmeApp> SyncManager<App> {
                         .entry(*child)
                         .or_default()
                         .insert(hash);
-                    self.reverse_blocks
-                        .entry(*child)
-                        .or_default()
-                        .insert(height);
                     pending
                         .needed_layers
                         .entry(*child)
@@ -324,7 +294,7 @@ impl<App: KolmeApp> SyncManager<App> {
                 }
             }
 
-            pending.pending_layers.insert(hash, layer.clone());
+            pending.pending_layers.insert(hash, layer);
             pending.needed_layers.remove(&hash);
 
             if has_all {
@@ -334,6 +304,7 @@ impl<App: KolmeApp> SyncManager<App> {
         } else {
             pending.needed_layers.remove(&hash);
         }
+        self.trigger.trigger();
         Ok(())
     }
 
@@ -452,6 +423,11 @@ impl<App: KolmeApp> SyncManager<App> {
                             gossip.local_display_name,
                             block.height()
                         );
+                    } else {
+                        #[cfg(debug_assertions)]
+                        {
+                            assert!(gossip.kolme.has_block(block.height()).await.unwrap());
+                        }
                     }
                     Ok(None)
                 } else {
@@ -468,8 +444,6 @@ impl<App: KolmeApp> SyncManager<App> {
                             pending
                                 .needed_layers
                                 .insert(hash, RequestStatus::new(*peer));
-                            // TODO: Is it worth passing this back up the call chain to remove it?
-                            // self.reverse_blocks.entry(hash).or_default().insert(height);
                         }
                     }
 
@@ -586,23 +560,25 @@ impl<App: KolmeApp> SyncManager<App> {
     }
 
     pub(super) fn add_layer_peer(&mut self, hash: Sha256Hash, peer: PeerId) {
-        for height in self.get_heights_for_layer(hash) {
-            if let Some(WaitingBlock::Pending(pending)) = self.needed_blocks.get_mut(&height) {
-                if let Some(status) = pending.needed_layers.get_mut(&hash) {
-                    status.add_peer(peer);
-                    self.trigger.trigger();
-                }
+        let Some(mut entry) = self.needed_blocks.first_entry() else {
+            return;
+        };
+        if let WaitingBlock::Pending(pending) = entry.get_mut() {
+            if let Some(status) = pending.needed_layers.get_mut(&hash) {
+                status.add_peer(peer);
+                self.trigger.trigger();
             }
         }
     }
 
     pub(super) fn remove_layer_peer(&mut self, hash: Sha256Hash, peer: PeerId) {
-        for height in self.get_heights_for_layer(hash) {
-            if let Some(WaitingBlock::Pending(pending)) = self.needed_blocks.get_mut(&height) {
-                if let Some(status) = pending.needed_layers.get_mut(&hash) {
-                    status.remove_peer(peer);
-                    self.trigger.trigger();
-                }
+        let Some(mut entry) = self.needed_blocks.first_entry() else {
+            return;
+        };
+        if let WaitingBlock::Pending(pending) = entry.get_mut() {
+            if let Some(status) = pending.needed_layers.get_mut(&hash) {
+                status.remove_peer(peer);
+                self.trigger.trigger();
             }
         }
     }
