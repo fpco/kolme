@@ -11,3 +11,4 @@ clap = { workspace = true }
 kolme = { workspace = true }
 libp2p = { workspace = true, features = ["rsa", "dns"] }
 anyhow = { workspace = true }
+tracing = "0.1.41"

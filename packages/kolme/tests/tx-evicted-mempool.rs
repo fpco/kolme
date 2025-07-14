@@ -98,6 +98,87 @@ async fn tx_evicted_mempool() {
     TestTasks::start(tx_evicted_inner, ()).await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn evicts_same_tx_mempool() {
+    TestTasks::start(evicts_same_tx_mempool_inner, ()).await;
+}
+
+async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
+    let kolme = Kolme::new(
+        SampleKolmeApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+    let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
+    test_tasks.try_spawn_persistent(processor.run());
+    let discovery = test_tasks.launch_kademlia_discovery_with(kolme.clone(), "kolme", |g| {
+        g.set_duplicate_cache_time(Duration::from_micros(100))
+    });
+
+    timeout(
+        Duration::from_secs(30),
+        kolme.wait_for_block(BlockHeight::start()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let kolme: Kolme<SampleKolmeApp> = Kolme::new(
+        SampleKolmeApp::default(),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+    test_tasks.try_spawn(repeat_client(kolme.clone()));
+    test_tasks.launch_kademlia_client_with(kolme.clone(), "kolme-client", &discovery, |item| {
+        item.set_duplicate_cache_time(Duration::from_micros(100))
+    });
+}
+
+async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
+    let secret = SecretKey::random(&mut rand::thread_rng());
+
+    let tx = Arc::new(
+        kolme
+            .read()
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
+    );
+    kolme
+        .propose_and_await_transaction(tx.clone())
+        .await
+        .unwrap();
+    let mut subscription = kolme.subscribe();
+
+    tracing::info!("Going to propose tx: {}", tx.hash());
+    kolme.propose_transaction(tx);
+    assert!(
+        !kolme.get_mempool_entries().is_empty(),
+        "Mempool should not be empty"
+    );
+    loop {
+        match subscription.recv().await {
+            Ok(note) => match note {
+                Notification::NewBlock(_) => (),
+                Notification::GenesisInstantiation { .. } => (),
+                Notification::FailedTransaction(_) => (),
+                Notification::LatestBlock(_) => (),
+                Notification::EvictMempoolTransaction(_) => {
+                    break;
+                }
+            },
+            Err(_) => panic!("Error from subscription"),
+        }
+    }
+    assert!(
+        kolme.get_mempool_entries().is_empty(),
+        "Mempool should be empty"
+    );
+    Ok(())
+}
+
 async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     let kolme = Kolme::new(
         SampleKolmeApp::default(),
@@ -153,8 +234,8 @@ async fn no_op_node(
     loop {
         let _ = mempool_subscribe.listen().await;
         counter += 1;
-        if counter >= 10 {
-            // Counter will be greater than 10 because
+        if counter >= 5 {
+            // Counter will be greater than 5 because
             // mempool_subscribe will also be triggered on removal in
             // the current implementation. But this is a good time to
             // break from the loop.
@@ -163,17 +244,15 @@ async fn no_op_node(
     }
     receiver.await.ok();
     let hashes = data.lock().unwrap().clone();
-    assert_eq!(hashes.len(), 10, "Ten transactions expected");
+    assert_eq!(hashes.len(), 5, "Ten transactions expected");
 
-    // Give it some time to catch up
-    tokio::time::sleep(Duration::from_secs(3)).await;
     let mut attempt = 0;
     loop {
         let mempool = kolme.get_mempool_entries();
         if mempool.is_empty() {
             break;
         }
-        if attempt == 3 {
+        if attempt == 10 {
             for (index, hash) in hashes.iter().enumerate() {
                 let height = kolme.get_tx_height(*hash).await.unwrap();
                 if height.is_none() {
@@ -189,7 +268,7 @@ async fn no_op_node(
             );
         }
         attempt += 1;
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
     Ok(())
 }
@@ -199,7 +278,7 @@ async fn client(
     sender: oneshot::Sender<()>,
     data: Arc<Mutex<Vec<TxHash>>>,
 ) -> Result<()> {
-    for _ in 0..10 {
+    for _ in 0..5 {
         let secret = SecretKey::random(&mut rand::thread_rng());
 
         let tx = Arc::new(

@@ -1,13 +1,34 @@
-set fallback
+set fallback := true
 
 # List all recipes
 default:
-	just --list --unsorted
+    just --list --unsorted
 
 # Run validator
 validator:
-	cargo run -- validators 2001
+    cargo run -- validators 2001 --enable-api-server
 
 # Run client
 client:
-	cargo run -- client --validator /ip4/127.0.0.1/tcp/2001 --continous
+    cargo run -- client --validator /ip4/127.0.0.1/tcp/2001 --continous
+
+# Run observer node
+observer:
+	cargo run -- observer --validator /ip4/127.0.0.1/tcp/2001
+
+# Open validator api-server
+open-vapi:
+	xdg-open http://localhost:2002
+
+# Open observer api-server
+open-oapi:
+	xdg-open http://localhost:2005
+
+# Generate new key
+gen-key:
+	openssl genpkey -algorithm RSA -out ./assets/client-keypair.pem -pkeyopt rsa_keygen_bits:2048
+	openssl pkcs8 -in ./assets/client-keypair.pem -inform PEM -topk8 -out ./assets/client-keypair.pk8 -outform DER -nocrypt
+
+# Run invalid client
+invalid-client:
+	cargo run -- invalid-client --validator /ip4/127.0.0.1/tcp/2001

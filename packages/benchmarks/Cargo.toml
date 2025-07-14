@@ -23,19 +23,8 @@ plotters-svg = { version = "0.3.7", optional = true }
 regex = "1.11.1"
 example-six-sigma = { path = "../examples/six-sigma" }
 example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
-strum = { version = "0.27.1", features = ["derive"] }
-futures = "0.3.31"
-backon = "1.4.1"
-hex = { workspace = true }
-cosmwasm-std = "2.2.2"
-tempfile = "3.19.1"
-pretty_assertions = "1.4.1"
 rand = "0.8"
-axum = { version = "0.8.3", features = ["ws"] }
-futures-util = "0.3.31"
-tokio-tungstenite = "0.26.2"
 jiff = "0.2.5"
-serial_test = "3.2.0"
 sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio"] }
 criterion = { version = "0.6.0", features = ["async_tokio"] }
 merkle-map.workspace = true

@@ -240,6 +240,7 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
                 .into());
             }
             Notification::LatestBlock(_) => (),
+            Notification::EvictMempoolTransaction(_) => (),
         }
     }
 }

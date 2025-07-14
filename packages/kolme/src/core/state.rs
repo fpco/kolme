@@ -63,6 +63,41 @@ pub struct AdminProposalState {
     pub proposals: BTreeMap<AdminProposalId, PendingProposal>,
 }
 
+impl<App: KolmeApp> ExecutionContext<'_, App> {
+    pub(crate) fn add_admin_proposal(
+        &mut self,
+        payload: ProposalPayload,
+        pubkey: PublicKey,
+        sigrec: SignatureWithRecovery,
+    ) -> Result<()> {
+        // Check to ensure we don't already have this proposal.
+        for (id, existing) in &self
+            .framework_state()
+            .admin_proposal_state
+            .as_ref()
+            .proposals
+        {
+            anyhow::ensure!(
+                existing.payload != payload,
+                "Identical proposal {id} already exists"
+            );
+        }
+
+        let state = self.framework_state_mut().admin_proposal_state.as_mut();
+        let id = state.next_admin_proposal_id;
+        state.next_admin_proposal_id = id.next();
+        state.proposals.insert(
+            id,
+            PendingProposal {
+                payload,
+                approvals: std::iter::once((pubkey, sigrec)).collect(),
+            },
+        );
+        self.log_event(LogEvent::NewAdminProposal(id))?;
+        Ok(())
+    }
+}
+
 /// Status of an in-flight admin proposals.
 #[derive(Clone, Debug)]
 pub struct PendingProposal {

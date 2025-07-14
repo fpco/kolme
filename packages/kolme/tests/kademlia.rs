@@ -11,7 +11,9 @@ async fn ensure_kademlia_discovery_works() {
 
 async fn kademlia_discovery_inner(testtasks: TestTasks, (): ()) {
     testtasks.spawn_persistent(async move {
-        kademlia_discovery::validators(KADEMLIA_PORT).await.unwrap();
+        kademlia_discovery::validators(KADEMLIA_PORT, false)
+            .await
+            .unwrap();
     });
 
     let signing_secret = SecretKey::random(&mut rand::thread_rng());
