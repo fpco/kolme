@@ -77,3 +77,7 @@ stress-test:
 # Run exact test
 run-exact-test target:
 	cargo nextest run --no-capture -- --exact {{target}}
+
+# Run test
+run-test target:
+	cargo nextest run --no-fail-fast --no-capture -- {{target}}
