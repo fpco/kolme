@@ -47,9 +47,9 @@ impl<Block: MerkleSerialize, FrameworkState: MerkleSerialize, AppState: MerkleSe
         serializer.store(blockhash)?;
         serializer.store(txhash)?;
         serializer.store(block)?;
-        serializer.store(framework_state)?;
-        serializer.store(app_state)?;
-        serializer.store(logs)?;
+        serializer.store_by_hash(framework_state)?;
+        serializer.store_by_hash(app_state)?;
+        serializer.store_by_hash(logs)?;
         Ok(())
     }
 }
@@ -68,9 +68,11 @@ impl<
         let blockhash = deserializer.load()?;
         let txhash = deserializer.load()?;
         let block = deserializer.load()?;
-        let framework_state = deserializer.load()?;
-        let app_state = deserializer.load()?;
-        let logs = deserializer.load().map(|x: Vec<Vec<String>>| x.into())?;
+        let framework_state = deserializer.load_by_hash()?;
+        let app_state = deserializer.load_by_hash()?;
+        let logs = deserializer
+            .load_by_hash()
+            .map(|x: Vec<Vec<String>>| x.into())?;
         Ok(Self {
             height,
             blockhash,
