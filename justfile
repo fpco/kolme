@@ -1,12 +1,16 @@
+# List all dependencies
 default:
-    just --list
+    just --list --unsorted
 
+# Clippy check
 cargo-clippy-check:
 	cargo clippy --no-deps --workspace --locked --tests --benches --examples -- -Dwarnings
 
+# Rustfmt check
 cargo-fmt-check:
     cargo fmt --all --check
 
+# Format Rust code
 fmt:
 	cargo fmt --all
 
