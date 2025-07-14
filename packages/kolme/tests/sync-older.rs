@@ -272,9 +272,6 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
 
     testtasks.try_spawn_persistent(Processor::new(kolme.clone(), my_secret_key()).run());
-    let kolme1 = kolme.clone();
-    // FIXME
-    // let archiver_handle = tokio::task::spawn(Archiver::new(kolme1).run());
 
     for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
@@ -287,8 +284,6 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     while kolme.get_latest_archived_block().await.unwrap() != Some(BlockHeight(10)) {
         tokio::task::yield_now().await;
     }
-    // FIXME
-    // archiver_handle.abort();
 
     let initial_heights = sqlx::query!("SELECT height, archived_at FROM archived_blocks")
         .fetch_all(&pool)
@@ -301,8 +296,6 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
         "Block heights were not archived correctly"
     );
 
-    // FIXME
-    // testtasks.spawn_persistent(Archiver::new(kolme.clone()).run());
     let secret = SecretKey::random(&mut rand::thread_rng());
 
     kolme
