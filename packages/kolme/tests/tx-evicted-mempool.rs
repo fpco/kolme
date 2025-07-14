@@ -252,7 +252,7 @@ async fn no_op_node(
         if mempool.is_empty() {
             break;
         }
-        if attempt == 10 {
+        if attempt == 15 {
             for (index, hash) in hashes.iter().enumerate() {
                 let height = kolme.get_tx_height(*hash).await.unwrap();
                 if height.is_none() {
