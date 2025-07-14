@@ -52,6 +52,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
     #[derive(serde::Serialize)]
     struct Basics<'a> {
         code_version: &'a String,
+        chain_version: &'a String,
         next_height: BlockHeight,
         next_genesis_action: Option<GenesisAction>,
         bridges: BTreeMap<ExternalChain, &'a ChainConfig>,
@@ -61,6 +62,7 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
     let kolme = kolme.read();
     let basics = Basics {
         code_version: kolme.get_code_version(),
+        chain_version: kolme.get_framework_state().get_chain_version(),
         next_height: kolme.get_next_height(),
         next_genesis_action: kolme.get_next_genesis_action(),
         bridges: kolme
