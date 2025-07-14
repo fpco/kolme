@@ -20,7 +20,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
-use sync_manager::{DataRequest, SyncManager, SyncType};
+use sync_manager::{DataLabel, DataRequest, SyncManager};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
@@ -170,11 +170,9 @@ pub enum SyncMode {
 pub enum SyncPreference {
     /// Catch up to the latest block as quickly as possible and stop.
     #[default]
-    JustLatest,
+    Latest,
     /// Prefer catching up from the beginning (for running an archive node).
     FromBeginning,
-    /// First catch up to latest, then fill in everything historic.
-    LatestThenBeginning,
 }
 
 impl GossipBuilder {
@@ -355,8 +353,6 @@ impl<App: KolmeApp> Gossip<App> {
         let mut subscription = self.kolme.subscribe();
         let mut swarm = self.swarm.lock().await;
 
-        let (peers_with_blocks_tx, mut peers_with_blocks_rx) = tokio::sync::mpsc::channel(16);
-
         // Interval for broadcasting our block height
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -369,33 +365,44 @@ impl<App: KolmeApp> Gossip<App> {
         let (block_requester, mut block_requester_rx) = tokio::sync::mpsc::channel(8);
         self.kolme.set_block_requester(block_requester);
 
+        let mut sync_manager_subscriber = self.state_sync.lock().await.subscribe();
+
         loop {
             tokio::select! {
                 // Our local Kolme generated a notification to be sent through the
                 // rest of the p2p network
-                notification = subscription.recv() =>
-                {self.handle_notification(&mut swarm, notification)},
+                notification = subscription.recv() => {
+                    self.handle_notification(&mut swarm, notification);
+                }
                 // A new event was generated from the p2p network
-                event = swarm.select_next_some() => self.handle_event(&mut swarm, event, &peers_with_blocks_tx).await,
-                // A peer reported a known height higher than we have, so
-                // try to synchronize with it
-                report_block_height = peers_with_blocks_rx.recv() => self.catch_up(report_block_height).await,
+                event = swarm.select_next_some() => {
+                    self.handle_event(&mut swarm, event).await;
+                }
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
                 _ = interval.tick() => async {
                     self.request_block_heights(&mut swarm);
-                    self.process_state_sync(&mut swarm).await;
+                    self.process_sync_manager(&mut swarm).await;
                     self.broadcast_latest_block(&mut swarm);
                     self.broadcast_mempool_entries(&mut swarm);
                 }.await,
+                _ = sync_manager_subscriber.listen() => {
+                    self.process_sync_manager(&mut swarm).await;
+                }
                 // When we're specifically triggered for it, also notify for latest block height
-                _ = trigger_broadcast_height.listen() => async {self.broadcast_latest_block(&mut swarm)}.await,
+                _ = trigger_broadcast_height.listen() => {
+                    self.broadcast_latest_block(&mut swarm);
+                }
                 // Same with state sync
-                _ = trigger_state_sync.listen() => async { self.process_state_sync(&mut swarm).await }.await,
+                _ = trigger_state_sync.listen() => {
+                    self.process_sync_manager(&mut swarm).await
+                }
                 // And any time we add something new to the mempool, broadcast all items.
-                _ = mempool_additions.listen() => self.broadcast_mempool_entries(&mut swarm),
+                _ = mempool_additions.listen() => {
+                    self.broadcast_mempool_entries(&mut swarm);
+                }
                 Some(height) = block_requester_rx.recv() => {
-                    if let Err(e) = self.state_sync.lock().await.add_needed_block(&self, height, None, SyncType::State).await {
+                    if let Err(e) = self.state_sync.lock().await.add_needed_block(&self, height, None).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
                     } else {
                         self.trigger_state_sync.trigger();
@@ -492,7 +499,6 @@ impl<App: KolmeApp> Gossip<App> {
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         event: SwarmEvent<KolmeBehaviourEvent<App::Message>>,
-        peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
     ) {
         let local_display_name = self.local_display_name.clone();
 
@@ -522,8 +528,7 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                     Ok(message) => {
                         tracing::debug!("{local_display_name}: Received message: {message}");
-                        if let Err(e) = self.handle_message(message, peers_with_blocks, swarm).await
-                        {
+                        if let Err(e) = self.handle_message(message, swarm).await {
                             tracing::warn!(
                                 "{local_display_name}: Error while handling message: {e}"
                             );
@@ -558,7 +563,6 @@ impl<App: KolmeApp> Gossip<App> {
     async fn handle_message(
         &self,
         message: GossipMessage<App>,
-        peers_with_blocks: &tokio::sync::mpsc::Sender<ReportBlockHeight>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) -> Result<()> {
         let local_display_name = self.local_display_name.clone();
@@ -570,7 +574,11 @@ impl<App: KolmeApp> Gossip<App> {
                 }
                 match &msg {
                     Notification::NewBlock(block) => {
-                        self.add_block(block.clone()).await;
+                        self.state_sync
+                            .lock()
+                            .await
+                            .add_new_block(self, block)
+                            .await;
                     }
                     Notification::GenesisInstantiation { .. } => (),
                     // TODO should we validate that this has a proper signature from
@@ -610,15 +618,11 @@ impl<App: KolmeApp> Gossip<App> {
                 self.trigger_broadcast_height.trigger();
             }
             GossipMessage::ReportBlockHeight(report) => {
-                tracing::debug!("{local_display_name}: got block height report message");
-                let our_next = self.kolme.read().get_next_height();
-                tracing::debug!(
-                    "{local_display_name}: Received ReportBlockHeight: {report:?}, our_next: {our_next}"
-                );
-                // Check if this peer has new blocks that we'd want to request.
-                if our_next < report.next {
-                    peers_with_blocks.try_send(report).ok();
-                }
+                self.state_sync
+                    .lock()
+                    .await
+                    .add_report_block_height(self, report)
+                    .await;
             }
             GossipMessage::BroadcastTx { tx } => {
                 self.kolme.propose_transaction(tx);
@@ -746,19 +750,11 @@ impl<App: KolmeApp> Gossip<App> {
         tracing::debug!("{local_display_name}: response");
         match response {
             BlockResponse::Block(block) | BlockResponse::BlockWithState { block } => {
-                match self
-                    .state_sync
+                self.state_sync
                     .lock()
                     .await
-                    .add_pending_block(self, block, peer)
-                    .await
-                {
-                    Ok(None) => self.trigger_state_sync.trigger(),
-                    Ok(Some(block)) => self.add_block(block).await,
-                    Err(e) => {
-                        tracing::error!("{local_display_name}: error adding pending block: {e}")
-                    }
-                }
+                    .add_pending_block(self, block, Some(peer))
+                    .await;
             }
             BlockResponse::HeightNotFound(height) => {
                 tracing::warn!(
@@ -789,228 +785,51 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
-    /// Based on current state info and the sync preference, determine the next block to sync.
-    async fn get_next_to_sync(
-        &self,
-        report_block_height: Option<ReportBlockHeight>,
-        our_next: BlockHeight,
-    ) -> Result<Option<(BlockHeight, PeerId)>> {
-        let (do_latest, do_archive) = match self.sync_preference {
-            SyncPreference::JustLatest => (true, false),
-            SyncPreference::FromBeginning => (false, true),
-            SyncPreference::LatestThenBeginning => (true, true),
-        };
-
-        let ReportBlockHeight {
-            next: their_next,
-            peer,
-            timestamp: _,
-            latest_block: _,
-        } = match report_block_height {
-            Some(report) => report,
-            None => {
-                tracing::debug!(
-                    "{}: get_next_to_sync found no ReportBlockHeight",
-                    self.local_display_name
-                );
-                return Ok(None);
-            }
-        };
-
-        tracing::debug!(
-            "{}: In get_next_to_sync, their_next=={their_next}, peer=={peer}, our_next=={our_next}",
-            self.local_display_name
-        );
-
-        let their_highest = match their_next.prev() {
-            None => return Ok(None),
-            Some(highest) => highest,
-        };
-
-        // If we're checking for latest, see if there's anything new for us.
-        if do_latest && their_highest >= our_next {
-            return Ok(Some((our_next, peer)));
-        }
-
-        // Now see if we have any archive work
-        if do_archive {
-            let next_to_archive = self.kolme.get_next_to_archive().await;
-            if next_to_archive <= their_highest {
-                // We don't know for sure that the peer will have an older
-                // block, but we can request and, if it doesn't, we'll remove
-                // the peer from the list of peers to query in the future.
-                return Ok(Some((next_to_archive, peer)));
-            }
-        }
-
-        // We're totally caught up
-        Ok(None)
-    }
-
-    /// Catch up on the latest chain information, if needed.
-    ///
-    /// Both puts out a broadcast to find more peers, plus sends requests to those peers for latest height information and any missing blocks.
-    async fn catch_up(&self, report_block_height: Option<ReportBlockHeight>) {
-        let kolme = self.kolme.read();
-        let our_next = kolme.get_next_height();
-        let (next_to_sync, peer) = match self.get_next_to_sync(report_block_height, our_next).await
-        {
-            Ok(None) => {
-                tracing::debug!("{}: catch_up: no new node to sync", self.local_display_name);
-                return;
-            }
-            Ok(Some(pair)) => pair,
+    async fn process_sync_manager(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        let requests = match self.state_sync.lock().await.get_data_requests(self).await {
+            Ok(requests) => requests,
             Err(e) => {
                 tracing::error!(
-                    "{}: error calling get_next_to_sync: {e}",
+                    "{}: unable to process sync manager requests: {e}",
                     self.local_display_name
                 );
                 return;
             }
         };
-
-        let do_state = match self.sync_mode {
-            // Only do a state transfer if we've fallen more than 1 block behind.
-            SyncMode::StateTransfer => next_to_sync != our_next,
-            SyncMode::StateTransferForUpgrade => {
-                // We only use state transfer if there are different code version and chain
-                // versions.
-                self.kolme.get_code_version() != self.kolme.read().get_chain_version()
-            }
-            SyncMode::BlockTransfer => {
-                // Block transfer mode: we never allow a state transfer
-                false
-            }
-        };
-
-        match self
-            .state_sync
-            .lock()
-            .await
-            .add_needed_block(
-                self,
-                next_to_sync,
-                Some(peer),
-                if do_state {
-                    SyncType::State
-                } else {
-                    SyncType::Block
-                },
-            )
-            .await
-        {
-            Ok(()) => self.trigger_state_sync.trigger(),
-            Err(e) => tracing::error!(
-                "{}: error adding needed block: {e}",
-                self.local_display_name
-            ),
-        }
-    }
-
-    async fn add_block(&self, block: Arc<SignedBlock<App::Message>>) {
-        // Don't add blocks from different versions
-        if self.kolme.get_code_version() != self.kolme.read().get_chain_version() {
-            return;
-        }
-        if block.0.message.as_inner().height == self.kolme.read().get_next_height() {
-            if let Err(e) = self
-                .kolme
-                .add_block_with(block, self.data_load_validation)
-                .await
-            {
-                tracing::warn!(
-                    "{}: Unable to add block to chain: {e}",
-                    self.local_display_name
-                )
-            }
-        }
-    }
-
-    async fn process_state_sync(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
-        if let Err(e) = self.process_state_sync_blocks(swarm).await {
-            tracing::error!(
-                "{}: unable to get state sync block requests: {e}",
-                self.local_display_name
-            );
-        };
-        if let Err(e) = self.process_state_sync_layers(swarm).await {
-            tracing::error!(
-                "{}: unable to get state sync layers requests: {e}",
-                self.local_display_name
-            );
-        };
-    }
-
-    async fn process_state_sync_blocks(
-        &self,
-        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-    ) -> Result<()> {
-        let Some(DataRequest {
-            data: height,
-            current_peers,
-            request_new_peers,
-        }) = self.state_sync.lock().await.get_block_request(self).await?
-        else {
-            return Ok(());
-        };
-        if request_new_peers || current_peers.is_empty() {
-            let msg = GossipMessage::RequestBlockContents {
-                height,
-                peer: self.peer_id(),
-            };
-            if let Err(e) = msg.publish(self, swarm) {
-                tracing::warn!(
-                    "{}: error requesting block contents for {height}: {e}",
-                    self.local_display_name
-                );
-            }
-        }
-        for peer in current_peers {
-            swarm
-                .behaviour_mut()
-                .request_response
-                .send_request(&peer, BlockRequest::BlockWithStateAtHeight(height));
-        }
-        Ok(())
-    }
-
-    async fn process_state_sync_layers(
-        &self,
-        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-    ) -> Result<()> {
-        let requests = self
-            .state_sync
-            .lock()
-            .await
-            .get_layer_requests(self)
-            .await?;
         for DataRequest {
-            data: hash,
+            data,
             current_peers,
             request_new_peers,
         } in requests
         {
             if request_new_peers || current_peers.is_empty() {
-                let msg = GossipMessage::RequestLayerContents {
-                    hash,
-                    peer: self.peer_id(),
+                let msg = match data {
+                    DataLabel::Block(height) => GossipMessage::RequestBlockContents {
+                        height,
+                        peer: self.peer_id(),
+                    },
+                    DataLabel::Merkle(hash) => GossipMessage::RequestLayerContents {
+                        hash,
+                        peer: self.peer_id(),
+                    },
                 };
                 if let Err(e) = msg.publish(self, swarm) {
                     tracing::warn!(
-                        "{}: error requesting layer contents for {hash}: {e}",
+                        "{}: error requesting peers to provide {data}: {e}",
                         self.local_display_name
                     );
                 }
             }
             for peer in current_peers {
-                swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_request(&peer, BlockRequest::Merkle(hash));
+                swarm.behaviour_mut().request_response.send_request(
+                    &peer,
+                    match data {
+                        DataLabel::Block(height) => BlockRequest::BlockAtHeight(height),
+                        DataLabel::Merkle(hash) => BlockRequest::Merkle(hash),
+                    },
+                );
             }
         }
-
-        Ok(())
     }
 
     // Returns true if the notfication should be skipped publishing to the p2p network

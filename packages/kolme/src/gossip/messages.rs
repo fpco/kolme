@@ -13,7 +13,7 @@ pub(super) enum BlockRequest {
     /// Return the contents of a specific block.
     BlockAtHeight(BlockHeight),
     /// Return both the raw block as well as the full app and framework state to go along with it.
-    /// TODO: Fairly certain this now has the exact same behavior as BlockAtHeight, can be removed.
+    /// TODO: Fairly certain this now has the exact same behavior as BlockAtHeight, can be removed. Just need to investigate implications on breaking network protocol.
     BlockWithStateAtHeight(BlockHeight),
     /// Request a Merkle layer
     Merkle(Sha256Hash),
@@ -44,6 +44,7 @@ pub(super) enum BlockRequest {
 ))]
 pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     Block(Arc<SignedBlock<AppMessage>>),
+    /// TODO: Fairly certain this now has the exact same behavior as Block, can be removed. Just need to investigate implications on breaking network protocol.
     BlockWithState {
         block: Arc<SignedBlock<AppMessage>>,
     },

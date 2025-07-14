@@ -361,6 +361,7 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<()> {
         // Make sure we're at the right height for this and the correct processor is signing this.
         let kolme = self.read();
+        // FIXME add support for adding old blocks instead
         if kolme.get_next_height() != signed_block.height() {
             anyhow::bail!(
                 "Tried to add block with height {}, but next expected height is {}",
@@ -1026,6 +1027,11 @@ impl<App: KolmeApp> Kolme<App> {
     /// Take a lock on constructing new blocks.
     pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
         self.inner.store.take_construct_lock().await
+    }
+
+    /// Returns the genesis info
+    pub fn get_genesis_info(&self) -> &GenesisInfo {
+        self.inner.app.genesis_info()
     }
 
     /// Returns a hash of the genesis info.
