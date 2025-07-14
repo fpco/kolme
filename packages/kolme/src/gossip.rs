@@ -40,8 +40,8 @@ pub struct Gossip<App: KolmeApp> {
     trigger_broadcast_height: Trigger,
     /// Switches to true once we have our first success received message
     watch_network_ready: tokio::sync::watch::Sender<bool>,
-    /// Status of state syncs, if present.
-    state_sync: Mutex<SyncManager<App>>,
+    /// The block sync manager.
+    sync_manager: Mutex<SyncManager<App>>,
     /// LRU cache for notifications received via P2p layer
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
 }
@@ -307,7 +307,7 @@ impl GossipBuilder {
 
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
-        let state_sync = Mutex::new(SyncManager::default());
+        let sync_manager = Mutex::new(SyncManager::default());
 
         Ok(Gossip {
             kolme,
@@ -319,7 +319,7 @@ impl GossipBuilder {
             trigger_broadcast_height: Trigger::new("broadcast_height"),
             watch_network_ready,
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
-            state_sync,
+            sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
         })
     }
@@ -349,7 +349,7 @@ impl<App: KolmeApp> Gossip<App> {
         let (block_requester, mut block_requester_rx) = tokio::sync::mpsc::channel(8);
         self.kolme.set_block_requester(block_requester);
 
-        let mut sync_manager_subscriber = self.state_sync.lock().await.subscribe();
+        let mut sync_manager_subscriber = self.sync_manager.lock().await.subscribe();
 
         loop {
             tokio::select! {
@@ -382,7 +382,7 @@ impl<App: KolmeApp> Gossip<App> {
                     self.broadcast_mempool_entries(&mut swarm);
                 }
                 Some(height) = block_requester_rx.recv() => {
-                    if let Err(e) = self.state_sync.lock().await.add_needed_block(&self, height, None).await {
+                    if let Err(e) = self.sync_manager.lock().await.add_needed_block(&self, height, None).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
                     }
                 }
@@ -532,6 +532,21 @@ impl<App: KolmeApp> Gossip<App> {
                     response,
                 } => self.handle_response(response, peer).await,
             },
+            SwarmEvent::ConnectionEstablished {
+                peer_id,
+                connection_id: _,
+                endpoint,
+                num_established: _,
+                concurrent_dial_errors: _,
+                established_in,
+            } =>
+                tracing::info!("{local_display_name}: connection established to {peer_id} on {endpoint:?}, established in {established_in:?}"),
+            // Catch some events that we don't even want to print at debug level
+            SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
+                libp2p::request_response::Event::ResponseSent { .. },
+            )) => tracing::trace!(
+                "{local_display_name}: Received and ignoring libp2p event: {event:?}"
+            ),
             _ => tracing::debug!(
                 "{local_display_name}: Received and ignoring libp2p event: {event:?}"
             ),
@@ -552,7 +567,7 @@ impl<App: KolmeApp> Gossip<App> {
                 }
                 match &msg {
                     Notification::NewBlock(block) => {
-                        self.state_sync
+                        self.sync_manager
                             .lock()
                             .await
                             .add_new_block(self, block)
@@ -596,7 +611,7 @@ impl<App: KolmeApp> Gossip<App> {
                 self.trigger_broadcast_height.trigger();
             }
             GossipMessage::ReportBlockHeight(report) => {
-                self.state_sync
+                self.sync_manager
                     .lock()
                     .await
                     .add_report_block_height(self, report)
@@ -699,11 +714,14 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             BlockRequest::BlockAvailable { height, peer } => {
-                self.state_sync.lock().await.add_block_peer(*height, *peer);
+                self.sync_manager
+                    .lock()
+                    .await
+                    .add_block_peer(*height, *peer);
                 BlockResponse::Ack
             }
             BlockRequest::LayerAvailable { hash, peer } => {
-                self.state_sync.lock().await.add_layer_peer(*hash, *peer);
+                self.sync_manager.lock().await.add_layer_peer(*hash, *peer);
                 BlockResponse::Ack
             }
         };
@@ -721,7 +739,7 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
         match response {
             BlockResponse::Block(block) | BlockResponse::BlockWithState { block } => {
-                self.state_sync
+                self.sync_manager
                     .lock()
                     .await
                     .add_pending_block(self, block, Some(peer))
@@ -731,17 +749,20 @@ impl<App: KolmeApp> Gossip<App> {
                 tracing::warn!(
                     "{local_display_name}: Tried to find block height {height}, but peer {peer} didn't find it"
                 );
-                self.state_sync.lock().await.remove_block_peer(height, peer);
+                self.sync_manager
+                    .lock()
+                    .await
+                    .remove_block_peer(height, peer);
             }
             BlockResponse::MerkleNotFound(hash) => {
                 tracing::warn!(
                     "{local_display_name}: Tried to find merkle layer {hash}, but peer {peer} didn't find it"
                 );
-                self.state_sync.lock().await.remove_layer_peer(hash, peer);
+                self.sync_manager.lock().await.remove_layer_peer(hash, peer);
             }
             BlockResponse::Merkle { hash, contents } => {
                 if let Err(e) = self
-                    .state_sync
+                    .sync_manager
                     .lock()
                     .await
                     .add_merkle_layer(self, hash, contents, peer)
@@ -757,7 +778,7 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn process_sync_manager(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
-        let requests = match self.state_sync.lock().await.get_data_requests(self).await {
+        let requests = match self.sync_manager.lock().await.get_data_requests(self).await {
             Ok(requests) => requests,
             Err(e) => {
                 tracing::error!(

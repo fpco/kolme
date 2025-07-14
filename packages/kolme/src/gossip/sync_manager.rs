@@ -1,4 +1,4 @@
-// ! Implementation of the state sync state machine.
+// ! Implementation of the sync manager state machine.
 //
 // Due to the complexity of the topic, there's a dedicated doc for this on the docs
 // site called "State sync implementation". Recommendation: read that before reading
@@ -329,6 +329,7 @@ impl<App: KolmeApp> SyncManager<App> {
 
             if has_all {
                 Self::process_available_hash(gossip, pending, hash).await?;
+                self.trigger.trigger();
             }
         } else {
             pending.needed_layers.remove(&hash);
@@ -341,8 +342,35 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
     ) -> Result<SmallVec<[DataRequest; REQUEST_COUNT]>> {
-        let mut res = SmallVec::new();
+        // We need to make sure that we are correctly performing
+        // requests in order. That means that, in some cases, we'll
+        // need to insert earlier block requests so that we fill in
+        // gaps in the chain. Also, in some cases, we'll remove
+        // blocks from the needed list.
+        //
+        // To account for this, we'll perform operations in an infinite loop.
+        // That loop will exit if the needed blocks is empty. It will also
+        // take responsibility for adding missing block requests and removing
+        // unnecessary ones.
+        //
+        // Without this approach, it's possible to (1) remove an out-of-date block
+        // request and then (2) proceed to a block request we're not yet ready for.
+        loop {
+            self.add_missing_needed_blocks(gossip).await?;
+            let Some(mut entry) = self.needed_blocks.first_entry() else {
+                break Ok(SmallVec::new());
+            };
 
+            match Self::get_data_requests_for(gossip, *entry.key(), entry.get_mut()).await? {
+                None => {
+                    self.needed_blocks.pop_first();
+                }
+                Some(reqs) => break Ok(reqs),
+            }
+        }
+    }
+
+    async fn add_missing_needed_blocks(&mut self, gossip: &Gossip<App>) -> Result<()> {
         // First determine if we need to force sync from the beginning.
         match gossip.sync_mode {
             // State mode allows us to just grab the blocks we need.
@@ -361,112 +389,106 @@ impl<App: KolmeApp> SyncManager<App> {
                 // If there are any blocks needed that are _later_ than our currently
                 // expected next block, get the next block.
                 if let Some((next_needed, _)) = self.needed_blocks.first_key_value() {
+                    let next_needed = *next_needed;
                     let next_chain = gossip.kolme.read().get_next_height();
-                    if *next_needed != next_chain {
+                    if next_needed != next_chain {
                         self.add_needed_block(gossip, next_chain, None).await?;
                     }
                 }
             }
         }
 
-        // Use a temporary array since we can't iterate and remove at the same time.
-        let mut blocks_to_drop = SmallVec::<[BlockHeight; REQUEST_COUNT]>::new();
+        Ok(())
+    }
 
-        for (height, waiting) in &mut self.needed_blocks {
-            // We only want to process a single block at a time. If there are requests, then exit.
-            if !res.is_empty() {
-                break;
-            }
+    async fn get_data_requests_for(
+        gossip: &Gossip<App>,
+        height: BlockHeight,
+        waiting: &mut WaitingBlock<App::Message>,
+    ) -> Result<Option<SmallVec<[DataRequest; REQUEST_COUNT]>>> {
+        let label = DataLabel::Block(height);
+        // Check if it got added to our store in the meanwhile
+        if gossip.kolme.has_block(height).await? {
+            return Ok(None);
+        }
 
-            let height = *height;
-            let label = DataLabel::Block(height);
-            // Check if it got added to our store in the meanwhile
-            if gossip.kolme.has_block(height).await? {
-                blocks_to_drop.push(height);
-                continue;
-            }
+        match waiting {
+            WaitingBlock::Needed(status) => {
+                let request_new_peers = match status.should_request(gossip, label) {
+                    ShouldRequest::DontRequest => {
+                        return Ok(Some(SmallVec::new()));
+                    }
+                    ShouldRequest::RequestNoPeers => false,
+                    ShouldRequest::RequestWithPeers => true,
+                };
 
-            match waiting {
-                WaitingBlock::Needed(status) => {
-                    let request_new_peers = match status.should_request(gossip, label) {
-                        ShouldRequest::DontRequest => {
-                            continue;
-                        }
-                        ShouldRequest::RequestNoPeers => false,
-                        ShouldRequest::RequestWithPeers => true,
-                    };
-
-                    res.push(DataRequest {
+                Ok(Some(
+                    std::iter::once(DataRequest {
                         data: label,
                         current_peers: status.peers.clone(),
                         request_new_peers,
-                    });
-                }
-                WaitingBlock::Received { block, peer } => {
-                    // Determine if we're going to use block or state sync.
-                    let do_block = match gossip.sync_mode {
-                        SyncMode::BlockTransfer => true,
-                        SyncMode::StateTransfer | SyncMode::Archive => {
-                            let kolme = gossip.kolme.read();
-                            kolme.get_next_height().next() == block.height()
-                                && kolme.get_chain_version() == kolme.get_code_version()
-                        }
-                    };
-                    if do_block {
-                        if let Err(e) = gossip
-                            .kolme
-                            .add_block_with(block.clone(), gossip.data_load_validation)
-                            .await
-                        {
-                            tracing::warn!(
-                                "{}: error processing block {}: {e}",
-                                gossip.local_display_name,
-                                block.height()
-                            );
-                        }
-                        blocks_to_drop.push(block.height());
-                    } else {
-                        let mut pending = PendingBlock {
-                            block: block.clone(),
-                            needed_layers: BTreeMap::new(),
-                            pending_layers: HashMap::new(),
-                            reverse_layers: HashMap::new(),
-                        };
-
-                        let inner = pending.block.0.message.as_inner();
-                        for hash in [inner.framework_state, inner.app_state, inner.logs] {
-                            if !gossip.kolme.has_merkle_hash(hash).await? {
-                                pending
-                                    .needed_layers
-                                    .insert(hash, RequestStatus::new(*peer));
-                                self.reverse_blocks.entry(hash).or_default().insert(height);
-                            }
-                        }
-
-                        let res =
-                            Self::get_block_data_requests(gossip, &mut pending, &mut res).await;
-                        *waiting = WaitingBlock::Pending(pending);
-                        res?;
+                    })
+                    .collect(),
+                ))
+            }
+            WaitingBlock::Received { block, peer } => {
+                // Determine if we're going to use block or state sync.
+                let do_block = match gossip.sync_mode {
+                    SyncMode::BlockTransfer => true,
+                    SyncMode::StateTransfer | SyncMode::Archive => {
+                        let kolme = gossip.kolme.read();
+                        kolme.get_next_height().next() == block.height()
+                            && kolme.get_chain_version() == kolme.get_code_version()
                     }
-                }
-                WaitingBlock::Pending(pending) => {
-                    Self::get_block_data_requests(gossip, pending, &mut res).await?;
+                };
+                if do_block {
+                    if let Err(e) = gossip
+                        .kolme
+                        .add_block_with(block.clone(), gossip.data_load_validation)
+                        .await
+                    {
+                        tracing::warn!(
+                            "{}: error processing block {}: {e}",
+                            gossip.local_display_name,
+                            block.height()
+                        );
+                    }
+                    Ok(None)
+                } else {
+                    let mut pending = PendingBlock {
+                        block: block.clone(),
+                        needed_layers: BTreeMap::new(),
+                        pending_layers: HashMap::new(),
+                        reverse_layers: HashMap::new(),
+                    };
+
+                    let inner = pending.block.0.message.as_inner();
+                    for hash in [inner.framework_state, inner.app_state, inner.logs] {
+                        if !gossip.kolme.has_merkle_hash(hash).await? {
+                            pending
+                                .needed_layers
+                                .insert(hash, RequestStatus::new(*peer));
+                            // TODO: Is it worth passing this back up the call chain to remove it?
+                            // self.reverse_blocks.entry(hash).or_default().insert(height);
+                        }
+                    }
+
+                    let res = Self::get_block_data_requests(gossip, &mut pending).await;
+                    *waiting = WaitingBlock::Pending(pending);
+                    res
                 }
             }
+            WaitingBlock::Pending(pending) => Self::get_block_data_requests(gossip, pending).await,
         }
-        for height in blocks_to_drop {
-            self.needed_blocks.remove(&height);
-        }
-        Ok(res)
     }
 
     async fn get_block_data_requests(
         gossip: &Gossip<App>,
         pending: &mut PendingBlock<App::Message>,
-        res: &mut SmallVec<[DataRequest; REQUEST_COUNT]>,
-    ) -> Result<()> {
+    ) -> Result<Option<SmallVec<[DataRequest; REQUEST_COUNT]>>> {
         let mut active_count = 0;
         let mut layers_to_drop = SmallVec::<[Sha256Hash; REQUEST_COUNT]>::new();
+        let mut res = SmallVec::new();
         for (hash, status) in &mut pending.needed_layers {
             if active_count >= REQUEST_COUNT {
                 break;
@@ -515,9 +537,10 @@ impl<App: KolmeApp> SyncManager<App> {
                 .kolme
                 .add_block_with_state(pending.block.clone())
                 .await?;
+            Ok(None)
+        } else {
+            Ok(Some(res))
         }
-
-        Ok(())
     }
 
     async fn process_available_hash(
@@ -607,11 +630,6 @@ impl<App: KolmeApp> SyncManager<App> {
             latest_block: _,
         }: ReportBlockHeight,
     ) {
-        tracing::debug!(
-            "{}: got block height report message: peer=={peer}, next=={next}",
-            gossip.local_display_name
-        );
-
         let Some(height) = next.prev() else { return };
 
         // All sync preferences currently want to download latest blocks.
