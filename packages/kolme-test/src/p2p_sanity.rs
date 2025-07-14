@@ -3,7 +3,7 @@ use std::sync::Arc;
 use kolme::{testtasks::TestTasks, *};
 use tokio::time::{timeout, Duration};
 
-use kolme_test::*;
+use crate::kolme_app::*;
 
 #[tokio::test]
 async fn sanity() {

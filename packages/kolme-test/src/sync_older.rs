@@ -1,6 +1,6 @@
 use kolme::{testtasks::TestTasks, *};
 
-use kolme_test::*;
+use crate::kolme_app::*;
 
 #[tokio::test]
 async fn sync_older() {

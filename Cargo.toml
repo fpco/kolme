@@ -32,6 +32,7 @@ merkle-map = { path = "packages/merkle-map" }
 quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
 lru = "0.14.0"
+rand = "0.8"
 
 [workspace.lints.clippy]
 unused_async = "deny"

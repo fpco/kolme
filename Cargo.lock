@@ -4480,11 +4480,20 @@ name = "kolme-test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "jiff",
+ "kademlia-discovery",
  "kolme",
+ "kolme-store",
  "merkle-map",
+ "parking_lot",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "shared",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

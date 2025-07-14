@@ -7,15 +7,9 @@ use kolme_store::sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
     Executor,
 };
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use kolme_test::*;
-
-pub fn get_sample_secret_key() -> &'static SecretKey {
-    static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
-}
+use crate::kolme_app::*;
 
 // #[tokio::test]
 // async fn test_in_memory_block_double_insertion() {

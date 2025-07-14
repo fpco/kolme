@@ -8,7 +8,7 @@ use kolme::testtasks::TestTasks;
 use kolme::*;
 use tokio::{sync::oneshot, time::timeout};
 
-use kolme_test::*;
+use crate::kolme_app::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tx_evicted_mempool() {

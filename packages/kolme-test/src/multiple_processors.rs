@@ -10,7 +10,7 @@ use kolme_store::sqlx::{
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 
-use kolme_test::*;
+use crate::kolme_app::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 100)]
 async fn multiple_processors() {

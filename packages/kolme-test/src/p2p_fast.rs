@@ -1,5 +1,5 @@
+use crate::kolme_app::*;
 use kolme::{testtasks::TestTasks, *};
-use kolme_test::*;
 
 #[tokio::test]
 async fn fast_sync() {

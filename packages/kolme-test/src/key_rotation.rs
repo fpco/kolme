@@ -3,10 +3,10 @@ use std::sync::Arc;
 use kolme::*;
 use testtasks::TestTasks;
 
-use kolme_test::*;
+use crate::kolme_app::*;
 
 #[tokio::test]
-async fn test_self_replace() {
+pub async fn test_self_replace() {
     TestTasks::start(test_self_replace_inner, ()).await;
 }
 
