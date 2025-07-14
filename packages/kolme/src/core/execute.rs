@@ -460,6 +460,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         &mut self.app_state
     }
 
+    pub fn framework_state(&self) -> &FrameworkState {
+        &self.framework_state
+    }
+
+    pub fn framework_state_mut(&mut self) -> &mut FrameworkState {
+        &mut self.framework_state
+    }
+
     pub fn block_time(&self) -> Timestamp {
         self.timestamp
     }
@@ -717,19 +725,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
                 validator_set.message.as_inner().validate()?;
-                let id = self.get_next_admin_proposal_id()?;
-                let state = self.framework_state.admin_proposal_state.as_mut();
-                state.proposals.insert(
-                    id,
-                    PendingProposal {
-                        payload: ProposalPayload::NewSet(validator_set.message.clone()),
-                        approvals: std::iter::once((
-                            self.pubkey,
-                            validator_set.signature_with_recovery(),
-                        ))
-                        .collect(),
-                    },
-                );
+                self.add_admin_proposal(
+                    ProposalPayload::NewSet(validator_set.message.clone()),
+                    self.pubkey,
+                    validator_set.signature_with_recovery(),
+                )?;
                 self.check_pending_proposals()?;
             }
             AdminMessage::MigrateContract(migrate) => {
@@ -739,19 +739,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .validator_set
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
-                let id = self.get_next_admin_proposal_id()?;
-                let state = self.framework_state.admin_proposal_state.as_mut();
-                state.proposals.insert(
-                    id,
-                    PendingProposal {
-                        payload: ProposalPayload::MigrateContract(migrate.message.clone()),
-                        approvals: std::iter::once((
-                            self.pubkey,
-                            migrate.signature_with_recovery(),
-                        ))
-                        .collect(),
-                    },
-                );
+                self.add_admin_proposal(
+                    ProposalPayload::MigrateContract(migrate.message.clone()),
+                    self.pubkey,
+                    migrate.signature_with_recovery(),
+                )?;
                 self.check_pending_proposals()?;
             }
             AdminMessage::Upgrade(upgrade) => {
@@ -761,22 +753,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .validator_set
                     .as_ref()
                     .ensure_is_validator(self.pubkey)?;
-                let id = self.get_next_admin_proposal_id()?;
-                self.framework_state
-                    .admin_proposal_state
-                    .as_mut()
-                    .proposals
-                    .insert(
-                        id,
-                        PendingProposal {
-                            payload: ProposalPayload::Upgrade(upgrade.message.clone()),
-                            approvals: std::iter::once((
-                                self.pubkey,
-                                upgrade.signature_with_recovery(),
-                            ))
-                            .collect(),
-                        },
-                    );
+                self.add_admin_proposal(
+                    ProposalPayload::Upgrade(upgrade.message.clone()),
+                    self.pubkey,
+                    upgrade.signature_with_recovery(),
+                )?;
                 self.check_pending_proposals()?;
             }
             AdminMessage::Approve {
@@ -857,17 +838,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.logs.last_mut().unwrap().push(msg.into());
     }
 
-    fn log_event(&mut self, event: LogEvent) -> Result<()> {
+    pub fn log_event(&mut self, event: LogEvent) -> Result<()> {
         let json = serde_json::to_string(&event)?;
         self.log(json);
         Ok(())
-    }
-
-    fn get_next_admin_proposal_id(&mut self) -> Result<AdminProposalId> {
-        let state = self.framework_state.admin_proposal_state.as_mut();
-        let id = state.next_admin_proposal_id;
-        state.next_admin_proposal_id = id.next();
-        self.log_event(LogEvent::NewAdminProposal(id))?;
-        Ok(id)
     }
 }

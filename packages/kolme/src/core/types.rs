@@ -1199,7 +1199,7 @@ impl AdminMessage {
 }
 
 /// The action that should be taken for this proposal.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProposalPayload {
     NewSet(TaggedJson<ValidatorSet>),
     MigrateContract(TaggedJson<MigrateContract>),
