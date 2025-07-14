@@ -1,12 +1,16 @@
+# List all dependencies
 default:
-    just --list
+    just --list --unsorted
 
+# Clippy check
 cargo-clippy-check:
 	cargo clippy --no-deps --workspace --locked --tests --benches --examples -- -Dwarnings
 
+# Rustfmt check
 cargo-fmt-check:
     cargo fmt --all --check
 
+# Format Rust code
 fmt:
 	cargo fmt --all
 
@@ -77,3 +81,7 @@ stress-test:
 # Run exact test
 run-exact-test target:
 	cargo nextest run --no-capture -- --exact {{target}}
+
+# Run test
+run-test target:
+	cargo nextest run --no-fail-fast --no-capture -- {{target}}
