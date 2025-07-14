@@ -1,5 +1,5 @@
 mod messages;
-mod state_sync;
+mod sync_manager;
 
 use std::{
     fmt::Display,
@@ -20,7 +20,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
-use state_sync::{DataRequest, StateSyncStatus, SyncType};
+use sync_manager::{DataRequest, SyncManager, SyncType};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
@@ -44,7 +44,7 @@ pub struct Gossip<App: KolmeApp> {
     /// Switches to true once we have our first success received message
     watch_network_ready: tokio::sync::watch::Sender<bool>,
     /// Status of state syncs, if present.
-    state_sync: Mutex<StateSyncStatus<App>>,
+    state_sync: Mutex<SyncManager<App>>,
     /// LRU cache for notifications received via P2p layer
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
 }
@@ -322,7 +322,7 @@ impl GossipBuilder {
 
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
-        let state_sync = Mutex::new(StateSyncStatus::new(kolme.clone()));
+        let state_sync = Mutex::new(SyncManager::default());
 
         Ok(Gossip {
             kolme,
@@ -395,7 +395,7 @@ impl<App: KolmeApp> Gossip<App> {
                 // And any time we add something new to the mempool, broadcast all items.
                 _ = mempool_additions.listen() => self.broadcast_mempool_entries(&mut swarm),
                 Some(height) = block_requester_rx.recv() => {
-                    if let Err(e) = self.state_sync.lock().await.add_needed_block(height, None, SyncType::State).await {
+                    if let Err(e) = self.state_sync.lock().await.add_needed_block(&self, height, None, SyncType::State).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
                     } else {
                         self.trigger_state_sync.trigger();
@@ -750,7 +750,7 @@ impl<App: KolmeApp> Gossip<App> {
                     .state_sync
                     .lock()
                     .await
-                    .add_pending_block(block, peer)
+                    .add_pending_block(self, block, peer)
                     .await
                 {
                     Ok(None) => self.trigger_state_sync.trigger(),
@@ -777,7 +777,7 @@ impl<App: KolmeApp> Gossip<App> {
                     .state_sync
                     .lock()
                     .await
-                    .add_merkle_layer(hash, contents, peer)
+                    .add_merkle_layer(self, hash, contents, peer)
                     .await
                 {
                     Ok(()) => self.trigger_state_sync.trigger(),
@@ -888,6 +888,7 @@ impl<App: KolmeApp> Gossip<App> {
             .lock()
             .await
             .add_needed_block(
+                self,
                 next_to_sync,
                 Some(peer),
                 if do_state {
@@ -948,7 +949,7 @@ impl<App: KolmeApp> Gossip<App> {
             data: height,
             current_peers,
             request_new_peers,
-        }) = self.state_sync.lock().await.get_block_request().await?
+        }) = self.state_sync.lock().await.get_block_request(self).await?
         else {
             return Ok(());
         };
@@ -977,7 +978,12 @@ impl<App: KolmeApp> Gossip<App> {
         &self,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) -> Result<()> {
-        let requests = self.state_sync.lock().await.get_layer_requests().await?;
+        let requests = self
+            .state_sync
+            .lock()
+            .await
+            .get_layer_requests(self)
+            .await?;
         for DataRequest {
             data: hash,
             current_peers,

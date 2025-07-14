@@ -20,8 +20,7 @@ pub(super) enum SyncType {
 }
 
 /// Status of state syncing.
-pub(super) struct StateSyncStatus<App: KolmeApp> {
-    kolme: Kolme<App>,
+pub(super) struct SyncManager<App: KolmeApp> {
     /// Blocks we're interested in but haven't received any info on yet.
     needed_blocks: BTreeMap<BlockHeight, (RequestStatus, SyncType)>,
     /// The block we are currently in the process of requesting, if any.
@@ -160,10 +159,9 @@ impl RequestStatus {
     }
 }
 
-impl<App: KolmeApp> StateSyncStatus<App> {
-    pub(super) fn new(kolme: Kolme<App>) -> Self {
-        StateSyncStatus {
-            kolme,
+impl<App: KolmeApp> Default for SyncManager<App> {
+    fn default() -> Self {
+        SyncManager {
             needed_blocks: BTreeMap::new(),
             active_block: None,
             pending_blocks: BTreeMap::new(),
@@ -174,14 +172,17 @@ impl<App: KolmeApp> StateSyncStatus<App> {
             reverse_layers: HashMap::new(),
         }
     }
+}
 
+impl<App: KolmeApp> SyncManager<App> {
     pub(super) async fn add_needed_block(
         &mut self,
+        gossip: &Gossip<App>,
         height: BlockHeight,
         peer: Option<PeerId>,
         sync_type: SyncType,
     ) -> Result<()> {
-        if !self.kolme.has_block(height).await? && !self.pending_blocks.contains_key(&height) {
+        if !gossip.kolme.has_block(height).await? && !self.pending_blocks.contains_key(&height) {
             self.needed_blocks
                 .entry(height)
                 .or_insert((RequestStatus::new(peer), sync_type));
@@ -204,6 +205,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
     /// Returns [Some] if we should perform a block sync, None otherwise.
     pub(super) async fn add_pending_block(
         &mut self,
+        gossip: &Gossip<App>,
         block: Arc<SignedBlock<App::Message>>,
         peer: PeerId,
     ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
@@ -216,7 +218,8 @@ impl<App: KolmeApp> StateSyncStatus<App> {
             return Ok(Some(block));
         }
 
-        if self.pending_blocks.contains_key(&height) || self.kolme.has_block(block.height()).await?
+        if self.pending_blocks.contains_key(&height)
+            || gossip.kolme.has_block(block.height()).await?
         {
             self.needed_blocks.remove(&height);
             return Ok(None);
@@ -225,7 +228,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         let inner = block.0.message.as_inner();
         let mut has_all = true;
         for hash in [inner.framework_state, inner.app_state, inner.logs] {
-            if !self.kolme.has_merkle_hash(hash).await? {
+            if !gossip.kolme.has_merkle_hash(hash).await? {
                 has_all = false;
                 self.reverse_blocks.entry(hash).or_default().insert(height);
                 self.needed_layers
@@ -235,13 +238,14 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 
         self.pending_blocks.insert(height, block);
         if has_all {
-            self.process_available_block(height).await?;
+            self.process_available_block(gossip, height).await?;
         }
         Ok(None)
     }
 
     pub(super) async fn add_merkle_layer(
         &mut self,
+        gossip: &Gossip<App>,
         hash: Sha256Hash,
         layer: MerkleLayerContents,
         peer: PeerId,
@@ -249,10 +253,10 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         if !self.needed_layers.contains_key(&hash) || self.pending_layers.contains_key(&hash) {
             return Ok(());
         }
-        if !self.kolme.has_merkle_hash(hash).await? {
+        if !gossip.kolme.has_merkle_hash(hash).await? {
             let mut has_all = true;
             for child in &layer.children {
-                if !self.kolme.has_merkle_hash(*child).await? {
+                if !gossip.kolme.has_merkle_hash(*child).await? {
                     has_all = false;
                     self.reverse_layers.entry(*child).or_default().insert(hash);
                     self.needed_layers
@@ -264,7 +268,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
             self.pending_layers.insert(hash, layer);
 
             if has_all {
-                self.process_available_hash(hash).await?;
+                self.process_available_hash(gossip, hash).await?;
             }
         }
         self.needed_layers.remove(&hash);
@@ -272,10 +276,13 @@ impl<App: KolmeApp> StateSyncStatus<App> {
     }
 
     /// Get any needed block data request, if relevant.
-    pub(super) async fn get_block_request(&mut self) -> Result<Option<DataRequest<BlockHeight>>> {
+    pub(super) async fn get_block_request(
+        &mut self,
+        gossip: &Gossip<App>,
+    ) -> Result<Option<DataRequest<BlockHeight>>> {
         // First, clear out an existing block request if it's already been fulfilled.
         if let Some(height) = self.active_block {
-            if self.pending_blocks.contains_key(&height) || self.kolme.has_block(height).await? {
+            if self.pending_blocks.contains_key(&height) || gossip.kolme.has_block(height).await? {
                 self.active_block = None;
             }
         }
@@ -287,7 +294,7 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                 break;
             };
             let height = *height;
-            if self.pending_blocks.contains_key(&height) || self.kolme.has_block(height).await? {
+            if self.pending_blocks.contains_key(&height) || gossip.kolme.has_block(height).await? {
                 self.needed_blocks.remove(&height);
             }
             self.active_block = Some(height);
@@ -321,10 +328,12 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 
     pub(super) async fn get_layer_requests(
         &mut self,
+        gossip: &Gossip<App>,
     ) -> Result<SmallVec<[DataRequest<Sha256Hash>; REQUEST_COUNT]>> {
         // First, clear out an existing layer requests that have already been fulfilled.
         for (idx, hash) in self.active_layers.clone().into_iter().enumerate().rev() {
-            if self.pending_layers.contains_key(&hash) || self.kolme.has_merkle_hash(hash).await? {
+            if self.pending_layers.contains_key(&hash) || gossip.kolme.has_merkle_hash(hash).await?
+            {
                 self.active_layers.remove(idx);
             }
         }
@@ -336,7 +345,8 @@ impl<App: KolmeApp> StateSyncStatus<App> {
             if self.active_layers.len() >= REQUEST_COUNT {
                 break;
             }
-            if self.pending_layers.contains_key(hash) || self.kolme.has_merkle_hash(*hash).await? {
+            if self.pending_layers.contains_key(hash) || gossip.kolme.has_merkle_hash(*hash).await?
+            {
                 to_remove.push(*hash);
             } else {
                 self.active_layers.push(*hash);
@@ -372,8 +382,12 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         Ok(res)
     }
 
-    async fn process_available_block(&mut self, height: BlockHeight) -> Result<()> {
-        if self.kolme.has_block(height).await? {
+    async fn process_available_block(
+        &mut self,
+        gossip: &Gossip<App>,
+        height: BlockHeight,
+    ) -> Result<()> {
+        if gossip.kolme.has_block(height).await? {
             // Nothing to be done
             self.pending_blocks.remove(&height);
             Ok(())
@@ -385,12 +399,12 @@ impl<App: KolmeApp> StateSyncStatus<App> {
 
                     let block = signed_block.0.message.as_inner();
                     for hash in [block.framework_state, block.app_state, block.logs] {
-                        if !self.kolme.has_merkle_hash(hash).await? {
+                        if !gossip.kolme.has_merkle_hash(hash).await? {
                             return Ok(());
                         }
                     }
 
-                    self.kolme.add_block_with_state(signed_block).await?;
+                    gossip.kolme.add_block_with_state(signed_block).await?;
                     entry.remove_entry();
                     Ok(())
                 }
@@ -402,8 +416,12 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         }
     }
 
-    async fn process_available_hash(&mut self, hash: Sha256Hash) -> Result<()> {
-        if self.kolme.has_merkle_hash(hash).await? {
+    async fn process_available_hash(
+        &mut self,
+        gossip: &Gossip<App>,
+        hash: Sha256Hash,
+    ) -> Result<()> {
+        if gossip.kolme.has_merkle_hash(hash).await? {
             // Awesome, we have the hash stored, we can drop it from pending and continue upstream.
             self.pending_layers.remove(&hash);
         } else {
@@ -412,14 +430,14 @@ impl<App: KolmeApp> StateSyncStatus<App> {
                 btree_map::Entry::Occupied(entry) => {
                     // Check if all the children are stored.
                     for child in &entry.get().children {
-                        if !self.kolme.has_merkle_hash(*child).await? {
+                        if !gossip.kolme.has_merkle_hash(*child).await? {
                             // Not all children available yet, so wait.
                             return Ok(());
                         }
                     }
 
                     // OK, we have all the children! Time to store it.
-                    self.kolme.add_merkle_layer(hash, entry.get()).await?;
+                    gossip.kolme.add_merkle_layer(hash, entry.get()).await?;
 
                     entry.remove_entry();
                 }
@@ -434,14 +452,14 @@ impl<App: KolmeApp> StateSyncStatus<App> {
         // or we just wrote it there. Either way, now go check all the reverse dependencies.
         if let Some(heights) = self.reverse_blocks.get(&hash).cloned() {
             for height in heights {
-                self.process_available_block(height).await?;
+                self.process_available_block(gossip, height).await?;
             }
             self.reverse_blocks.remove(&hash);
         }
 
         if let Some(parents) = self.reverse_layers.get(&hash).cloned() {
             for parent in parents {
-                Box::pin(self.process_available_hash(parent)).await?;
+                Box::pin(self.process_available_hash(gossip, parent)).await?;
             }
             self.reverse_layers.remove(&hash);
         }
