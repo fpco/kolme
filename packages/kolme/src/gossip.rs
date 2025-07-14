@@ -33,7 +33,6 @@ pub struct Gossip<App: KolmeApp> {
     gossip_topic: IdentTopic,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
-    sync_preference: SyncPreference,
     local_peer_id: PeerId,
     // human-readable name for an instance
     local_display_name: String,
@@ -126,7 +125,6 @@ pub struct GossipBuilder {
     heartbeat_interval: Duration,
     sync_mode: SyncMode,
     data_load_validation: DataLoadValidation,
-    sync_preference: SyncPreference,
     local_display_name: Option<String>,
     duplicate_cache_time: Duration,
 }
@@ -140,7 +138,6 @@ impl Default for GossipBuilder {
             // This is set to aid debugging by not cluttering the log space
             heartbeat_interval: Duration::from_secs(10),
             sync_mode: Default::default(),
-            sync_preference: Default::default(),
             data_load_validation: Default::default(),
             local_display_name: Default::default(),
             // Same default as libp2p_gossip
@@ -157,22 +154,22 @@ pub enum SyncMode {
     /// Allow state transfer always (aka fast sync).
     ///
     /// Requires trust in the processor to only produce valid blocks, no verification occurs on our node.
+    ///
+    /// Will still use block sync (executing a block locally) when syncing the newest block,
+    /// while this node is up-to-date, and if the node is running the right code version.
+    ///
+    /// Note that this will attempt to sync to the latest block. See [SyncMode::Archive] if you
+    /// want all the blocks.
     #[default]
     StateTransfer,
+    /// Same as [SyncMode::StateTransfer], but syncs all blocks from the beginning of the chain.
     /// Allow state transfer for version upgrades, but otherwise use block sync.
-    StateTransferForUpgrade,
-    /// Always do block sync, verifying each new block
+    Archive,
+    /// Always do block sync, verifying each new block.
+    ///
+    /// This will fail to work if the chain has different code versions. At the point of a version
+    /// upgrade, you would need to switch to a new code version.
     BlockTransfer,
-}
-
-/// Preference of how blocks are chosen for syncing.
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncPreference {
-    /// Catch up to the latest block as quickly as possible and stop.
-    #[default]
-    Latest,
-    /// Prefer catching up from the beginning (for running an archive node).
-    FromBeginning,
 }
 
 impl GossipBuilder {
@@ -222,14 +219,6 @@ impl GossipBuilder {
 
     pub fn set_local_display_name(mut self, display_name: &str) -> Self {
         self.local_display_name = Some(String::from(display_name));
-        self
-    }
-
-    /// Set the sync preference.
-    ///
-    /// See [SyncPreference] for more details and default setting.
-    pub fn set_sync_preference(mut self, sync_preference: SyncPreference) -> Self {
-        self.sync_preference = sync_preference;
         self
     }
 
@@ -328,7 +317,6 @@ impl GossipBuilder {
             gossip_topic,
             sync_mode: self.sync_mode,
             data_load_validation: self.data_load_validation,
-            sync_preference: self.sync_preference,
             local_peer_id,
             trigger_broadcast_height: Trigger::new("broadcast_height"),
             trigger_state_sync: Trigger::new("state_sync"),

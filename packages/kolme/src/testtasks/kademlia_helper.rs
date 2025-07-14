@@ -48,10 +48,7 @@ impl TestTasks {
         discovery: &KademliaDiscovery,
     ) {
         self.launch_kademlia_client_with(kolme, display_name, discovery, |builder| {
-            builder.set_sync_mode(
-                SyncMode::BlockTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
+            builder.set_sync_mode(SyncMode::BlockTransfer, DataLoadValidation::ValidateDataLoads)
         });
     }
 

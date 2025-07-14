@@ -167,12 +167,10 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
         "kolme_state_transfer",
         &discovery,
         |builder| {
-            builder
-                .set_sync_mode(
-                    SyncMode::StateTransfer,
-                    DataLoadValidation::ValidateDataLoads,
-                )
-                .set_sync_preference(gossip::SyncPreference::LatestThenBeginning)
+            builder.set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
         },
     );
 
@@ -236,6 +234,10 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     //   - Validate that previous archived heights "updated_at" have not changed
     const IDENT: &str = "sync-older";
     let db_url = std::env::var("PROCESSOR_BLOCK_DB").expect("PROCESSOR_BLOCK_DB is missing");
+    if db_url == "SKIP" {
+        tracing::info!("Skipping test based on PROCESSOR_BLOCK_DB=SKIP env var");
+        return;
+    }
     // Clear db
     let pool = sqlx::PgPool::connect(&db_url)
         .await
