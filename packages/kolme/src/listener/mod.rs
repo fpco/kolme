@@ -73,7 +73,10 @@ impl<App: KolmeApp> Listener<App> {
             match res {
                 Err(e) => {
                     set.abort_all();
-                    return Err(anyhow::anyhow!("Listener panicked: {e}"));
+                    return Err(KolmeError::ListenerPanicked {
+                        details: e.to_string(),
+                    }
+                    .into());
                 }
                 Ok(Err(e)) => return Err(e),
                 Ok(Ok(())) => (),
@@ -104,7 +107,7 @@ impl<App: KolmeApp> Listener<App> {
                         BridgeContract::NeededCosmosBridge { code_id } => code_id,
                         BridgeContract::NeededSolanaBridge { .. } => 0, // Solana has no code id to check
                         BridgeContract::Deployed(_) => {
-                            anyhow::bail!("Already have a deployed contract on {chain:?}")
+                            return Err(KolmeError::ContractAlreadyDeployed { chain }.into());
                         }
                     };
 
@@ -132,7 +135,7 @@ impl<App: KolmeApp> Listener<App> {
                         }
                         #[cfg(feature = "pass_through")]
                         ChainKind::PassThrough => {
-                            anyhow::bail!("No wait for pass-through contract is expected")
+                            return Err(KolmeError::UnexpectedPassThroughContract.into());
                         }
                     };
 

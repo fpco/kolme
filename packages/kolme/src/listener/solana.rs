@@ -42,14 +42,18 @@ pub async fn sanity_check_contract(
     let acc = client.get_account(&state_acc).await?;
 
     if acc.owner != program_id || acc.data.len() < 2 {
-        return Err(anyhow::anyhow!(
-            "Bridge program {program} hasn't been initialized yet."
-        ));
+        return Err(KolmeError::UninitializedSolanaBridge {
+            program: program.to_string(),
+        }
+        .into());
     }
 
     // Skip the first two bytes which are the discriminator byte and the bump seed respectively.
-    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..])
-        .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
+    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..]).map_err(|x| {
+        KolmeError::InvalidSolanaBridgeState {
+            details: format!("{x:?}"),
+        }
+    })?;
 
     anyhow::ensure!(info.validator_set.processor == state.set.processor);
     anyhow::ensure!(info.validator_set.listeners == state.set.listeners);
@@ -245,11 +249,10 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
         let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
         let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
 
-        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|x| {
-            anyhow::anyhow!(
-                "Error deserializing Solana bridge message from logs: {:?}",
-                x
-            )
+        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|e| {
+            KolmeError::InvalidSolanaBridgeLogMessage {
+                details: format!("{e:?}"),
+            }
         });
 
         match result {
@@ -261,8 +264,7 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
                     );
                     return Ok(None);
                 }
-
-                return Err(e);
+                return Err(e.into());
             }
         }
     }

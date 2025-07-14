@@ -1334,9 +1334,7 @@ impl ConfiguredChains {
 
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Cosmos contract as a Solana bridge."
-                ))
+                return Err(KolmeError::CosmosBridgeConfiguredAsSolana.into());
             }
             BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(program_id)?,
             BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
@@ -1352,9 +1350,7 @@ impl ConfiguredChains {
 
         match &config.bridge {
             BridgeContract::NeededSolanaBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Solana program as a Cosmos bridge."
-                ))
+                return Err(KolmeError::SolanaBridgeConfiguredAsCosmos.into());
             }
             BridgeContract::NeededCosmosBridge { .. } => (),
             BridgeContract::Deployed(program_id) => {
@@ -1375,17 +1371,13 @@ impl ConfiguredChains {
                 .get(&ExternalChain::PassThrough)
                 .is_some_and(|existing| *existing != config)
             {
-                Err(anyhow::anyhow!(
-                    "Multiple pass-through bridges are not supported"
-                ))
+                Err(KolmeError::MultiplePassThroughBridgesUnsupported.into())
             } else {
                 self.0.insert(ExternalChain::PassThrough, config);
                 Ok(())
             }
         } else {
-            Err(anyhow::anyhow!(
-                "Pass-through bridge can't require Cosmos or Solana bridge contract"
-            ))
+            Err(KolmeError::InvalidPassThroughBridgeType.into())
         }
     }
 }
@@ -1577,46 +1569,48 @@ impl ExecAction {
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
-            ExecAction::MigrateContract { migrate_contract } => {
-                match chain.name() {
-                    ChainName::Cosmos => {
-                        let contract_addr = match &config.bridge {
+            ExecAction::MigrateContract { migrate_contract } => match chain.name() {
+                ChainName::Cosmos => {
+                    let contract_addr = match &config.bridge {
                         BridgeContract::Deployed(addr) => addr.clone(),
-                        _ => anyhow::bail!("Unable to migrate contract for chain {chain}: contract isn't deployed")
+                        _ => return Err(KolmeError::ContractNotDeployed { chain }.into()),
                     };
-                        let MigrateContract {
-                            chain: _,
-                            new_code_id,
-                            message,
-                        } = migrate_contract.as_inner();
-                        let msg = CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Migrate {
-                            contract_addr,
-                            new_code_id: *new_code_id,
-                            msg: Binary::from(serde_json::to_vec(message)?),
-                        });
-                        let payload = serde_json::to_string(&cosmos::PayloadWithId {
-                            id,
-                            action: shared::cosmos::CosmosAction::Cosmos(vec![msg]),
-                        })?;
+                    let MigrateContract {
+                        chain: _,
+                        new_code_id,
+                        message,
+                    } = migrate_contract.as_inner();
+                    let msg = CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Migrate {
+                        contract_addr,
+                        new_code_id: *new_code_id,
+                        msg: Binary::from(serde_json::to_vec(message)?),
+                    });
+                    let payload = serde_json::to_string(&cosmos::PayloadWithId {
+                        id,
+                        action: shared::cosmos::CosmosAction::Cosmos(vec![msg]),
+                    })?;
 
-                        Ok(payload)
-                    }
-                    ChainName::Solana => todo!(),
-                    #[cfg(feature = "pass_through")]
-                    ChainName::PassThrough => todo!(),
+                    Ok(payload)
                 }
-            }
+                ChainName::Solana => todo!(),
+                #[cfg(feature = "pass_through")]
+                ChainName::PassThrough => todo!(),
+            },
         }
     }
 }
 
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String> {
-    let len = borsh::object_length(&payload)
-        .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
+    let len = borsh::object_length(&payload).map_err(|e| KolmeError::SolanaPayloadLengthError {
+        details: format!("{e:?}"),
+    })?;
 
     let mut buf = Vec::with_capacity(len);
-    borsh::BorshSerialize::serialize(&payload, &mut buf)
-        .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
+    borsh::BorshSerialize::serialize(&payload, &mut buf).map_err(|e| {
+        KolmeError::SolanaPayloadSerializationError {
+            details: format!("{e:?}"),
+        }
+    })?;
 
     let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
 

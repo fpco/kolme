@@ -360,11 +360,11 @@ impl<App: KolmeApp> Kolme<App> {
         // Make sure we're at the right height for this and the correct processor is signing this.
         let kolme = self.read();
         if kolme.get_next_height() != signed_block.height() {
-            anyhow::bail!(
-                "Tried to add block with height {}, but next expected height is {}",
-                signed_block.height(),
-                kolme.get_next_height()
-            );
+            return Err(KolmeError::UnexpectedBlockHeight {
+                received: signed_block.height(),
+                expected: kolme.get_next_height(),
+            }
+            .into());
         }
 
         let actual_parent = kolme.get_current_block_hash();
@@ -509,18 +509,21 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<()> {
         // Don't accept blocks we already have
         if self.has_block(signed_block.height()).await? {
-            anyhow::bail!(
-                "Tried to add block with height {}, but it's already present in the store.",
-                signed_block.height()
-            );
+            return Err(KolmeError::BlockAlreadyExists {
+                height: signed_block.height(),
+            }
+            .into());
         }
         let kolme = self.read();
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
-        anyhow::ensure!(
-            expected_processor == actual_processor,
-            "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
-        );
+        if expected_processor != actual_processor {
+            return Err(KolmeError::InvalidBlockProcessor {
+                expected_processor,
+                actual_processor,
+            }
+            .into());
+        }
 
         let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;

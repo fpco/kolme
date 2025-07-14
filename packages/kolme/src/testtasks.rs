@@ -7,6 +7,8 @@ use std::sync::{
 
 use tokio::sync::mpsc::error::TryRecvError;
 
+use crate::KolmeError;
+
 #[derive(Clone)]
 pub struct TestTasks {
     send_keep_running: tokio::sync::watch::Sender<bool>,
@@ -131,13 +133,23 @@ impl TestTasks {
                 match res {
                     Ok(Ok(())) => {
                         if persistent {
-                            Some(anyhow::anyhow!("Persistent task exited unexpectedly"))
+                            Some(KolmeError::PersistentTaskExited.into())
                         } else {
                             None
                         }
                     }
-                    Ok(Err(e)) => Some(e.context("Task exited with an error")),
-                    Err(e) => Some(anyhow::anyhow!("Task panicked: {e}")),
+                    Ok(Err(e)) => Some(
+                        KolmeError::TaskErrored {
+                            error: e.to_string(),
+                        }
+                        .into(),
+                    ),
+                    Err(e) => Some(
+                        KolmeError::TaskPanicked {
+                            details: e.to_string(),
+                        }
+                        .into(),
+                    ),
                 }
             } else {
                 None

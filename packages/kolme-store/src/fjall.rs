@@ -57,7 +57,12 @@ impl KolmeBackingStore for Store {
         };
         let height = match <[u8; 8]>::try_from(&*height) {
             Ok(height) => u64::from_be_bytes(height),
-            Err(e) => anyhow::bail!("get_height_for_tx: invalid height in Fjall store: {e}"),
+            Err(e) => {
+                return Err(KolmeStoreError::InvalidHeightInFjall {
+                    details: e.to_string(),
+                }
+                .into())
+            }
         };
         Ok(Some(height))
     }

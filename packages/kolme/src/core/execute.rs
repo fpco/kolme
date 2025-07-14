@@ -293,9 +293,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 BridgeEvent::Instantiated { contract } => {
                     let config = &mut self.framework_state.chains.get_mut(chain)?.config;
                     match config.bridge {
-                        BridgeContract::NeededCosmosBridge { .. } |
-                            BridgeContract::NeededSolanaBridge { .. } => (),
-                        BridgeContract::Deployed(_) => anyhow::bail!("Already have a bridge contract for {chain:?}, just received another from a listener"),
+                        BridgeContract::NeededCosmosBridge { .. }
+                        | BridgeContract::NeededSolanaBridge { .. } => (),
+                        BridgeContract::Deployed(_) => {
+                            return Err(KolmeError::BridgeAlreadyDeployed { chain }.into())
+                        }
                     }
                     config.bridge = BridgeContract::Deployed(contract.clone());
                 }
@@ -670,7 +672,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         match admin {
             AdminMessage::SelfReplace(self_replace) => {
                 let signer = self_replace.verify_signature()?;
-                anyhow::ensure!(signer == self.pubkey);
+                if signer != self.pubkey {
+                    return Err(KolmeError::InvalidSelfReplaceSigner.into());
+                }
                 fn set_helper(
                     validator_set: &mut ValidatorSet,
                     is_approver: bool,
@@ -683,7 +687,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         &mut validator_set.listeners
                     };
                     if !set.remove(&sender) {
-                        anyhow::bail!("Signing public key {} is not a member of the {} set and cannot self-replace", sender, if is_approver {"approver"}else{"listener"});
+                        return Err(KolmeError::NotInValidatorSet {
+                            signer: sender,
+                            role: if is_approver { "approver" } else { "listener" }.to_string(),
+                        }
+                        .into());
                     }
                     set.insert(replacement);
                     Ok(())
@@ -696,7 +704,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         if config.processor == signer {
                             config.processor = replacement;
                         } else {
-                            anyhow::bail!("Signing public key {} is not the current processor and cannot self-replace", self.pubkey);
+                            return Err(KolmeError::NotProcessor {
+                                signer: self.pubkey,
+                            }
+                            .into());
                         }
                     }
                     ValidatorType::Listener => {

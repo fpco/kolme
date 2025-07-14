@@ -88,10 +88,12 @@ impl<App: KolmeApp> KolmeStore<App> {
             return Ok(None);
         };
         let messages = &block.tx().0.message.as_inner().messages;
-        anyhow::ensure!(messages.len() == 1);
+        if messages.len() != 1 {
+            return Err(KolmeError::InvalidGenesisMessageCount.into());
+        }
         match messages.first().unwrap() {
             Message::Genesis(genesis_info) => Ok(Some(genesis_info.clone())),
-            _ => Err(anyhow::anyhow!("Invalid messages in first block")),
+            _ => Err(KolmeError::InvalidGenesisMessageType.into()),
         }
     }
 

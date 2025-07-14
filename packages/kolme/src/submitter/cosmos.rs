@@ -70,8 +70,10 @@ pub async fn execute(
                 "Cosmos submitter failed to execute signed transaction: {}",
                 e
             );
-
-            Err(anyhow::anyhow!(e))
+            Err(KolmeError::CosmosExecutionFailed {
+                details: e.to_string(),
+            }
+            .into())
         }
     }
 }
