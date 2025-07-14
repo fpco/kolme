@@ -48,6 +48,7 @@ hex.workspace = true
 workspace = true
 
 [dev-dependencies]
+kolme-test = { path = "../kolme-test" }
 quickcheck = { workspace = true }
 tempfile = "3.18.0"
 kademlia-discovery = { path = "../examples/kademlia-discovery" }

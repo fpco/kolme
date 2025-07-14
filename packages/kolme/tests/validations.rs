@@ -1,96 +1,10 @@
-use std::{
-    collections::BTreeSet,
-    sync::{Arc, OnceLock},
-};
+use std::sync::Arc;
 
 use jiff::Timestamp;
 use testtasks::TestTasks;
 
 use kolme::*;
-
-/// In the future, move to an example and convert the binary to a library.
-#[derive(Clone, Debug)]
-pub struct SampleKolmeApp {
-    pub genesis: GenesisInfo,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SampleState {}
-
-impl MerkleSerialize for SampleState {
-    fn merkle_serialize(
-        &self,
-        _serializer: &mut MerkleSerializer,
-    ) -> Result<(), MerkleSerialError> {
-        Ok(())
-    }
-}
-
-impl MerkleDeserialize for SampleState {
-    fn merkle_deserialize(
-        _deserializer: &mut MerkleDeserializer,
-        _version: usize,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(SampleState {})
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum SampleMessage {
-    SayHi,
-}
-
-pub fn get_sample_secret_key() -> &'static SecretKey {
-    static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
-}
-
-const DUMMY_CODE_VERSION: &str = "dummy code version";
-
-impl Default for SampleKolmeApp {
-    fn default() -> Self {
-        let my_public_key = get_sample_secret_key().public_key();
-        let mut set = BTreeSet::new();
-        set.insert(my_public_key);
-        let genesis = GenesisInfo {
-            kolme_ident: "Dev code".to_owned(),
-            validator_set: ValidatorSet {
-                processor: my_public_key,
-                listeners: set.clone(),
-                needed_listeners: 1,
-                approvers: set,
-                needed_approvers: 1,
-            },
-            chains: ConfiguredChains::default(),
-            version: DUMMY_CODE_VERSION.to_owned(),
-        };
-
-        Self { genesis }
-    }
-}
-
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info(&self) -> &GenesisInfo {
-        &self.genesis
-    }
-
-    fn new_state() -> anyhow::Result<Self::State> {
-        Ok(SampleState {})
-    }
-
-    async fn execute(
-        &self,
-        _ctx: &mut ExecutionContext<'_, Self>,
-        _msg: &Self::Message,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
+use kolme_test::*;
 
 #[tokio::test]
 async fn test_invalid_hashes() {
@@ -99,9 +13,9 @@ async fn test_invalid_hashes() {
 }
 
 async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
-    let processor = get_sample_secret_key();
+    let processor = my_secret_key();
     let kolme = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new("Dev code"),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
@@ -160,7 +74,7 @@ async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
         f(&mut block);
         let signed = TaggedJson::new(block)
             .unwrap()
-            .sign(get_sample_secret_key())
+            .sign(&my_secret_key())
             .unwrap();
         let signed = Arc::new(SignedBlock(signed));
         kolme.add_block(signed).await

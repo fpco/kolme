@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeSet, HashSet},
-    sync::{Arc, OnceLock},
-};
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use kolme::testtasks::TestTasks;
@@ -13,89 +10,7 @@ use kolme_store::sqlx::{
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 
-#[derive(Clone)]
-pub struct SampleKolmeApp {
-    pub genesis: GenesisInfo,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SampleState {}
-
-impl MerkleSerialize for SampleState {
-    fn merkle_serialize(
-        &self,
-        _serializer: &mut MerkleSerializer,
-    ) -> Result<(), MerkleSerialError> {
-        Ok(())
-    }
-}
-
-impl MerkleDeserialize for SampleState {
-    fn merkle_deserialize(
-        _deserializer: &mut MerkleDeserializer,
-        _version: usize,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(SampleState {})
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum SampleMessage {
-    SayHi,
-}
-
-pub fn get_sample_secret_key() -> &'static SecretKey {
-    const HEX: &str = "60cb788cae86b83d8932715e99558d7b4d75b410cbbe379f232eb51fb743ca63";
-    static KEY: OnceLock<SecretKey> = OnceLock::new();
-    KEY.get_or_init(|| HEX.parse().unwrap())
-}
-
-const DUMMY_CODE_VERSION: &str = "dummy code version";
-
-impl Default for SampleKolmeApp {
-    fn default() -> Self {
-        let my_public_key = get_sample_secret_key().public_key();
-        let mut set = BTreeSet::new();
-        set.insert(my_public_key);
-        let genesis = GenesisInfo {
-            kolme_ident: "Dev code".to_owned(),
-            validator_set: ValidatorSet {
-                processor: my_public_key,
-                listeners: set.clone(),
-                needed_listeners: 1,
-                approvers: set,
-                needed_approvers: 1,
-            },
-            chains: ConfiguredChains::default(),
-            version: DUMMY_CODE_VERSION.to_owned(),
-        };
-
-        Self { genesis }
-    }
-}
-
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info(&self) -> &GenesisInfo {
-        &self.genesis
-    }
-
-    fn new_state() -> Result<Self::State> {
-        Ok(SampleState {})
-    }
-
-    async fn execute(
-        &self,
-        _ctx: &mut ExecutionContext<'_, Self>,
-        _msg: &Self::Message,
-    ) -> Result<()> {
-        // Don't need to do anything here
-        Ok(())
-    }
-}
+use kolme_test::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 100)]
 async fn multiple_processors() {
@@ -175,7 +90,7 @@ async fn multiple_processors_inner(
 
     for _ in 0..processor_count {
         let kolme = Kolme::new(
-            SampleKolmeApp::default(),
+            SampleKolmeApp::new("Dev code"),
             DUMMY_CODE_VERSION,
             match &store {
                 Some(store) => store.clone(),
@@ -198,7 +113,7 @@ async fn multiple_processors_inner(
         // 10 seconds to land.
         let kolme = kolme.set_tx_await_duration(tokio::time::Duration::from_secs(70));
 
-        let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
+        let processor = Processor::new(kolme.clone(), my_secret_key().clone());
         test_tasks.try_spawn_persistent(processor.run());
         test_tasks.try_spawn_persistent(check_failed_txs(kolme.clone()));
         kolmes.push(kolme);
@@ -256,7 +171,7 @@ async fn client(
         let tx = Arc::new(
             kolme
                 .read()
-                .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
+                .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])?,
         );
         let txhash = tx.hash();
         kolme.propose_and_await_transaction(tx).await?;

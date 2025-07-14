@@ -38,7 +38,6 @@ test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
 	just localosmosis
 	just cargo-test
 	just cargo-contract-tests
-	just cargo-slow-tests
 
 [working-directory: "packages/kolme-store"]
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
@@ -66,7 +65,7 @@ changelog:
 cargo-compile:
 	cargo test --workspace --no-run --locked
 
-# cargo test
+# Non contract test
 cargo-test:
 	cat contract-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
 
@@ -85,3 +84,11 @@ run-exact-test target:
 # Run test
 run-test target:
 	cargo nextest run --no-fail-fast --no-capture -- {{target}}
+
+# Profile build timings
+profile-build:
+	cargo test --workspace --no-run --locked --timings
+
+# Cargo inherit
+inherit:
+	cargo autoinherit

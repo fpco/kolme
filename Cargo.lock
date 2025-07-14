@@ -4396,6 +4396,7 @@ dependencies = [
  "kademlia-discovery",
  "kolme-solana-bridge-client",
  "kolme-store",
+ "kolme-test",
  "libp2p",
  "lru 0.14.0",
  "merkle-map",
@@ -4472,6 +4473,18 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "kolme-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kolme",
+ "merkle-map",
+ "serde",
+ "serde_json",
+ "shared",
 ]
 
 [[package]]

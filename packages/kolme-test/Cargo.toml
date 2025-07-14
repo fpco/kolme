@@ -1,0 +1,16 @@
+[package]
+name = "kolme-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kolme = { path = "../kolme" }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+merkle-map = { workspace = true }
+shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
+
+
+[lints]
+workspace = true

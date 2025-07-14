@@ -594,7 +594,7 @@ mod tests {
         let db_path = db_file.path().to_path_buf();
         let app = tokio::task::spawn(serve(
             SixSigmaApp::new_passthrough(),
-            SocketAddr::from_str("[::]:3001").unwrap(),
+            SocketAddr::from_str("[::]:3005").unwrap(),
             StoreType::Fjall(db_path.clone()),
             Some(log_file.path().to_path_buf()),
             None,
@@ -887,7 +887,7 @@ mod tests {
     }
 
     async fn server_state(client: &reqwest::Client) -> Result<()> {
-        let resp = client.get("http://localhost:3001").send().await?;
+        let resp = client.get("http://localhost:3005").send().await?;
         ensure!(resp.status().is_success());
         ensure!(resp.json::<serde_json::Value>().await.is_ok());
         Ok(())
@@ -910,7 +910,7 @@ mod tests {
         broadcast(
             serde_json::to_string(&msg).unwrap(),
             secret.to_string(),
-            "http://localhost:3001".to_string(),
+            "http://localhost:3005".to_string(),
         )
         .await?;
         (|| async {
@@ -928,7 +928,7 @@ mod tests {
     type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
     async fn connect_ws_notifications() -> WsStream {
-        let ws_url = format!("ws://localhost:{}/notifications", 3001);
+        let ws_url = format!("ws://localhost:{}/notifications", 3005);
         connect_async(&ws_url).await.unwrap().0
     }
 
@@ -959,7 +959,7 @@ mod tests {
         let txhash = broadcast(
             serde_json::to_string(&msg).unwrap(),
             secret.to_string(),
-            "http://localhost:3001".to_string(),
+            "http://localhost:3005".to_string(),
         )
         .await?;
         wait_tx(ws, |block, logs| {
