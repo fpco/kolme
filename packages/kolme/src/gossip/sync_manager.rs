@@ -209,12 +209,14 @@ impl<App: KolmeApp> SyncManager<App> {
     pub(super) fn add_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
         if let Some(WaitingBlock::Needed(status)) = self.needed_blocks.get_mut(&height) {
             status.add_peer(peer);
+            self.trigger.trigger();
         }
     }
 
     pub(super) fn remove_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
         if let Some(WaitingBlock::Needed(status)) = self.needed_blocks.get_mut(&height) {
             status.remove_peer(peer);
+            self.trigger.trigger();
         }
     }
 
@@ -256,64 +258,6 @@ impl<App: KolmeApp> SyncManager<App> {
         }
     }
 
-    //     let do_block = match gossip.sync_mode {
-    //         // If we have the prior block and we have the right code version, still
-    //         // do a block sync.
-    //         // FIXME reconsider the StateTransferForUpgrade entirely, maybe it's too wonky. This is not the right implementation regardless.
-    //         SyncMode::StateTransfer | SyncMode::StateTransferForUpgrade => {
-    //             match height.prev() {
-    //                 // We're at the starting block, so just confirm that we have
-    //                 // the same code version as the genesis
-    //                 None => {
-    //                     &gossip.kolme.get_genesis_info().version == gossip.kolme.get_code_version()
-    //                 }
-    //                 Some(needed) => {
-    //                     match gossip.kolme.load_block(needed).await {
-    //                         Ok(block) => {
-    //                             block.framework_state.get_chain_version()
-    //                                 == gossip.kolme.get_code_version()
-    //                         }
-    //                         // For any errors, just go back to block sync
-    //                         Err(_) => false,
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //         SyncMode::BlockTransfer => {
-    //             // Block transfer mode: we never allow a state transfer
-    //             true
-    //         }
-    //     };
-
-    //     if do_block {
-    //         // FIXME handle all the logic around requesting older blocks if needed
-    //         gossip.kolme.add_block(block).await?;
-    //     } else {
-    //         let mut pending = PendingBlock {
-    //             block,
-    //             needed_layers: BTreeMap::new(),
-    //             pending_layers: HashMap::new(),
-    //             reverse_layers: HashMap::new(),
-    //         };
-
-    //         let inner = pending.block.0.message.as_inner();
-    //         for hash in [inner.framework_state, inner.app_state, inner.logs] {
-    //             if !gossip.kolme.has_merkle_hash(hash).await? {
-    //                 pending.needed_layers.insert(hash, RequestStatus::new(peer));
-    //                 self.reverse_blocks.entry(hash).or_default().insert(height);
-    //             }
-    //         }
-
-    //         let has_all = pending.needed_layers.is_empty();
-    //         *waiting = WaitingBlock::Pending(pending);
-    //         if has_all {
-    //             self.process_available_block(gossip, height).await?;
-    //         }
-    //     }
-
-    //     Ok(())
-    // }
-
     fn get_heights_for_layer(&self, hash: Sha256Hash) -> SmallVec<[BlockHeight; 4]> {
         self.reverse_blocks
             .get(&hash)
@@ -333,6 +277,7 @@ impl<App: KolmeApp> SyncManager<App> {
         }
 
         self.reverse_blocks.remove(&hash);
+        self.trigger.trigger();
         Ok(())
     }
 
@@ -622,6 +567,7 @@ impl<App: KolmeApp> SyncManager<App> {
             if let Some(WaitingBlock::Pending(pending)) = self.needed_blocks.get_mut(&height) {
                 if let Some(status) = pending.needed_layers.get_mut(&hash) {
                     status.add_peer(peer);
+                    self.trigger.trigger();
                 }
             }
         }
@@ -632,6 +578,7 @@ impl<App: KolmeApp> SyncManager<App> {
             if let Some(WaitingBlock::Pending(pending)) = self.needed_blocks.get_mut(&height) {
                 if let Some(status) = pending.needed_layers.get_mut(&hash) {
                     status.remove_peer(peer);
+                    self.trigger.trigger();
                 }
             }
         }
@@ -675,47 +622,6 @@ impl<App: KolmeApp> SyncManager<App> {
                 gossip.local_display_name
             );
         }
-
-        // FIXME do we need any of this anymore?
-        // let our_next = self.kolme.read().get_next_height();
-        // tracing::debug!(
-        //     "{local_display_name}: Received ReportBlockHeight: {report:?}, our_next: {our_next}"
-        // );
-        // // Check if this peer has new blocks that we'd want to request.
-        // if our_next < report.next {
-        //     peers_with_blocks.try_send(report).ok();
-        // }
-        // let kolme = self.kolme.read();
-        // let our_next = kolme.get_next_height();
-        // let (next_to_sync, peer) = match self.get_next_to_sync(report_block_height, our_next).await
-        // {
-        //     Ok(None) => {
-        //         tracing::debug!("{}: catch_up: no new node to sync", self.local_display_name);
-        //         return;
-        //     }
-        //     Ok(Some(pair)) => pair,
-        //     Err(e) => {
-        //         tracing::error!(
-        //             "{}: error calling get_next_to_sync: {e}",
-        //             self.local_display_name
-        //         );
-        //         return;
-        //     }
-        // };
-
-        // match self
-        //     .state_sync
-        //     .lock()
-        //     .await
-        //     .add_needed_block(self, next_to_sync, Some(peer))
-        //     .await
-        // {
-        //     Ok(()) => self.trigger_state_sync.trigger(),
-        //     Err(e) => tracing::error!(
-        //         "{}: error adding needed block: {e}",
-        //         self.local_display_name
-        //     ),
-        // }
     }
 }
 

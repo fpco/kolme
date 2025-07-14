@@ -36,6 +36,23 @@ pub(super) enum BlockRequest {
     },
 }
 
+impl Display for BlockRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BlockRequest::BlockAtHeight(height) | BlockRequest::BlockWithStateAtHeight(height) => {
+                write!(f, "request block {height}")
+            }
+            BlockRequest::Merkle(hash) => write!(f, "request merkle layer {hash}"),
+            BlockRequest::BlockAvailable { height, peer } => {
+                write!(f, "notify block {height} available from {peer}")
+            }
+            BlockRequest::LayerAvailable { hash, peer } => {
+                write!(f, "notify merkle layer {hash} available from {peer}")
+            }
+        }
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(bound(
@@ -54,6 +71,8 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     },
     HeightNotFound(BlockHeight),
     MerkleNotFound(Sha256Hash),
+    /// Acknowledge a previous request that requires no response information.
+    Ack,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

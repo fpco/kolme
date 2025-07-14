@@ -38,8 +38,6 @@ pub struct Gossip<App: KolmeApp> {
     local_display_name: String,
     /// Trigger a broadcast of our latest block height.
     trigger_broadcast_height: Trigger,
-    /// Trigger a check of the state sync.
-    trigger_state_sync: Trigger,
     /// Switches to true once we have our first success received message
     watch_network_ready: tokio::sync::watch::Sender<bool>,
     /// Status of state syncs, if present.
@@ -319,7 +317,6 @@ impl GossipBuilder {
             data_load_validation: self.data_load_validation,
             local_peer_id,
             trigger_broadcast_height: Trigger::new("broadcast_height"),
-            trigger_state_sync: Trigger::new("state_sync"),
             watch_network_ready,
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             state_sync,
@@ -346,7 +343,6 @@ impl<App: KolmeApp> Gossip<App> {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         interval.reset_immediately();
         let mut trigger_broadcast_height = self.trigger_broadcast_height.subscribe();
-        let mut trigger_state_sync = self.trigger_state_sync.subscribe();
 
         let mut mempool_additions = self.kolme.subscribe_mempool_additions();
 
@@ -381,10 +377,6 @@ impl<App: KolmeApp> Gossip<App> {
                 _ = trigger_broadcast_height.listen() => {
                     self.broadcast_latest_block(&mut swarm);
                 }
-                // Same with state sync
-                _ = trigger_state_sync.listen() => {
-                    self.process_sync_manager(&mut swarm).await
-                }
                 // And any time we add something new to the mempool, broadcast all items.
                 _ = mempool_additions.listen() => {
                     self.broadcast_mempool_entries(&mut swarm);
@@ -392,8 +384,6 @@ impl<App: KolmeApp> Gossip<App> {
                 Some(height) = block_requester_rx.recv() => {
                     if let Err(e) = self.state_sync.lock().await.add_needed_block(&self, height, None).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
-                    } else {
-                        self.trigger_state_sync.trigger();
                     }
                 }
             }
@@ -663,12 +653,13 @@ impl<App: KolmeApp> Gossip<App> {
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) {
         let local_display_name = self.local_display_name.clone();
-        match request {
+        let res = match &request {
             BlockRequest::BlockAtHeight(height) | BlockRequest::BlockWithStateAtHeight(height) => {
-                let res = match self.kolme.read().get_block(height).await {
+                let height = *height;
+                match self.kolme.read().get_block(height).await {
                     Err(e) => {
                         tracing::warn!("{local_display_name}: Error querying block in gossip: {e}");
-                        return;
+                        BlockResponse::HeightNotFound(height)
                     }
                     Ok(None) => {
                         tracing::warn!("{local_display_name}: Received a request for block {height}, but didn't have it.");
@@ -687,19 +678,11 @@ impl<App: KolmeApp> Gossip<App> {
                         }
                         BlockResponse::Block(storable_block.block)
                     }
-                };
-                if let Err(e) = swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_response(channel, res)
-                {
-                    tracing::warn!(
-                        "{local_display_name}: Unable to answer BlockAtHeight request: {e:?}"
-                    );
                 }
             }
             BlockRequest::Merkle(hash) => {
-                let res = match self.kolme.get_merkle_layer(hash).await {
+                let hash = *hash;
+                match self.kolme.get_merkle_layer(hash).await {
                     // We didn't have it, in theory we could send a message back about this, but
                     // skipping for now
                     Ok(None) => {
@@ -711,31 +694,31 @@ impl<App: KolmeApp> Gossip<App> {
                         tracing::warn!(
                             "{local_display_name}: Error when loading Merkle layer for {hash}: {e}"
                         );
-                        return;
+                        BlockResponse::MerkleNotFound(hash)
                     }
-                };
-                if let Err(e) = swarm
-                    .behaviour_mut()
-                    .request_response
-                    .send_response(channel, res)
-                {
-                    tracing::warn!("{local_display_name}: Unable to answer Merkle request: {e:?}");
                 }
             }
             BlockRequest::BlockAvailable { height, peer } => {
-                self.state_sync.lock().await.add_block_peer(height, peer);
-                self.trigger_state_sync.trigger();
+                self.state_sync.lock().await.add_block_peer(*height, *peer);
+                BlockResponse::Ack
             }
             BlockRequest::LayerAvailable { hash, peer } => {
-                self.state_sync.lock().await.add_layer_peer(hash, peer);
-                self.trigger_state_sync.trigger();
+                self.state_sync.lock().await.add_layer_peer(*hash, *peer);
+                BlockResponse::Ack
             }
+        };
+
+        if let Err(e) = swarm
+            .behaviour_mut()
+            .request_response
+            .send_response(channel, res)
+        {
+            tracing::warn!("{local_display_name}: Unable to answer {request}: {e:?}");
         }
     }
 
     async fn handle_response(&self, response: BlockResponse<App::Message>, peer: PeerId) {
         let local_display_name = self.local_display_name.clone();
-        tracing::debug!("{local_display_name}: response");
         match response {
             BlockResponse::Block(block) | BlockResponse::BlockWithState { block } => {
                 self.state_sync
@@ -757,19 +740,19 @@ impl<App: KolmeApp> Gossip<App> {
                 self.state_sync.lock().await.remove_layer_peer(hash, peer);
             }
             BlockResponse::Merkle { hash, contents } => {
-                match self
+                if let Err(e) = self
                     .state_sync
                     .lock()
                     .await
                     .add_merkle_layer(self, hash, contents, peer)
                     .await
                 {
-                    Ok(()) => self.trigger_state_sync.trigger(),
-                    Err(e) => tracing::error!(
+                    tracing::error!(
                         "{local_display_name}: error adding Merkle layer contents for {hash}: {e}"
-                    ),
+                    )
                 }
             }
+            BlockResponse::Ack => (),
         }
     }
 
