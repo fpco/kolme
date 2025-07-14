@@ -3,6 +3,9 @@ name = "merkle-map"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+_testing = []
+
 [dependencies]
 arrayvec = "0.7.6"
 base64 = "0.22.1"
