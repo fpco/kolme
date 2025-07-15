@@ -21,4 +21,4 @@
   - [Timestamp Verification](technical/timestamp-verification.md)
 - [Developer Guides]()
   - [Versioning policy](devs/versioning-policy.md)
-  - [State sync implementation](devs/state-sync-implementation.md)
+  - [Sync manager](devs/sync-manager.md)

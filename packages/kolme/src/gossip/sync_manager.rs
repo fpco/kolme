@@ -1,7 +1,7 @@
 // ! Implementation of the sync manager state machine.
 //
 // Due to the complexity of the topic, there's a dedicated doc for this on the docs
-// site called "State sync implementation". Recommendation: read that before reading
+// site called "Sync manager". Recommendation: read that before reading
 // the code below.
 use std::{
     collections::{hash_map, HashMap, HashSet},
