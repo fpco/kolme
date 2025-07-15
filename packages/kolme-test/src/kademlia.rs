@@ -16,7 +16,7 @@ async fn kademlia_discovery_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     });
 
-    let signing_secret = SecretKey::random(&mut rand::thread_rng());
+    let signing_secret = SecretKey::random();
     testtasks.try_spawn(kademlia_discovery_client(KADEMLIA_PORT, signing_secret));
 }
 
