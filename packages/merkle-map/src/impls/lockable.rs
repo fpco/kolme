@@ -10,7 +10,7 @@ pub struct MerkleLockable<T> {
 
 impl<T: Debug> Debug for MerkleLockable<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.inner.fmt(f)
+        f.debug_tuple("MerkleLockable").field(&self.inner).finish()
     }
 }
 
