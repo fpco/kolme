@@ -170,17 +170,17 @@ pub async fn serve(
     solana_submitter: SolanaKeypair,
     cosmos_submitter: CosmosSeedPhrase,
     bind: SocketAddr,
-) -> Result<()> {
+) -> std::result::Result<(), KolmeError> {
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(processor.run());
 
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(listener.run(ChainName::Cosmos));
+    set.spawn(async move { listener.run(ChainName::Cosmos).await.map_err(Into::into) });
 
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(listener.run(ChainName::Solana));
+    set.spawn(async move { listener.run(ChainName::Solana).await.map_err(Into::into) });
 
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
@@ -198,11 +198,15 @@ pub async fn serve(
         match res {
             Err(e) => {
                 set.abort_all();
-                return Err(anyhow::anyhow!("Task panicked: {e}"));
+                return Err(KolmeError::TaskPanicked {
+                    details: e.to_string(),
+                });
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(KolmeError::TaskErrored {
+                    error: e.to_string(),
+                });
             }
             Ok(Ok(())) => (),
         }

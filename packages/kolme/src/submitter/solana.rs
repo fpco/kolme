@@ -39,7 +39,7 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: String,
-) -> Result<String> {
+) -> std::result::Result<String, KolmeError> {
     tracing::info!("Executing signed message on bridge: {program_id}");
 
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
@@ -92,8 +92,7 @@ pub async fn execute(
 
             Err(KolmeError::SolanaSignedTxExecutionFailed {
                 details: e.to_string(),
-            }
-            .into())
+            })
         }
     }
 }

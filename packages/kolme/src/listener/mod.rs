@@ -30,7 +30,7 @@ impl<App: KolmeApp> Listener<App> {
         Listener { kolme, secret }
     }
 
-    pub async fn run(self, name: ChainName) -> Result<()> {
+    pub async fn run(self, name: ChainName) -> std::result::Result<(), KolmeError> {
         let contracts = self.wait_for_contracts(name).await?;
         let mut set = JoinSet::new();
         tracing::debug!("Listen on {name:?}");
@@ -75,10 +75,9 @@ impl<App: KolmeApp> Listener<App> {
                     set.abort_all();
                     return Err(KolmeError::ListenerPanicked {
                         details: e.to_string(),
-                    }
-                    .into());
+                    }); // FIX TO USE KOLMEERROR
                 }
-                Ok(Err(e)) => return Err(e),
+                Ok(Err(e)) => return Err(e.into()),
                 Ok(Ok(())) => (),
             }
         }
@@ -86,7 +85,10 @@ impl<App: KolmeApp> Listener<App> {
         Ok(())
     }
 
-    async fn wait_for_contracts(&self, name: ChainName) -> Result<BTreeMap<ExternalChain, String>> {
+    async fn wait_for_contracts(
+        &self,
+        name: ChainName,
+    ) -> std::result::Result<BTreeMap<ExternalChain, String>, KolmeError> {
         let mut receiver = self.kolme.subscribe();
         loop {
             if let Some(contracts) = self.get_contracts(name) {
@@ -107,7 +109,7 @@ impl<App: KolmeApp> Listener<App> {
                         BridgeContract::NeededCosmosBridge { code_id } => code_id,
                         BridgeContract::NeededSolanaBridge { .. } => 0, // Solana has no code id to check
                         BridgeContract::Deployed(_) => {
-                            return Err(KolmeError::ContractAlreadyDeployed { chain }.into());
+                            return Err(KolmeError::ContractAlreadyDeployed { chain });
                         }
                     };
 
@@ -132,10 +134,11 @@ impl<App: KolmeApp> Listener<App> {
                                 self.kolme.get_app().genesis_info(),
                             )
                             .await
+                            .map_err(Into::into)
                         }
                         #[cfg(feature = "pass_through")]
                         ChainKind::PassThrough => {
-                            return Err(KolmeError::UnexpectedPassThroughContract.into());
+                            return Err(KolmeError::UnexpectedPassThroughContract);
                         }
                     };
 

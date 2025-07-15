@@ -80,7 +80,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     async fn load_genesis_info(
         &self,
         merkle_manager: &MerkleManager,
-    ) -> Result<Option<GenesisInfo>> {
+    ) -> std::result::Result<Option<GenesisInfo>, KolmeError> {
         let Some(block) = self
             .load_signed_block(merkle_manager, BlockHeight::start())
             .await?
@@ -89,11 +89,11 @@ impl<App: KolmeApp> KolmeStore<App> {
         };
         let messages = &block.tx().0.message.as_inner().messages;
         if messages.len() != 1 {
-            return Err(KolmeError::InvalidGenesisMessageCount.into());
+            return Err(KolmeError::InvalidGenesisMessageCount);
         }
         match messages.first().unwrap() {
             Message::Genesis(genesis_info) => Ok(Some(genesis_info.clone())),
-            _ => Err(KolmeError::InvalidGenesisMessageType.into()),
+            _ => Err(KolmeError::InvalidGenesisMessageType),
         }
     }
 
@@ -190,7 +190,10 @@ impl<App: KolmeApp> KolmeStore<App> {
             .await?)
     }
 
-    pub(super) async fn get_height_for_tx(&self, txhash: TxHash) -> Result<Option<BlockHeight>> {
+    pub(super) async fn get_height_for_tx(
+        &self,
+        txhash: TxHash,
+    ) -> std::result::Result<Option<BlockHeight>, KolmeStoreError> {
         Ok(self
             .inner
             .get_height_for_tx(txhash.0)

@@ -471,7 +471,14 @@ async fn test_solana_contract_update(self_replace: bool) {
     processor.add_secret(new_processor.clone());
     set.spawn(processor.run());
     set.spawn(Submitter::new_solana(kolme.clone(), submitter).run());
-    set.spawn(Listener::new(kolme.clone(), listener.clone()).run(ChainName::Solana));
+    let kolme_clone = kolme.clone();
+    let listener_clone = listener.clone();
+    set.spawn(async move {
+        Listener::new(kolme_clone, listener_clone)
+            .run(ChainName::Solana)
+            .await
+            .map_err(Into::into)
+    });
     set.spawn(Approver::new(kolme.clone(), approver.clone()).run());
 
     futures::join!(

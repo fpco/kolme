@@ -241,7 +241,7 @@ pub async fn validators(port: u16, enable_api_server: bool) -> Result<()> {
     // event from chain and then constructs a tx which leads to adding
     // new mempool entry.
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(listener.run(ChainName::Cosmos));
+    set.spawn(async move { listener.run(ChainName::Cosmos).await.map_err(Into::into) });
     // Approves pending bridge actions.
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());

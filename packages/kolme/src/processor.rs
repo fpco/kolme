@@ -97,7 +97,7 @@ impl<App: KolmeApp> Processor<App> {
         Ok(())
     }
 
-    async fn ensure_genesis_event(&self) -> Result<()> {
+    async fn ensure_genesis_event(&self) -> std::result::Result<(), KolmeError> {
         if self.kolme.read().get_next_height().is_start() {
             let code_version = self.kolme.get_code_version();
             let kolme = self.kolme.read();
@@ -127,7 +127,7 @@ impl<App: KolmeApp> Processor<App> {
         })
     }
 
-    pub async fn create_genesis_event(&self) -> Result<()> {
+    pub async fn create_genesis_event(&self) -> std::result::Result<(), KolmeError> {
         let info = self.kolme.get_app().genesis_info().clone();
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
@@ -139,15 +139,18 @@ impl<App: KolmeApp> Processor<App> {
         let executed_block = self
             .construct_block(signed, kolme.get_next_height())
             .await?;
-        if let Err(e) = self.kolme.add_executed_block(executed_block).await {
+
+        match self.kolme.add_executed_block(executed_block).await {
             // kolme#144 - Discard unneeded fields
-            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
-                self.kolme.resync().await?;
+            Ok(_) => {
+                self.emit_latest().ok();
+                Ok(())
             }
-            Err(e)
-        } else {
-            self.emit_latest().ok();
-            Ok(())
+            Err(KolmeError::ConflictingBlockInDb { .. }) => {
+                self.kolme.resync().await?;
+                Ok(())
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -167,22 +170,20 @@ impl<App: KolmeApp> Processor<App> {
             self.kolme.add_executed_block(executed_block).await
         }
         .await;
-        if let Err(e) = &res {
-            // kolme#144 - Discard unneeded fields
-            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
+        match &res {
+            Ok(_) => (),
+            Err(KolmeError::ConflictingBlockInDb { .. }) => {
                 tracing::warn!(
-                    "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this"
+                    "Unexpected ConflictingBlockInDb while adding transaction; construction lock should have prevented this"
                 );
-            } else {
+            }
+            Err(e) => {
                 tracing::warn!("Giving up on adding transaction {txhash}: {e}");
                 let failed = (|| {
                     let failed = FailedTransaction {
                         txhash,
                         proposed_height,
-                        error: match e.downcast_ref::<KolmeError>() {
-                            Some(e) => e.clone(),
-                            None => KolmeError::Other(e.to_string()),
-                        },
+                        error: e.clone(),
                     };
                     let failed = TaggedJson::new(failed)?;
                     let key = self.get_correct_secret(&self.kolme.read())?;
@@ -200,7 +201,7 @@ impl<App: KolmeApp> Processor<App> {
             }
         }
         self.emit_latest().ok();
-        res
+        Ok(res?)
     }
 
     async fn construct_block(

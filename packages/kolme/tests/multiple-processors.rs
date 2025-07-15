@@ -219,7 +219,7 @@ async fn multiple_processors_inner(
     (kolmes, all_txhashes, highest_block)
 }
 
-async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
+async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> std::result::Result<(), KolmeError> {
     let mut recv = kolme.subscribe();
     loop {
         match recv.recv().await? {
@@ -236,8 +236,7 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
                     txhash: *txhash,
                     proposed_height: *proposed_height,
                     error: error.to_string(),
-                }
-                .into());
+                });
             }
             Notification::LatestBlock(_) => (),
             Notification::EvictMempoolTransaction(_) => (),

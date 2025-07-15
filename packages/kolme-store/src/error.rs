@@ -37,3 +37,11 @@ impl KolmeStoreError {
         Self::Custom(Box::new(e))
     }
 }
+
+impl From<fjall::Error> for KolmeStoreError {
+    fn from(e: fjall::Error) -> Self {
+        KolmeStoreError::InvalidHeightInFjall {
+            details: e.to_string(),
+        }
+    }
+}

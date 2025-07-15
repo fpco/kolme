@@ -133,30 +133,24 @@ impl TestTasks {
                 match res {
                     Ok(Ok(())) => {
                         if persistent {
-                            Some(KolmeError::PersistentTaskExited.into())
+                            Some(KolmeError::PersistentTaskExited)
                         } else {
                             None
                         }
                     }
-                    Ok(Err(e)) => Some(
-                        KolmeError::TaskErrored {
-                            error: e.to_string(),
-                        }
-                        .into(),
-                    ),
-                    Err(e) => Some(
-                        KolmeError::TaskPanicked {
-                            details: e.to_string(),
-                        }
-                        .into(),
-                    ),
+                    Ok(Err(e)) => Some(KolmeError::TaskErrored {
+                        error: e.to_string(),
+                    }),
+                    Err(e) => Some(KolmeError::TaskPanicked {
+                        details: e.to_string(),
+                    }),
                 }
             } else {
                 None
             };
 
             if let Some(err) = err {
-                tasks.send_error.send(err).await.ok();
+                tasks.send_error.send(err.into()).await.ok();
                 tasks.send_keep_running.send(false).ok();
             }
 

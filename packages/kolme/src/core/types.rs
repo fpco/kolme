@@ -325,7 +325,11 @@ pub struct ChainState {
 }
 
 impl ChainState {
-    pub(crate) fn deposit(&mut self, asset_id: AssetId, amount: Decimal) -> Result<()> {
+    pub(crate) fn deposit(
+        &mut self,
+        asset_id: AssetId,
+        amount: Decimal,
+    ) -> std::result::Result<(), anyhow::Error> {
         let old = self.assets.entry(asset_id).or_default();
         *old = old.checked_add(amount).with_context(|| {
             format!("Overflow while depositing asset {asset_id}, amount == {amount}")
@@ -1329,12 +1333,16 @@ impl ChainStates {
 pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
 
 impl ConfiguredChains {
-    pub fn insert_solana(&mut self, chain: SolanaChain, config: ChainConfig) -> Result<()> {
+    pub fn insert_solana(
+        &mut self,
+        chain: SolanaChain,
+        config: ChainConfig,
+    ) -> std::result::Result<(), KolmeError> {
         use kolme_solana_bridge_client::pubkey::Pubkey;
 
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
-                return Err(KolmeError::CosmosBridgeConfiguredAsSolana.into());
+                return Err(KolmeError::CosmosBridgeConfiguredAsSolana);
             }
             BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(program_id)?,
             BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
@@ -1345,12 +1353,16 @@ impl ConfiguredChains {
         Ok(())
     }
 
-    pub fn insert_cosmos(&mut self, chain: CosmosChain, config: ChainConfig) -> Result<()> {
+    pub fn insert_cosmos(
+        &mut self,
+        chain: CosmosChain,
+        config: ChainConfig,
+    ) -> std::result::Result<(), KolmeError> {
         use cosmos::Address;
 
         match &config.bridge {
             BridgeContract::NeededSolanaBridge { .. } => {
-                return Err(KolmeError::SolanaBridgeConfiguredAsCosmos.into());
+                return Err(KolmeError::SolanaBridgeConfiguredAsCosmos);
             }
             BridgeContract::NeededCosmosBridge { .. } => (),
             BridgeContract::Deployed(program_id) => {
@@ -1364,20 +1376,23 @@ impl ConfiguredChains {
     }
 
     #[cfg(feature = "pass_through")]
-    pub fn insert_pass_through(&mut self, config: ChainConfig) -> Result<()> {
+    pub fn insert_pass_through(
+        &mut self,
+        config: ChainConfig,
+    ) -> std::result::Result<(), KolmeError> {
         if let BridgeContract::Deployed(_) = config.bridge {
             if self
                 .0
                 .get(&ExternalChain::PassThrough)
                 .is_some_and(|existing| *existing != config)
             {
-                Err(KolmeError::MultiplePassThroughBridgesUnsupported.into())
+                Err(KolmeError::MultiplePassThroughBridgesUnsupported)
             } else {
                 self.0.insert(ExternalChain::PassThrough, config);
                 Ok(())
             }
         } else {
-            Err(KolmeError::InvalidPassThroughBridgeType.into())
+            Err(KolmeError::InvalidPassThroughBridgeType)
         }
     }
 }
@@ -1419,7 +1434,7 @@ impl ExecAction {
         chain: ExternalChain,
         config: &ChainConfig,
         id: BridgeActionId,
-    ) -> Result<String> {
+    ) -> std::result::Result<String, KolmeError> {
         use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
         use shared::{cosmos, solana};
 
@@ -1573,7 +1588,7 @@ impl ExecAction {
                 ChainName::Cosmos => {
                     let contract_addr = match &config.bridge {
                         BridgeContract::Deployed(addr) => addr.clone(),
-                        _ => return Err(KolmeError::ContractNotDeployed { chain }.into()),
+                        _ => return Err(KolmeError::ContractNotDeployed { chain }),
                     };
                     let MigrateContract {
                         chain: _,
@@ -1600,7 +1615,9 @@ impl ExecAction {
     }
 }
 
-fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String> {
+fn serialize_solana_payload(
+    payload: &shared::solana::Payload,
+) -> std::result::Result<String, KolmeError> {
     let len = borsh::object_length(&payload).map_err(|e| KolmeError::SolanaPayloadLengthError {
         details: format!("{e:?}"),
     })?;

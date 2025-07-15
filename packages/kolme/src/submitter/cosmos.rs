@@ -45,7 +45,7 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload: &str,
-) -> Result<String> {
+) -> std::result::Result<String, KolmeError> {
     tracing::info!("Executing signed message on bridge: {contract}");
 
     let msg = ExecuteMsg::Signed {
@@ -72,8 +72,7 @@ pub async fn execute(
             );
             Err(KolmeError::CosmosExecutionFailed {
                 details: e.to_string(),
-            }
-            .into())
+            })
         }
     }
 }

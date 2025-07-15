@@ -1,3 +1,8 @@
+use cosmos::error::{AddressError, WalletError};
+use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
+use std::num::TryFromIntError;
+use tokio::sync::broadcast::error::RecvError;
+
 use crate::core::*;
 
 #[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -35,10 +40,13 @@ pub enum KolmeError {
     #[error(
         "Signing public key {signer} is not a member of the {role} set and cannot self-replace"
     )]
-    NotInValidatorSet { signer: PublicKey, role: String },
+    NotInValidatorSet {
+        signer: Box<PublicKey>,
+        role: String,
+    },
 
     #[error("Signing public key {signer} is not the current processor and cannot self-replace")]
-    NotProcessor { signer: PublicKey },
+    NotProcessor { signer: Box<PublicKey> },
 
     #[error("Validator self-replace signature doesn't match the current validator pubkey")]
     InvalidSelfReplaceSigner,
@@ -54,8 +62,8 @@ pub enum KolmeError {
 
     #[error("Received block signed by processor {actual_processor}, but the real processor is {expected_processor}")]
     InvalidBlockProcessor {
-        expected_processor: PublicKey,
-        actual_processor: PublicKey,
+        expected_processor: Box<PublicKey>,
+        actual_processor: Box<PublicKey>,
     },
 
     #[error("Unable to migrate contract for chain {chain:?}: contract isn't deployed")]
@@ -107,6 +115,39 @@ pub enum KolmeError {
     #[error("Listener panicked: {details}")]
     ListenerPanicked { details: String },
 
+    #[error("Block parent mismatch: actual {actual}, expected {expected}")]
+    BlockParentMismatch {
+        actual: Box<BlockHash>,
+        expected: Box<BlockHash>,
+    },
+
+    #[error("Block loads mismatch")]
+    BlockLoadsMismatch,
+
+    #[error("Serialized framework state hash mismatch")]
+    FrameworkStateHashMismatch,
+
+    #[error("Serialized app state hash mismatch")]
+    AppStateHashMismatch,
+
+    #[error("Serialized logs hash mismatch")]
+    LogsHashMismatch,
+
+    #[error("Action ID mismatch: expected {expected}, found {found}")]
+    ActionIdMismatch {
+        expected: BridgeActionId,
+        found: BridgeActionId,
+    },
+
+    #[error("Validator {signer} already approved proposal {proposal_id}")]
+    AlreadyApprovedProposal {
+        signer: PublicKey,
+        proposal_id: AdminProposalId,
+    },
+
+    #[error("Conflicting block in DB at height {height} with hash {hash}")]
+    ConflictingBlockInDb { height: u64, hash: Sha256Hash },
+
     #[error("Failed to execute signed Cosmos bridge transaction: {details}")]
     CosmosExecutionFailed { details: String },
 
@@ -145,4 +186,96 @@ pub enum KolmeError {
 
     #[error("{0}")]
     Other(String),
+}
+
+// CREATE A GENERIC, MACRO OR SOMETHING WITH SIMILAR BEHAVIOR
+
+impl From<CoreStateError> for KolmeError {
+    fn from(e: CoreStateError) -> Self {
+        KolmeError::Other(format!("CoreState error: {e}"))
+    }
+}
+
+impl From<AssetError> for KolmeError {
+    fn from(e: AssetError) -> Self {
+        KolmeError::Other(format!("Asset error: {e}"))
+    }
+}
+
+impl From<AccountsError> for KolmeError {
+    fn from(e: AccountsError) -> Self {
+        KolmeError::Other(format!("Accounts error: {e}"))
+    }
+}
+
+impl From<anyhow::Error> for KolmeError {
+    fn from(e: anyhow::Error) -> Self {
+        KolmeError::Other(format!("Anyhow Error: {e}"))
+    }
+}
+
+impl From<ValidatorSetError> for KolmeError {
+    fn from(e: ValidatorSetError) -> Self {
+        KolmeError::Other(format!("Validator set error: {e}"))
+    }
+}
+
+impl From<PublicKeyError> for KolmeError {
+    fn from(e: PublicKeyError) -> Self {
+        KolmeError::Other(format!("Public key error: {e}"))
+    }
+}
+
+impl From<MerkleSerialError> for KolmeError {
+    fn from(e: MerkleSerialError) -> Self {
+        KolmeError::Other(format!("Merkle serialization error: {e}"))
+    }
+}
+
+impl From<ParsePubkeyError> for KolmeError {
+    fn from(e: ParsePubkeyError) -> Self {
+        KolmeError::Other(format!("Parse public key error: {e}"))
+    }
+}
+
+impl From<AddressError> for KolmeError {
+    fn from(e: AddressError) -> Self {
+        KolmeError::Other(format!("Address error: {e}"))
+    }
+}
+
+impl From<TryFromIntError> for KolmeError {
+    fn from(e: TryFromIntError) -> Self {
+        KolmeError::Other(format!("TryFromInt error: {e}"))
+    }
+}
+
+impl From<serde_json::Error> for KolmeError {
+    fn from(e: serde_json::Error) -> Self {
+        KolmeError::Other(format!("Serde JSON error: {e}"))
+    }
+}
+
+impl From<RecvError> for KolmeError {
+    fn from(e: RecvError) -> Self {
+        KolmeError::Other(format!("Recv error: {e}"))
+    }
+}
+
+impl From<solana_client::client_error::ClientError> for KolmeError {
+    fn from(e: solana_client::client_error::ClientError) -> Self {
+        KolmeError::Other(e.to_string())
+    }
+}
+
+impl From<base64::DecodeError> for KolmeError {
+    fn from(e: base64::DecodeError) -> Self {
+        KolmeError::Other(format!("Base64 decode error: {e}"))
+    }
+}
+
+impl From<WalletError> for KolmeError {
+    fn from(e: WalletError) -> Self {
+        KolmeError::Other(format!("Wallet error: {e}"))
+    }
 }
