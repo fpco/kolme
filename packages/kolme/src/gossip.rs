@@ -573,7 +573,7 @@ impl<App: KolmeApp> Gossip<App> {
                         self.sync_manager
                             .lock()
                             .await
-                            .add_pending_block(self, block.clone(), None)
+                            .add_new_block(self, block)
                             .await;
                     }
                     Notification::GenesisInstantiation { .. } => (),
