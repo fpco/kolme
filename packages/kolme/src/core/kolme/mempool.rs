@@ -109,7 +109,7 @@ impl<AppMessage> Mempool<AppMessage> {
             .filter_map(|item| {
                 let to_gossip = item
                     .last_gossiped
-                    .map_or(true, |last_gossiped| last_gossiped < cutoff);
+                    .is_none_or(|last_gossiped| last_gossiped < cutoff);
                 if to_gossip {
                     Some(item.tx.clone())
                 } else {
