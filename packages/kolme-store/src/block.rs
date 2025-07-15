@@ -52,6 +52,10 @@ impl<Block: MerkleSerialize, FrameworkState: MerkleSerialize, AppState: MerkleSe
         serializer.store_by_hash(logs)?;
         Ok(())
     }
+
+    fn merkle_version() -> usize {
+        1
+    }
 }
 
 impl<
@@ -62,17 +66,36 @@ impl<
 {
     fn merkle_deserialize(
         deserializer: &mut merkle_map::MerkleDeserializer,
-        _version: usize,
+        version: usize,
     ) -> Result<Self, MerkleSerialError> {
         let height = deserializer.load()?;
         let blockhash = deserializer.load()?;
         let txhash = deserializer.load()?;
         let block = deserializer.load()?;
-        let framework_state = deserializer.load_by_hash()?;
-        let app_state = deserializer.load_by_hash()?;
-        let logs = deserializer
-            .load_by_hash()
-            .map(|x: Vec<Vec<String>>| x.into())?;
+
+
+        let (framework_state, app_state, logs) = match version {
+            0 => {
+                let framework_state = deserializer.load()?;
+                let app_state = deserializer.load()?;
+                let logs = deserializer
+                    .load()
+                    .map(|x: Vec<Vec<String>>| x.into())?;
+
+                (framework_state, app_state, logs)
+            }
+            1 => {
+                let framework_state = deserializer.load_by_hash()?;
+                let app_state = deserializer.load_by_hash()?;
+                let logs = deserializer
+                    .load_by_hash()
+                    .map(|x: Vec<Vec<String>>| x.into())?;
+
+                (framework_state, app_state, logs)
+            },
+            _ => unreachable!("Validation of version is carried out at the trait level on MerkleDeserializeRaw")
+        };
+
         Ok(Self {
             height,
             blockhash,
