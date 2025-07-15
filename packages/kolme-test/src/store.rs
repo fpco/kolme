@@ -90,17 +90,19 @@ async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<Sam
         app_state,
         logs,
         loads,
+        height,
     } = kolme
         .read()
         .execute_transaction(&tx, timestamp, BlockDataHandling::NoPriorData)
         .await
         .unwrap();
+    assert_eq!(height, genesis.height().next());
 
     let block = Block {
         tx,
         timestamp: jiff::Timestamp::now(),
         processor: processor.public_key(),
-        height: genesis.height().next(),
+        height,
         parent: genesis.hash(),
         framework_state: kolme
             .get_merkle_manager()

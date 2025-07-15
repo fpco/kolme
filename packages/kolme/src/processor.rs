@@ -226,9 +226,11 @@ impl<App: KolmeApp> Processor<App> {
             app_state,
             logs,
             loads,
+            height,
         } = kolme
             .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
             .await?;
+        anyhow::ensure!(height == proposed_height);
 
         if let Some(max_height) = tx.0.message.as_inner().max_height {
             if max_height < proposed_height {

@@ -804,6 +804,23 @@ impl TryFrom<i64> for BlockHeight {
     }
 }
 
+impl MerkleSerializeRaw for BlockHeight {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        serializer.store(&self.0)
+    }
+}
+
+impl MerkleDeserializeRaw for BlockHeight {
+    fn merkle_deserialize_raw(
+        deserializer: &mut MerkleDeserializer,
+    ) -> std::result::Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
+
 /// Blockchain wallet address.
 ///
 /// To allow support for arbitrary chains, we represent this as a simple [String].
