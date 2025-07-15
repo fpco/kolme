@@ -3,7 +3,7 @@ name = "kolme"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
-license = "AGPL-3.0-or-later"
+license = "MIT"
 authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [features]

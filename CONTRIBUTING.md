@@ -1,6 +1,6 @@
 # Contributing to Kolme
 
-Thank you for your interest in contributing! By submitting code or other materials to this project, you agree to assign the copyright of your contributions to FP Complete. This ensures that the project remains under unified ownership while adhering to the AGPLv3 license.
+Thank you for your interest in contributing! By submitting code or other materials to this project, you agree to assign the copyright of your contributions to FP Complete. This ensures that the project remains under unified ownership while adhering to the MIT license.
 
 To contribute:
 1. Fork the repository.
