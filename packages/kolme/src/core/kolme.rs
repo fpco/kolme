@@ -1163,7 +1163,7 @@ impl<App: KolmeApp> Kolme<App> {
             {
                 let contents = man.serialize(&block.logs)?;
                 let exists = self.get_merkle_layer(contents.hash).await?.is_some();
-                println!("{height} logs: {exists}: {}", contents.hash);
+                tracing::debug!("height: {height} logs: {exists}: {}", contents.hash);
                 if !exists {
                     tracing::info!("Saving Merkle layer for {height}/logs: {}", contents.hash);
                     self.inner
