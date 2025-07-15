@@ -58,14 +58,7 @@ async fn main_inner() -> Result<()> {
         Cmd::Client {
             validator,
             continous,
-        } => {
-            client(
-                &validator,
-                SecretKey::random(&mut rand::thread_rng()),
-                continous,
-            )
-            .await
-        }
+        } => client(&validator, SecretKey::random(), continous).await,
         Cmd::Observer { validator } => observer_node(&validator).await,
         Cmd::InvalidClient { validator } => invalid_client(&validator).await,
     }
