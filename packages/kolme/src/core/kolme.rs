@@ -404,6 +404,7 @@ impl<App: KolmeApp> Kolme<App> {
             app_state,
             logs,
             loads,
+            height,
         } = self
             .read()
             .execute_transaction(
@@ -415,6 +416,7 @@ impl<App: KolmeApp> Kolme<App> {
                 },
             )
             .await?;
+        anyhow::ensure!(height == signed_block.height());
         anyhow::ensure!(loads == block.loads);
 
         self.add_executed_block(ExecutedBlock {
