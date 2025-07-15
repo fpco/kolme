@@ -73,14 +73,11 @@ impl<
         let txhash = deserializer.load()?;
         let block = deserializer.load()?;
 
-
         let (framework_state, app_state, logs) = match version {
             0 => {
                 let framework_state = deserializer.load()?;
                 let app_state = deserializer.load()?;
-                let logs = deserializer
-                    .load()
-                    .map(|x: Vec<Vec<String>>| x.into())?;
+                let logs = deserializer.load().map(|x: Vec<Vec<String>>| x.into())?;
 
                 (framework_state, app_state, logs)
             }
@@ -92,8 +89,10 @@ impl<
                     .map(|x: Vec<Vec<String>>| x.into())?;
 
                 (framework_state, app_state, logs)
-            },
-            _ => unreachable!("Validation of version is carried out at the trait level on MerkleDeserializeRaw")
+            }
+            _ => unreachable!(
+                "Validation of version is carried out at the trait level on MerkleDeserializeRaw"
+            ),
         };
 
         Ok(Self {

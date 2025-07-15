@@ -22,4 +22,3 @@ workspace = true
 
 [dev-dependencies]
 quickcheck.workspace = true
-merkle-map = { workspace = true, features = ["_testing"] }
