@@ -42,7 +42,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
         .launch_kademlia_client(kolme_client.clone(), "sanity-client", &discovery)
         .await;
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     timeout(
         Duration::from_secs(30),
         kolme_client.wait_for_block(BlockHeight::start()),

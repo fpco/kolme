@@ -10,7 +10,7 @@ use litesvm_token::{
 };
 use sha_256::Sha256;
 use shared::{
-    cryptography::{SecretKey, ThreadRng},
+    cryptography::SecretKey,
     solana::{ExecuteAction, Payload, RegularMsgIxData, SignedAction},
 };
 use solana_transaction_error::TransactionError;
@@ -246,8 +246,7 @@ fn false_processor_signature_is_rejected() {
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
     let (mut data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER3_KEY]);
 
-    let mut rng = ThreadRng::default();
-    let fake_key = SecretKey::random(&mut rng);
+    let fake_key = SecretKey::random();
 
     let mut bytes = Vec::with_capacity(borsh::object_length(&payload).unwrap());
     payload.serialize(&mut bytes).unwrap();
@@ -290,8 +289,7 @@ fn false_executor_signature_is_rejected() {
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
     let (mut data, metas) = p.make_signed_msg(&payload, &[APPROVER1_KEY, APPROVER4_KEY]);
 
-    let mut rng = ThreadRng::default();
-    let fake_key = SecretKey::random(&mut rng);
+    let fake_key = SecretKey::random();
 
     let mut bytes = Vec::with_capacity(borsh::object_length(&payload).unwrap());
     payload.serialize(&mut bytes).unwrap();

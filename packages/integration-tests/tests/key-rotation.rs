@@ -203,11 +203,11 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
     .await
     .unwrap();
 
-    let orig_processor = SecretKey::random(&mut rand::thread_rng());
-    let new_processor = SecretKey::random(&mut rand::thread_rng());
-    let listener = SecretKey::random(&mut rand::thread_rng());
-    let approver = SecretKey::random(&mut rand::thread_rng());
-    let client = SecretKey::random(&mut rand::thread_rng());
+    let orig_processor = SecretKey::random();
+    let new_processor = SecretKey::random();
+    let listener = SecretKey::random();
+    let approver = SecretKey::random();
+    let client = SecretKey::random();
     let kolme = Kolme::new(
         SampleKolmeApp::new_cosmos(
             prepare_local_contract(&local_wallet)
@@ -424,11 +424,11 @@ async fn solana_contract_update_set() {
 }
 
 async fn test_solana_contract_update(self_replace: bool) {
-    let orig_processor = SecretKey::random(&mut rand::thread_rng());
-    let new_processor = SecretKey::random(&mut rand::thread_rng());
-    let listener = SecretKey::random(&mut rand::thread_rng());
-    let approver = SecretKey::random(&mut rand::thread_rng());
-    let client = SecretKey::random(&mut rand::thread_rng());
+    let orig_processor = SecretKey::random();
+    let new_processor = SecretKey::random();
+    let listener = SecretKey::random();
+    let approver = SecretKey::random();
+    let client = SecretKey::random();
 
     let submitter = Keypair::new();
     let client_wallet = Keypair::new();

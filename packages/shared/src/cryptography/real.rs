@@ -192,7 +192,12 @@ impl SecretKey {
             .map_err(|source| SecretKeyError::SigningFailed { source })
     }
 
-    pub fn random(rng: &mut rand::rngs::ThreadRng) -> Self {
+    /// Produce a random secret key using [rand::thread_rng]
+    pub fn random() -> Self {
+        Self::random_with(&mut rand::thread_rng())
+    }
+
+    pub fn random_with(rng: &mut rand::rngs::ThreadRng) -> Self {
         SecretKey(k256::SecretKey::random(rng))
     }
 

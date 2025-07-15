@@ -42,8 +42,7 @@ pub enum SampleMessage {
 
 pub fn get_sample_secret_key() -> &'static SecretKey {
     static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
+    KEY.get_or_init(SecretKey::random)
 }
 
 const DUMMY_CODE_VERSION: &str = "dummy code version";
@@ -114,14 +113,9 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
         .try_spawn_persistent(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
     subscription.recv().await.unwrap();
 
-    let (secret1, secret2, secret3) = {
-        let mut rng = rand::thread_rng();
-        (
-            SecretKey::random(&mut rng),
-            SecretKey::random(&mut rng),
-            SecretKey::random(&mut rng),
-        )
-    };
+    let secret1 = SecretKey::random();
+    let secret2 = SecretKey::random();
+    let secret3 = SecretKey::random();
 
     let perform_many = |signer: &SecretKey, msgs: Vec<AuthMessage>| {
         let signer = signer.clone();

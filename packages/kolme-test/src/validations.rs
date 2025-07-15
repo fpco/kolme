@@ -28,7 +28,7 @@ async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
     subscription.recv().await.unwrap();
 
     let genesis = kolme.wait_for_block(BlockHeight(0)).await.unwrap();
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let tx = kolme
         .read()
         .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])

@@ -59,7 +59,7 @@ async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
 }
 
 async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
 
     let tx = Arc::new(
         kolme
@@ -183,7 +183,7 @@ async fn client(
     data: Arc<Mutex<Vec<TxHash>>>,
 ) -> Result<()> {
     for _ in 0..5 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
 
         let tx = Arc::new(
             kolme

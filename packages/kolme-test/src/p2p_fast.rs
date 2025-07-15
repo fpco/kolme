@@ -25,14 +25,14 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
 
     // Send a few transactions to bump up the block height
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
             .unwrap();
     }
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let latest_block_height = kolme1
         .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
         .await

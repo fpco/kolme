@@ -617,7 +617,7 @@ async fn test_concurrent_transactions_inner(
 
     let mut secrets = Vec::with_capacity(50);
     for _ in 0..50 {
-        let secret = SecretKey::random(&mut rand::rngs::ThreadRng::default());
+        let secret = SecretKey::random();
         secrets.push(secret);
     }
 

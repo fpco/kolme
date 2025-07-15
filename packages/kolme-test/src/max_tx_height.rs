@@ -28,7 +28,7 @@ async fn max_tx_height_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
 
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
@@ -37,7 +37,7 @@ async fn max_tx_height_inner(testtasks: TestTasks, (): ()) {
     let latest = kolme.get_latest_block().unwrap().message.as_inner().height;
     let max = BlockHeight(5);
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let tx_builder = TxBuilder::new()
         .add_message(Message::App(SampleMessage::SayHi {}))
         .with_max_height(max);
