@@ -10,7 +10,7 @@ use solana_client::nonblocking::pubsub_client::PubsubClient;
 pub use store::KolmeStore;
 use utils::trigger::TriggerSubscriber;
 
-use std::{collections::HashMap, ops::Deref, sync::OnceLock};
+use std::{collections::HashMap, ops::Deref, sync::OnceLock, time::Duration};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -593,7 +593,8 @@ impl<App: KolmeApp> Kolme<App> {
         secret: Option<&SecretKey>,
     ) -> Arc<SignedTransaction<App::Message>> {
         loop {
-            let (txhash, tx) = self.inner.mempool.peek().await;
+            let tx = self.inner.mempool.peek().await;
+            let txhash = tx.hash();
             match self.get_tx_height(txhash).await {
                 Ok(Some(_)) => {
                     // This means our store already has the tx hash. And this
@@ -670,7 +671,9 @@ impl<App: KolmeApp> Kolme<App> {
             pass_through_conn: OnceLock::new(),
             merkle_manager,
             notify: tokio::sync::broadcast::channel(100).0,
-            mempool: Mempool::new(),
+            // In the future, maybe have a Builder interface for configuring things like this
+            // Default value chosen to exceed the libp2p default of 60 seconds
+            mempool: Mempool::new(Duration::from_secs(90)),
             current_block: RwLock::new(Arc::new(current_block)),
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
             latest_block: parking_lot::RwLock::new(None),
@@ -705,6 +708,20 @@ impl<App: KolmeApp> Kolme<App> {
     /// Get all entries currently in the mempool
     pub fn get_mempool_entries(&self) -> Vec<Arc<SignedTransaction<App::Message>>> {
         self.inner.mempool.get_entries()
+    }
+
+    /// Get all mempool entries which should be gossiped.
+    ///
+    /// This excludes entries which have been seen gossiped recently.
+    pub fn get_mempool_entries_for_gossip(&self) -> Vec<Arc<SignedTransaction<App::Message>>> {
+        self.inner.mempool.get_entries_for_gossip()
+    }
+
+    /// Mark a mempool transaction as having been gossiped.
+    ///
+    /// This prevents the transaction from being rebroadcast too frequently.
+    pub fn mark_mempool_entry_gossiped(&self, txhash: TxHash) {
+        self.inner.mempool.mark_mempool_entry_gossiped(txhash)
     }
 
     /// Wait until the given block is published
