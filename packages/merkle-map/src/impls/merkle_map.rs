@@ -161,15 +161,7 @@ impl<K, V> Default for MerkleMap<K, V> {
 
 impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{{")?;
-        for (idx, (k, v)) in self.iter().enumerate() {
-            if idx != 0 {
-                write!(f, ", ")?;
-            }
-            write!(f, "{k:?}: {v:?}")?;
-        }
-        write!(f, "}}")?;
-        Ok(())
+        self.0.fmt(f)
     }
 }
 

@@ -122,14 +122,6 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for Node<K,
 
 impl<K: Debug, V: Debug> Debug for Node<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{{")?;
-        for (idx, (k, v)) in self.iter().enumerate() {
-            if idx != 0 {
-                write!(f, ", ")?;
-            }
-            write!(f, "{k:?}: {v:?}")?;
-        }
-        write!(f, "}}")?;
-        Ok(())
+        f.debug_map().entries(self.iter()).finish()
     }
 }
