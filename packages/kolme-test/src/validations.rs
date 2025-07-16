@@ -1,12 +1,10 @@
-use std::
-    sync::Arc
-;
+use std::sync::Arc;
 
 use jiff::Timestamp;
 use testtasks::TestTasks;
 
-use kolme::*;
 use crate::kolme_app::*;
+use kolme::*;
 
 #[tokio::test]
 async fn test_invalid_hashes() {
