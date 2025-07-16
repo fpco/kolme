@@ -131,6 +131,15 @@ impl Display for Sha256Hash {
 }
 
 #[cfg(feature = "realcryptography")]
+impl std::str::FromStr for Sha256Hash {
+    type Err = std::convert::Infallible; // FIXME use a real error
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Sha256Hash::from_hash(&hex::decode(s).unwrap()).unwrap())
+    }
+}
+
+#[cfg(feature = "realcryptography")]
 impl std::fmt::Debug for Sha256Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{self}")

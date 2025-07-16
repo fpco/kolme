@@ -102,7 +102,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
         kolme_state_transfer.wait_for_block(latest_block_height),
     )
     .await
-    .unwrap()
+    .expect("Timeout querying latest_block_height")
     .unwrap();
     assert_eq!(latest_from_gossip.hash(), BlockHash(latest_block.blockhash));
 

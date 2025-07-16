@@ -361,6 +361,7 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<()> {
         // Make sure we're at the right height for this and the correct processor is signing this.
         let kolme = self.read();
+        // FIXME add support for adding old blocks instead
         if kolme.get_next_height() != signed_block.height() {
             anyhow::bail!(
                 "Tried to add block with height {}, but next expected height is {}",
@@ -441,6 +442,7 @@ impl<App: KolmeApp> Kolme<App> {
         let framework_state = Arc::new(framework_state);
         let app_state = Arc::new(app_state);
         let logs: Arc<[_]> = logs.into();
+        let height = signed_block.height();
 
         let framework_state_contents = self.get_merkle_manager().serialize(&framework_state)?;
         anyhow::ensure!(
@@ -475,24 +477,32 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.drop_tx(signed_block.tx().hash());
 
         // Now do the write lock
-        let mut guard = self.inner.current_block.write();
+        {
+            let mut guard = self.inner.current_block.write();
 
-        if guard.get_next_height() > signed_block.height() {
-            return Ok(());
+            if guard.get_next_height() > signed_block.height() {
+                return Ok(());
+            }
+
+            *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
+                block: signed_block.clone(),
+                logs,
+                state: BlockState {
+                    blockhash: signed_block.hash(),
+                    framework_state,
+                    app_state,
+                },
+            }));
         }
 
-        *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
-            block: signed_block.clone(),
-            logs,
-            state: BlockState {
-                blockhash: signed_block.hash(),
-                framework_state,
-                app_state,
-            },
-        }));
-        std::mem::drop(guard);
-
         self.notify(Notification::NewBlock(signed_block));
+
+        // Update the archive if appropriate
+        if self.get_next_to_archive().await == height {
+            if let Err(e) = self.inner.store.archive_block(height).await {
+                tracing::warn!("Unable to mark block {height} as archived: {e}");
+            }
+        }
 
         Ok(())
     }
@@ -730,24 +740,40 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
+        // Optimization for the common case.
+        if let Some(storable_block) = self.get_block(height).await? {
+            return Ok(storable_block.block);
+        }
+
         // First subscribe to avoid a race condition...
         let mut recv = self.inner.store.subscribe();
+        let mut last_warning = std::time::Instant::now();
         loop {
             // And then check if we're at the requested height.
             if let Some(storable_block) = self.get_block(height).await? {
                 return Ok(storable_block.block);
             }
 
-            // Only use the state sync requester if we have a gap in blocks, otherwise
-            // normal mechanisms for filling in blocks will work.
-            if self.read().get_next_height() > height {
-                if let Some(requester) = self.inner.block_requester.get() {
-                    requester.send(height).await.ok();
-                }
+            if let Some(requester) = self.inner.block_requester.get() {
+                requester.send(height).await.ok();
             }
 
-            // Wait for more data
-            recv.listen().await;
+            // Only wait up to 5 seconds for a new event, if that doesn't happen,
+            // check again in case an archiver or similar filled in an old
+            // block without triggering an event.
+            //
+            // TODO: investigate this more closely, maybe we need gossip to generate
+            // a notification every time a new block is added.
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), recv.listen())
+                .await
+                .ok();
+
+            // If we've waited too long, print a warning.
+            let now = std::time::Instant::now();
+            if now.duration_since(last_warning).as_secs() >= 30 {
+                tracing::warn!("Still waiting for block {height}");
+                last_warning = now;
+            };
         }
     }
 
@@ -1020,6 +1046,11 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.store.take_construct_lock().await
     }
 
+    /// Returns the genesis info
+    pub fn get_genesis_info(&self) -> &GenesisInfo {
+        self.inner.app.genesis_info()
+    }
+
     /// Returns a hash of the genesis info.
     ///
     /// Purpose: this provides a unique identifier for a chain.
@@ -1105,6 +1136,67 @@ impl<App: KolmeApp> Kolme<App> {
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
     }
 
+    /// Ensure that all states are stored directly as their own Merkle layers.
+    ///
+    /// This is a helper method to workaround a data integrity issue from older versions
+    /// of Kolme. This traverses all blocks in the store and ensures that the framework state, app state, and logs are stored directly in the merkle store. With older versions of Kolme, these were mistakenly only stored in the block data itself.
+    pub async fn fix_missing_layers(&self) -> Result<()> {
+        let mut height = BlockHeight::start();
+        let man = self.get_merkle_manager();
+        while self.has_block(height).await? {
+            tracing::info!("Attempting to fix missing layers for block height {height}");
+
+            let block = self.load_block(height).await.with_context(|| {
+                format!("fix_missing_layers: error while loading block height {height}")
+            })?;
+            {
+                let contents = man.serialize(&block.framework_state)?;
+                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
+                if !exists {
+                    tracing::info!(
+                        "Saving Merkle layer for {height}/framework_state: {}",
+                        contents.hash
+                    );
+                    self.inner
+                        .store
+                        .save(man, &block.framework_state, contents.hash)
+                        .await?;
+                }
+            }
+            {
+                let contents = man.serialize(&block.app_state)?;
+                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
+                if !exists {
+                    tracing::info!(
+                        "Saving Merkle layer for {height}/app_state: {}",
+                        contents.hash
+                    );
+                    self.inner
+                        .store
+                        .save(man, &block.app_state, contents.hash)
+                        .await?;
+                }
+            }
+            {
+                let contents = man.serialize(&block.logs)?;
+                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
+                tracing::debug!("height: {height} logs: {exists}: {}", contents.hash);
+                if !exists {
+                    tracing::info!("Saving Merkle layer for {height}/logs: {}", contents.hash);
+                    self.inner
+                        .store
+                        .save(man, &block.logs, contents.hash)
+                        .await?;
+                }
+            }
+
+            height = height.next();
+        }
+
+        tracing::info!("Finished fixing missing layers, first missing block found is: {height}");
+        Ok(())
+    }
+
     /// Marks the current block to not be resynced by the Archiver
     pub async fn archive_block(&self, height: BlockHeight) -> Result<()> {
         self.inner
@@ -1123,6 +1215,20 @@ impl<App: KolmeApp> Kolme<App> {
             .await
             .context("Unable to retrieve latest archived block height")?
             .map(BlockHeight))
+    }
+
+    /// Get the next block to archive.
+    ///
+    /// This will report errors during data load and then return the earliest
+    /// block height, essentially restarting the archive process.
+    pub async fn get_next_to_archive(&self) -> BlockHeight {
+        match self.get_latest_archived_block().await {
+            Ok(None) => (),
+            Ok(Some(height)) => return height.next(),
+            Err(e) => tracing::warn!("Error loading archive value: {e}"),
+        };
+
+        BlockHeight::start()
     }
 }
 

@@ -107,9 +107,6 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     let from_kolme1 = kolme1.load_block(older).await.unwrap();
     assert_eq!(from_gossip.hash().0, from_kolme1.blockhash);
 
-    // OK, now launch the archive and try the same thing with every block.
-    testtasks.spawn_persistent(Archiver::new(kolme_state_transfer.clone()).run());
-
     for height in 0..latest_block_height.0 {
         let height = BlockHeight(height);
         let from_gossip = tokio::time::timeout(
@@ -141,6 +138,10 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     //   - Validate that previous archived heights "updated_at" have not changed
     const IDENT: &str = "sync-older";
     let db_url = std::env::var("PROCESSOR_BLOCK_DB").expect("PROCESSOR_BLOCK_DB is missing");
+    if db_url == "SKIP" {
+        tracing::info!("Skipping test based on PROCESSOR_BLOCK_DB=SKIP env var");
+        return;
+    }
     // Clear db
     let pool = sqlx::PgPool::connect(&db_url)
         .await
@@ -175,8 +176,6 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
 
     testtasks.try_spawn_persistent(Processor::new(kolme.clone(), my_secret_key()).run());
-    let kolme1 = kolme.clone();
-    let archiver_handle = tokio::task::spawn(Archiver::new(kolme1).run());
 
     for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
@@ -189,7 +188,6 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     while kolme.get_latest_archived_block().await.unwrap() != Some(BlockHeight(10)) {
         tokio::task::yield_now().await;
     }
-    archiver_handle.abort();
 
     let initial_heights = sqlx::query!("SELECT height, archived_at FROM archived_blocks")
         .fetch_all(&pool)
@@ -202,7 +200,6 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
         "Block heights were not archived correctly"
     );
 
-    testtasks.spawn_persistent(Archiver::new(kolme.clone()).run());
     let secret = SecretKey::random(&mut rand::thread_rng());
 
     kolme

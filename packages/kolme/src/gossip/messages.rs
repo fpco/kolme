@@ -13,6 +13,7 @@ pub(super) enum BlockRequest {
     /// Return the contents of a specific block.
     BlockAtHeight(BlockHeight),
     /// Return both the raw block as well as the full app and framework state to go along with it.
+    /// TODO: Fairly certain this now has the exact same behavior as BlockAtHeight, can be removed. Just need to investigate implications on breaking network protocol.
     BlockWithStateAtHeight(BlockHeight),
     /// Request a Merkle layer
     Merkle(Sha256Hash),
@@ -35,6 +36,23 @@ pub(super) enum BlockRequest {
     },
 }
 
+impl Display for BlockRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BlockRequest::BlockAtHeight(height) | BlockRequest::BlockWithStateAtHeight(height) => {
+                write!(f, "request block {height}")
+            }
+            BlockRequest::Merkle(hash) => write!(f, "request merkle layer {hash}"),
+            BlockRequest::BlockAvailable { height, peer } => {
+                write!(f, "notify block {height} available from {peer}")
+            }
+            BlockRequest::LayerAvailable { hash, peer } => {
+                write!(f, "notify merkle layer {hash} available from {peer}")
+            }
+        }
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(bound(
@@ -43,6 +61,7 @@ pub(super) enum BlockRequest {
 ))]
 pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     Block(Arc<SignedBlock<AppMessage>>),
+    /// TODO: Fairly certain this now has the exact same behavior as Block, can be removed. Just need to investigate implications on breaking network protocol.
     BlockWithState {
         block: Arc<SignedBlock<AppMessage>>,
     },
@@ -51,6 +70,9 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
         contents: MerkleLayerContents,
     },
     HeightNotFound(BlockHeight),
+    MerkleNotFound(Sha256Hash),
+    /// Acknowledge a previous request that requires no response information.
+    Ack,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -160,7 +182,7 @@ impl<App: KolmeApp> GossipMessage<App> {
         match result {
             Ok(_id) => Ok(true),
             Err(PublishError::Duplicate) => {
-                tracing::info!(
+                tracing::debug!(
                     "{}: Skipping sending duplicate message",
                     gossip.local_display_name
                 );
