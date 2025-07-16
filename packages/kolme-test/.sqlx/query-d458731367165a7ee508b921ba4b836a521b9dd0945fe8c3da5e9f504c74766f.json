@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT height as \"height!\" FROM latest_archived_block_height\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "height!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "d458731367165a7ee508b921ba4b836a521b9dd0945fe8c3da5e9f504c74766f"
+}

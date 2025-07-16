@@ -1,0 +1,7 @@
+# List all recipes
+default:
+	just --list --unsorted
+
+# sqlx-prepare
+sqlx-prepare:
+	cargo sqlx prepare -- --tests

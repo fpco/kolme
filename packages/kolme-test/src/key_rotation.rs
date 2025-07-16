@@ -1,96 +1,12 @@
-use std::{
-    collections::BTreeSet,
-    sync::{Arc, OnceLock},
-};
+use std::sync::Arc;
 
 use kolme::*;
 use testtasks::TestTasks;
 
-/// In the future, move to an example and convert the binary to a library.
-#[derive(Clone)]
-pub struct SampleKolmeApp {
-    pub genesis: GenesisInfo,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SampleState {}
-
-impl MerkleSerialize for SampleState {
-    fn merkle_serialize(
-        &self,
-        _serializer: &mut MerkleSerializer,
-    ) -> Result<(), MerkleSerialError> {
-        Ok(())
-    }
-}
-
-impl MerkleDeserialize for SampleState {
-    fn merkle_deserialize(
-        _deserializer: &mut MerkleDeserializer,
-        _version: usize,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(SampleState {})
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub enum SampleMessage {
-    SayHi,
-}
-
-pub fn get_sample_secret_key() -> &'static SecretKey {
-    static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
-}
-
-const DUMMY_CODE_VERSION: &str = "dummy code version";
-
-impl SampleKolmeApp {
-    fn new(validator: PublicKey) -> Self {
-        let mut set = BTreeSet::new();
-        set.insert(validator);
-
-        let genesis = GenesisInfo {
-            kolme_ident: "Dev code".to_owned(),
-            validator_set: ValidatorSet {
-                processor: validator,
-                listeners: set.clone(),
-                needed_listeners: 1,
-                approvers: set,
-                needed_approvers: 1,
-            },
-            chains: ConfiguredChains::default(),
-            version: DUMMY_CODE_VERSION.to_owned(),
-        };
-
-        Self { genesis }
-    }
-}
-
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info(&self) -> &GenesisInfo {
-        &self.genesis
-    }
-
-    fn new_state() -> anyhow::Result<Self::State> {
-        Ok(SampleState {})
-    }
-
-    async fn execute(
-        &self,
-        _ctx: &mut ExecutionContext<'_, Self>,
-        _msg: &Self::Message,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
+use crate::kolme_app::*;
 
 #[tokio::test]
-async fn test_self_replace() {
+pub async fn test_self_replace() {
     TestTasks::start(test_self_replace_inner, ()).await;
 }
 
@@ -101,7 +17,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     let fake_validator = SecretKey::random(&mut rand::thread_rng());
     let store = KolmeStore::new_in_memory();
     let kolme = Kolme::new(
-        SampleKolmeApp::new(secret1.public_key()),
+        SampleKolmeApp::new_validator(secret1.public_key()),
         DUMMY_CODE_VERSION,
         store.clone(),
     )
@@ -113,7 +29,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
 
     // Prove that we can produce a block
     kolme
-        .sign_propose_await_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
+        .sign_propose_await_transaction(&client, vec![Message::App(SampleMessage::SayHi {})])
         .await
         .unwrap();
 
@@ -183,7 +99,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     let tx = Arc::new(
         kolme
             .read()
-            .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi)])
+            .create_signed_transaction(&client, vec![Message::App(SampleMessage::SayHi {})])
             .unwrap(),
     );
     let txhash = tx.hash();
@@ -199,7 +115,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     // Give it its own Kolme so the two processors aren't fighting
     // over the mempool.
     let kolme2 = Kolme::new(
-        SampleKolmeApp::new(secret1.public_key()),
+        SampleKolmeApp::new_validator(secret1.public_key()),
         DUMMY_CODE_VERSION,
         store.clone(),
     )
@@ -232,7 +148,7 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     let client = SecretKey::random(&mut rand::thread_rng());
     let store = KolmeStore::new_in_memory();
     let kolme = Kolme::new(
-        SampleKolmeApp::new(orig_processor.public_key()),
+        SampleKolmeApp::new_validator(orig_processor.public_key()),
         DUMMY_CODE_VERSION,
         store.clone(),
     )

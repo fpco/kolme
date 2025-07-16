@@ -1,0 +1,24 @@
+[package]
+name = "kolme-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kolme = { path = "../kolme" }
+kolme-store = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+merkle-map = { workspace = true }
+kademlia-discovery = { path = "../examples/kademlia-discovery" }
+shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
+tokio = { workspace = true}
+sqlx = { workspace = true }
+jiff = { workspace = true }
+parking_lot = "0.12.4"
+tracing = "0.1.41"
+rand = "0.8"
+tempfile = "3.19.1"
+
+[lints]
+workspace = true

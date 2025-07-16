@@ -1,6 +1,5 @@
 mod api_server;
 mod approver;
-mod archiver;
 mod common;
 mod core;
 pub mod gossip;
@@ -15,7 +14,6 @@ pub mod utils;
 
 pub use api_server::{base_api_router, ApiNotification, ApiServer};
 pub use approver::Approver;
-pub use archiver::Archiver;
 pub use common::*;
 pub use core::*;
 pub use gossip::{Gossip, GossipBuilder, SyncMode};

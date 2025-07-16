@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                payload  as \"payload!\",\n                children as \"children!\"\n            FROM merkle_contents\n            WHERE hash = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload!",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "children!",
+        "type_info": "ByteaArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "505eba26df640e94f608a8b7d763b6e1b16639c0088c33c5b923ef4549722d55"
+}

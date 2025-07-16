@@ -9,6 +9,7 @@ members = [
   "packages/kolme-store",
   "packages/merkle-map",
   "packages/shared",
+  "packages/kolme-test",
 ]
 
 [workspace.dependencies]
@@ -31,6 +32,8 @@ merkle-map = { path = "packages/merkle-map" }
 quickcheck = "1.0.3"
 shared = { path = "packages/shared" }
 lru = "0.14.0"
+rand = "0.8"
+sqlx = { version = "0.8.5", default-features = false, features = ["runtime-tokio", "postgres", "time", "macros", "migrate", "tls-rustls"] }
 
 [workspace.lints.clippy]
 unused_async = "deny"

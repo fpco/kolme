@@ -36,7 +36,7 @@ axum = { version = "0.8.3", features = ["ws"] }
 futures-util = "0.3.31"
 tokio-tungstenite = "0.26.2"
 jiff = "0.2.5"
-sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio"] }
+sqlx = { workspace = true }
 
 [lints]
 workspace = true
