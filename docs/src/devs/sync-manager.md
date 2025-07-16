@@ -33,7 +33,7 @@ The basic mechanism for state sync is simple:
 
 The naive way of doing this is to serialize the entirety of the block and all of its Merkle data (framework state, app state, and logs) in one message. There are two problems with this:
 
-1. It means that synchronizing additional blocks requires transfer all data again, bypassing the data deduplication logic of `merkle-map`.
+1. It means that synchronizing additional blocks requires transferring all data again, bypassing the data deduplication logic of `merkle-map`.
 2. For large enough stores, we blow past libp2p's 16mb buffer limit, making state transfer impossible.
 
 Therefore, we need something more intelligent.
