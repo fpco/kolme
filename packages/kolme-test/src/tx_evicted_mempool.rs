@@ -1,6 +1,5 @@
 use std::{
-    collections::BTreeSet,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -9,92 +8,11 @@ use kolme::testtasks::TestTasks;
 use kolme::*;
 use tokio::{sync::oneshot, time::timeout};
 
-#[derive(Clone)]
-pub struct SampleKolmeApp {
-    pub genesis: GenesisInfo,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SampleState {}
-
-impl MerkleSerialize for SampleState {
-    fn merkle_serialize(
-        &self,
-        _serializer: &mut MerkleSerializer,
-    ) -> Result<(), MerkleSerialError> {
-        Ok(())
-    }
-}
-
-impl MerkleDeserialize for SampleState {
-    fn merkle_deserialize(
-        _deserializer: &mut MerkleDeserializer,
-        _version: usize,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(SampleState {})
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum SampleMessage {
-    SayHi,
-}
-
-pub fn get_sample_secret_key() -> &'static SecretKey {
-    const HEX: &str = "60cb788cae86b83d8932715e99558d7b4d75b410cbbe379f232eb51fb743ca63";
-    static KEY: OnceLock<SecretKey> = OnceLock::new();
-    KEY.get_or_init(|| HEX.parse().unwrap())
-}
-
-const DUMMY_CODE_VERSION: &str = "dummy code version";
-
-impl Default for SampleKolmeApp {
-    fn default() -> Self {
-        let my_public_key = get_sample_secret_key().public_key();
-        let mut set = BTreeSet::new();
-        set.insert(my_public_key);
-        let genesis = GenesisInfo {
-            kolme_ident: "Dev code".to_owned(),
-            validator_set: ValidatorSet {
-                processor: my_public_key,
-                listeners: set.clone(),
-                needed_listeners: 1,
-                approvers: set,
-                needed_approvers: 1,
-            },
-            chains: ConfiguredChains::default(),
-            version: DUMMY_CODE_VERSION.to_owned(),
-        };
-
-        Self { genesis }
-    }
-}
-
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info(&self) -> &GenesisInfo {
-        &self.genesis
-    }
-
-    fn new_state() -> Result<Self::State> {
-        Ok(SampleState {})
-    }
-
-    async fn execute(
-        &self,
-        _ctx: &mut ExecutionContext<'_, Self>,
-        _msg: &Self::Message,
-    ) -> Result<()> {
-        // Don't need to do anything here
-        Ok(())
-    }
-}
+use crate::kolme_app::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tx_evicted_mempool() {
+    init_logger(true, None);
     TestTasks::start(tx_evicted_inner, ()).await;
 }
 
@@ -105,13 +23,13 @@ async fn evicts_same_tx_mempool() {
 
 async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
     let kolme = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new("Dev code"),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
     .await
     .unwrap();
-    let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     test_tasks.try_spawn_persistent(processor.run());
     let discovery = test_tasks.launch_kademlia_discovery_with(kolme.clone(), "kolme", |g| {
         g.set_duplicate_cache_time(Duration::from_micros(100))
@@ -126,7 +44,7 @@ async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
     .unwrap();
 
     let kolme: Kolme<SampleKolmeApp> = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new("Dev code"),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
@@ -144,7 +62,7 @@ async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
     let tx = Arc::new(
         kolme
             .read()
-            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
+            .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])?,
     );
     kolme
         .propose_and_await_transaction(tx.clone())
@@ -181,14 +99,14 @@ async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
 
 async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     let kolme = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new("Dev code"),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
     .await
     .unwrap();
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    let processor = Processor::new(kolme.clone(), get_sample_secret_key().clone());
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     test_tasks.try_spawn_persistent(processor.run());
     let discovery = test_tasks.launch_kademlia_discovery(kolme.clone(), "kolme");
 
@@ -201,7 +119,7 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     .unwrap();
 
     let kolme: Kolme<SampleKolmeApp> = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new("Dev code"),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
@@ -212,7 +130,7 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     test_tasks.launch_kademlia_client(kolme.clone(), "kolme-client", &discovery);
 
     let kolme = Kolme::new(
-        SampleKolmeApp::default(),
+        SampleKolmeApp::new("Dev code"),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
@@ -244,7 +162,7 @@ async fn no_op_node(
     }
     receiver.await.ok();
     let hashes = data.lock().unwrap().clone();
-    assert_eq!(hashes.len(), 5, "Ten transactions expected");
+    assert_eq!(hashes.len(), 5, "Five transactions expected");
 
     let mut attempt = 0;
     loop {
@@ -284,7 +202,7 @@ async fn client(
         let tx = Arc::new(
             kolme
                 .read()
-                .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi)])?,
+                .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])?,
         );
         let txhash = tx.hash();
         // We propose and wait till we hear from gossip layer that a
