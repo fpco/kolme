@@ -25,7 +25,7 @@ example-six-sigma = { path = "../examples/six-sigma" }
 example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
 rand = "0.8"
 jiff = "0.2.5"
-sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio"] }
+sqlx = { version = "0.8.5", features = ["postgres", "runtime-tokio"] }
 criterion = { version = "0.6.0", features = ["async_tokio"] }
 merkle-map.workspace = true
 smallvec.workspace = true

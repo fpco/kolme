@@ -1,100 +1,15 @@
 use jiff::Timestamp;
 use kolme::{
-    testtasks::TestTasks, Block, BlockDataHandling, BlockHeight, ConfiguredChains,
-    ExecutionContext, ExecutionResults, GenesisInfo, Kolme, KolmeApp, KolmeStore,
-    MerkleDeserialize, MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer,
-    Message, Processor, SecretKey, SignedBlock, TaggedJson, ValidatorSet,
+    testtasks::TestTasks, Block, BlockDataHandling, BlockHeight, ExecutionResults, Kolme,
+    KolmeStore, Message, Processor, SecretKey, SignedBlock, TaggedJson,
 };
 use kolme_store::sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
     Executor,
 };
-use std::{
-    collections::BTreeSet,
-    sync::{Arc, OnceLock},
-};
+use std::sync::Arc;
 
-const DUMMY_CODE_VERSION: &str = "dummy code version";
-
-pub fn get_sample_secret_key() -> &'static SecretKey {
-    static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
-}
-
-#[derive(Clone, Debug)]
-pub struct SampleKolmeApp {
-    pub genesis: GenesisInfo,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SampleState {}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub enum SampleMessage {
-    SayHi,
-}
-
-impl MerkleSerialize for SampleState {
-    fn merkle_serialize(
-        &self,
-        _serializer: &mut MerkleSerializer,
-    ) -> Result<(), MerkleSerialError> {
-        Ok(())
-    }
-}
-
-impl MerkleDeserialize for SampleState {
-    fn merkle_deserialize(
-        _deserializer: &mut MerkleDeserializer,
-        _version: usize,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(SampleState {})
-    }
-}
-
-impl Default for SampleKolmeApp {
-    fn default() -> Self {
-        let my_public_key = get_sample_secret_key().public_key();
-        let mut set = BTreeSet::new();
-        set.insert(my_public_key);
-        let genesis = GenesisInfo {
-            kolme_ident: "Dev code".to_owned(),
-            validator_set: ValidatorSet {
-                processor: my_public_key,
-                listeners: set.clone(),
-                needed_listeners: 1,
-                approvers: set,
-                needed_approvers: 1,
-            },
-            chains: ConfiguredChains::default(),
-            version: DUMMY_CODE_VERSION.to_owned(),
-        };
-
-        Self { genesis }
-    }
-}
-
-impl KolmeApp for SampleKolmeApp {
-    type State = SampleState;
-    type Message = SampleMessage;
-
-    fn genesis_info(&self) -> &GenesisInfo {
-        &self.genesis
-    }
-
-    fn new_state() -> anyhow::Result<Self::State> {
-        Ok(SampleState {})
-    }
-
-    async fn execute(
-        &self,
-        _ctx: &mut ExecutionContext<'_, Self>,
-        _msg: &Self::Message,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
+use crate::kolme_app::*;
 
 // #[tokio::test]
 // async fn test_in_memory_block_double_insertion() {
@@ -153,8 +68,8 @@ async fn test_postgres_block_double_insertion() {
 
 async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<SampleKolmeApp>) {
     // Arrange
-    let processor = get_sample_secret_key();
-    let kolme = Kolme::new(SampleKolmeApp::default(), DUMMY_CODE_VERSION, store)
+    let processor = my_secret_key();
+    let kolme = Kolme::new(SampleKolmeApp::new("Dev code"), DUMMY_CODE_VERSION, store)
         .await
         .unwrap();
 
@@ -205,9 +120,7 @@ async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<Sam
         f: impl FnOnce(&mut Block<SampleMessage>),
     ) -> anyhow::Result<Arc<SignedBlock<SampleMessage>>> {
         f(&mut block);
-        let signed = TaggedJson::new(block)
-            .unwrap()
-            .sign(get_sample_secret_key())?;
+        let signed = TaggedJson::new(block).unwrap().sign(&my_secret_key())?;
 
         Ok(Arc::new(SignedBlock(signed)))
     }

@@ -27,3 +27,5 @@ test-ledger/
 flake.nix
 flake.lock
 .dir-locals.el
+.env
+.envrc
