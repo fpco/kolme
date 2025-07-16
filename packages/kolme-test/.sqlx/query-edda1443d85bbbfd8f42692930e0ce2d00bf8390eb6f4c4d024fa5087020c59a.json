@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "TRUNCATE blocks",
+  "query": "TRUNCATE TABLE archived_blocks",
   "describe": {
     "columns": [],
     "parameters": {
@@ -8,5 +8,5 @@
     },
     "nullable": []
   },
-  "hash": "7b8b6b518603513edf36bb8472e1ed23155d93f19a70320453d51eba708f51eb"
+  "hash": "edda1443d85bbbfd8f42692930e0ce2d00bf8390eb6f4c4d024fa5087020c59a"
 }

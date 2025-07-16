@@ -13,7 +13,7 @@ merkle-map = { workspace = true }
 kademlia-discovery = { path = "../examples/kademlia-discovery" }
 shared = { workspace = true, features = ["realcryptography", "cosmwasm"] }
 tokio = { workspace = true}
-sqlx = { version = "0.8.5", features = ["macros", "migrate", "runtime-tokio", "postgres", "tls-rustls"], default-features = false }
+sqlx = { workspace = true }
 jiff = { workspace = true }
 parking_lot = "0.12.4"
 tracing = "0.1.41"

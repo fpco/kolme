@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT height as \"height!\" FROM latest_archived_block_height\n            ",
+  "query": "SELECT height as \"height!\" FROM latest_archived_block_height",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       true
     ]
   },
-  "hash": "d458731367165a7ee508b921ba4b836a521b9dd0945fe8c3da5e9f504c74766f"
+  "hash": "5592bd60787be1e3b134126ebad87881e96d808e5f318a8d33da53b4c72096cc"
 }
