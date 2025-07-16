@@ -11,6 +11,7 @@ use crate::*;
 
 pub use accounts::{Account, Accounts, AccountsError};
 pub use error::KolmeError;
+pub use error::KolmeExecutionError;
 
 pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
 pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;

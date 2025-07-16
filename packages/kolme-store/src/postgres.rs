@@ -221,15 +221,14 @@ impl KolmeBackingStore for Store {
     async fn get_height_for_tx(
         &self,
         txhash: Sha256Hash,
-    ) -> core::result::Result<Option<u64>, KolmeStoreError> {
+    ) -> std::result::Result<Option<u64>, KolmeStoreError> {
         let txhash = txhash.as_array().as_slice();
         let height =
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
                 .fetch_optional(&self.pool)
                 .await
                 .context("Unable to query tx height")
-                .inspect_err(|err| tracing::error!("{err:?}"))
-                .unwrap();
+                .inspect_err(|err| tracing::error!("{err:?}"))?;
         match height {
             None => Ok(None),
             Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),

@@ -216,13 +216,17 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let attestations = match state.pending_events.get_mut(&event_id) {
             Some(pending) => {
                 if pending.event != *event {
-                    return Err(KolmeError::Other("Mismatched bridge event".to_string()));
+                    return Err(KolmeError::Execution(
+                        KolmeExecutionError::MismatchedBridgeEvent,
+                    ));
                 }
                 &mut pending.attestations
             }
             None => {
                 if event_id != state.next_event_id {
-                    return Err(KolmeError::Other("Unexpected event_id".to_string()));
+                    return Err(KolmeError::Execution(
+                        KolmeExecutionError::UnexpectedBridgeEventId,
+                    ));
                 }
                 state.next_event_id = event_id.next();
                 state.pending_events.insert(

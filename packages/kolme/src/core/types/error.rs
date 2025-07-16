@@ -151,6 +151,9 @@ pub enum KolmeError {
     #[error("Failed to execute signed Cosmos bridge transaction: {details}")]
     CosmosExecutionFailed { details: String },
 
+    #[error("Execution error: {0}")]
+    Execution(#[from] KolmeExecutionError),
+
     #[error("Error serializing Solana bridge payload (length): {details}")]
     SolanaPayloadLengthSerializationError { details: String },
 
@@ -278,4 +281,13 @@ impl From<WalletError> for KolmeError {
     fn from(e: WalletError) -> Self {
         KolmeError::Other(format!("Wallet error: {e}"))
     }
+}
+
+#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum KolmeExecutionError {
+    #[error("Mismatched bridge event")]
+    MismatchedBridgeEvent,
+
+    #[error("Unexpected bridge event ID")]
+    UnexpectedBridgeEventId,
 }

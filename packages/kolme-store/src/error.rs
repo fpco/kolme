@@ -45,3 +45,9 @@ impl From<fjall::Error> for KolmeStoreError {
         }
     }
 }
+
+impl From<anyhow::Error> for KolmeStoreError {
+    fn from(e: anyhow::Error) -> Self {
+        KolmeStoreError::Other(format!("Anyhow Error: {e}"))
+    }
+}

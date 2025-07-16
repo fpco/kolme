@@ -85,7 +85,7 @@ impl KolmeBackingStore for Store {
     async fn get_height_for_tx(
         &self,
         txhash: Sha256Hash,
-    ) -> core::result::Result<Option<u64>, KolmeStoreError> {
+    ) -> std::result::Result<Option<u64>, KolmeStoreError> {
         Ok(self.0.read().await.txhashes.get(&txhash).copied())
     }
 
