@@ -1,4 +1,4 @@
-# List all dependencies
+# List all recipes
 default:
     just --list --unsorted
 
