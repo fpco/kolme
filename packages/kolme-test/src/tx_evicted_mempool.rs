@@ -12,6 +12,7 @@ use crate::kolme_app::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tx_evicted_mempool() {
+    init_logger(true, None);
     TestTasks::start(tx_evicted_inner, ()).await;
 }
 
@@ -161,7 +162,7 @@ async fn no_op_node(
     }
     receiver.await.ok();
     let hashes = data.lock().unwrap().clone();
-    assert_eq!(hashes.len(), 5, "Ten transactions expected");
+    assert_eq!(hashes.len(), 5, "Five transactions expected");
 
     let mut attempt = 0;
     loop {
