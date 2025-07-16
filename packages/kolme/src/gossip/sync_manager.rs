@@ -299,7 +299,6 @@ impl<App: KolmeApp> SyncManager<App> {
 
             if has_all {
                 Self::process_available_hash(gossip, pending, hash).await?;
-                self.trigger.trigger();
             }
         } else {
             pending.needed_layers.remove(&hash);
@@ -408,7 +407,7 @@ impl<App: KolmeApp> SyncManager<App> {
                     SyncMode::BlockTransfer => true,
                     SyncMode::StateTransfer | SyncMode::Archive => {
                         let kolme = gossip.kolme.read();
-                        kolme.get_next_height().next() == block.height()
+                        kolme.get_next_height() == block.height()
                             && kolme.get_chain_version() == kolme.get_code_version()
                     }
                 };
