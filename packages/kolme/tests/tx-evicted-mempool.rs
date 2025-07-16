@@ -95,6 +95,7 @@ impl KolmeApp for SampleKolmeApp {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tx_evicted_mempool() {
+    init_logger(true, None);
     TestTasks::start(tx_evicted_inner, ()).await;
 }
 
