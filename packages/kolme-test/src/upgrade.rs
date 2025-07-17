@@ -110,9 +110,9 @@ async fn test_upgrade() {
 
 async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     // Set up the validators and genesis info to be used for both versions of the app.
-    let processor = SecretKey::random(&mut rand::thread_rng());
-    let listener = SecretKey::random(&mut rand::thread_rng());
-    let approver = SecretKey::random(&mut rand::thread_rng());
+    let processor = SecretKey::random();
+    let listener = SecretKey::random();
+    let approver = SecretKey::random();
     let genesis = GenesisInfo {
         kolme_ident: "Dev code".to_owned(),
         validator_set: ValidatorSet {
@@ -159,7 +159,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
         })
         .await;
 
-    let client = SecretKey::random(&mut rand::thread_rng());
+    let client = SecretKey::random();
     const HI_COUNT1: u64 = 10;
     for i in 0..HI_COUNT1 {
         kolme1

@@ -23,6 +23,8 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     /// Timestamp corresponding to the moment of time when processor starts
     /// executing the current transaction
     timestamp: Timestamp,
+    /// The block height we are trying to produce.
+    height: BlockHeight,
 }
 
 #[derive(Debug)]
@@ -32,6 +34,7 @@ pub struct ExecutionResults<App: KolmeApp> {
     /// Logs collected from each message.
     pub logs: Vec<Vec<String>>,
     pub loads: Vec<BlockDataLoad>,
+    pub height: BlockHeight,
 }
 
 /// An already executed block that can be added to storage.
@@ -114,6 +117,7 @@ impl<App: KolmeApp> KolmeRead<App> {
             timestamp,
             logs: vec![],
             loads: vec![],
+            height: self.get_next_height(),
         };
         for message in &tx.messages {
             execution_context.logs.push(vec![]);
@@ -133,6 +137,7 @@ impl<App: KolmeApp> KolmeRead<App> {
             timestamp: _,
             logs,
             loads,
+            height,
         } = execution_context;
 
         match block_data_handling {
@@ -152,6 +157,7 @@ impl<App: KolmeApp> KolmeRead<App> {
             app_state,
             logs,
             loads,
+            height,
         })
     }
 }
@@ -470,6 +476,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
     pub fn block_time(&self) -> Timestamp {
         self.timestamp
+    }
+
+    pub fn block_height(&self) -> BlockHeight {
+        self.height
     }
 
     pub fn get_sender_id(&self) -> AccountId {

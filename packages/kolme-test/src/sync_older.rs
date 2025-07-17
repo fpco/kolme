@@ -32,14 +32,14 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
 
     // Send a few transactions to bump up the block height
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
             .unwrap();
     }
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let latest_block_height = kolme1
         .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
         .await
@@ -180,7 +180,7 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(Processor::new(kolme.clone(), my_secret_key()).run());
 
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
@@ -202,7 +202,7 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
         "Block heights were not archived correctly"
     );
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
 
     kolme
         .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])

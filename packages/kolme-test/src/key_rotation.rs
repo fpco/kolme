@@ -11,10 +11,10 @@ pub async fn test_self_replace() {
 }
 
 async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
-    let secret1 = SecretKey::random(&mut rand::thread_rng());
-    let secret2 = SecretKey::random(&mut rand::thread_rng());
-    let client = SecretKey::random(&mut rand::thread_rng());
-    let fake_validator = SecretKey::random(&mut rand::thread_rng());
+    let secret1 = SecretKey::random();
+    let secret2 = SecretKey::random();
+    let client = SecretKey::random();
+    let fake_validator = SecretKey::random();
     let store = KolmeStore::new_in_memory();
     let kolme = Kolme::new(
         SampleKolmeApp::new_validator(secret1.public_key()),
@@ -138,14 +138,14 @@ async fn test_total_replace() {
 }
 
 async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
-    let orig_processor = SecretKey::random(&mut rand::thread_rng());
-    let listener = SecretKey::random(&mut rand::thread_rng());
-    let temp_approver = SecretKey::random(&mut rand::thread_rng());
-    let new_approvers = std::iter::repeat_with(|| SecretKey::random(&mut rand::thread_rng()))
+    let orig_processor = SecretKey::random();
+    let listener = SecretKey::random();
+    let temp_approver = SecretKey::random();
+    let new_approvers = std::iter::repeat_with(SecretKey::random)
         .take(3)
         .collect::<Vec<_>>();
-    let new_processor = SecretKey::random(&mut rand::thread_rng());
-    let client = SecretKey::random(&mut rand::thread_rng());
+    let new_processor = SecretKey::random();
+    let client = SecretKey::random();
     let store = KolmeStore::new_in_memory();
     let kolme = Kolme::new(
         SampleKolmeApp::new_validator(orig_processor.public_key()),
