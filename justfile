@@ -46,6 +46,7 @@ sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgre
     just store::sqlx-prepare
     just kolme_test::sqlx-prepare
 
+# Build contracts
 build-contracts:
     ./.ci/build-contracts.sh
 
