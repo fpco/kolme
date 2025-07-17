@@ -547,10 +547,10 @@ impl<App: KolmeApp> Gossip<App> {
             // Catch some events that we don't even want to print at debug level
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
                 libp2p::request_response::Event::ResponseSent { .. },
-            )) => tracing::trace!(
+            )) => tracing::error!(
                 "{local_display_name}: Received and ignoring libp2p event: {event:?}"
             ),
-            _ => tracing::debug!(
+            _ => tracing::error!(
                 "{local_display_name}: Received and ignoring libp2p event: {event:?}"
             ),
         }
@@ -632,8 +632,12 @@ impl<App: KolmeApp> Gossip<App> {
                             "{local_display_name}: RequestBlockContents error on {height}: {e}"
                         );
                     }
-                    Ok(false) => (),
+                    Ok(false) => {
+                        tracing::info!("{local_display_name}: RequestsBlockContents Ok(false) for height {height}");
+                        ()
+                    },
                     Ok(true) => {
+                        tracing::info!("{local_display_name}: RequestsBlockContents Ok(true) BlockAvailable for height {height}");
                         swarm.behaviour_mut().request_response.send_request(
                             &peer,
                             BlockRequest::BlockAvailable {
@@ -649,8 +653,12 @@ impl<App: KolmeApp> Gossip<App> {
                     Err(e) => tracing::warn!(
                         "{local_display_name}: RequestLayerContents error on {hash}: {e}"
                     ),
-                    Ok(false) => (),
+                    Ok(false) => {
+                        tracing::info!("{local_display_name}: RequestLayerContents Ok(false) for hash {hash}");
+                        ()
+                    },
                     Ok(true) => {
+                        tracing::info!("{local_display_name}: RequestLayerContents Ok(true) LayerAvailable for hash {hash}");
                         swarm.behaviour_mut().request_response.send_request(
                             &peer,
                             BlockRequest::LayerAvailable {
@@ -686,6 +694,7 @@ impl<App: KolmeApp> Gossip<App> {
                         BlockResponse::HeightNotFound(height)
                     }
                     Ok(Some(storable_block)) => {
+                        tracing::info!("{local_display_name}: Received a request for block {height}, and had it.");
                         #[cfg(debug_assertions)]
                         {
                             // Sanity testing
@@ -709,7 +718,10 @@ impl<App: KolmeApp> Gossip<App> {
                         tracing::warn!("{local_display_name}: Received a request for merkle layer {hash}, but didn't have it.");
                         BlockResponse::MerkleNotFound(hash)
                     }
-                    Ok(Some(contents)) => BlockResponse::Merkle { hash, contents },
+                    Ok(Some(contents)) => {
+                        tracing::info!("{local_display_name}: Received a request for merkle layer {hash}, and had it.");
+                        BlockResponse::Merkle { hash, contents }
+                    }
                     Err(e) => {
                         tracing::warn!(
                             "{local_display_name}: Error when loading Merkle layer for {hash}: {e}"
@@ -744,6 +756,7 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
         match response {
             BlockResponse::Block(block) | BlockResponse::BlockWithState { block } => {
+                tracing::info!("{local_display_name}: BlockResponse::Block add_pending_block");
                 self.sync_manager
                     .lock()
                     .await
