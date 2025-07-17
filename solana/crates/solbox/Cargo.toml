@@ -1,16 +1,20 @@
 [package]
 name = "solbox"
 version = "0.1.0"
+authors = ["FP Complete", "Michael Snoyman <msnoyman@fpcomplete.com>"]
 edition = "2021"
 license = "MIT"
-authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [dependencies]
-pinocchio = "0.8.4"
-pinocchio-system = "0.2.3"
-pinocchio-token = "0.3.0"
-pinocchio-pubkey = "0.2.4"
-bitflags = "2.9.0"
-borsh = { version = "1.5.7", default-features = false }
-smallvec = { version = "1.14.0", default-features = false, features = ["union", "const_generics", "const_new"]}
-once_cell = { version = "1.21.1", default-features = false }
+bitflags = { workspace = true }
+borsh = { workspace = true }
+once_cell = { workspace = true }
+pinocchio = { workspace = true }
+pinocchio-pubkey = { workspace = true }
+pinocchio-system = { workspace = true }
+pinocchio-token = { workspace = true }
+smallvec = { workspace = true, features = [
+  "const_generics",
+  "const_new",
+  "union",
+] }

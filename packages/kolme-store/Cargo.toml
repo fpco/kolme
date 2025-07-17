@@ -5,20 +5,26 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
-merkle-map.workspace = true
-thiserror = "2.0.12"
-tracing = "0.1.41"
-sqlx = { version = "0.8.5", features = ["macros", "migrate", "runtime-tokio", "postgres", "tls-rustls"], default-features = false }
-tokio.workspace = true
-serde_json.workspace = true
-serde.workspace = true
+enum_dispatch = { workspace = true }
 fjall.workspace = true
+merkle-map.workspace = true
+parking_lot = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
 smallvec.workspace = true
-enum_dispatch = "0.3.13"
-parking_lot = "0.12.4"
-
-[lints]
-workspace = true
+sqlx = { workspace = true, features = [
+  "macros",
+  "migrate",
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+] }
+thiserror = { workspace = true }
+tokio.workspace = true
+tracing = { workspace = true }
 
 [dev-dependencies]
 quickcheck.workspace = true
+
+[lints]
+workspace = true
