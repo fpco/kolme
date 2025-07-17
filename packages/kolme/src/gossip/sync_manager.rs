@@ -200,6 +200,7 @@ impl<App: KolmeApp> SyncManager<App> {
 
         self.needed_blocks
             .insert(height, WaitingBlock::Needed(RequestStatus::new(peer)));
+        println!("Triggering add_needed_block. height: {height}");
         self.trigger.trigger();
         Ok(())
     }
@@ -347,21 +348,27 @@ impl<App: KolmeApp> SyncManager<App> {
             SyncMode::StateTransfer => (),
             // Check the archive value and sync from there.
             SyncMode::Archive => {
+                tracing::info!("Adding missing blocks on Archive mode");
                 // Add earlier blocks to archive if we know there are later blocks available.
                 if let Some((next_needed, _)) = self.needed_blocks.first_key_value() {
                     let next_to_archive = gossip.kolme.get_next_to_archive().await?;
+                    tracing::info!("Next block to archive {}", next_to_archive);
                     if next_to_archive < *next_needed {
+                        tracing::info!("Calling add_needed_block to archive {}", next_to_archive);
                         self.add_needed_block(gossip, next_to_archive, None).await?;
                     }
                 }
             }
             SyncMode::BlockTransfer => {
+                tracing::info!("Adding missing blocks on BlockTransfer mode");
                 // If there are any blocks needed that are _later_ than our currently
                 // expected next block, get the next block.
                 if let Some((next_needed, _)) = self.needed_blocks.first_key_value() {
                     let next_needed = *next_needed;
                     let next_chain = gossip.kolme.read().get_next_height();
+                    tracing::info!("Next block for BlockTransfer {}", next_needed);
                     if next_needed != next_chain {
+                        tracing::info!("Calling add_needed_block to BlockTransfer {}", next_chain);
                         self.add_needed_block(gossip, next_chain, None).await?;
                     }
                 }
