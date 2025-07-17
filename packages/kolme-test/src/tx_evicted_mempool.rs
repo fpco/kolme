@@ -140,6 +140,7 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
+    let kolme = kolme.set_tx_await_duration(Duration::from_secs(5));
     test_tasks.try_spawn(no_op_node(kolme.clone(), receiver, mutex));
     test_tasks
         .launch_kademlia_client(kolme, "kolme-no-op", &discovery)
@@ -151,48 +152,27 @@ async fn no_op_node(
     receiver: oneshot::Receiver<()>,
     data: Arc<Mutex<Vec<TxHash>>>,
 ) -> Result<()> {
-    let mut counter = 0;
-
-    let mut mempool_subscribe = kolme.subscribe_mempool_additions();
-
-    loop {
-        let _ = mempool_subscribe.listen().await;
-        counter += 1;
-        if counter >= 5 {
-            // Counter will be greater than 5 because
-            // mempool_subscribe will also be triggered on removal in
-            // the current implementation. But this is a good time to
-            // break from the loop.
-            break;
-        }
-    }
     receiver.await.ok();
     let hashes = data.lock().unwrap().clone();
     assert_eq!(hashes.len(), 5, "Five transactions expected");
 
     let mut attempt = 0;
-    loop {
-        let mempool = kolme.get_mempool_entries();
-        if mempool.is_empty() {
-            break;
-        }
-        if attempt == 15 {
-            for (index, hash) in hashes.iter().enumerate() {
-                let height = kolme.get_tx_height(*hash).await.unwrap();
-                if height.is_none() {
-                    println!("{hash} with {index} not present");
-                }
+    for (index, hash) in hashes.iter().enumerate() {
+        loop {
+            let height = kolme.wait_for_tx(*hash).await;
+            if height.is_ok() {
+                break;
+            } else {
+                attempt += 1;
             }
-            for tx in &mempool {
-                println!("Mempool hash: {}", tx.hash());
+            if attempt >= 5 {
+                let mempool = kolme.get_mempool_entries();
+                panic!(
+                    "Mempool is not empty after {attempt} retries for {hash} ({index}). Still left {} entries.",
+                    mempool.len()
+                );
             }
-            panic!(
-                "Mempool is not empty after {attempt} retries. Still left {} entries.",
-                mempool.len()
-            );
         }
-        attempt += 1;
-        tokio::time::sleep(Duration::from_secs(2)).await;
     }
     Ok(())
 }
