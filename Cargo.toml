@@ -6,6 +6,7 @@ members = [
   "packages/examples/*",
   "packages/integration-tests",
   "packages/kolme",
+  "packages/kolme-cli",
   "packages/kolme-store",
   "packages/kolme-test",
   "packages/merkle-map",

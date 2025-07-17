@@ -23,7 +23,7 @@ async fn migrate_stores_inner(testtasks: TestTasks, (): ()) {
 
     // Send a few transactions to bump up the block height
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
@@ -56,7 +56,7 @@ async fn migrate_stores_inner(testtasks: TestTasks, (): ()) {
 
     // Confirm that we can still execute blocks.
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme2
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await

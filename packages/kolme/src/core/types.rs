@@ -1062,30 +1062,47 @@ impl<AppMessage> From<Vec<Message<AppMessage>>> for TxBuilder<AppMessage> {
 
 /// An individual message included in a transaction.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
 pub enum Message<AppMessage> {
+    #[serde(alias = "Genesis")]
     Genesis(GenesisInfo),
+    #[serde(alias = "App")]
     App(AppMessage),
+    #[serde(alias = "Listener")]
     Listener {
         chain: ExternalChain,
         event_id: BridgeEventId,
         event: BridgeEvent,
     },
     /// Approval from a single approver for a bridge action
+    #[serde(alias = "Approve")]
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
         signature: SignatureWithRecovery,
     },
     /// Final approval from the processor to confirm approvals from approvers.
+    #[serde(alias = "ProcessorApprove")]
     ProcessorApprove {
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: SignatureWithRecovery,
         approvers: Vec<SignatureWithRecovery>,
     },
+    #[serde(alias = "Auth")]
     Auth(AuthMessage),
+    #[serde(alias = "Bank")]
     Bank(BankMessage),
+    #[serde(alias = "Admin")]
     Admin(AdminMessage),
+}
+
+impl<AppMessage: serde::de::DeserializeOwned> FromStr for Message<AppMessage> {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
 }
 
 /// An event emitted by a bridge contract and reported by a listener.

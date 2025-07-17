@@ -4409,6 +4409,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kolme-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.5.38",
+ "jiff",
+ "kolme",
+ "reqwest 0.12.15",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "kolme-cosmos-bridge"
 version = "0.1.0"
 dependencies = [
