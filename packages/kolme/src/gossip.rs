@@ -235,7 +235,7 @@ impl GossipBuilder {
                 noise::Config::new,
                 yamux::Config::default,
             )
-            .unwrap()
+            .map_err(|e| KolmeError::Other(e.to_string()))?
             .with_quic()
             .with_dns()?
             .with_behaviour(|key| {
@@ -293,7 +293,7 @@ impl GossipBuilder {
                     kademlia,
                 })
             })
-            .unwrap()
+            .map_err(|e| KolmeError::Other(e.to_string()))?
             .build();
 
         // Create the Gossipsub topics
@@ -303,7 +303,11 @@ impl GossipBuilder {
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
         if self.listeners.is_empty() {
-            swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
+            swarm.listen_on(
+                "/ip4/0.0.0.0/tcp/0"
+                    .parse()
+                    .map_err(|e| KolmeError::Other(format!("Parsing Error: {e}")))?,
+            )?;
         } else {
             for listener in &self.listeners {
                 swarm.listen_on(listener.multiaddr())?;
@@ -887,8 +891,12 @@ impl FromStr for KademliaBootstrap {
             .split_once('@')
             .with_context(|| format!("No @ found in Kademlia bootstrap: {s}"))?;
         Ok(KademliaBootstrap {
-            peer: peer.parse().unwrap(),
-            address: address.parse().unwrap(),
+            peer: peer
+                .parse()
+                .map_err(|e| KolmeError::Other(format!("Parsing Error: {e}")))?,
+            address: address
+                .parse()
+                .map_err(|e| KolmeError::Other(format!("Parsing Error: {e}")))?,
         })
     }
 }

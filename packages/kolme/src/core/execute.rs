@@ -199,7 +199,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         event: &BridgeEvent,
         event_id: BridgeEventId,
     ) -> std::result::Result<(), KolmeError> {
-        if !self
+        if self
             .framework_state
             .get_validator_set()
             .listeners
@@ -717,7 +717,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     fn admin(&mut self, admin: &AdminMessage) -> std::result::Result<(), KolmeError> {
         match admin {
             AdminMessage::SelfReplace(self_replace) => {
-                let signer = self_replace.verify_signature().unwrap();
+                let signer = self_replace.verify_signature()?;
                 if signer != self.pubkey {
                     return Err(KolmeError::InvalidSelfReplaceSigner);
                 }

@@ -532,8 +532,7 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block: Arc<SignedBlock<App::Message>>,
     ) -> std::result::Result<(), KolmeError> {
         // Don't accept blocks we already have
-        if self.has_block(signed_block.height()).await.unwrap() {
-            //Convert KolmeStoreError to KolmeError
+        if self.has_block(signed_block.height()).await? {
             return Err(KolmeError::BlockAlreadyExists {
                 height: signed_block.height(),
             });
