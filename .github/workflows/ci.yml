@@ -12,6 +12,7 @@ env:
   CARGO_NET_RETRY: 10
   RUST_BACKTRACE: 1
   RUSTUP_MAX_RETRIES: 10
+  RUSTFLAGS: "-D warnings"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,7 +38,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v0-kolme"
+          prefix-key: "v1-kolme"
           cache-workspace-crates: true
           cache-on-failure: true
           workspaces: |
@@ -94,7 +95,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: "v5-solana"
+          prefix-key: "v6-solana"
           cache-workspace-crates: true
           # https://github.com/Swatinem/rust-cache/issues/237
           cache-bin: false

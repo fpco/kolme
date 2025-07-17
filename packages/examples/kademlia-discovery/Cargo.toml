@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serde = { version = "1.0.219", features = ["derive"] }
-rand = "0.8"
-tokio = { workspace = true }
+anyhow = { workspace = true }
 clap = { workspace = true }
 kolme = { workspace = true }
-libp2p = { workspace = true, features = ["rsa", "dns"] }
-anyhow = { workspace = true }
-tracing = "0.1.41"
+libp2p = { workspace = true, features = ["dns", "rsa"] }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true }
+tracing = { workspace = true }

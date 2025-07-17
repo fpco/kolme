@@ -41,7 +41,7 @@ impl TestTasks {
         KademliaDiscovery { peer, addr }
     }
 
-    pub fn launch_kademlia_client<App: KolmeApp>(
+    pub async fn launch_kademlia_client<App: KolmeApp>(
         &self,
         kolme: Kolme<App>,
         display_name: &str,
@@ -52,10 +52,11 @@ impl TestTasks {
                 SyncMode::BlockTransfer,
                 DataLoadValidation::ValidateDataLoads,
             )
-        });
+        })
+        .await;
     }
 
-    pub fn launch_kademlia_client_with<App: KolmeApp, F>(
+    pub async fn launch_kademlia_client_with<App: KolmeApp, F>(
         &self,
         kolme: Kolme<App>,
         display_name: &str,
@@ -68,7 +69,13 @@ impl TestTasks {
             .set_local_display_name(display_name)
             .add_bootstrap(discovery.peer, discovery.addr.clone());
         let builder = f(builder);
-        self.try_spawn_persistent(builder.build(kolme.clone()).unwrap().run());
+        let gossip = builder.build(kolme.clone()).unwrap();
+        let mut ready = gossip.subscribe_network_ready();
+        self.try_spawn_persistent(gossip.run());
+        tokio::time::timeout(tokio::time::Duration::from_secs(30), ready.changed())
+            .await
+            .expect("Timed out waiting for network to be ready")
+            .unwrap();
     }
 }
 

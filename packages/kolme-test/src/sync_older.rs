@@ -66,17 +66,19 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.launch_kademlia_client_with(
-        kolme_state_transfer.clone(),
-        "kolme_state_transfer",
-        &discovery,
-        |builder| {
-            builder.set_sync_mode(
-                SyncMode::StateTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-        },
-    );
+    testtasks
+        .launch_kademlia_client_with(
+            kolme_state_transfer.clone(),
+            "kolme_state_transfer",
+            &discovery,
+            |builder| {
+                builder.set_sync_mode(
+                    SyncMode::StateTransfer,
+                    DataLoadValidation::ValidateDataLoads,
+                )
+            },
+        )
+        .await;
 
     // We should be able to sync the latest block within a few seconds
     let latest_from_gossip = tokio::time::timeout(

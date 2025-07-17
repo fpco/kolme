@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-litesvm = "0.6.0"
-litesvm-token = "0.6.0"
-shared = { path = "../../../packages/shared", features = ["realcryptography", "solana"] }
-kolme-solana-bridge-client = { path = "../kolme-solana-bridge-client" }
-solana-transaction-error = "2.2.1"
-sha_256 = "1.0.1"
-base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
-borsh = { version = "1.5.7", default-features = false }
+base64 = { workspace = true, features = ["alloc"] }
+borsh = { workspace = true }
+kolme-solana-bridge-client = { workspace = true }
+litesvm = { workspace = true }
+litesvm-token = { workspace = true }
+sha_256 = { workspace = true }
+shared = { workspace = true, features = ["realcryptography", "solana"] }
+solana-transaction-error = { workspace = true }

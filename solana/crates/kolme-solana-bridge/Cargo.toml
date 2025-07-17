@@ -1,24 +1,24 @@
 [package]
 name = "kolme-solana-bridge"
 version = "0.1.0"
+authors = ["FP Complete", "Michael Snoyman <msnoyman@fpcomplete.com>"]
 edition = "2021"
 license = "MIT"
-authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
-#[profile.release.build-override]
-#lto = "fat"
-
-[features]
-no-entrypoint = []
-cpi = ["no-entrypoint"]
-default = []
+# [profile.release.build-override]
+# lto = "fat"
 
 [dependencies]
-borsh = { version = "1.5.7", default-features = false }
-solbox = { path = "../solbox" }
-shared = { path = "../../../packages/shared", features = ["chaincryptography", "solana"] }
-base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
-serde_json = "1"
+base64 = { workspace = true, features = ["alloc"] }
+borsh = { workspace = true }
+serde_json = { workspace = true }
+shared = { workspace = true, features = ["chaincryptography", "solana"] }
+solbox = { workspace = true }
+
+[features]
+cpi = ["no-entrypoint"]
+default = []
+no-entrypoint = []

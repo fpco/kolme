@@ -1,45 +1,45 @@
 [package]
 name = "benchmarks"
 version = "0.1.0"
+authors = ["FP Complete", "Michael Snoyman <msnoyman@fpcomplete.com>"]
 edition = "2021"
 license = "MIT"
-authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
-
-[features]
-artifacts = ["dep:regex", "dep:plotters", "dep:plotters-svg"]
-
-[dependencies]
-kolme = { workspace = true, features = ["pass_through"] }
-anyhow = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true }
-serde = { workspace = true }
-tracing = "0.1.41"
-plotters = { version = "0.3.7", optional = true }
-regex = { version = "1.11.1", optional = true }
-plotters-svg = { version = "0.3.7", optional = true }
-
-[dev-dependencies]
-regex = "1.11.1"
-example-six-sigma = { path = "../examples/six-sigma" }
-example-solana-cosmos-bridge = { path = "../examples/solana-cosmos-bridge" }
-rand = "0.8"
-jiff = "0.2.5"
-sqlx = { version = "0.8.5", features = ["postgres", "runtime-tokio"] }
-criterion = { version = "0.6.0", features = ["async_tokio"] }
-merkle-map.workspace = true
-smallvec.workspace = true
-parking_lot = "0.12.4"
-tempdir = "0.3.7"
-fjall.workspace = true
-
-[lints]
-workspace = true
-
-[[bench]]
-name = "insertion"
-harness = false
 
 [[bin]]
 name = "generate_benchmark_artifacts"
 required-features = ["artifacts"]
+
+[[bench]]
+harness = false
+name = "insertion"
+
+[dependencies]
+anyhow = { workspace = true }
+kolme = { workspace = true, features = ["pass_through"] }
+plotters = { workspace = true, optional = true }
+plotters-svg = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+example-six-sigma = { workspace = true }
+example-solana-cosmos-bridge = { workspace = true }
+fjall.workspace = true
+jiff = { workspace = true }
+merkle-map.workspace = true
+parking_lot = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+smallvec.workspace = true
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }
+tempdir = { workspace = true }
+
+[features]
+artifacts = ["dep:plotters", "dep:plotters-svg", "dep:regex"]
+
+[lints]
+workspace = true

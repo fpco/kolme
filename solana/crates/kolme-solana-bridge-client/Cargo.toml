@@ -1,18 +1,18 @@
 [package]
 name = "kolme-solana-bridge-client"
 version = "0.1.0"
+authors = ["FP Complete", "Michael Snoyman <msnoyman@fpcomplete.com>"]
 edition = "2021"
 license = "MIT"
-authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
 
 [dependencies]
-borsh = { version = "1.5.7", default-features = false, features = ["derive"] }
-shared = { path = "../../../packages/shared", features = ["realcryptography", "solana"] }
-solana-transaction = { version = "2.2", features = ["bincode"] }
-solana-pubkey = { version = "2.2", default-features = false, features = ["std", "curve25519"] }
-solana-keypair = { version = "2.2" }
-solana-signer = { version = "2.2" }
-solana-message = { version = "2.2" }
-solana-instruction = { version = "2.2" }
-solana-hash = { version = "2.2" }
-spl-associated-token-account-client = { version = "2.0.0" }
+borsh = { workspace = true, features = ["derive"] }
+shared = { workspace = true, features = ["realcryptography", "solana"] }
+solana-hash = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true, features = ["curve25519", "std"] }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true, features = ["bincode"] }
+spl-associated-token-account-client = { workspace = true }

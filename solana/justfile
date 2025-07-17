@@ -26,3 +26,7 @@ download-solana:
 	mv solana-release/bin/* ~/.cargo/bin/
 	rm solana-release.tar.bz2
 	rm -rf solana-release
+
+# Cargo inherit
+inherit:
+    cargo autoinherit

@@ -43,9 +43,10 @@ test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
     just cargo-contract-tests
 
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
-	just store::sqlx-prepare
-	just kolme_test::sqlx-prepare
+    just store::sqlx-prepare
+    just kolme_test::sqlx-prepare
 
+# Build contracts
 build-contracts:
     ./.ci/build-contracts.sh
 
@@ -90,4 +91,8 @@ profile-build:
 
 # Cargo inherit
 inherit:
-    cargo autoinherit
+    cargo autoinherit --exclude-members solana
+
+# Toml format
+toml-format:
+    tombi format

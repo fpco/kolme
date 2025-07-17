@@ -15,7 +15,6 @@ header = """
 All notable changes to this project are documented in this file. This changelog is generated automatically from commit history using [git-cliff](https://github.com/orhun/git-cliff) and follows the [Conventional Commits](https://www.conventionalcommits.org/) specification.
 
 """
-
 group_titles.Features = "Features"
 group_titles."Bug Fixes" = "Bug Fixes"
 group_titles.Documentation = "Documentation"
@@ -25,11 +24,9 @@ group_titles.Tests = "Tests"
 group_titles."Build System" = "Build System"
 group_titles."Continuous Integration" = "Continuous Integration"
 group_titles.Chores = "Chores"
-
 group = """
 ### {{ group | upper_first }}
 """
-
 body = """
 {% if version %}
 ## Version {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
@@ -48,7 +45,6 @@ _No changes._
 {% endfor %}
 {% endif %}
 """
-
 footer = """
 ---
 This changelog is maintained for production releases. For more details, see the project repository.

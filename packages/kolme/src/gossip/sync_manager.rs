@@ -349,7 +349,7 @@ impl<App: KolmeApp> SyncManager<App> {
             SyncMode::Archive => {
                 // Add earlier blocks to archive if we know there are later blocks available.
                 if let Some((next_needed, _)) = self.needed_blocks.first_key_value() {
-                    let next_to_archive = gossip.kolme.get_next_to_archive().await;
+                    let next_to_archive = gossip.kolme.get_next_to_archive().await?;
                     if next_to_archive < *next_needed {
                         self.add_needed_block(gossip, next_to_archive, None).await?;
                     }

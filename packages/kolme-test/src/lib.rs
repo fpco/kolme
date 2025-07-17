@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod archiver;
+#[cfg(test)]
 mod auth;
 #[cfg(test)]
 mod kademlia;
