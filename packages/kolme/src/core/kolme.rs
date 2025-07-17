@@ -211,7 +211,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn propose_and_await_transaction(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> std::result::Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         let txhash = tx.hash();
         match tokio::time::timeout(
             self.tx_await_duration,
@@ -220,16 +220,17 @@ impl<App: KolmeApp> Kolme<App> {
         .await
         {
             Ok(res) => res,
-            Err(e) => Err(anyhow::Error::from(e).context(format!(
-                "Timed out proposing and awaiting transaction {txhash}"
-            ))),
+            Err(e) => Err(KolmeError::TimeoutProposingTx {
+                txhash,
+                details: e.to_string(),
+            }),
         }
     }
 
     async fn propose_and_await_transaction_inner(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> std::result::Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         let mut recv = self.subscribe();
         let txhash_orig = tx.hash();
         self.propose_transaction(tx);
@@ -265,7 +266,7 @@ impl<App: KolmeApp> Kolme<App> {
                         continue;
                     }
                     if txhash_orig == failed.message.as_inner().txhash {
-                        break Err(failed.message.as_inner().error.clone().into());
+                        break Err(failed.message.as_inner().error.clone());
                     }
                 }
                 Notification::LatestBlock(_) => continue,
@@ -286,7 +287,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         secret: &SecretKey,
         tx_builder: T,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> std::result::Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         match tokio::time::timeout(
             self.tx_await_duration,
             self.sign_propose_await_transaction_inner(secret, tx_builder.into()),
@@ -294,8 +295,9 @@ impl<App: KolmeApp> Kolme<App> {
         .await
         {
             Ok(res) => res,
-            Err(e) => Err(anyhow::Error::from(e)
-                .context("Timed out while signing/proposing/awaiting a transaction")),
+            Err(e) => Err(KolmeError::TimeoutOnTransaction {
+                details: e.to_string(),
+            }),
         }
     }
 
@@ -303,7 +305,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         secret: &SecretKey,
         tx_builder: TxBuilder<App::Message>,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> std::result::Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         loop {
             let tx = Arc::new(
                 self.read()
@@ -312,12 +314,12 @@ impl<App: KolmeApp> Kolme<App> {
             match self.propose_and_await_transaction_inner(tx).await {
                 Ok(block) => break Ok(block),
                 Err(e) => {
-                    if let Some(KolmeError::InvalidNonce {
+                    if let KolmeError::InvalidNonce {
                         pubkey: _,
                         account_id: _,
                         expected,
                         actual,
-                    }) = e.downcast_ref()
+                    } = e
                     {
                         if actual < expected {
                             tracing::warn!("Retrying with new nonce: {e}");
@@ -751,7 +753,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn wait_for_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> std::result::Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         // Optimization for the common case.
         if let Some(storable_block) = self.get_block(height).await? {
             return Ok(storable_block.block);
@@ -1030,7 +1032,10 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    pub async fn get_solana_pubsub_client(&self, chain: SolanaChain) -> Result<PubsubClient> {
+    pub async fn get_solana_pubsub_client(
+        &self,
+        chain: SolanaChain,
+    ) -> std::result::Result<PubsubClient, KolmeError> {
         // TODO do we need caching here?
 
         let endpoint = self

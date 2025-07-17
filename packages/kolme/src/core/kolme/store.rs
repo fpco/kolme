@@ -37,21 +37,21 @@ impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
-    pub async fn new_postgres(url: &str) -> Result<Self> {
+    pub async fn new_postgres(url: &str) -> std::result::Result<Self, KolmeError> {
         KolmeStoreInner::new_postgres(url)
             .await
             .map(KolmeStore::from)
-            .map_err(anyhow::Error::from)
+            .map_err(KolmeError::from)
     }
 
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, KolmeError> {
         KolmeStoreInner::new_postgres_with_options(connect, options)
             .await
             .map(KolmeStore::from)
-            .map_err(anyhow::Error::from)
+            .map_err(KolmeError::from)
     }
 
     pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {

@@ -177,7 +177,9 @@ impl KolmeBackingStore for Store {
             .inspect_err(|err| tracing::error!("{err:?}"))
     }
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation("Postgres"))
+        Err(KolmeStoreError::UnsupportedDeleteOperation(
+            "Postgres".to_owned(),
+        ))
     }
 
     async fn take_construct_lock(&self) -> Result<KolmeConstructLock, KolmeStoreError> {

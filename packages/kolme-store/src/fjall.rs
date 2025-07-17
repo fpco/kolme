@@ -37,7 +37,9 @@ impl KolmeBackingStore for Store {
     }
 
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation("Fjall"))
+        Err(KolmeStoreError::UnsupportedDeleteOperation(
+            "Fjall".to_owned(),
+        ))
     }
 
     async fn take_construct_lock(&self) -> Result<crate::KolmeConstructLock, KolmeStoreError> {

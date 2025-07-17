@@ -1,6 +1,11 @@
 use cosmos::error::{AddressError, WalletError};
 use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
-use std::num::TryFromIntError;
+use kolme_store::KolmeStoreError;
+use libp2p::{
+    gossipsub::{ConfigBuilderError, SubscriptionError},
+    TransportError,
+};
+use std::{io, num::TryFromIntError};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::core::*;
@@ -56,6 +61,9 @@ pub enum KolmeError {
         received: BlockHeight,
         expected: BlockHeight,
     },
+
+    #[error("Height mismatch: expected {expected}, got {actual}")]
+    HeightMismatch { expected: u64, actual: u64 },
 
     #[error("Tried to add block with height {height}, but it's already present in the store")]
     BlockAlreadyExists { height: BlockHeight },
@@ -151,8 +159,20 @@ pub enum KolmeError {
     #[error("Failed to execute signed Cosmos bridge transaction: {details}")]
     CosmosExecutionFailed { details: String },
 
+    #[error("Timed out while signing/proposing/awaiting a transaction")]
+    TimeoutOnTransaction { details: String },
+
+    #[error("Timed out proposing and awaiting transaction {txhash}: {details}")]
+    TimeoutProposingTx { txhash: TxHash, details: String },
+
+    #[error("API server error: {details}")]
+    ApiServerError { details: String },
+
     #[error("Execution error: {0}")]
     Execution(#[from] KolmeExecutionError),
+
+    #[error("Store error: {0}")]
+    StoreError(#[from] KolmeStoreError),
 
     #[error("Error serializing Solana bridge payload (length): {details}")]
     SolanaPayloadLengthSerializationError { details: String },
@@ -174,6 +194,9 @@ pub enum KolmeError {
 
     #[error("Solana submitter failed to execute signed transaction: {details}")]
     SolanaSignedTxExecutionFailed { details: String },
+
+    #[error("Failed to create Solana pubsub client: {0}")]
+    SolanaPubsubError(String),
 
     #[error("Bridge program {program} hasn't been initialized yet")]
     UninitializedSolanaBridge { program: String },
@@ -213,7 +236,25 @@ impl From<AccountsError> for KolmeError {
 
 impl From<anyhow::Error> for KolmeError {
     fn from(e: anyhow::Error) -> Self {
-        KolmeError::Other(format!("Anyhow Error: {e}"))
+        KolmeError::Other(format!("Error from Anyhow: {e}"))
+    }
+}
+
+impl From<std::io::Error> for KolmeError {
+    fn from(e: std::io::Error) -> Self {
+        KolmeError::Other(format!("std::io::Error Error: {e}"))
+    }
+}
+
+impl From<SubscriptionError> for KolmeError {
+    fn from(e: SubscriptionError) -> Self {
+        KolmeError::Other(format!("Subscription Error: {e}"))
+    }
+}
+
+impl From<TransportError<io::Error>> for KolmeError {
+    fn from(e: TransportError<io::Error>) -> Self {
+        KolmeError::Other(format!("Subscription Error: {e}"))
     }
 }
 
@@ -280,6 +321,12 @@ impl From<base64::DecodeError> for KolmeError {
 impl From<WalletError> for KolmeError {
     fn from(e: WalletError) -> Self {
         KolmeError::Other(format!("Wallet error: {e}"))
+    }
+}
+
+impl From<ConfigBuilderError> for KolmeError {
+    fn from(e: ConfigBuilderError) -> Self {
+        KolmeError::Other(format!("Config Builder error: {e}"))
     }
 }
 

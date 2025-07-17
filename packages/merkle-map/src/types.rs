@@ -100,7 +100,7 @@ where
 }
 
 /// Errors that can occur during serialization of data.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MerkleSerialError {
     #[error("Insufficient input when parsing buffer")]
     InsufficientInput,
@@ -137,8 +137,8 @@ pub enum MerkleSerialError {
         type_name: &'static str,
         offset: usize,
     },
-    #[error(transparent)]
-    Custom(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Merkle error: {0}")]
+    Custom(String),
     #[error("{0}")]
     Other(String),
 }

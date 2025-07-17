@@ -139,22 +139,22 @@ impl<App: KolmeApp> Processor<App> {
         let executed_block = self
             .construct_block(signed, kolme.get_next_height())
             .await?;
-
-        match self.kolme.add_executed_block(executed_block).await {
+        if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             // kolme#144 - Discard unneeded fields
-            Ok(_) => {
-                self.emit_latest().ok();
-                Ok(())
-            }
-            Err(KolmeError::ConflictingBlockInDb { .. }) => {
+            if let KolmeError::ConflictingBlockInDb { .. } = &e {
                 self.kolme.resync().await?;
-                Ok(())
             }
-            Err(e) => Err(e),
+            Err(e)
+        } else {
+            self.emit_latest().ok();
+            Ok(())
         }
     }
 
-    async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
+    async fn add_transaction(
+        &self,
+        tx: SignedTransaction<App::Message>,
+    ) -> std::result::Result<(), KolmeError> {
         // We'll retry adding a transaction multiple times before giving up.
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
@@ -167,17 +167,19 @@ impl<App: KolmeApp> Processor<App> {
         let proposed_height = self.kolme.read().get_next_height();
         let res = async {
             let executed_block = self.construct_block(tx.clone(), proposed_height).await?;
-            self.kolme.add_executed_block(executed_block).await
+            self.kolme
+                .add_executed_block(executed_block)
+                .await
+                .map_err(KolmeError::from)
         }
         .await;
-        match &res {
-            Ok(_) => (),
-            Err(KolmeError::ConflictingBlockInDb { .. }) => {
+        if let Err(e) = &res {
+            // kolme#144 - Discard unneeded fields
+            if let KolmeError::StoreError(KolmeStoreError::ConflictingBlockInDb { .. }) = e {
                 tracing::warn!(
                     "Unexpected ConflictingBlockInDb while adding transaction; construction lock should have prevented this"
                 );
-            }
-            Err(e) => {
+            } else {
                 tracing::warn!("Giving up on adding transaction {txhash}: {e}");
                 let failed = (|| {
                     let failed = FailedTransaction {
@@ -201,23 +203,21 @@ impl<App: KolmeApp> Processor<App> {
             }
         }
         self.emit_latest().ok();
-        Ok(res?)
+        res
     }
 
     async fn construct_block(
         &self,
         tx: SignedTransaction<App::Message>,
         proposed_height: BlockHeight,
-    ) -> Result<ExecutedBlock<App>> {
+    ) -> std::result::Result<ExecutedBlock<App>, KolmeError> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
 
         let txhash = tx.hash();
         if kolme.get_tx_height(txhash).await?.is_some() {
-            return Err(anyhow::Error::from(KolmeStoreError::TxAlreadyInDb {
-                txhash: txhash.0,
-            }));
+            return Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 }.into());
         }
 
         let now = Timestamp::now();
@@ -237,8 +237,7 @@ impl<App: KolmeApp> Processor<App> {
                     txhash,
                     max_height,
                     proposed_height,
-                }
-                .into());
+                });
             }
         }
 

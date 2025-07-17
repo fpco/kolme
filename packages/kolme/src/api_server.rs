@@ -23,7 +23,10 @@ impl<App: KolmeApp> ApiServer<App> {
         ApiServer { kolme }
     }
 
-    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<()> {
+    pub async fn run<A: tokio::net::ToSocketAddrs>(
+        self,
+        addr: A,
+    ) -> std::result::Result<(), KolmeError> {
         let cors = CorsLayer::new()
             .allow_methods([Method::GET, Method::POST, Method::PUT])
             .allow_origin(Any)
@@ -31,11 +34,27 @@ impl<App: KolmeApp> ApiServer<App> {
 
         let app = base_api_router().layer(cors).with_state(self.kolme);
 
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        tracing::info!("Starting API server on {:?}", listener.local_addr()?);
+        let listener =
+            tokio::net::TcpListener::bind(addr)
+                .await
+                .map_err(|e| KolmeError::ApiServerError {
+                    details: format!("TCP bind error: {e}"),
+                })?;
+
+        tracing::info!(
+            "Starting API server on {:?}",
+            listener
+                .local_addr()
+                .map_err(|e| KolmeError::ApiServerError {
+                    details: format!("Local address error: {e}"),
+                })
+        );
+
         axum::serve(listener, app)
             .await
-            .map_err(anyhow::Error::from)
+            .map_err(|e| KolmeError::ApiServerError {
+                details: format!("Axum server error: {e}"),
+            })
     }
 }
 

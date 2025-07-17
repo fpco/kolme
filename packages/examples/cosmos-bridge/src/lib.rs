@@ -208,7 +208,7 @@ pub async fn serve(kolme: Kolme<CosmosBridgeApp>, bind: SocketAddr) -> Result<()
     );
     set.spawn(submitter.run());
     let api_server = ApiServer::new(kolme);
-    set.spawn(api_server.run(bind));
+    set.spawn(async move { api_server.run(bind).await.map_err(Into::into) });
 
     while let Some(res) = set.join_next().await {
         match res {

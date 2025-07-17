@@ -151,7 +151,7 @@ pub async fn observer_node(validator_addr: &str) -> Result<()> {
     set.spawn(gossip.run());
 
     let api = ApiServer::new(kolme);
-    set.spawn(api.run(("0.0.0.0", 2005)));
+    set.spawn(async move { api.run(("0.0.0.0", 2005)).await.map_err(Into::into) });
 
     loop {
         tracing::info!("Continuing execution...");
@@ -247,7 +247,7 @@ pub async fn validators(port: u16, enable_api_server: bool) -> Result<()> {
     set.spawn(approver.run());
     if enable_api_server {
         let api_server = ApiServer::new(kolme.clone());
-        set.spawn(api_server.run(("0.0.0.0", 2002)));
+        set.spawn(async move { api_server.run(("0.0.0.0", 2002)).await.map_err(Into::into) });
     }
     let gossip = GossipBuilder::new()
         .add_listener(GossipListener {

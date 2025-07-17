@@ -177,12 +177,12 @@ impl SolanaClientEndpoint {
         })
     }
 
-    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
+    pub async fn make_pubsub_client(self) -> std::result::Result<SolanaPubsubClient, KolmeError> {
         match self {
             SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
             SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
         }
-        .map_err(anyhow::Error::from)
+        .map_err(|e| KolmeError::SolanaPubsubError(e.to_string()))
     }
 }
 
@@ -330,7 +330,7 @@ impl ChainState {
         &mut self,
         asset_id: AssetId,
         amount: Decimal,
-    ) -> std::result::Result<(), anyhow::Error> {
+    ) -> std::result::Result<(), KolmeError> {
         let old = self.assets.entry(asset_id).or_default();
         *old = old.checked_add(amount).with_context(|| {
             format!("Overflow while depositing asset {asset_id}, amount == {amount}")
@@ -765,9 +765,9 @@ impl MerkleDeserializeRaw for AccountNonce {
 }
 
 impl TryFrom<i64> for AccountNonce {
-    type Error = anyhow::Error;
+    type Error = KolmeError;
 
-    fn try_from(value: i64) -> Result<Self> {
+    fn try_from(value: i64) -> std::result::Result<Self, KolmeError> {
         Ok(AccountNonce(value.try_into()?))
     }
 }
@@ -802,10 +802,10 @@ impl Display for BlockHeight {
 }
 
 impl TryFrom<i64> for BlockHeight {
-    type Error = anyhow::Error;
+    type Error = KolmeError;
 
-    fn try_from(value: i64) -> Result<Self> {
-        value.try_into().map_err(anyhow::Error::from).map(Self)
+    fn try_from(value: i64) -> std::result::Result<Self, KolmeError> {
+        value.try_into().map_err(KolmeError::from).map(Self)
     }
 }
 

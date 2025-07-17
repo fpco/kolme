@@ -220,7 +220,10 @@ impl GossipBuilder {
         self
     }
 
-    pub fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>> {
+    pub fn build<App: KolmeApp>(
+        self,
+        kolme: Kolme<App>,
+    ) -> std::result::Result<Gossip<App>, KolmeError> {
         let builder = match self.keypair {
             Some(keypair) => SwarmBuilder::with_existing_identity(keypair),
             None => SwarmBuilder::with_new_identity(),
@@ -231,7 +234,8 @@ impl GossipBuilder {
                 tcp::Config::default(),
                 noise::Config::new,
                 yamux::Config::default,
-            )?
+            )
+            .unwrap()
             .with_quic()
             .with_dns()?
             .with_behaviour(|key| {
@@ -255,7 +259,7 @@ impl GossipBuilder {
                     // signing)
                     .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
                     .build()
-                    .map_err(anyhow::Error::from)?;
+                    .map_err(KolmeError::from)?;
 
                 // build a gossipsub network behaviour
                 let gossipsub = gossipsub::Behaviour::new(
@@ -288,7 +292,8 @@ impl GossipBuilder {
                     request_response,
                     kademlia,
                 })
-            })?
+            })
+            .unwrap()
             .build();
 
         // Create the Gossipsub topics
@@ -298,7 +303,7 @@ impl GossipBuilder {
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
         if self.listeners.is_empty() {
-            swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+            swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap())?;
         } else {
             for listener in &self.listeners {
                 swarm.listen_on(listener.multiaddr())?;
@@ -875,15 +880,15 @@ pub struct KademliaBootstrap {
 }
 
 impl FromStr for KademliaBootstrap {
-    type Err = anyhow::Error;
+    type Err = KolmeError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let (peer, address) = s
             .split_once('@')
             .with_context(|| format!("No @ found in Kademlia bootstrap: {s}"))?;
         Ok(KademliaBootstrap {
-            peer: peer.parse()?,
-            address: address.parse()?,
+            peer: peer.parse().unwrap(),
+            address: address.parse().unwrap(),
         })
     }
 }

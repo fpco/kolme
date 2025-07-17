@@ -75,7 +75,7 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
 impl<App: KolmeApp> TryFrom<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>
     for BlockInfo<App>
 {
-    type Error = anyhow::Error;
+    type Error = KolmeError;
 
     fn try_from(
         StorableBlock {
@@ -87,8 +87,13 @@ impl<App: KolmeApp> TryFrom<StorableBlock<SignedBlock<App::Message>, FrameworkSt
             app_state,
             logs,
         }: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
-    ) -> Result<Self> {
-        anyhow::ensure!(height == block.height().0);
+    ) -> std::result::Result<Self, KolmeError> {
+        if height != block.height().0 {
+            return Err(KolmeError::HeightMismatch {
+                expected: height,
+                actual: block.height().0,
+            });
+        }
         Ok(Self {
             block,
             logs,
