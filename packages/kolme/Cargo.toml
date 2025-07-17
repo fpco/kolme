@@ -26,7 +26,7 @@ libp2p = { workspace = true, features = ["tcp", "noise", "gossipsub", "yamux", "
 merkle-map = { workspace = true }
 parking_lot = "0.12.3"
 rand = "0.8"
-reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }
+reqwest = { workspace = true }
 rust_decimal = { workspace = true, features = ["macros"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

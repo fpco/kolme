@@ -6,6 +6,7 @@ members = [
   "packages/benchmarks",
   "packages/integration-tests",
   "packages/kolme",
+  "packages/kolme-cli",
   "packages/kolme-store",
   "packages/merkle-map",
   "packages/shared",
@@ -30,6 +31,7 @@ kolme-store = { path = "packages/kolme-store" }
 libp2p = { version = "0.55" }
 merkle-map = { path = "packages/merkle-map" }
 quickcheck = "1.0.3"
+reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2", "brotli", "deflate"] }
 shared = { path = "packages/shared" }
 lru = "0.14.0"
 rand = "0.8"
