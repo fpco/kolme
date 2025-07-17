@@ -51,9 +51,11 @@ async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
     .await
     .unwrap();
     test_tasks.try_spawn(repeat_client(kolme.clone()));
-    test_tasks.launch_kademlia_client_with(kolme.clone(), "kolme-client", &discovery, |item| {
-        item.set_duplicate_cache_time(Duration::from_micros(100))
-    });
+    test_tasks
+        .launch_kademlia_client_with(kolme.clone(), "kolme-client", &discovery, |item| {
+            item.set_duplicate_cache_time(Duration::from_micros(100))
+        })
+        .await;
 }
 
 async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
@@ -127,7 +129,9 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     .unwrap();
     let mutex = Arc::new(Mutex::new(Vec::new()));
     test_tasks.try_spawn(client(kolme.clone(), sender, mutex.clone()));
-    test_tasks.launch_kademlia_client(kolme.clone(), "kolme-client", &discovery);
+    test_tasks
+        .launch_kademlia_client(kolme.clone(), "kolme-client", &discovery)
+        .await;
 
     let kolme = Kolme::new(
         SampleKolmeApp::new("Dev code"),
@@ -137,7 +141,9 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     .await
     .unwrap();
     test_tasks.try_spawn(no_op_node(kolme.clone(), receiver, mutex));
-    test_tasks.launch_kademlia_client(kolme, "kolme-no-op", &discovery);
+    test_tasks
+        .launch_kademlia_client(kolme, "kolme-no-op", &discovery)
+        .await;
 }
 
 async fn no_op_node(
