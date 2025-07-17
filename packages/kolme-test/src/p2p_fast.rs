@@ -45,20 +45,17 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
         .unwrap()
         .unwrap();
 
-    // Now delete some older blocks
-    for height in BlockHeight::start().0..latest_block_height.0 {
-        store1.delete_block(BlockHeight(height)).await.unwrap();
-    }
-
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
     let discovery = testtasks.launch_kademlia_discovery(kolme1, "kolme1");
 
+    const FAKE_CODE_VERSION: &str = "fake code version";
+
     // Launching a new Kolme with a new gossip set to BlockTransfer should fail
-    // at syncing blocks, since the source gossip doesn't have the early blocks
+    // at syncing blocks, since we give it a different code version.
     let kolme_block_transfer = Kolme::new(
         SampleKolmeApp::new(IDENT),
-        DUMMY_CODE_VERSION,
+        FAKE_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
     .await
@@ -81,7 +78,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     // First check that StateTransfer works
     let kolme_state_transfer = Kolme::new(
         SampleKolmeApp::new(IDENT),
-        DUMMY_CODE_VERSION,
+        FAKE_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
     .await
@@ -111,15 +108,8 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     assert_eq!(latest_from_gossip.hash(), BlockHash(latest_block.blockhash));
 
     // Make sure we never caught up via block transfer.
-    // TODO We'd like to ensure we get no blocks at all.
-    // However, some tests have demonstrated getting the first block.
-    // It's worth investigating why in the future, but it's not priority.
-    //
-    // TODO With the changes to how gossip works, we no longer have the
-    // guarantee of not getting these blocks. We may want to try
-    // fixing this in the future.
-    // assert_ne!(
-    //     kolme_block_transfer.read().get_next_height().0,
-    //     latest_block.height + 1
-    // );
+    assert_eq!(
+        kolme_block_transfer.read().get_next_height(),
+        BlockHeight::start()
+    );
 }

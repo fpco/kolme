@@ -162,11 +162,6 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
         .unwrap()
         .unwrap();
 
-    // Now delete some older blocks
-    for height in BlockHeight::start().0..latest_block_height.0 {
-        store1.delete_block(BlockHeight(height)).await.unwrap();
-    }
-
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
     // And now launch a gossip node for this Kolme
