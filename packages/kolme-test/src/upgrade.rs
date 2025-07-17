@@ -150,12 +150,14 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
         .await
         .unwrap();
     testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), processor.clone()).run());
-    testtasks.launch_kademlia_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
-        builder.set_sync_mode(
-            SyncMode::StateTransfer,
-            DataLoadValidation::ValidateDataLoads,
-        )
-    });
+    testtasks
+        .launch_kademlia_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
+            builder.set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        })
+        .await;
 
     let client = SecretKey::random(&mut rand::thread_rng());
     const HI_COUNT1: u64 = 10;
