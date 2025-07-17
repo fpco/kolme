@@ -498,7 +498,7 @@ impl<App: KolmeApp> Kolme<App> {
         self.notify(Notification::NewBlock(signed_block));
 
         // Update the archive if appropriate
-        if self.get_next_to_archive().await == height {
+        if self.get_next_to_archive().await? == height {
             if let Err(e) = self.inner.store.archive_block(height).await {
                 tracing::warn!("Unable to mark block {height} as archived: {e}");
             }
@@ -1221,14 +1221,19 @@ impl<App: KolmeApp> Kolme<App> {
     ///
     /// This will report errors during data load and then return the earliest
     /// block height, essentially restarting the archive process.
-    pub async fn get_next_to_archive(&self) -> BlockHeight {
-        match self.get_latest_archived_block().await {
-            Ok(None) => (),
-            Ok(Some(height)) => return height.next(),
-            Err(e) => tracing::warn!("Error loading archive value: {e}"),
-        };
+    pub async fn get_next_to_archive(&self) -> Result<BlockHeight> {
+        let mut next = self
+            .get_latest_archived_block()
+            .await?
+            .map_or_else(BlockHeight::start, BlockHeight::next);
 
-        BlockHeight::start()
+        while self.has_block(next).await? {
+            // Mark the "next" block as already archived.
+            self.inner.store.archive_block(next).await?;
+            tracing::info!("get_next_to_archive: block already in database: {next}");
+            next = next.next();
+        }
+        Ok(next)
     }
 }
 
