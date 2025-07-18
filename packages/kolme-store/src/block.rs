@@ -278,4 +278,42 @@ mod tests {
             "Logs were not deserialized correctly"
         );
     }
+
+    #[tokio::test]
+    async fn it_deserializes_from_payload_with_previous_version() {
+        // Arrange
+        let payload: Arc<[u8]> = vec![
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 68, 117, 109, 109, 121, 32, 98,
+            108, 111, 99, 107, 0, 20, 68, 117, 109, 109, 121, 32, 70, 114, 97, 109, 101, 119, 111,
+            114, 107, 83, 116, 97, 116, 101, 0, 14, 68, 117, 109, 109, 121, 32, 65, 112, 112, 83,
+            116, 97, 116, 101, 2, 1, 5, 68, 117, 109, 109, 121, 1, 4, 76, 111, 103, 115,
+        ]
+        .into();
+        let payload_hash = Sha256Hash::hash(&payload);
+        let manager = MerkleManager::new(10);
+
+        // Act
+        let storable_block = manager
+            .deserialize::<StorableBlock<DummyBytes, DummyBytes, DummyBytes>>(payload_hash, payload)
+            .expect("Unable to deserialize block with version 0");
+
+        // Assert
+        assert_eq!(
+            storable_block.framework_state,
+            DummyBytes(b"Dummy FrameworkState".to_vec()).into(),
+            "Framework state was not deserialized correctly"
+        );
+        assert_eq!(
+            storable_block.app_state,
+            DummyBytes(b"Dummy AppState".to_vec()).into(),
+            "App state was not deserialized correctly"
+        );
+        assert_eq!(
+            storable_block.logs,
+            vec![vec!["Dummy".to_owned()], vec!["Logs".to_owned()]].into(),
+            "Logs were not deserialized correctly"
+        );
+    }
 }
