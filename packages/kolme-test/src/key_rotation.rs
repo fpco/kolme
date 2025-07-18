@@ -159,7 +159,7 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     processor.add_secret(new_processor.clone());
     testtasks.try_spawn_persistent(processor.run());
     tracing::info!("Waiting for genesis event...");
-    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 
     // Swap out the approver and listener right away. Since there's only one
     // key being used, we don't need to do any approving.
