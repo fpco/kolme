@@ -175,6 +175,12 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
         );
     }
 
+    // The chain is still on version1. So this tx will be eventually rejected by the processor.
+    kolme2
+        .sign_propose_await_transaction(&client, vec![Message::App(SampleMessage::SayHi {})])
+        .await
+        .unwrap();
+
     // Initiate upgrade, the first Upgrader should not be successful but the second one should.
     let next_height = kolme1.read().get_next_height();
     testtasks.spawn_persistent(Upgrader::new(kolme1.clone(), processor.clone(), VERSION2).run());
