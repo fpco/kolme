@@ -283,7 +283,7 @@ mod tests {
     async fn it_deserializes_from_payload_with_previous_version() {
         // Arrange
         let payload: Arc<[u8]> = vec![
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 68, 117, 109, 109, 121, 32, 98,
             108, 111, 99, 107, 0, 20, 68, 117, 109, 109, 121, 32, 70, 114, 97, 109, 101, 119, 111,
@@ -314,6 +314,20 @@ mod tests {
             storable_block.logs,
             vec![vec!["Dummy".to_owned()], vec!["Logs".to_owned()]].into(),
             "Logs were not deserialized correctly"
+        );
+        assert_eq!(
+            storable_block.blockhash,
+            Sha256Hash::from_array(Default::default()),
+            "Blockhash was not deserialized correctly"
+        );
+        assert_eq!(
+            storable_block.txhash,
+            Sha256Hash::from_array(Default::default()),
+            "TxHash was not deserialized correctly"
+        );
+        assert_eq!(
+            storable_block.height, 1,
+            "Height was not deserialized correctly"
         );
     }
 }
