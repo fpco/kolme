@@ -11,6 +11,8 @@ mod kolme_app;
 #[cfg(test)]
 mod max_tx_height;
 #[cfg(test)]
+mod migrate_stores;
+#[cfg(test)]
 mod multiple_processors;
 #[cfg(test)]
 mod offline_simple;

@@ -121,6 +121,16 @@ impl<T> SignedTaggedJson<T> {
     }
 }
 
+impl<T> PartialEq for SignedTaggedJson<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.message == other.message
+            && self.signature == other.signature
+            && self.recovery_id == other.recovery_id
+    }
+}
+
+impl<T> Eq for SignedTaggedJson<T> {}
+
 impl<T> PartialEq for TaggedJson<T> {
     fn eq(&self, other: &Self) -> bool {
         self.serialized == other.serialized
