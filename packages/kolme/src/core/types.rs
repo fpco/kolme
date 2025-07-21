@@ -892,6 +892,14 @@ impl<AppMessage: serde::de::DeserializeOwned> MerkleDeserialize for SignedBlock<
     }
 }
 
+impl<T> PartialEq for SignedBlock<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> Eq for SignedBlock<T> {}
+
 /// The hash of a [Block].
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub Sha256Hash);

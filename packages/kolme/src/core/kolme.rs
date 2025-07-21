@@ -1092,6 +1092,38 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<()> {
         self.inner.store.add_merkle_layer(hash, layer).await
     }
+
+    /// Ingest all blocks from the given Kolme into this one.
+    pub async fn ingest_blocks_from(&self, other: &Self) -> Result<()> {
+        loop {
+            let to_archive = self.get_next_to_archive().await?;
+            let Some(block) = other.get_block(to_archive).await? else {
+                break Ok(());
+            };
+            let man = self.get_merkle_manager();
+            self.inner
+                .store
+                .save(
+                    man,
+                    &block.framework_state,
+                    block.block.0.message.as_inner().framework_state,
+                )
+                .await?;
+            self.inner
+                .store
+                .save(
+                    man,
+                    &block.app_state,
+                    block.block.0.message.as_inner().app_state,
+                )
+                .await?;
+            self.inner
+                .store
+                .save(man, &block.logs, block.block.0.message.as_inner().logs)
+                .await?;
+            self.add_block_with_state(block.block).await?;
+        }
+    }
 }
 
 impl<App: KolmeApp> Kolme<App> {
