@@ -2,7 +2,7 @@ use parameterized::parameterized;
 use paste::paste;
 use quickcheck::quickcheck;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     ops::Bound,
 };
 
@@ -315,7 +315,10 @@ fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
 
     let manager = MerkleManager::new(TEST_CACHE_SIZE);
     let contents = manager.serialize(&person).unwrap();
-    let person2 = manager.deserialize_cached(contents.hash).unwrap().unwrap();
+    let person2 = manager
+        .deserialize_cached(contents.hash, Arc::new(HashMap::new()))
+        .unwrap()
+        .unwrap();
     assert_eq!(person, person2);
 }
 
