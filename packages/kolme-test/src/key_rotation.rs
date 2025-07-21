@@ -158,6 +158,11 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
     let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
     processor.add_secret(new_processor.clone());
     testtasks.try_spawn_persistent(processor.run());
+
+    // The genesis event hasn't completed, which causes this test to fail.
+    // We need to investigate why this is happening.
+    // Adding a short delay (sleep) as shown below allows the test to pass.
+
     tracing::info!("Waiting for genesis event...");
     tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 
