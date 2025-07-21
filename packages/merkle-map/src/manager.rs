@@ -1,6 +1,10 @@
 //! Helper types and functions for buffer reading and writing.
 
-use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroUsize,
+    sync::{Arc, LazyLock},
+};
 
 use lru::LruCache;
 use parking_lot::Mutex;
@@ -13,7 +17,7 @@ use crate::*;
 #[derive(Clone)]
 pub struct MerkleManager {
     //cache: Arc<parking_lot::RwLock<HashMap<Sha256Hash, Arc<[u8]>>>>,
-    cache: Arc<Mutex<LruCache<Sha256Hash, Arc<[u8]>>>>,
+    cache: Arc<Mutex<LruCache<Sha256Hash, MerkleLayerContents>>>,
 }
 
 impl MerkleSerialError {
@@ -29,8 +33,10 @@ impl std::fmt::Debug for MerkleContents {
 }
 
 impl MerkleManager {
+    /// cache_size must be at least 1
     pub fn new(cache_size: usize) -> Self {
-        let cache = LruCache::new(NonZeroUsize::new(cache_size).unwrap());
+        let cache =
+            LruCache::new(NonZeroUsize::new(cache_size).expect("Cannot have a cache size of 0"));
         Self {
             cache: Arc::new(Mutex::new(cache)),
         }
@@ -50,13 +56,18 @@ impl MerkleManager {
         let mut contents = serializer.finish();
         let existing_payload = self.cache.lock().get(&contents.hash).cloned();
         match existing_payload {
-            Some(payload) => {
+            Some(layer) => {
                 // Reuse existing memory
-                contents.payload = payload.clone();
+                contents.payload = layer.payload.clone();
             }
             None => {
-                let payload = contents.payload.clone();
-                self.cache.lock().put(contents.hash, payload);
+                self.cache.lock().put(
+                    contents.hash,
+                    MerkleLayerContents {
+                        payload: contents.payload.clone(),
+                        children: contents.children.iter().map(|m| m.hash).collect(),
+                    },
+                );
             }
         }
 
@@ -110,12 +121,26 @@ impl MerkleManager {
     }
 
     /// Deserialize a value from the given payload.
+    ///
+    /// This relies on all layers fitting in the LRU cache of the manager. This is finicky;
+    /// consider moving to other methods.
     pub fn deserialize<T: MerkleDeserializeRaw>(
         &self,
         hash: Sha256Hash,
         payload: Arc<[u8]>,
     ) -> Result<T, MerkleSerialError> {
-        let mut deserializer = MerkleDeserializer::new(hash, payload, self.clone());
+        static EMPTY_HASHMAP: LazyLock<Arc<HashMap<Sha256Hash, MerkleLayerContents>>> =
+            LazyLock::new(|| Arc::new(HashMap::new()));
+        self.deserialize_with(hash, payload, EMPTY_HASHMAP.clone())
+    }
+
+    fn deserialize_with<T: MerkleDeserializeRaw>(
+        &self,
+        hash: Sha256Hash,
+        payload: Arc<[u8]>,
+        loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
+    ) -> Result<T, MerkleSerialError> {
+        let mut deserializer = MerkleDeserializer::new(hash, payload, self.clone(), loaded);
         let value = T::merkle_deserialize_raw(&mut deserializer)?;
         let contents = Arc::new(deserializer.finish()?);
         value.set_merkle_contents_raw(&contents);
@@ -130,51 +155,62 @@ impl MerkleManager {
     ) -> Result<T, MerkleSerialError> {
         // We load the data in a loop. Each time we encounter an
         // error about missing hashes, we load up the missing data and try again.
-        let payload = self.get_or_load_payload(store, hash).await?;
-        loop {
-            match self.deserialize(hash, payload.clone()) {
-                Ok(value) => break Ok(value),
-                Err(MerkleSerialError::HashesNotFound { hashes }) => {
-                    for hash in hashes {
-                        self.get_or_load_payload(store, hash).await?;
-                    }
-                }
-                Err(e) => break Err(e),
-            }
-        }
+        let (layer, layers) = self.get_or_load_payload(store, hash).await?;
+        self.deserialize_with(hash, layer.payload, Arc::new(layers))
     }
 
     pub(crate) async fn get_or_load_payload<Store: MerkleStore>(
         &self,
         store: &mut Store,
         hash: Sha256Hash,
-    ) -> Result<Arc<[u8]>, MerkleSerialError> {
-        if let Some(payload) = self.cache.lock().get(&hash) {
-            return Ok(payload.clone());
+    ) -> Result<
+        (
+            MerkleLayerContents,
+            HashMap<Sha256Hash, MerkleLayerContents>,
+        ),
+        MerkleSerialError,
+    > {
+        let mut layers = HashMap::new();
+        let mut to_process = vec![hash];
+
+        loop {
+            let Some(hash) = to_process.pop() else { break };
+
+            let layer = self.cache.lock().get(&hash).cloned();
+            let layer = if let Some(layer) = layer {
+                layer
+            } else {
+                let layer = store.load_by_hash(hash).await?.ok_or_else(|| {
+                    MerkleSerialError::HashesNotFound {
+                        hashes: HashSet::from_iter([hash]),
+                    }
+                })?;
+                self.cache.lock().put(hash, layer.clone());
+                layer
+            };
+
+            to_process.extend_from_slice(&layer.children);
+            layers.insert(hash, layer);
         }
 
-        let MerkleLayerContents { payload, children } = store
-            .load_by_hash(hash)
-            .await?
-            .ok_or_else(|| MerkleSerialError::HashesNotFound {
-                hashes: HashSet::from_iter([hash]),
-            })?;
-        for child in children {
-            let future = Box::pin(self.get_or_load_payload(store, child));
-            future.await?;
-        }
-        self.cache.lock().put(hash, payload.clone());
-
-        Ok(payload)
+        Ok((
+            layers.get(&hash).expect("Impossible missing hash").clone(),
+            layers,
+        ))
     }
 
     pub(crate) fn deserialize_cached<T: MerkleDeserializeRaw>(
         &self,
         hash: Sha256Hash,
+        loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
     ) -> Result<Option<T>, MerkleSerialError> {
-        let Some(payload) = self.cache.lock().get(&hash).cloned() else {
+        let layer = if let Some(layer) = self.cache.lock().get(&hash) {
+            layer.clone()
+        } else if let Some(layer) = loaded.get(&hash) {
+            layer.clone()
+        } else {
             return Ok(None);
         };
-        self.deserialize(hash, payload).map(Some)
+        self.deserialize_with(hash, layer.payload, loaded).map(Some)
     }
 }
