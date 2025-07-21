@@ -672,8 +672,7 @@ impl<App: KolmeApp> Kolme<App> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
         let merkle_manager = MerkleManager::new(MERKLE_CACHE_SIZE);
-        let current_block =
-            MaybeBlockInfo::<App>::load(&store, app.genesis_info(), &merkle_manager).await?;
+        let current_block = MaybeBlockInfo::<App>::load(&store, &app, &merkle_manager).await?;
         let inner = KolmeInner {
             store,
             app,

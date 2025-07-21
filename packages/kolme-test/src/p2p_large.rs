@@ -85,7 +85,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(SampleState {
             next_hi: 0,
             payloads: MerkleMap::new(),

@@ -79,7 +79,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> anyhow::Result<Self::State> {
+    fn new_state(&self) -> anyhow::Result<Self::State> {
         Ok(SampleState {})
     }
 

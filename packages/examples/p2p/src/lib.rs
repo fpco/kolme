@@ -83,7 +83,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(SampleState { hi_count: 0 })
     }
 

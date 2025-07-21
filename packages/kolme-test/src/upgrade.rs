@@ -56,7 +56,7 @@ impl KolmeApp for SampleKolmeApp1 {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(SampleState {
             hi_count1: 0,
             hi_count2: 0,
@@ -86,8 +86,11 @@ impl KolmeApp for SampleKolmeApp2 {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
-        SampleKolmeApp1::new_state()
+    fn new_state(&self) -> Result<Self::State> {
+        SampleKolmeApp1 {
+            genesis: self.genesis.clone(),
+        }
+        .new_state()
     }
 
     async fn execute(
