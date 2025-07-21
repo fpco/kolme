@@ -21,7 +21,11 @@ pub async fn instantiate(
 
     let program_pubkey = Pubkey::from_str(program_id)?;
     let blockhash = client.get_latest_blockhash().await?;
-    let tx = init_tx(program_pubkey, blockhash, keypair, &data).map_err(|x| anyhow::anyhow!(x))?;
+    let tx = init_tx(program_pubkey, blockhash, keypair, &data).map_err(|x| {
+        KolmeError::SolanaInitTxBuildFailed {
+            details: x.to_string(),
+        }
+    })?;
 
     client.send_and_confirm_transaction(&tx).await?;
 
@@ -35,12 +39,15 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: String,
-) -> Result<String> {
+) -> std::result::Result<String, KolmeError> {
     tracing::info!("Executing signed message on bridge: {program_id}");
 
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
-    let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
-        .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
+    let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes).map_err(|x| {
+        KolmeError::InvalidSolanaPayloadDeserialization {
+            details: format!("{x:?}"),
+        }
+    })?;
 
     let program_id = Pubkey::from_str(program_id)?;
     let metas = if let SignedAction::Execute(ref action) = payload.action {
@@ -69,8 +76,11 @@ pub async fn execute(
     };
 
     let blockhash = client.get_latest_blockhash().await?;
-    let tx =
-        signed_tx(program_id, blockhash, keypair, &data, &metas).map_err(|x| anyhow::anyhow!(x))?;
+    let tx = signed_tx(program_id, blockhash, keypair, &data, &metas).map_err(|x| {
+        KolmeError::SolanaSignedTxBuildFailed {
+            details: x.to_string(),
+        }
+    })?;
 
     match client.send_and_confirm_transaction(&tx).await {
         Ok(sig) => Ok(sig.to_string()),
@@ -80,7 +90,9 @@ pub async fn execute(
                 e
             );
 
-            Err(anyhow::anyhow!(e))
+            Err(KolmeError::SolanaSignedTxExecutionFailed {
+                details: e.to_string(),
+            })
         }
     }
 }

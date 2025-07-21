@@ -134,7 +134,7 @@ async fn multiple_processors_inner(
     (kolmes, all_txhashes, highest_block)
 }
 
-async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
+async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> std::result::Result<(), KolmeError> {
     let mut recv = kolme.subscribe();
     loop {
         match recv.recv().await? {
@@ -146,9 +146,12 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
                     error,
                     proposed_height,
                 } = failed.message.as_inner();
-                anyhow::bail!(
-                    "Error with transaction {txhash} for block {proposed_height}: {error}"
-                )
+
+                return Err(KolmeError::TransactionFailed {
+                    txhash: *txhash,
+                    proposed_height: *proposed_height,
+                    error: error.to_string(),
+                });
             }
             Notification::LatestBlock(_) => (),
             Notification::EvictMempoolTransaction(_) => (),

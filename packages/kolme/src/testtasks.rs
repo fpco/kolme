@@ -5,12 +5,13 @@ use std::sync::{
     Arc,
 };
 
+use crate::KolmeError;
 use tokio::sync::mpsc::error::TryRecvError;
 
 #[derive(Clone)]
 pub struct TestTasks {
     send_keep_running: tokio::sync::watch::Sender<bool>,
-    send_error: tokio::sync::mpsc::Sender<anyhow::Error>,
+    send_error: tokio::sync::mpsc::Sender<KolmeError>,
     running_count: Arc<AtomicUsize>,
 }
 
@@ -57,13 +58,13 @@ impl TestTasks {
     {
         self.try_spawn_persistent(async move {
             task.await;
-            anyhow::Ok(())
+            Ok::<_, KolmeError>(())
         });
     }
     pub fn try_spawn_persistent<F, E>(&self, task: F)
     where
         F: std::future::Future<Output = Result<(), E>> + Send + 'static,
-        anyhow::Error: From<E>,
+        KolmeError: From<E>,
     {
         self.spawn_helper(true, task)
     }
@@ -81,7 +82,7 @@ impl TestTasks {
     pub fn try_spawn<F, E>(&self, task: F)
     where
         F: std::future::Future<Output = Result<(), E>> + Send + 'static,
-        anyhow::Error: From<E>,
+        KolmeError: From<E>,
     {
         self.spawn_helper(false, task)
     }
@@ -89,7 +90,7 @@ impl TestTasks {
     fn spawn_helper<F, E>(&self, persistent: bool, task: F)
     where
         F: std::future::Future<Output = Result<(), E>> + Send + 'static,
-        anyhow::Error: From<E>,
+        KolmeError: From<E>,
     {
         let tasks = self.clone();
 
@@ -102,7 +103,7 @@ impl TestTasks {
         }
 
         // Spawn the actual worker.
-        let handle = tokio::spawn(async move { task.await.map_err(anyhow::Error::from) });
+        let handle = tokio::spawn(async move { task.await.map_err(KolmeError::from) });
 
         // Spawn the first watchdog. It waits for the overall runtime to finish,
         // either because all tasks are done or because an error occurred,
@@ -131,13 +132,17 @@ impl TestTasks {
                 match res {
                     Ok(Ok(())) => {
                         if persistent {
-                            Some(anyhow::anyhow!("Persistent task exited unexpectedly"))
+                            Some(KolmeError::PersistentTaskExited)
                         } else {
                             None
                         }
                     }
-                    Ok(Err(e)) => Some(e.context("Task exited with an error")),
-                    Err(e) => Some(anyhow::anyhow!("Task panicked: {e}")),
+                    Ok(Err(e)) => Some(KolmeError::TaskErrored {
+                        error: e.to_string(),
+                    }),
+                    Err(e) => Some(KolmeError::TaskPanicked {
+                        details: e.to_string(),
+                    }),
                 }
             } else {
                 None

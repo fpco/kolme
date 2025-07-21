@@ -37,7 +37,9 @@ impl KolmeBackingStore for Store {
     }
 
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation("Fjall"))
+        Err(KolmeStoreError::UnsupportedDeleteOperation(
+            "Fjall".to_owned(),
+        ))
     }
 
     async fn take_construct_lock(&self) -> Result<crate::KolmeConstructLock, KolmeStoreError> {
@@ -51,13 +53,20 @@ impl KolmeBackingStore for Store {
         self.merkle.clone().load_by_hash(hash).await
     }
 
-    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>> {
+    async fn get_height_for_tx(
+        &self,
+        txhash: Sha256Hash,
+    ) -> core::result::Result<Option<u64>, KolmeStoreError> {
         let Some(height) = self.merkle.handle.get(tx_key(txhash))? else {
             return Ok(None);
         };
         let height = match <[u8; 8]>::try_from(&*height) {
             Ok(height) => u64::from_be_bytes(height),
-            Err(e) => anyhow::bail!("get_height_for_tx: invalid height in Fjall store: {e}"),
+            Err(e) => {
+                return Err(KolmeStoreError::InvalidHeightInFjall {
+                    details: e.to_string(),
+                });
+            }
         };
         Ok(Some(height))
     }

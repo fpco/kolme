@@ -177,7 +177,9 @@ impl KolmeBackingStore for Store {
             .inspect_err(|err| tracing::error!("{err:?}"))
     }
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation("Postgres"))
+        Err(KolmeStoreError::UnsupportedDeleteOperation(
+            "Postgres".to_owned(),
+        ))
     }
 
     async fn take_construct_lock(&self) -> Result<KolmeConstructLock, KolmeStoreError> {
@@ -218,7 +220,10 @@ impl KolmeBackingStore for Store {
         let mut merkle = self.new_store();
         merkle.load_by_hash(hash).await
     }
-    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>> {
+    async fn get_height_for_tx(
+        &self,
+        txhash: Sha256Hash,
+    ) -> std::result::Result<Option<u64>, KolmeStoreError> {
         let txhash = txhash.as_array().as_slice();
         let height =
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
