@@ -54,7 +54,7 @@ async fn migrate_stores_inner(testtasks: TestTasks, (): ()) {
         assert_eq!(block1, block2);
     }
 
-    // Confirm that we can still executable blocks.
+    // Confirm that we can still execute blocks.
     for _ in 0..10 {
         let secret = SecretKey::random(&mut rand::thread_rng());
         kolme2
