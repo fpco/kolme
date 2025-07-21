@@ -462,6 +462,15 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.app
     }
 
+    pub fn app_state(&self) -> &App::State {
+        &self.app_state
+    }
+
+    pub fn app_state_mut(&mut self) -> &mut App::State {
+        &mut self.app_state
+    }
+
+    /// Synonym for [Self::app_state_mut]
     pub fn state_mut(&mut self) -> &mut App::State {
         &mut self.app_state
     }
@@ -849,7 +858,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     }
 
     pub fn log_event(&mut self, event: LogEvent) -> Result<()> {
-        let json = serde_json::to_string(&event)?;
+        self.log_json(&event)
+    }
+
+    /// Log any serializable value as JSON.
+    pub fn log_json<T: serde::Serialize>(&mut self, msg: &T) -> Result<()> {
+        let json = serde_json::to_string(msg)?;
         self.log(json);
         Ok(())
     }
