@@ -8,6 +8,7 @@ mod merkle_deserializer;
 mod merkle_serializer;
 mod traits;
 mod types;
+mod vec;
 
 pub use impls::MerkleLockable;
 pub use manager::*;
@@ -17,6 +18,7 @@ pub use merkle_serializer::*;
 pub use shared::types::Sha256Hash;
 pub use traits::*;
 pub use types::*;
+pub use vec::MerkleVec;
 
 // Internal prelude
 use std::{borrow::Borrow, sync::Arc};

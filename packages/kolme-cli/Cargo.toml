@@ -1,0 +1,24 @@
+[package]
+name = "kolme-cli"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+license = "MIT"
+authors = ["Michael Snoyman <msnoyman@fpcomplete.com>", "FP Complete"]
+
+[[bin]]
+name = "kolme"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+jiff = { workspace = true }
+kolme = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

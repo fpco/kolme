@@ -33,9 +33,8 @@ async fn bridge_transfer() {
     let solana_client = make_solana_client();
     let cosmos_client = make_cosmos_client().await.unwrap();
 
-    let mut rng = rand::thread_rng();
-    let key_solana = SecretKey::random(&mut rng);
-    let key_cosmos = SecretKey::random(&mut rng);
+    let key_solana = SecretKey::random();
+    let key_cosmos = SecretKey::random();
 
     let user_solana = Keypair::new();
     let user_cosmos = Wallet::generate(hrp).unwrap();
@@ -225,12 +224,10 @@ async fn solana_listener_catchup() {
 
     deploy_solana_bridge().await.unwrap();
 
-    let mut rng = rand::thread_rng();
-
     let http_client = reqwest::Client::new();
     let client = make_solana_client();
     let user = Keypair::new();
-    let user_key = SecretKey::random(&mut rng);
+    let user_key = SecretKey::random();
     let submitter = Keypair::new();
 
     let (osmo, _) = futures::join!(

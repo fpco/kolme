@@ -28,7 +28,7 @@ async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
     subscription.recv().await.unwrap();
 
     let genesis = kolme.wait_for_block(BlockHeight(0)).await.unwrap();
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let tx = kolme
         .read()
         .create_signed_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
@@ -40,17 +40,19 @@ async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
         app_state,
         logs,
         loads,
+        height,
     } = kolme
         .read()
         .execute_transaction(&tx, timestamp, BlockDataHandling::NoPriorData)
         .await
         .unwrap();
+    assert_eq!(height, genesis.height().next());
 
     let block = Block {
         tx,
         timestamp: jiff::Timestamp::now(),
         processor: processor.public_key(),
-        height: genesis.height().next(),
+        height,
         parent: genesis.hash(),
         framework_state: kolme
             .get_merkle_manager()

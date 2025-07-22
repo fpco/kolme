@@ -85,7 +85,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(SampleState {
             next_hi: 0,
             payloads: MerkleMap::new(),
@@ -134,7 +134,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     // Send a few transactions to bump up the block height
     for i in 0..200 {
         let payload = std::iter::repeat(i).take(50_000).collect::<Vec<_>>();
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(
                 &secret,
@@ -144,7 +144,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     }
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let latest_block_height = kolme1
         .sign_propose_await_transaction(
             &secret,

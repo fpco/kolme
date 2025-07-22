@@ -143,7 +143,7 @@ impl KolmeApp for CosmosBridgeApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(State { hi_count: 0 })
     }
 

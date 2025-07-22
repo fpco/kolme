@@ -17,6 +17,7 @@ pub use approver::Approver;
 pub use common::*;
 pub use core::*;
 pub use gossip::{Gossip, GossipBuilder, SyncMode};
+pub use jiff::Timestamp;
 pub use listener::Listener;
 pub use merkle_map::*;
 pub use processor::Processor;
@@ -27,6 +28,5 @@ pub use submitter::Submitter;
 pub use upgrader::Upgrader;
 
 pub(crate) use anyhow::{Context, Result};
-pub(crate) use jiff::Timestamp;
 pub(crate) use std::collections::{BTreeMap, BTreeSet};
 pub(crate) use std::sync::Arc;

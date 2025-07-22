@@ -131,7 +131,7 @@ impl KolmeApp for SolanaCosmosBridgeApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(State)
     }
 

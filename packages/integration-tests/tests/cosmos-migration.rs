@@ -79,7 +79,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> anyhow::Result<Self::State> {
+    fn new_state(&self) -> anyhow::Result<Self::State> {
         Ok(SampleState {})
     }
 
@@ -125,9 +125,9 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
         .await
         .unwrap();
 
-    let processor = SecretKey::random(&mut rand::thread_rng());
-    let listener = SecretKey::random(&mut rand::thread_rng());
-    let approver = SecretKey::random(&mut rand::thread_rng());
+    let processor = SecretKey::random();
+    let listener = SecretKey::random();
+    let approver = SecretKey::random();
     let orig_code_id = prepare_local_contract(&submitter_wallet)
         .await
         .unwrap()

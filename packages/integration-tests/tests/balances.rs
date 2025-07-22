@@ -91,7 +91,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> anyhow::Result<Self::State> {
+    fn new_state(&self) -> anyhow::Result<Self::State> {
         Ok(SampleState {})
     }
 
@@ -140,7 +140,7 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     }
 
-    let validator = SecretKey::random(&mut rand::thread_rng());
+    let validator = SecretKey::random();
     let orig_code_id = prepare_local_contract(&submitter_wallet)
         .await
         .unwrap()
@@ -199,7 +199,7 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
     );
 
     // Deposit some funds and make sure the balances update correctly
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let tx_response = contract
         .execute(
             &user_wallet,
