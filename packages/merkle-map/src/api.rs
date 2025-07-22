@@ -1,9 +1,6 @@
 //! Helper types and functions for buffer reading and writing.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, LazyLock},
-};
+use std::{collections::HashSet, sync::Arc};
 
 use shared::types::Sha256Hash;
 use smallvec::SmallVec;
@@ -86,20 +83,9 @@ pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
 /// This relies on all layers fitting in the LRU cache of the manager. This is finicky;
 /// consider moving to other methods.
 pub fn deserialize<T: MerkleDeserializeRaw>(
-    hash: Sha256Hash,
-    payload: Arc<[u8]>,
+    contents: Arc<MerkleContents>,
 ) -> Result<T, MerkleSerialError> {
-    static EMPTY_HASHMAP: LazyLock<Arc<HashMap<Sha256Hash, MerkleLayerContents>>> =
-        LazyLock::new(|| Arc::new(HashMap::new()));
-    deserialize_with(hash, payload, EMPTY_HASHMAP.clone())
-}
-
-fn deserialize_with<T: MerkleDeserializeRaw>(
-    hash: Sha256Hash,
-    payload: Arc<[u8]>,
-    loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
-) -> Result<T, MerkleSerialError> {
-    let mut deserializer = MerkleDeserializer::new(hash, payload, loaded);
+    let mut deserializer = MerkleDeserializer::new(contents.clone());
     let value = T::merkle_deserialize_raw(&mut deserializer)?;
     let contents = Arc::new(deserializer.finish()?);
     value.set_merkle_contents_raw(&contents);
@@ -111,53 +97,40 @@ pub async fn load<T: MerkleDeserializeRaw, Store: MerkleStore>(
     store: &mut Store,
     hash: Sha256Hash,
 ) -> Result<T, MerkleSerialError> {
-    // We load the data in a loop. Each time we encounter an
-    // error about missing hashes, we load up the missing data and try again.
-    let (layer, layers) = get_or_load_payload(store, hash).await?;
-    deserialize_with(hash, layer.payload, Arc::new(layers))
+    deserialize(load_merkle_contents(store, hash).await?)
 }
 
-pub(crate) async fn get_or_load_payload<Store: MerkleStore>(
+/// Load up a [MerkleContents] from the store.
+pub async fn load_merkle_contents<Store: MerkleStore>(
     store: &mut Store,
     hash: Sha256Hash,
-) -> Result<
-    (
-        MerkleLayerContents,
-        HashMap<Sha256Hash, MerkleLayerContents>,
-    ),
-    MerkleSerialError,
-> {
-    let mut layers = HashMap::new();
-    let mut to_process = vec![hash];
+) -> Result<Arc<MerkleContents>, MerkleSerialError> {
+    let layer =
+        store
+            .load_by_hash(hash)
+            .await?
+            .ok_or_else(|| MerkleSerialError::HashesNotFound {
+                hashes: std::iter::once(hash).collect(),
+            })?;
 
-    loop {
-        let Some(hash) = to_process.pop() else { break };
+    let mut children = vec![];
+    let mut missing = HashSet::new();
 
-        let layer =
-            store
-                .load_by_hash(hash)
-                .await?
-                .ok_or_else(|| MerkleSerialError::HashesNotFound {
-                    hashes: HashSet::from_iter([hash]),
-                })?;
-
-        to_process.extend_from_slice(&layer.children);
-        layers.insert(hash, layer);
+    for child in layer.children {
+        match Box::pin(load_merkle_contents(store, child)).await {
+            Ok(child) => children.push(child),
+            Err(MerkleSerialError::HashesNotFound { hashes }) => missing.extend(hashes.into_iter()),
+            Err(e) => return Err(e),
+        }
     }
 
-    Ok((
-        layers.get(&hash).expect("Impossible missing hash").clone(),
-        layers,
-    ))
-}
-
-pub(crate) fn deserialize_cached<T: MerkleDeserializeRaw>(
-    hash: Sha256Hash,
-    loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
-) -> Result<Option<T>, MerkleSerialError> {
-    if let Some(layer) = loaded.get(&hash) {
-        deserialize_with(hash, layer.payload.clone(), loaded).map(Some)
-    } else {
-        Ok(None)
+    if !missing.is_empty() {
+        return Err(MerkleSerialError::HashesNotFound { hashes: missing });
     }
+
+    Ok(Arc::new(MerkleContents {
+        hash,
+        payload: layer.payload,
+        children: children.into(),
+    }))
 }

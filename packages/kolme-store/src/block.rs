@@ -288,11 +288,16 @@ mod tests {
         ]
         .into();
         let payload_hash = Sha256Hash::hash(&payload);
+        let contents = MerkleContents {
+            hash: payload_hash,
+            payload,
+            children: vec![].into(),
+        };
 
         // Act
         let storable_block = merkle_map::api::deserialize::<
             StorableBlock<DummyBytes, DummyBytes, DummyBytes>,
-        >(payload_hash, payload)
+        >(Arc::new(contents))
         .expect("Unable to deserialize block with version 0");
 
         // Assert

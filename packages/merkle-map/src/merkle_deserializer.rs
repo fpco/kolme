@@ -1,43 +1,31 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::*;
 
 /// Provides context within a [MerkleDeserialize] impl for deserializing data.
 pub struct MerkleDeserializer {
-    hash: Sha256Hash,
-    buff: Arc<[u8]>,
+    contents: Arc<MerkleContents>,
     pos: usize,
-    loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
-    children: Vec<Arc<MerkleContents>>,
 }
 
 impl MerkleDeserializer {
-    pub(crate) fn new(
-        hash: Sha256Hash,
-        payload: Arc<[u8]>,
-        loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
-    ) -> Self {
-        MerkleDeserializer {
-            hash,
-            buff: payload,
-            pos: 0,
-            loaded,
-            children: vec![],
-        }
+    pub(crate) fn new(contents: Arc<MerkleContents>) -> Self {
+        MerkleDeserializer { contents, pos: 0 }
     }
 
     pub fn get_full_payload(&self) -> Arc<[u8]> {
-        self.buff.clone()
+        self.contents.payload.clone()
     }
 
     pub fn get_hash(&self) -> Sha256Hash {
-        self.hash
+        self.contents.hash
     }
 
     /// Look at the next byte without consuming it from the stream.
     pub fn peek_byte(&self) -> Result<u8, MerkleSerialError> {
         let byte = *self
-            .buff
+            .contents
+            .payload
             .get(self.pos)
             .ok_or(MerkleSerialError::InsufficientInput)?;
         Ok(byte)
@@ -53,23 +41,19 @@ impl MerkleDeserializer {
     /// Load up the given number of bytes.
     pub fn load_raw_bytes(&mut self, len: usize) -> Result<&[u8], MerkleSerialError> {
         let end = self.pos + len;
-        if end > self.buff.len() {
+        if end > self.contents.payload.len() {
             Err(MerkleSerialError::InsufficientInput)
         } else {
-            let slice = &self.buff[self.pos..end];
+            let slice = &self.contents.payload[self.pos..end];
             self.pos = end;
             Ok(slice)
         }
     }
 
     /// Finish processing, ensuring that all input was consumed.
-    pub(crate) fn finish(self) -> Result<MerkleContents, MerkleSerialError> {
-        if self.buff.len() == self.pos {
-            Ok(MerkleContents {
-                hash: self.hash,
-                payload: self.buff,
-                children: self.children.into(),
-            })
+    pub(crate) fn finish(self) -> Result<Arc<MerkleContents>, MerkleSerialError> {
+        if self.contents.payload.len() == self.pos {
+            Ok(self.contents)
         } else {
             Err(MerkleSerialError::TooMuchInput)
         }
@@ -111,21 +95,25 @@ impl MerkleDeserializer {
         }
     }
 
-    pub(crate) fn load_by_hash_optional<T: MerkleDeserializeRaw>(
-        &mut self,
-        hash: Sha256Hash,
-    ) -> Result<Option<T>, MerkleSerialError> {
-        crate::api::deserialize_cached(hash, self.loaded.clone())
-    }
-
     pub fn load_by_hash<T: MerkleDeserializeRaw>(&mut self) -> Result<T, MerkleSerialError> {
         let hash = Sha256Hash::merkle_deserialize_raw(self)?;
-        match crate::api::deserialize_cached(hash, self.loaded.clone()) {
-            Err(e) => Err(e),
-            Ok(Some(x)) => Ok(x),
-            Ok(None) => Err(MerkleSerialError::HashesNotFound {
+        self.load_by_given_hash(hash)
+    }
+
+    pub(crate) fn load_by_given_hash<T: MerkleDeserializeRaw>(
+        &mut self,
+        hash: Sha256Hash,
+    ) -> Result<T, MerkleSerialError> {
+        // NOTE: using a find here instead of reconstituting the children into a HashMap.
+        // The assumption is that the number of children will generally be small enough
+        // that a scan of the slice is faster than a HashMap lookup, and will involve
+        // less allocation. If this assumption turns out to be wrong in the future,
+        // we can create a HashMap of all the children when creating the MerkleDeserializer.
+        match self.contents.children.iter().find(|c| c.hash == hash) {
+            None => Err(MerkleSerialError::HashesNotFound {
                 hashes: HashSet::from_iter([hash]),
             }),
+            Some(child) => crate::api::deserialize(child.clone()),
         }
     }
 
