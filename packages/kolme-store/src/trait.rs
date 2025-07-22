@@ -57,4 +57,7 @@ pub trait KolmeBackingStore {
     async fn load<T>(&self, hash: Sha256Hash) -> Result<T, MerkleSerialError>
     where
         T: MerkleDeserializeRaw;
+
+    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>>;
+    async fn set_next_missing_layer(&self, height: u64) -> anyhow::Result<()>;
 }

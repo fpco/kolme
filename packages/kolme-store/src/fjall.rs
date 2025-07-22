@@ -6,6 +6,7 @@ use std::path::Path;
 mod merkle;
 
 const LATEST_ARCHIVED_HEIGHT_KEY: &[u8] = b"LATEST";
+const NEXT_MISSING_LAYER_KEY: &[u8] = b"NEXT_MISSING";
 
 #[derive(Clone)]
 pub struct Store {
@@ -206,6 +207,27 @@ impl KolmeBackingStore for Store {
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
             .context("Unable to retrieve latest height")?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
+    }
+
+    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>> {
+        Ok(Some(
+            self.merkle
+                .handle
+                .get(NEXT_MISSING_LAYER_KEY)
+                .context("Unable to retrieve latest height")?
+                .map_or(0, |contents| {
+                    u64::from_be_bytes(std::array::from_fn(|i| contents[i]))
+                }),
+        ))
+    }
+
+    async fn set_next_missing_layer(&self, height: u64) -> anyhow::Result<()> {
+        self.merkle
+            .handle
+            .insert(NEXT_MISSING_LAYER_KEY, height.to_be_bytes())
+            .context("Unable to update partition with given next missing layer")?;
+
+        Ok(())
     }
 }
 

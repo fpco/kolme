@@ -514,4 +514,14 @@ impl KolmeBackingStore for Store {
 
         Ok(())
     }
+
+    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>> {
+        Ok(None)
+    }
+
+    async fn set_next_missing_layer(&self, _height: u64) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!(
+            "PostgreSQL store does not support missing layers feature"
+        ))
+    }
 }

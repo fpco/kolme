@@ -124,6 +124,17 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(crate) async fn get_latest_archived_block_height(&self) -> Result<Option<u64>> {
         self.inner.get_latest_archived_block_height().await
     }
+
+    pub(super) async fn get_next_missing_layer(&self) -> Result<Option<BlockHeight>> {
+        self.inner
+            .get_next_missing_layer()
+            .await
+            .map(|x| x.map(BlockHeight))
+    }
+
+    pub(super) async fn set_next_missing_layer(&self, height: BlockHeight) -> Result<()> {
+        self.inner.set_next_missing_layer(height.0).await
+    }
 }
 
 impl<App: KolmeApp> KolmeStore<App> {

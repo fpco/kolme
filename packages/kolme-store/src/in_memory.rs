@@ -178,4 +178,14 @@ impl KolmeBackingStore for Store {
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
         Ok(self.0.read().await.latest_archived_block)
     }
+
+    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>> {
+        Ok(None)
+    }
+
+    async fn set_next_missing_layer(&self, _height: u64) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!(
+            "In memory store does not support missing layers feature"
+        ))
+    }
 }

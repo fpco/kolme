@@ -1136,7 +1136,10 @@ impl<App: KolmeApp> Kolme<App> {
     /// This is a helper method to workaround a data integrity issue from older versions
     /// of Kolme. This traverses all blocks in the store and ensures that the framework state, app state, and logs are stored directly in the merkle store. With older versions of Kolme, these were mistakenly only stored in the block data itself.
     pub async fn fix_missing_layers(&self) -> Result<()> {
-        let mut height = BlockHeight::start();
+        let Some(mut height) = self.inner.store.get_next_missing_layer().await? else {
+            tracing::info!("Skipping fix_missing_layers since we're using a storage backend that doesn't support it.");
+            return Ok(());
+        };
         while self.has_block(height).await? {
             tracing::info!("Attempting to fix missing layers for block height {height}");
 
@@ -1182,6 +1185,7 @@ impl<App: KolmeApp> Kolme<App> {
             }
 
             height = height.next();
+            self.inner.store.set_next_missing_layer(height).await?;
         }
 
         tracing::info!("Finished fixing missing layers, first missing block found is: {height}");
