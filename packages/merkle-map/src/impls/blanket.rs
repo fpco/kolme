@@ -19,8 +19,8 @@ impl<T: MerkleSerialize> MerkleSerializeRaw for T {
 }
 
 impl<T: MerkleSerialize + MerkleDeserialize> MerkleDeserializeRaw for T {
-    fn merkle_deserialize_raw(
-        deserializer: &mut MerkleDeserializer,
+    fn merkle_deserialize_raw<'a, Store: MerkleStore>(
+        deserializer: &mut MerkleDeserializer<'a, Store>,
     ) -> Result<Self, MerkleSerialError> {
         let version = deserializer.load()?;
         // TODO consider including some string identifying the data type in this error

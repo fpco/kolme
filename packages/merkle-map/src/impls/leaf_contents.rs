@@ -130,8 +130,8 @@ impl<K, V: MerkleSerializeRaw> MerkleSerializeRaw for LeafContents<K, V> {
 impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
     for MerkleLockable<LeafContents<K, V>>
 {
-    fn merkle_deserialize_raw(
-        deserializer: &mut MerkleDeserializer,
+    fn merkle_deserialize_raw<'a, Store: MerkleStore>(
+        deserializer: &mut MerkleDeserializer<'a, Store>,
     ) -> Result<Self, MerkleSerialError> {
         let magic_byte = deserializer.pop_byte()?;
         if magic_byte != 42 {

@@ -12,8 +12,8 @@ impl<K, V: MerkleSerializeRaw> MerkleSerializeRaw for LeafEntry<K, V> {
 }
 
 impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for LeafEntry<K, V> {
-    fn merkle_deserialize_raw(
-        deserializer: &mut MerkleDeserializer,
+    fn merkle_deserialize_raw<'a, Store: MerkleStore>(
+        deserializer: &mut MerkleDeserializer<'a, Store>,
     ) -> Result<Self, MerkleSerialError> {
         let key_bytes = deserializer.load_bytes()?;
         let key = K::from_merkle_key(key_bytes)?;
