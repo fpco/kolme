@@ -1,17 +1,21 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock,
+    DEFAULT_CACHE_SIZE,
+};
 use anyhow::Context as _;
+use lru::LruCache;
 use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerialize,
     MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use sqlx::{
     pool::PoolOptions,
     postgres::{PgAdvisoryLock, PgConnectOptions},
     Executor, Postgres,
 };
 use std::{
-    collections::HashMap,
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, OnceLock,
@@ -31,7 +35,7 @@ impl Drop for ConstructLock {
     }
 }
 
-type MerkleCache = Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>;
+type MerkleCache = Arc<Mutex<LruCache<Sha256Hash, MerkleLayerContents>>>;
 
 #[derive(Clone)]
 pub struct Store {
@@ -44,13 +48,20 @@ pub struct Store {
 impl Store {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
         let connect_options = url.parse()?;
-        Self::new_with_options(connect_options, PoolOptions::new().max_connections(5)).await
+        Self::new_with_options(
+            connect_options,
+            PoolOptions::new().max_connections(5),
+            DEFAULT_CACHE_SIZE,
+        )
+        .await
     }
 
     pub async fn new_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
+        cache_size: usize,
     ) -> anyhow::Result<Self> {
+        anyhow::ensure!(cache_size >= 1024, "PostgreSQL backend currently requires a cache size of at least 1024. This is an open bug that needs investigation.");
         let pool = options
             .connect_with(connect)
             .await
@@ -93,7 +104,9 @@ impl Store {
                 Some(height) => OnceLock::from(AtomicU64::new(height as u64)),
                 None => OnceLock::new(),
             }),
-            merkle_cache: Default::default(),
+            merkle_cache: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(cache_size).context("new_with_options: cache size of 0")?,
+            ))),
         })
     }
 

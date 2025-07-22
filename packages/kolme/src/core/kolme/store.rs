@@ -47,8 +47,9 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
+        cache_size: usize,
     ) -> Result<Self> {
-        KolmeStoreInner::new_postgres_with_options(connect, options)
+        KolmeStoreInner::new_postgres_with_options(connect, options, cache_size)
             .await
             .map(KolmeStore::from)
             .map_err(anyhow::Error::from)

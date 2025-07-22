@@ -174,10 +174,13 @@ mod tests {
         let options = options.database(&db_name);
         maintenance_pool.set_connect_options(options.clone());
 
-        let store =
-            KolmeStore::new_postgres_with_options(options, maintenance_pool.options().clone())
-                .await
-                .unwrap();
+        let store = KolmeStore::new_postgres_with_options(
+            options,
+            maintenance_pool.options().clone(),
+            1024,
+        )
+        .await
+        .unwrap();
         test_sample_sanity(store).await
     }
 }

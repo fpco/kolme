@@ -4461,6 +4461,7 @@ dependencies = [
  "anyhow",
  "enum_dispatch",
  "fjall",
+ "lru 0.14.0",
  "merkle-map",
  "parking_lot",
  "quickcheck",

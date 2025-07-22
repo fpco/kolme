@@ -58,10 +58,13 @@ async fn test_postgres_block_double_insertion() {
     let options = options.database(&db_name);
     maintenance_pool.set_connect_options(options.clone());
 
-    let postgres =
-        KolmeStore::new_postgres_with_options(options, PgPoolOptions::new().max_connections(2))
-            .await
-            .unwrap();
+    let postgres = KolmeStore::new_postgres_with_options(
+        options,
+        PgPoolOptions::new().max_connections(2),
+        1024,
+    )
+    .await
+    .unwrap();
 
     TestTasks::start(test_block_double_insertion, postgres).await;
 }

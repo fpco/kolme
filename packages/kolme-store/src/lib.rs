@@ -43,9 +43,10 @@ impl KolmeStore {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
+        cache_size: usize,
     ) -> anyhow::Result<Self> {
         Ok(KolmeStore::KolmePostgresStore(
-            postgres::Store::new_with_options(connect, options).await?,
+            postgres::Store::new_with_options(connect, options, cache_size).await?,
         ))
     }
 
@@ -90,3 +91,5 @@ impl KolmeStore {
         })
     }
 }
+
+const DEFAULT_CACHE_SIZE: usize = 1024 * 512;

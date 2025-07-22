@@ -1,7 +1,14 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
-use anyhow::Context as _;
-use merkle_map::{MerkleDeserialize, MerkleSerialize, MerkleStore as _, Sha256Hash};
-use std::path::Path;
+use crate::{
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock,
+    DEFAULT_CACHE_SIZE,
+};
+use anyhow::Context;
+use lru::LruCache;
+use merkle_map::{
+    MerkleDeserialize, MerkleLayerContents, MerkleSerialize, MerkleStore as _, Sha256Hash,
+};
+use parking_lot::Mutex;
+use std::{num::NonZeroUsize, path::Path, sync::Arc};
 
 mod merkle;
 
@@ -11,13 +18,24 @@ const NEXT_MISSING_LAYER_KEY: &[u8] = b"NEXT_MISSING";
 #[derive(Clone)]
 pub struct Store {
     pub(super) merkle: merkle::MerkleFjallStore,
+    cache: Arc<Mutex<LruCache<Sha256Hash, MerkleLayerContents>>>,
 }
 
 impl Store {
     pub fn new(fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+        Store::new_with(fjall_dir, DEFAULT_CACHE_SIZE)
+    }
+
+    pub fn new_with(fjall_dir: impl AsRef<Path>, cache_size: usize) -> anyhow::Result<Self> {
         let merkle = merkle::MerkleFjallStore::new(fjall_dir)?;
 
-        Ok(Self { merkle })
+        Ok(Self {
+            merkle,
+            cache: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(cache_size)
+                    .context("Store::new_with: provided 0 as cache size")?,
+            ))),
+        })
     }
 }
 
@@ -34,6 +52,8 @@ impl KolmeBackingStore for Store {
                 .remove(key)
                 .map_err(KolmeStoreError::custom)?;
         }
+
+        self.cache.lock().clear();
         Ok(())
     }
 
@@ -49,7 +69,12 @@ impl KolmeBackingStore for Store {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<merkle_map::MerkleLayerContents>, merkle_map::MerkleSerialError> {
-        self.merkle.clone().load_by_hash(hash).await
+        let layer = self.cache.lock().get(&hash).cloned();
+        if let Some(layer) = layer {
+            Ok(Some(layer))
+        } else {
+            self.merkle.clone().load_by_hash(hash).await
+        }
     }
 
     async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>> {
@@ -111,6 +136,10 @@ impl KolmeBackingStore for Store {
         &self,
         hash: Sha256Hash,
     ) -> Result<bool, merkle_map::MerkleSerialError> {
+        let cached = self.cache.lock().contains(&hash);
+        if cached {
+            return Ok(true);
+        }
         let mut merkle = self.merkle.clone();
         merkle.contains_hash(hash).await
     }
@@ -171,6 +200,7 @@ impl KolmeBackingStore for Store {
     ) -> anyhow::Result<()> {
         let mut merkle = self.merkle.clone();
         merkle.save_by_hash(hash, layer).await?;
+        self.cache.lock().put(hash, layer.clone());
         Ok(())
     }
 
