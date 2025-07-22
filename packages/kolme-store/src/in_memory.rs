@@ -4,9 +4,7 @@ use std::{
 };
 
 use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
-use merkle_map::{
-    MerkleDeserialize, MerkleManager, MerkleMemoryStore, MerkleSerialize, MerkleStore, Sha256Hash,
-};
+use merkle_map::{MerkleDeserialize, MerkleMemoryStore, MerkleSerialize, MerkleStore, Sha256Hash};
 use tokio::sync::Semaphore;
 
 #[derive(Clone)]
@@ -57,7 +55,6 @@ impl KolmeBackingStore for Store {
 
     async fn load_block<Block, FrameworkState, AppState>(
         &self,
-        merkle_manager: &MerkleManager,
         height: u64,
     ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
     where
@@ -71,8 +68,7 @@ impl KolmeBackingStore for Store {
         };
         let hash = *hash;
 
-        merkle_manager
-            .load(&mut guard.merkle, hash)
+        merkle_map::load(&mut guard.merkle, hash)
             .await
             .map_err(KolmeStoreError::custom)
             .map(Some)
@@ -88,7 +84,6 @@ impl KolmeBackingStore for Store {
 
     async fn add_block<Block, FrameworkState, AppState>(
         &self,
-        merkle_manager: &MerkleManager,
         block: &StorableBlock<Block, FrameworkState, AppState>,
     ) -> Result<(), KolmeStoreError>
     where
@@ -118,8 +113,7 @@ impl KolmeBackingStore for Store {
 
         guard.txhashes.insert(txhash, height);
 
-        let hash = merkle_manager
-            .save(&mut guard.merkle, block)
+        let hash = merkle_map::save(&mut guard.merkle, block)
             .await
             .map_err(KolmeStoreError::custom)?;
         guard.blocks.insert(height, hash.hash);
@@ -160,28 +154,20 @@ impl KolmeBackingStore for Store {
         Ok(())
     }
 
-    async fn save<T>(
-        &self,
-        merkle_manager: &MerkleManager,
-        value: &T,
-    ) -> anyhow::Result<Arc<merkle_map::MerkleContents>>
+    async fn save<T>(&self, value: &T) -> anyhow::Result<Arc<merkle_map::MerkleContents>>
     where
         T: merkle_map::MerkleSerializeRaw,
     {
         let mut merkle = self.get_merkle_store().await;
-        Ok(merkle_manager.save(&mut merkle, value).await?)
+        Ok(merkle_map::save(&mut merkle, value).await?)
     }
 
-    async fn load<T>(
-        &self,
-        merkle_manager: &MerkleManager,
-        hash: Sha256Hash,
-    ) -> Result<T, merkle_map::MerkleSerialError>
+    async fn load<T>(&self, hash: Sha256Hash) -> Result<T, merkle_map::MerkleSerialError>
     where
         T: merkle_map::MerkleDeserializeRaw,
     {
         let mut merkle = self.get_merkle_store().await;
-        merkle_manager.load(&mut merkle, hash).await
+        merkle_map::load(&mut merkle, hash).await
     }
 
     async fn archive_block(&self, height: u64) -> anyhow::Result<()> {

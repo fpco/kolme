@@ -7,7 +7,6 @@ pub struct MerkleDeserializer {
     hash: Sha256Hash,
     buff: Arc<[u8]>,
     pos: usize,
-    manager: MerkleManager,
     loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
     children: Vec<Arc<MerkleContents>>,
 }
@@ -16,14 +15,12 @@ impl MerkleDeserializer {
     pub(crate) fn new(
         hash: Sha256Hash,
         payload: Arc<[u8]>,
-        manager: MerkleManager,
         loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
     ) -> Self {
         MerkleDeserializer {
             hash,
             buff: payload,
             pos: 0,
-            manager,
             loaded,
             children: vec![],
         }
@@ -118,12 +115,12 @@ impl MerkleDeserializer {
         &mut self,
         hash: Sha256Hash,
     ) -> Result<Option<T>, MerkleSerialError> {
-        self.manager.deserialize_cached(hash, self.loaded.clone())
+        crate::api::deserialize_cached(hash, self.loaded.clone())
     }
 
     pub fn load_by_hash<T: MerkleDeserializeRaw>(&mut self) -> Result<T, MerkleSerialError> {
         let hash = Sha256Hash::merkle_deserialize_raw(self)?;
-        match self.manager.deserialize_cached(hash, self.loaded.clone()) {
+        match crate::api::deserialize_cached(hash, self.loaded.clone()) {
             Err(e) => Err(e),
             Ok(Some(x)) => Ok(x),
             Ok(None) => Err(MerkleSerialError::HashesNotFound {

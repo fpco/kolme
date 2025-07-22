@@ -26,9 +26,8 @@ impl StoreEnv for Store {
         }
     }
 
-    async fn run(&mut self, manager: &kolme::MerkleManager, map: RawMerkleMap) {
-        manager
-            .save(&mut self.store.clone(), &map.0)
+    async fn run(&mut self, map: RawMerkleMap) {
+        merkle_map::save(&mut self.store.clone(), &map.0)
             .await
             .expect("Unable to save MerkleMap contents");
 

@@ -104,17 +104,9 @@ async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<Sam
         processor: processor.public_key(),
         height,
         parent: genesis.hash(),
-        framework_state: kolme
-            .get_merkle_manager()
-            .serialize(&framework_state)
-            .unwrap()
-            .hash,
-        app_state: kolme
-            .get_merkle_manager()
-            .serialize(&app_state)
-            .unwrap()
-            .hash,
-        logs: kolme.get_merkle_manager().serialize(&logs).unwrap().hash,
+        framework_state: merkle_map::api::serialize(&framework_state).unwrap().hash,
+        app_state: merkle_map::api::serialize(&app_state).unwrap().hash,
+        logs: merkle_map::api::serialize(&logs).unwrap().hash,
         loads,
     };
     fn sign_block(
