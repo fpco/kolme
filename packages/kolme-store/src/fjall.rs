@@ -175,11 +175,12 @@ impl KolmeBackingStore for Store {
         }
 
         let mut store = self.merkle.clone();
-        merkle_map::api::save_merkle_contents(&mut store, &contents).await?;
+        let hash = contents.hash;
+        merkle_map::api::save_merkle_contents(&mut store, contents).await?;
 
         self.merkle
             .handle
-            .insert(key, contents.hash.as_array())
+            .insert(key, hash.as_array())
             .map_err(KolmeStoreError::custom)?;
         self.merkle
             .handle

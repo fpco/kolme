@@ -3,7 +3,6 @@
 use std::{collections::HashSet, sync::Arc};
 
 use shared::types::Sha256Hash;
-use smallvec::SmallVec;
 
 use crate::*;
 
@@ -37,33 +36,63 @@ pub fn serialize<T: MerkleSerializeRaw + ?Sized>(
 /// Save a [MerkleContents] to the given store.
 pub async fn save_merkle_contents<Store: MerkleStore>(
     store: &mut Store,
-    contents: &MerkleContents,
+    contents: Arc<MerkleContents>,
 ) -> Result<(), MerkleSerialError> {
-    // First check if our hash already exists. If so, we assume
-    // all children are also present.
+    // Bypass everything below: if this already exists, just exit.
     if store.contains_hash(contents.hash).await? {
         return Ok(());
     }
 
-    // TODO avoid the recursive call, instead use a Vec of work
-
-    // If the hash doesn't exist, write the children first.
-    // This is to ensure that all child data is present before
-    // writing the parent. This is what allows us to have the short-circuit
-    // optimization above.
-    let mut children = SmallVec::with_capacity(contents.children.len());
-    for child in contents.children.iter() {
-        children.push(child.hash);
-        let future = Box::pin(save_merkle_contents(store, child));
-        future.await?;
+    // Work items consist of both the contents to write, and whether we need to
+    // write children first. The workflow here is:
+    //
+    // 1. Add a contents and say we need to check children
+    // 2. Pop item from the queue, if we don't need to check children, store immediately
+    // 3. If we do need to check children, put this back on the queue with "no check children"
+    //    and then add all children to the queue, saying they need to be checked.
+    //
+    // Motivation: we want to ensure we always write children layers before the parent.
+    struct Work {
+        contents: Arc<MerkleContents>,
+        check_children: bool,
     }
 
-    // And finally write the actual contents.
-    let layer = MerkleLayerContents {
-        payload: contents.payload.clone(),
-        children,
-    };
-    store.save_by_hash(contents.hash, &layer).await?;
+    let mut work = vec![Work {
+        contents,
+        check_children: true,
+    }];
+
+    while let Some(Work {
+        contents,
+        check_children,
+    }) = work.pop()
+    {
+        if check_children {
+            let children = contents.children.clone();
+            work.push(Work {
+                contents,
+                check_children: false,
+            });
+            for child in children.iter() {
+                if !store.contains_hash(child.hash).await? {
+                    work.push(Work {
+                        contents: child.clone(),
+                        check_children: true,
+                    });
+                }
+            }
+        } else {
+            store
+                .save_by_hash(
+                    contents.hash,
+                    &MerkleLayerContents {
+                        payload: contents.payload.clone(),
+                        children: contents.children.iter().map(|c| c.hash).collect(),
+                    },
+                )
+                .await?;
+        }
+    }
 
     Ok(())
 }
@@ -74,7 +103,7 @@ pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
     value: &T,
 ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
     let contents = serialize(value)?;
-    save_merkle_contents(store, &contents).await?;
+    save_merkle_contents(store, contents.clone()).await?;
     Ok(contents)
 }
 
