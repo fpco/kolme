@@ -78,10 +78,7 @@ pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
     Ok(contents)
 }
 
-/// Deserialize a value from the given payload.
-///
-/// This relies on all layers fitting in the LRU cache of the manager. This is finicky;
-/// consider moving to other methods.
+/// Deserialize a value from the given [MerkleContents].
 pub fn deserialize<T: MerkleDeserializeRaw>(
     contents: Arc<MerkleContents>,
 ) -> Result<T, MerkleSerialError> {
