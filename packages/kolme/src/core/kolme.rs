@@ -46,7 +46,6 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     pub(super) solana_endpoints: parking_lot::RwLock<SolanaEndpoints>,
     #[cfg(feature = "pass_through")]
     pub(super) pass_through_conn: OnceLock<reqwest::Client>,
-    pub(super) merkle_manager: MerkleManager,
     current_block: RwLock<Arc<MaybeBlockInfo<App>>>,
     /// Latest block reported by the processor
     pub(super) latest_block: RwLock<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
@@ -81,11 +80,6 @@ impl<App: KolmeApp> Clone for Kolme<App> {
         }
     }
 }
-
-// ATM we use a speculative cache bound. For cache values with avarage size of 1kb
-// and assuming pessimistic overhead of 2x this should result in merkle cache
-// not getting larger than 512M
-const MERKLE_CACHE_SIZE: usize = 262_144; // 2^^18
 
 impl<App: KolmeApp> Kolme<App> {
     /// Lock the local storage and the database.
@@ -334,12 +328,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn resync(&self) -> Result<()> {
         loop {
             let next = self.inner.current_block.read().get_next_height();
-            let Some(block) = self
-                .inner
-                .store
-                .load_signed_block(self.get_merkle_manager(), next)
-                .await?
-            else {
+            let Some(block) = self.inner.store.load_signed_block(next).await? else {
                 break Ok(());
             };
             self.add_block(block).await?;
@@ -446,34 +435,31 @@ impl<App: KolmeApp> Kolme<App> {
         let logs: Arc<[_]> = logs.into();
         let height = signed_block.height();
 
-        let framework_state_contents = self.get_merkle_manager().serialize(&framework_state)?;
+        let framework_state_contents = merkle_map::api::serialize(&framework_state)?;
         anyhow::ensure!(
             framework_state_contents.hash == signed_block.0.message.as_inner().framework_state
         );
 
-        let app_state_contents = self.get_merkle_manager().serialize(&app_state)?;
+        let app_state_contents = merkle_map::api::serialize(&app_state)?;
         anyhow::ensure!(app_state_contents.hash == signed_block.0.message.as_inner().app_state);
 
-        let logs_contents = self.get_merkle_manager().serialize(&logs)?;
+        let logs_contents = merkle_map::api::serialize(&logs)?;
         anyhow::ensure!(logs_contents.hash == signed_block.0.message.as_inner().logs);
 
         self.inner
             .store
-            .add_block(
-                &self.inner.merkle_manager,
-                StorableBlock {
-                    height: signed_block.height().0,
-                    blockhash: signed_block.hash().0,
-                    txhash: signed_block.tx().hash().0,
-                    block: signed_block.clone(),
-                    // TODO possible future optimization, either use MerkleLockable
-                    // around these fields or pass in the _contents values from
-                    // above to avoid double-serialization
-                    framework_state: framework_state.clone(),
-                    app_state: app_state.clone(),
-                    logs: logs.clone(),
-                },
-            )
+            .add_block(StorableBlock {
+                height: signed_block.height().0,
+                blockhash: signed_block.hash().0,
+                txhash: signed_block.tx().hash().0,
+                block: signed_block.clone(),
+                // TODO possible future optimization, either use MerkleLockable
+                // around these fields or pass in the _contents values from
+                // above to avoid double-serialization
+                framework_state: framework_state.clone(),
+                app_state: app_state.clone(),
+                logs: logs.clone(),
+            })
             .await?;
 
         self.inner.mempool.drop_tx(signed_block.tx().hash());
@@ -543,36 +529,28 @@ impl<App: KolmeApp> Kolme<App> {
         let framework_state = Arc::new(
             self.inner
                 .store
-                .load::<FrameworkState>(&self.inner.merkle_manager, block.framework_state)
+                .load::<FrameworkState>(block.framework_state)
                 .await?,
         );
-        let app_state = Arc::new(
-            self.inner
-                .store
-                .load::<App::State>(&self.inner.merkle_manager, block.app_state)
-                .await?,
-        );
+        let app_state = Arc::new(self.inner.store.load::<App::State>(block.app_state).await?);
         let logs = Arc::<[Vec<String>]>::from(
             self.inner
                 .store
-                .load::<Vec<Vec<String>>>(&self.inner.merkle_manager, block.logs)
+                .load::<Vec<Vec<String>>>(block.logs)
                 .await?,
         );
 
         self.inner
             .store
-            .add_block(
-                &self.inner.merkle_manager,
-                StorableBlock {
-                    height: signed_block.height().0,
-                    blockhash: signed_block.hash().0,
-                    txhash: signed_block.tx().hash().0,
-                    block: signed_block.clone(),
-                    framework_state: framework_state.clone(),
-                    app_state: app_state.clone(),
-                    logs: logs.clone(),
-                },
-            )
+            .add_block(StorableBlock {
+                height: signed_block.height().0,
+                blockhash: signed_block.hash().0,
+                txhash: signed_block.tx().hash().0,
+                block: signed_block.clone(),
+                framework_state: framework_state.clone(),
+                app_state: app_state.clone(),
+                logs: logs.clone(),
+            })
             .await?;
 
         self.inner.mempool.drop_tx(txhash);
@@ -671,8 +649,7 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Self> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
-        let merkle_manager = MerkleManager::new(MERKLE_CACHE_SIZE);
-        let current_block = MaybeBlockInfo::<App>::load(&store, &app, &merkle_manager).await?;
+        let current_block = MaybeBlockInfo::<App>::load(&store, &app).await?;
         let inner = KolmeInner {
             store,
             app,
@@ -680,7 +657,6 @@ impl<App: KolmeApp> Kolme<App> {
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "pass_through")]
             pass_through_conn: OnceLock::new(),
-            merkle_manager,
             notify: tokio::sync::broadcast::channel(100).0,
             // In the future, maybe have a Builder interface for configuring things like this
             // Default value chosen to exceed the libp2p default of 60 seconds
@@ -701,7 +677,7 @@ impl<App: KolmeApp> Kolme<App> {
         kolme
             .inner
             .store
-            .validate_genesis_info(&kolme.inner.merkle_manager, kolme.get_app().genesis_info())
+            .validate_genesis_info(kolme.get_app().genesis_info())
             .await?;
 
         Ok(kolme)
@@ -1101,26 +1077,20 @@ impl<App: KolmeApp> Kolme<App> {
             let Some(block) = other.get_block(to_archive).await? else {
                 break Ok(());
             };
-            let man = self.get_merkle_manager();
             self.inner
                 .store
                 .save(
-                    man,
                     &block.framework_state,
                     block.block.0.message.as_inner().framework_state,
                 )
                 .await?;
             self.inner
                 .store
-                .save(
-                    man,
-                    &block.app_state,
-                    block.block.0.message.as_inner().app_state,
-                )
+                .save(&block.app_state, block.block.0.message.as_inner().app_state)
                 .await?;
             self.inner
                 .store
-                .save(man, &block.logs, block.block.0.message.as_inner().logs)
+                .save(&block.logs, block.block.0.message.as_inner().logs)
                 .await?;
             self.add_block_with_state(block.block).await?;
         }
@@ -1133,10 +1103,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         height: BlockHeight,
     ) -> Result<Option<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>> {
-        self.inner
-            .store
-            .load_block(&self.inner.merkle_manager, height)
-            .await
+        self.inner.store.load_block(height).await
     }
 
     /// Check if the given block is available in storage.
@@ -1152,11 +1119,6 @@ impl<App: KolmeApp> Kolme<App> {
     /// Get the block height for the given transaction, if present.
     pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>> {
         self.inner.store.get_height_for_tx(tx).await
-    }
-
-    /// Get the [MerkleManager]
-    pub fn get_merkle_manager(&self) -> &MerkleManager {
-        &self.inner.merkle_manager
     }
 
     /// Load the block details from the database
@@ -1175,7 +1137,6 @@ impl<App: KolmeApp> Kolme<App> {
     /// of Kolme. This traverses all blocks in the store and ensures that the framework state, app state, and logs are stored directly in the merkle store. With older versions of Kolme, these were mistakenly only stored in the block data itself.
     pub async fn fix_missing_layers(&self) -> Result<()> {
         let mut height = BlockHeight::start();
-        let man = self.get_merkle_manager();
         while self.has_block(height).await? {
             tracing::info!("Attempting to fix missing layers for block height {height}");
 
@@ -1183,7 +1144,7 @@ impl<App: KolmeApp> Kolme<App> {
                 format!("fix_missing_layers: error while loading block height {height}")
             })?;
             {
-                let contents = man.serialize(&block.framework_state)?;
+                let contents = merkle_map::api::serialize(&block.framework_state)?;
                 let exists = self.get_merkle_layer(contents.hash).await?.is_some();
                 if !exists {
                     tracing::info!(
@@ -1192,12 +1153,12 @@ impl<App: KolmeApp> Kolme<App> {
                     );
                     self.inner
                         .store
-                        .save(man, &block.framework_state, contents.hash)
+                        .save(&block.framework_state, contents.hash)
                         .await?;
                 }
             }
             {
-                let contents = man.serialize(&block.app_state)?;
+                let contents = merkle_map::api::serialize(&block.app_state)?;
                 let exists = self.get_merkle_layer(contents.hash).await?.is_some();
                 if !exists {
                     tracing::info!(
@@ -1206,20 +1167,17 @@ impl<App: KolmeApp> Kolme<App> {
                     );
                     self.inner
                         .store
-                        .save(man, &block.app_state, contents.hash)
+                        .save(&block.app_state, contents.hash)
                         .await?;
                 }
             }
             {
-                let contents = man.serialize(&block.logs)?;
+                let contents = merkle_map::api::serialize(&block.logs)?;
                 let exists = self.get_merkle_layer(contents.hash).await?.is_some();
                 tracing::debug!("height: {height} logs: {exists}: {}", contents.hash);
                 if !exists {
                     tracing::info!("Saving Merkle layer for {height}/logs: {}", contents.hash);
-                    self.inner
-                        .store
-                        .save(man, &block.logs, contents.hash)
-                        .await?;
+                    self.inner.store.save(&block.logs, contents.hash).await?;
                 }
             }
 

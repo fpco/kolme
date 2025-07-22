@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock};
 use enum_dispatch::enum_dispatch;
 use merkle_map::{
-    MerkleContents, MerkleDeserialize, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager,
+    MerkleContents, MerkleDeserialize, MerkleDeserializeRaw, MerkleLayerContents,
     MerkleSerialError, MerkleSerialize, MerkleSerializeRaw, Sha256Hash,
 };
 
@@ -24,7 +24,6 @@ pub trait KolmeBackingStore {
     async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError>;
     async fn load_block<Block, FrameworkState, AppState>(
         &self,
-        merkle_manager: &MerkleManager,
         height: u64,
     ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
     where
@@ -37,7 +36,6 @@ pub trait KolmeBackingStore {
 
     async fn add_block<Block, FrameworkState, AppState>(
         &self,
-        merkle_manager: &MerkleManager,
         block: &StorableBlock<Block, FrameworkState, AppState>,
     ) -> Result<(), KolmeStoreError>
     where
@@ -53,18 +51,10 @@ pub trait KolmeBackingStore {
     async fn archive_block(&self, height: u64) -> anyhow::Result<()>;
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>>;
 
-    async fn save<T>(
-        &self,
-        merkle_manager: &MerkleManager,
-        value: &T,
-    ) -> anyhow::Result<Arc<MerkleContents>>
+    async fn save<T>(&self, value: &T) -> anyhow::Result<Arc<MerkleContents>>
     where
         T: MerkleSerializeRaw;
-    async fn load<T>(
-        &self,
-        merkle_manager: &MerkleManager,
-        hash: Sha256Hash,
-    ) -> Result<T, MerkleSerialError>
+    async fn load<T>(&self, hash: Sha256Hash) -> Result<T, MerkleSerialError>
     where
         T: MerkleDeserializeRaw;
 }

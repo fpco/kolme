@@ -1,8 +1,8 @@
 use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use anyhow::Context as _;
 use merkle_map::{
-    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError,
-    MerkleSerialize, MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
+    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerialize,
+    MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
 use parking_lot::RwLock;
 use sqlx::{
@@ -245,7 +245,6 @@ impl KolmeBackingStore for Store {
         AppState: MerkleDeserializeRaw,
     >(
         &self,
-        merkle_manager: &MerkleManager,
         height: u64,
     ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError> {
         let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
@@ -301,9 +300,9 @@ impl KolmeBackingStore for Store {
         let mut store3 = self.new_store();
 
         let (framework_state, app_state, logs) = tokio::try_join!(
-            merkle_manager.load(&mut store1, framework_state_hash),
-            merkle_manager.load(&mut store2, app_state_hash),
-            merkle_manager.load(&mut store3, logs_hash),
+            merkle_map::load(&mut store1, framework_state_hash),
+            merkle_map::load(&mut store2, app_state_hash),
+            merkle_map::load(&mut store3, logs_hash),
         )?;
 
         let block = serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?;
@@ -343,7 +342,6 @@ impl KolmeBackingStore for Store {
         AppState: MerkleSerialize,
     >(
         &self,
-        merkle_manager: &MerkleManager,
         StorableBlock {
             height,
             blockhash,
@@ -362,9 +360,9 @@ impl KolmeBackingStore for Store {
         let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
 
         let (framework_state, app_state, logs) = tokio::try_join!(
-            merkle_manager.save(&mut store1, framework_state),
-            merkle_manager.save(&mut store2, app_state),
-            merkle_manager.save(&mut store3, logs)
+            merkle_map::save(&mut store1, framework_state),
+            merkle_map::save(&mut store2, app_state),
+            merkle_map::save(&mut store3, logs)
         )?;
 
         let framework_state_hash = framework_state.hash;
@@ -455,24 +453,19 @@ impl KolmeBackingStore for Store {
         Ok(())
     }
 
-    async fn save<T: MerkleSerializeRaw>(
-        &self,
-        merkle_manager: &MerkleManager,
-        value: &T,
-    ) -> anyhow::Result<Arc<MerkleContents>> {
+    async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> anyhow::Result<Arc<MerkleContents>> {
         let mut store = self.new_store();
-        let contents = merkle_manager.save(&mut store, value).await?;
+        let contents = merkle_map::save(&mut store, value).await?;
         self.consume_stores(&self.pool, [store]).await?;
         Ok(contents)
     }
     async fn load<T: MerkleDeserializeRaw>(
         &self,
-        merkle_manager: &MerkleManager,
         hash: Sha256Hash,
     ) -> Result<T, MerkleSerialError> {
         let mut store = self.new_store();
 
-        merkle_manager.load::<T, _>(&mut store, hash).await
+        merkle_map::load::<T, _>(&mut store, hash).await
     }
 
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {

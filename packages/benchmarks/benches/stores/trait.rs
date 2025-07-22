@@ -1,4 +1,3 @@
-use kolme::MerkleManager;
 use tokio::runtime::Handle;
 
 use super::core::RawMerkleMap;
@@ -7,7 +6,7 @@ pub trait StoreEnv {
     type Params: Clone;
 
     async fn new(params: Self::Params) -> Self;
-    async fn run(&mut self, manager: &MerkleManager, map: RawMerkleMap);
+    async fn run(&mut self, map: RawMerkleMap);
     async fn cleanup(&mut self);
 }
 
