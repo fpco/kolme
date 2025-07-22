@@ -121,6 +121,16 @@ impl<T> SignedTaggedJson<T> {
     }
 }
 
+impl<T> PartialEq for SignedTaggedJson<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.message == other.message
+            && self.signature == other.signature
+            && self.recovery_id == other.recovery_id
+    }
+}
+
+impl<T> Eq for SignedTaggedJson<T> {}
+
 impl<T> PartialEq for TaggedJson<T> {
     fn eq(&self, other: &Self) -> bool {
         self.serialized == other.serialized
@@ -273,8 +283,7 @@ mod tests {
 
     #[test]
     fn round_trip_public_key() {
-        let mut rng = rand::thread_rng();
-        let secret = SecretKey::random(&mut rng);
+        let secret = SecretKey::random();
         let public = secret.public_key();
 
         assert_eq!(
@@ -293,8 +302,7 @@ mod tests {
 
     #[test]
     fn round_trip_secret_key() {
-        let mut rng = rand::thread_rng();
-        let secret = SecretKey::random(&mut rng);
+        let secret = SecretKey::random();
         let s = secret.reveal_as_hex();
         let secret2 = SecretKey::from_str(&s).unwrap();
         assert_eq!(secret, secret2);

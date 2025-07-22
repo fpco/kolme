@@ -83,7 +83,7 @@ mod tests {
             payload.push(rand::random::<u8>());
         }
 
-        let secret = SecretKey::random(&mut rng);
+        let secret = SecretKey::random();
 
         let sigrec = secret.sign_recoverable(&payload).unwrap();
 

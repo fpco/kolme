@@ -16,7 +16,7 @@ use kolme_solana_bridge_client::{
     transfer_payload, TokenProgram,
 };
 use shared::{
-    cryptography::{SecretKey, ThreadRng},
+    cryptography::SecretKey,
     solana::{InitializeIxData, Payload, RegularMsgIxData, SignedAction, SignedMsgIxData},
     types::ValidatorSet,
 };
@@ -56,10 +56,9 @@ impl Program {
 
         let keys = unsafe {
             let mut keys = Box::<[SecretKey; KEYS_LEN]>::new_uninit();
-            let mut rng = ThreadRng::default();
 
             for i in 0..KEYS_LEN {
-                (*keys.as_mut_ptr()).as_mut_slice()[i] = SecretKey::random(&mut rng);
+                (*keys.as_mut_ptr()).as_mut_slice()[i] = SecretKey::random();
             }
 
             keys.assume_init()

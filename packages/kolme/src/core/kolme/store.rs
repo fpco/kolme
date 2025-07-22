@@ -101,15 +101,6 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.inner.clear_blocks().await
     }
 
-    /// Delete the given block height.
-    ///
-    /// Currently only implemented for the in-memory store, since this is intended
-    /// exclusively for test cases.
-    pub async fn delete_block(&self, height: BlockHeight) -> Result<()> {
-        self.inner.delete_block(height.0).await?;
-        Ok(())
-    }
-
     pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
         Ok(self.inner.take_construct_lock().await?)
     }

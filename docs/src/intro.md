@@ -8,6 +8,8 @@ Kolme is a Rust-powered blockchain framework that empowers developers to build f
 
 This document provides an overview of Kolme’s architecture, real-world use cases, and key benefits, serving as your entry point to building the future of decentralized technology.
 
+Want to see the code? Check out [the Kolme GitHub repo](https://github.com/fpco/kolme).
+
 ## Why Kolme?
 
 Kolme redefines blockchain development by combining the speed of modern web applications, the security of leading blockchains, and seamless multichain accessibility. Its innovative design delivers:

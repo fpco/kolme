@@ -83,7 +83,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(SampleState { hi_count: 0 })
     }
 
@@ -170,7 +170,7 @@ pub async fn api_server(bind: SocketAddr) -> Result<()> {
 pub async fn say_hi(secret: Option<String>, host: String) -> Result<()> {
     let secret = match secret {
         Some(secret) => SecretKey::from_hex(&secret)?,
-        None => SecretKey::random(&mut rand::thread_rng()),
+        None => SecretKey::random(),
     };
     let public = secret.public_key();
     let client = reqwest::Client::new();

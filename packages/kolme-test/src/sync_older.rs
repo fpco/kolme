@@ -32,14 +32,14 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
 
     // Send a few transactions to bump up the block height
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
             .unwrap();
     }
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let latest_block_height = kolme1
         .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
         .await
@@ -66,17 +66,19 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.launch_kademlia_client_with(
-        kolme_state_transfer.clone(),
-        "kolme_state_transfer",
-        &discovery,
-        |builder| {
-            builder.set_sync_mode(
-                SyncMode::StateTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-        },
-    );
+    testtasks
+        .launch_kademlia_client_with(
+            kolme_state_transfer.clone(),
+            "kolme_state_transfer",
+            &discovery,
+            |builder| {
+                builder.set_sync_mode(
+                    SyncMode::StateTransfer,
+                    DataLoadValidation::ValidateDataLoads,
+                )
+            },
+        )
+        .await;
 
     // We should be able to sync the latest block within a few seconds
     let latest_from_gossip = tokio::time::timeout(
@@ -178,7 +180,7 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(Processor::new(kolme.clone(), my_secret_key()).run());
 
     for _ in 0..10 {
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme
             .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])
             .await
@@ -200,7 +202,7 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
         "Block heights were not archived correctly"
     );
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
 
     kolme
         .sign_propose_await_transaction(&secret, vec![Message::App(SampleMessage::SayHi {})])

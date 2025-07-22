@@ -404,6 +404,7 @@ impl<App: KolmeApp> Kolme<App> {
             app_state,
             logs,
             loads,
+            height,
         } = self
             .read()
             .execute_transaction(
@@ -415,6 +416,7 @@ impl<App: KolmeApp> Kolme<App> {
                 },
             )
             .await?;
+        anyhow::ensure!(height == signed_block.height());
         anyhow::ensure!(loads == block.loads);
 
         self.add_executed_block(ExecutedBlock {
@@ -498,7 +500,7 @@ impl<App: KolmeApp> Kolme<App> {
         self.notify(Notification::NewBlock(signed_block));
 
         // Update the archive if appropriate
-        if self.get_next_to_archive().await == height {
+        if self.get_next_to_archive().await? == height {
             if let Err(e) = self.inner.store.archive_block(height).await {
                 tracing::warn!("Unable to mark block {height} as archived: {e}");
             }
@@ -670,8 +672,7 @@ impl<App: KolmeApp> Kolme<App> {
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
         let merkle_manager = MerkleManager::new(MERKLE_CACHE_SIZE);
-        let current_block =
-            MaybeBlockInfo::<App>::load(&store, app.genesis_info(), &merkle_manager).await?;
+        let current_block = MaybeBlockInfo::<App>::load(&store, &app, &merkle_manager).await?;
         let inner = KolmeInner {
             store,
             app,
@@ -1092,6 +1093,38 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<()> {
         self.inner.store.add_merkle_layer(hash, layer).await
     }
+
+    /// Ingest all blocks from the given Kolme into this one.
+    pub async fn ingest_blocks_from(&self, other: &Self) -> Result<()> {
+        loop {
+            let to_archive = self.get_next_to_archive().await?;
+            let Some(block) = other.get_block(to_archive).await? else {
+                break Ok(());
+            };
+            let man = self.get_merkle_manager();
+            self.inner
+                .store
+                .save(
+                    man,
+                    &block.framework_state,
+                    block.block.0.message.as_inner().framework_state,
+                )
+                .await?;
+            self.inner
+                .store
+                .save(
+                    man,
+                    &block.app_state,
+                    block.block.0.message.as_inner().app_state,
+                )
+                .await?;
+            self.inner
+                .store
+                .save(man, &block.logs, block.block.0.message.as_inner().logs)
+                .await?;
+            self.add_block_with_state(block.block).await?;
+        }
+    }
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -1221,14 +1254,19 @@ impl<App: KolmeApp> Kolme<App> {
     ///
     /// This will report errors during data load and then return the earliest
     /// block height, essentially restarting the archive process.
-    pub async fn get_next_to_archive(&self) -> BlockHeight {
-        match self.get_latest_archived_block().await {
-            Ok(None) => (),
-            Ok(Some(height)) => return height.next(),
-            Err(e) => tracing::warn!("Error loading archive value: {e}"),
-        };
+    pub async fn get_next_to_archive(&self) -> Result<BlockHeight> {
+        let mut next = self
+            .get_latest_archived_block()
+            .await?
+            .map_or_else(BlockHeight::start, BlockHeight::next);
 
-        BlockHeight::start()
+        while self.has_block(next).await? {
+            // Mark the "next" block as already archived.
+            self.inner.store.archive_block(next).await?;
+            tracing::info!("get_next_to_archive: block already in database: {next}");
+            next = next.next();
+        }
+        Ok(next)
     }
 }
 

@@ -52,7 +52,7 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
 
     pub(super) async fn load(
         store: &KolmeStore<App>,
-        genesis: &GenesisInfo,
+        app: &App,
         merkle_manager: &MerkleManager,
     ) -> Result<Self> {
         let output = store.load_latest_block().await?;
@@ -62,8 +62,8 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
                 MaybeBlockInfo::Some(storable.try_into()?)
             }
             None => MaybeBlockInfo::None(BlockState {
-                framework_state: Arc::new(FrameworkState::new(genesis)),
-                app_state: Arc::new(App::new_state()?),
+                framework_state: Arc::new(FrameworkState::new(app.genesis_info())),
+                app_state: Arc::new(app.new_state()?),
                 blockhash: BlockHash::genesis_parent(),
             }),
         };

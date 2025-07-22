@@ -23,6 +23,8 @@ pub struct ExecutionContext<'a, App: KolmeApp> {
     /// Timestamp corresponding to the moment of time when processor starts
     /// executing the current transaction
     timestamp: Timestamp,
+    /// The block height we are trying to produce.
+    height: BlockHeight,
 }
 
 #[derive(Debug)]
@@ -32,6 +34,7 @@ pub struct ExecutionResults<App: KolmeApp> {
     /// Logs collected from each message.
     pub logs: Vec<Vec<String>>,
     pub loads: Vec<BlockDataLoad>,
+    pub height: BlockHeight,
 }
 
 /// An already executed block that can be added to storage.
@@ -114,6 +117,7 @@ impl<App: KolmeApp> KolmeRead<App> {
             timestamp,
             logs: vec![],
             loads: vec![],
+            height: self.get_next_height(),
         };
         for message in &tx.messages {
             execution_context.logs.push(vec![]);
@@ -133,6 +137,7 @@ impl<App: KolmeApp> KolmeRead<App> {
             timestamp: _,
             logs,
             loads,
+            height,
         } = execution_context;
 
         match block_data_handling {
@@ -152,6 +157,7 @@ impl<App: KolmeApp> KolmeRead<App> {
             app_state,
             logs,
             loads,
+            height,
         })
     }
 }
@@ -456,6 +462,15 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.app
     }
 
+    pub fn app_state(&self) -> &App::State {
+        &self.app_state
+    }
+
+    pub fn app_state_mut(&mut self) -> &mut App::State {
+        &mut self.app_state
+    }
+
+    /// Synonym for [Self::app_state_mut]
     pub fn state_mut(&mut self) -> &mut App::State {
         &mut self.app_state
     }
@@ -470,6 +485,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
     pub fn block_time(&self) -> Timestamp {
         self.timestamp
+    }
+
+    pub fn block_height(&self) -> BlockHeight {
+        self.height
     }
 
     pub fn get_sender_id(&self) -> AccountId {
@@ -839,7 +858,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     }
 
     pub fn log_event(&mut self, event: LogEvent) -> Result<()> {
-        let json = serde_json::to_string(&event)?;
+        self.log_json(&event)
+    }
+
+    /// Log any serializable value as JSON.
+    pub fn log_json<T: serde::Serialize>(&mut self, msg: &T) -> Result<()> {
+        let json = serde_json::to_string(msg)?;
         self.log(json);
         Ok(())
     }

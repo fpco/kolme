@@ -40,8 +40,7 @@ pub enum SampleMessage {
 
 pub fn get_sample_secret_key() -> &'static SecretKey {
     static KEY: OnceLock<SecretKey> = OnceLock::new();
-    let mut rng = rand::thread_rng();
-    KEY.get_or_init(|| SecretKey::random(&mut rng))
+    KEY.get_or_init(SecretKey::random)
 }
 
 const OSMOSIS_TESTNET_CODE_ID: u64 = 123; // FIXME still need to actually write and store this contract
@@ -103,7 +102,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> anyhow::Result<Self::State> {
+    fn new_state(&self) -> anyhow::Result<Self::State> {
         Ok(SampleState {})
     }
 

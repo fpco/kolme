@@ -165,7 +165,7 @@ async fn client(
         let (kolme, secret) = {
             let mut rng = rand::thread_rng();
             let kolme = (*kolmes).choose(&mut rng).unwrap();
-            let secret = SecretKey::random(&mut rng);
+            let secret = SecretKey::random();
             (kolme, secret)
         };
         let tx = Arc::new(

@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod archiver;
+#[cfg(test)]
 mod auth;
 #[cfg(test)]
 mod kademlia;
@@ -8,6 +10,8 @@ mod key_rotation;
 mod kolme_app;
 #[cfg(test)]
 mod max_tx_height;
+#[cfg(test)]
+mod migrate_stores;
 #[cfg(test)]
 mod multiple_processors;
 #[cfg(test)]

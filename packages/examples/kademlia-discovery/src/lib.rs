@@ -88,7 +88,7 @@ impl KolmeApp for KademliaTestApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(State { hi_count: 0 })
     }
 
@@ -163,7 +163,7 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
     // Corresponding to the one in ../assets/validator-keypair.pem
     const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
 
     let client_keypair: &[u8] = include_bytes!("../assets/client-keypair.pk8");
 

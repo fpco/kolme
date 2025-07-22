@@ -2,38 +2,95 @@
 resolver = "2"
 members = [
   "contracts/cosmos",
-  "packages/examples/*",
   "packages/benchmarks",
+  "packages/examples/*",
   "packages/integration-tests",
   "packages/kolme",
+  "packages/kolme-cli",
   "packages/kolme-store",
+  "packages/kolme-test",
   "packages/merkle-map",
   "packages/shared",
-  "packages/kolme-test",
 ]
 
 [workspace.dependencies]
-tokio = { version = "1.43.0", features = ["full"] }
-clap = { version = "4.5.20", features = ["derive", "env", "unicode"] }
-cosmos = { git = "https://github.com/fpco/cosmos-rs", rev = "6f6fea0f7c04e4b64f5c091b006e4736dba1b10e", features = ["config"] }
-fjall = "2.9.0"
-hex = "0.4.3"
-k256 = "0.13.4"
 anyhow = "1.0.97"
+arrayvec = "0.7.6"
+axum = "0.8.3"
+backon = "1.4.1"
+base64 = "0.22.1"
+borsh = { version = "1.5.7", default-features = false }
+clap = { version = "4.5.20", features = ["derive", "env", "unicode"] }
+cosmos = { features = ["config"], git = "https://github.com/fpco/cosmos-rs", rev = "6f6fea0f7c04e4b64f5c091b006e4736dba1b10e" }
+cosmwasm-std = "2.2.2"
+criterion = "0.6.0"
+cw2 = "2.0.0"
+cw-storage-plus = "2.0.0"
+enum_dispatch = "0.3.13"
+example-six-sigma = { path = "packages/examples/six-sigma" }
+example-solana-cosmos-bridge = { path = "packages/examples/solana-cosmos-bridge" }
+fjall = "2.9.0"
+futures = "0.3.31"
+futures-util = "0.3.31"
+hex = "0.4.3"
+jiff = { version = "0.2.3", features = ["serde"] }
+k256 = "0.13.4"
+kademlia-discovery = { path = "packages/examples/kademlia-discovery" }
+kolme = { path = "packages/kolme" }
+kolme-solana-bridge-client = { path = "solana/crates/kolme-solana-bridge-client" }
+kolme-store = { path = "packages/kolme-store" }
+kolme-test = { path = "packages/kolme-test" }
+libp2p = { version = "0.55" }
+lru = "0.14.0"
+merkle-map = { path = "packages/merkle-map" }
+parameterized = "2.0.0"
+parking_lot = "0.12.4"
+paste = "1.0.15"
+plotters = "0.3.7"
+plotters-svg = "0.3.7"
+pretty_assertions = "1.4.1"
+quickcheck = "1.0.3"
+rand = "0.8"
+regex = "1.11.1"
+reqwest = { version = "0.12.15", default-features = false }
+rust_decimal = "1.37.1"
+semver = "1.0.26"
 serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = "1.0.140"
-smallvec = { version = "1.13.2", default-features = false, features = ["serde"] }
-jiff = { version = "0.2.3", features = ["serde"] }
-rust_decimal = "1.37.1"
-kolme = { path = "packages/kolme" }
-kolme-store = { path = "packages/kolme-store" }
-libp2p = { version = "0.55" }
-merkle-map = { path = "packages/merkle-map" }
-quickcheck = "1.0.3"
+sha2 = "0.10.8"
 shared = { path = "packages/shared" }
-lru = "0.14.0"
-rand = "0.8"
-sqlx = { version = "0.8.5", default-features = false, features = ["runtime-tokio", "postgres", "time", "macros", "migrate", "tls-rustls"] }
+smallvec = { version = "1.13.2", default-features = false, features = ["serde"] }
+solana-client = "2.2.7"
+solana-commitment-config = "2.2.1"
+solana-hash = "2.2"
+solana-instruction = "2.2"
+solana-keypair = "2.2"
+solana-message = "2.2"
+solana-pubkey = { version = "2.2", default-features = false }
+solana-signature = "2.2.1"
+solana-signer = "2.2"
+solana-transaction = "2.2"
+solana-transaction-status-client-types = "2.2.7"
+spl-associated-token-account-client = "2.0.0"
+spl-token-client = "0.14.0"
+sqlx = { version = "0.8.5", default-features = false, features = [
+  "macros",
+  "migrate",
+  "postgres",
+  "runtime-tokio",
+  "time",
+  "tls-rustls",
+] }
+strum = "0.27.1"
+tempdir = "0.3.7"
+tempfile = "3.19.1"
+thiserror = "2.0.12"
+tinyvec = "1.9.0"
+tokio = { version = "1.43.0", features = ["full"] }
+tokio-tungstenite = "0.26.2"
+tower-http = "0.6.2"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
 
 [workspace.lints.clippy]
 unused_async = "deny"
@@ -42,3 +99,6 @@ unused_async = "deny"
 debug = 0
 strip = "debuginfo"
 lto = false
+
+[profile.dev]
+debug = 0

@@ -198,7 +198,7 @@ impl KolmeApp for SixSigmaApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(State::new([admin_secret_key().public_key()]))
     }
 

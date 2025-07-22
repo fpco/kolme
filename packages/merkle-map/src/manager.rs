@@ -28,7 +28,7 @@ impl MerkleSerialError {
 
 impl std::fmt::Debug for MerkleContents {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "MerkleContents({})", self.hash)
+        f.debug_tuple("MerkleContents").field(&self.hash).finish()
     }
 }
 

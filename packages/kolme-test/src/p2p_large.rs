@@ -85,7 +85,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(SampleState {
             next_hi: 0,
             payloads: MerkleMap::new(),
@@ -134,7 +134,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     // Send a few transactions to bump up the block height
     for i in 0..200 {
         let payload = std::iter::repeat(i).take(50_000).collect::<Vec<_>>();
-        let secret = SecretKey::random(&mut rand::thread_rng());
+        let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(
                 &secret,
@@ -144,7 +144,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
             .unwrap();
     }
 
-    let secret = SecretKey::random(&mut rand::thread_rng());
+    let secret = SecretKey::random();
     let latest_block_height = kolme1
         .sign_propose_await_transaction(
             &secret,
@@ -162,11 +162,6 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
         .unwrap()
         .unwrap();
 
-    // Now delete some older blocks
-    for height in BlockHeight::start().0..latest_block_height.0 {
-        store1.delete_block(BlockHeight(height)).await.unwrap();
-    }
-
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
     // And now launch a gossip node for this Kolme
@@ -181,17 +176,19 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.launch_kademlia_client_with(
-        kolme_state_transfer.clone(),
-        "kolme_state_transfer",
-        &discovery,
-        |builder| {
-            builder.set_sync_mode(
-                SyncMode::StateTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-        },
-    );
+    testtasks
+        .launch_kademlia_client_with(
+            kolme_state_transfer.clone(),
+            "kolme_state_transfer",
+            &discovery,
+            |builder| {
+                builder.set_sync_mode(
+                    SyncMode::StateTransfer,
+                    DataLoadValidation::ValidateDataLoads,
+                )
+            },
+        )
+        .await;
 
     let kolme_state_transfer2 = Kolme::new(
         SampleKolmeApp::new(IDENT),
@@ -200,17 +197,19 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.launch_kademlia_client_with(
-        kolme_state_transfer2.clone(),
-        "kolme_state_transfer2",
-        &discovery,
-        |builder| {
-            builder.set_sync_mode(
-                SyncMode::StateTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-        },
-    );
+    testtasks
+        .launch_kademlia_client_with(
+            kolme_state_transfer2.clone(),
+            "kolme_state_transfer2",
+            &discovery,
+            |builder| {
+                builder.set_sync_mode(
+                    SyncMode::StateTransfer,
+                    DataLoadValidation::ValidateDataLoads,
+                )
+            },
+        )
+        .await;
 
     // Due to data size, it can take a bit to transfer the entire state
     let latest_from_gossip = tokio::time::timeout(

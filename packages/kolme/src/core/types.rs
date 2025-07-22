@@ -804,6 +804,23 @@ impl TryFrom<i64> for BlockHeight {
     }
 }
 
+impl MerkleSerializeRaw for BlockHeight {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> std::result::Result<(), MerkleSerialError> {
+        serializer.store(&self.0)
+    }
+}
+
+impl MerkleDeserializeRaw for BlockHeight {
+    fn merkle_deserialize_raw(
+        deserializer: &mut MerkleDeserializer,
+    ) -> std::result::Result<Self, MerkleSerialError> {
+        deserializer.load().map(Self)
+    }
+}
+
 /// Blockchain wallet address.
 ///
 /// To allow support for arbitrary chains, we represent this as a simple [String].
@@ -891,6 +908,14 @@ impl<AppMessage: serde::de::DeserializeOwned> MerkleDeserialize for SignedBlock<
         deserializer.load().map(Self)
     }
 }
+
+impl<T> PartialEq for SignedBlock<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> Eq for SignedBlock<T> {}
 
 /// The hash of a [Block].
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1037,30 +1062,47 @@ impl<AppMessage> From<Vec<Message<AppMessage>>> for TxBuilder<AppMessage> {
 
 /// An individual message included in a transaction.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
 pub enum Message<AppMessage> {
+    #[serde(alias = "Genesis")]
     Genesis(GenesisInfo),
+    #[serde(alias = "App")]
     App(AppMessage),
+    #[serde(alias = "Listener")]
     Listener {
         chain: ExternalChain,
         event_id: BridgeEventId,
         event: BridgeEvent,
     },
     /// Approval from a single approver for a bridge action
+    #[serde(alias = "Approve")]
     Approve {
         chain: ExternalChain,
         action_id: BridgeActionId,
         signature: SignatureWithRecovery,
     },
     /// Final approval from the processor to confirm approvals from approvers.
+    #[serde(alias = "ProcessorApprove")]
     ProcessorApprove {
         chain: ExternalChain,
         action_id: BridgeActionId,
         processor: SignatureWithRecovery,
         approvers: Vec<SignatureWithRecovery>,
     },
+    #[serde(alias = "Auth")]
     Auth(AuthMessage),
+    #[serde(alias = "Bank")]
     Bank(BankMessage),
+    #[serde(alias = "Admin")]
     Admin(AdminMessage),
+}
+
+impl<AppMessage: serde::de::DeserializeOwned> FromStr for Message<AppMessage> {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
 }
 
 /// An event emitted by a bridge contract and reported by a listener.

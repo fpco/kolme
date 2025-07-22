@@ -56,7 +56,7 @@ impl KolmeApp for SampleKolmeApp1 {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State> {
         Ok(SampleState {
             hi_count1: 0,
             hi_count2: 0,
@@ -86,8 +86,11 @@ impl KolmeApp for SampleKolmeApp2 {
         &self.genesis
     }
 
-    fn new_state() -> Result<Self::State> {
-        SampleKolmeApp1::new_state()
+    fn new_state(&self) -> Result<Self::State> {
+        SampleKolmeApp1 {
+            genesis: self.genesis.clone(),
+        }
+        .new_state()
     }
 
     async fn execute(
@@ -110,9 +113,9 @@ async fn test_upgrade() {
 
 async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     // Set up the validators and genesis info to be used for both versions of the app.
-    let processor = SecretKey::random(&mut rand::thread_rng());
-    let listener = SecretKey::random(&mut rand::thread_rng());
-    let approver = SecretKey::random(&mut rand::thread_rng());
+    let processor = SecretKey::random();
+    let listener = SecretKey::random();
+    let approver = SecretKey::random();
     let genesis = GenesisInfo {
         kolme_ident: "Dev code".to_owned(),
         validator_set: ValidatorSet {
@@ -150,14 +153,16 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
         .await
         .unwrap();
     testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), processor.clone()).run());
-    testtasks.launch_kademlia_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
-        builder.set_sync_mode(
-            SyncMode::StateTransfer,
-            DataLoadValidation::ValidateDataLoads,
-        )
-    });
+    testtasks
+        .launch_kademlia_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
+            builder.set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        })
+        .await;
 
-    let client = SecretKey::random(&mut rand::thread_rng());
+    let client = SecretKey::random();
     const HI_COUNT1: u64 = 10;
     for i in 0..HI_COUNT1 {
         kolme1

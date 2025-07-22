@@ -59,8 +59,7 @@ async fn main_inner() -> Result<()> {
             serve(kolme, bind).await
         }
         Cmd::GenPair {} => {
-            let mut rng = rand::thread_rng();
-            let secret = SecretKey::random(&mut rng);
+            let secret = SecretKey::random();
             let public = secret.public_key();
             println!("Public key: {public}");
             println!("Secret key: {}", secret.reveal_as_hex());
