@@ -2,7 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, LazyLock},
+    sync::Arc,
 };
 
 use shared::types::Sha256Hash;
@@ -81,40 +81,23 @@ pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
     Ok(contents)
 }
 
-/// Deserialize a value from the given payload.
-///
-/// This relies on all layers fitting in the LRU cache of the manager. This is finicky;
-/// consider moving to other methods.
-pub fn deserialize<T: MerkleDeserializeRaw>(
-    hash: Sha256Hash,
-    payload: Arc<[u8]>,
-) -> Result<T, MerkleSerialError> {
-    static EMPTY_HASHMAP: LazyLock<Arc<HashMap<Sha256Hash, MerkleLayerContents>>> =
-        LazyLock::new(|| Arc::new(HashMap::new()));
-    deserialize_with(hash, payload, EMPTY_HASHMAP.clone())
-}
-
-fn deserialize_with<T: MerkleDeserializeRaw>(
-    hash: Sha256Hash,
-    payload: Arc<[u8]>,
-    loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
-) -> Result<T, MerkleSerialError> {
-    let mut deserializer = MerkleDeserializer::new(hash, payload, loaded);
-    let value = T::merkle_deserialize_raw(&mut deserializer)?;
-    let contents = Arc::new(deserializer.finish()?);
-    value.set_merkle_contents_raw(&contents);
-    Ok(value)
-}
-
 /// Load the value at the given hash
 pub async fn load<T: MerkleDeserializeRaw, Store: MerkleStore>(
     store: &mut Store,
     hash: Sha256Hash,
 ) -> Result<T, MerkleSerialError> {
-    // We load the data in a loop. Each time we encounter an
-    // error about missing hashes, we load up the missing data and try again.
-    let (layer, layers) = get_or_load_payload(store, hash).await?;
-    deserialize_with(hash, layer.payload, Arc::new(layers))
+    let layer =
+        store
+            .load_by_hash(hash)
+            .await?
+            .ok_or_else(|| MerkleSerialError::HashesNotFound {
+                hashes: HashSet::from_iter([hash]),
+            })?;
+    let mut deserializer = MerkleDeserializer::new(hash, layer.payload, store);
+    let value = T::merkle_deserialize_raw(&mut deserializer)?;
+    let contents = Arc::new(deserializer.finish()?);
+    value.set_merkle_contents_raw(&contents);
+    Ok(value)
 }
 
 pub(crate) async fn get_or_load_payload<Store: MerkleStore>(
@@ -149,15 +132,4 @@ pub(crate) async fn get_or_load_payload<Store: MerkleStore>(
         layers.get(&hash).expect("Impossible missing hash").clone(),
         layers,
     ))
-}
-
-pub(crate) fn deserialize_cached<T: MerkleDeserializeRaw>(
-    hash: Sha256Hash,
-    loaded: Arc<HashMap<Sha256Hash, MerkleLayerContents>>,
-) -> Result<Option<T>, MerkleSerialError> {
-    if let Some(layer) = loaded.get(&hash) {
-        deserialize_with(hash, layer.payload.clone(), loaded).map(Some)
-    } else {
-        Ok(None)
-    }
 }

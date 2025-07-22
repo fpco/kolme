@@ -77,8 +77,8 @@ pub trait MerkleDeserialize: Sized {
     ///
     /// Note that, when implementing this method, you can rely on an invariant
     /// that the version number will never be greater than [MerkleSerialize::merkle_version].
-    fn merkle_deserialize(
-        deserializer: &mut MerkleDeserializer,
+    fn merkle_deserialize<'a, Store: MerkleStore>(
+        deserializer: &mut MerkleDeserializer<'a, Store>,
         version: usize,
     ) -> Result<Self, MerkleSerialError>;
 
@@ -86,8 +86,8 @@ pub trait MerkleDeserialize: Sized {
 }
 
 pub trait MerkleDeserializeRaw: Sized {
-    fn merkle_deserialize_raw(
-        deserializer: &mut MerkleDeserializer,
+    fn merkle_deserialize_raw<'a, Store: MerkleStore>(
+        deserializer: &mut MerkleDeserializer<'a, Store>,
     ) -> Result<Self, MerkleSerialError>;
 
     fn set_merkle_contents_raw(&self, _contents: &Arc<MerkleContents>) {}
