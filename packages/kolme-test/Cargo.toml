@@ -15,7 +15,7 @@ rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
-sqlx = { workspace = true }
+sqlx = { workspace = true, features = ["time"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
