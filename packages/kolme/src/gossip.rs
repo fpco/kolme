@@ -228,7 +228,7 @@ impl GossipBuilder {
         let mut swarm = builder
             .with_tokio()
             .with_tcp(
-                tcp::Config::default(),
+                tcp::Config::default().nodelay(true),
                 noise::Config::new,
                 yamux::Config::default,
             )?
