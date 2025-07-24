@@ -379,12 +379,9 @@ impl<App: KolmeApp> Gossip<App> {
                 }
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
-                _ = interval.tick() => async {
-                    self.request_block_heights(&mut swarm);
-                    self.process_sync_manager(&mut swarm).await;
-                    self.broadcast_latest_block(&mut swarm);
-                    self.broadcast_mempool_entries(&mut swarm);
-                }.await,
+                _ = interval.tick() => {
+                    self.on_interval(&mut swarm).await;
+                },
                 _ = sync_manager_subscriber.listen() => {
                     self.process_sync_manager(&mut swarm).await;
                 }
@@ -403,6 +400,13 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
         }
+    }
+
+    async fn on_interval(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        self.request_block_heights(swarm);
+        self.process_sync_manager(swarm).await;
+        self.broadcast_latest_block(swarm);
+        self.broadcast_mempool_entries(swarm);
     }
 
     fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
