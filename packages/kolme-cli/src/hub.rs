@@ -1,3 +1,5 @@
+mod sanity;
+
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use kolme::{gossip::KademliaBootstrap, init_logger};
@@ -18,6 +20,8 @@ pub(super) enum Cmd {
     GenKeypair,
     /// Start a Kolme Hub instance
     Start(#[clap(flatten)] StartOpt),
+    /// Sanity test a hub by running multiple services talking to it.
+    Sanity(#[clap(flatten)] sanity::SanityOpt),
 }
 
 #[derive(clap::Parser)]
@@ -43,6 +47,7 @@ pub(super) async fn run(cmd: Cmd) -> Result<()> {
     match cmd {
         Cmd::GenKeypair => gen_keypair()?,
         Cmd::Start(opt) => start(opt).await?,
+        Cmd::Sanity(opt) => sanity::sanity(opt).await?,
     }
 
     Ok(())

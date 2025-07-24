@@ -17,6 +17,7 @@ clap = { workspace = true }
 jiff = { workspace = true }
 kolme = { workspace = true }
 libp2p = { workspace = true, features = ["autonat", "dcutr", "relay", "upnp", "rendezvous"] }
+rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -4418,6 +4418,7 @@ dependencies = [
  "jiff",
  "kolme",
  "libp2p",
+ "rand 0.8.5",
  "reqwest 0.12.15",
  "serde",
  "serde_json",
