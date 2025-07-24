@@ -1,17 +1,21 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
-use anyhow::Context as _;
-use merkle_map::{
-    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager, MerkleSerialError,
-    MerkleSerialize, MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
+use crate::{
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock,
+    DEFAULT_CACHE_SIZE,
 };
-use parking_lot::RwLock;
+use anyhow::Context as _;
+use lru::LruCache;
+use merkle_map::{
+    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerialize,
+    MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
+};
+use parking_lot::Mutex;
 use sqlx::{
     pool::PoolOptions,
     postgres::{PgAdvisoryLock, PgConnectOptions},
     Executor, Postgres,
 };
 use std::{
-    collections::HashMap,
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, OnceLock,
@@ -31,7 +35,7 @@ impl Drop for ConstructLock {
     }
 }
 
-type MerkleCache = Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>;
+type MerkleCache = Arc<Mutex<LruCache<Sha256Hash, MerkleLayerContents>>>;
 
 #[derive(Clone)]
 pub struct Store {
@@ -44,13 +48,20 @@ pub struct Store {
 impl Store {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
         let connect_options = url.parse()?;
-        Self::new_with_options(connect_options, PoolOptions::new().max_connections(5)).await
+        Self::new_with_options(
+            connect_options,
+            PoolOptions::new().max_connections(5),
+            DEFAULT_CACHE_SIZE,
+        )
+        .await
     }
 
     pub async fn new_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
+        cache_size: usize,
     ) -> anyhow::Result<Self> {
+        anyhow::ensure!(cache_size >= 1024, "PostgreSQL backend currently requires a cache size of at least 1024. This is an open bug that needs investigation.");
         let pool = options
             .connect_with(connect)
             .await
@@ -93,7 +104,9 @@ impl Store {
                 Some(height) => OnceLock::from(AtomicU64::new(height as u64)),
                 None => OnceLock::new(),
             }),
-            merkle_cache: Default::default(),
+            merkle_cache: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(cache_size).context("new_with_options: cache size of 0")?,
+            ))),
         })
     }
 
@@ -245,7 +258,6 @@ impl KolmeBackingStore for Store {
         AppState: MerkleDeserializeRaw,
     >(
         &self,
-        merkle_manager: &MerkleManager,
         height: u64,
     ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError> {
         let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
@@ -301,9 +313,9 @@ impl KolmeBackingStore for Store {
         let mut store3 = self.new_store();
 
         let (framework_state, app_state, logs) = tokio::try_join!(
-            merkle_manager.load(&mut store1, framework_state_hash),
-            merkle_manager.load(&mut store2, app_state_hash),
-            merkle_manager.load(&mut store3, logs_hash),
+            merkle_map::load(&mut store1, framework_state_hash),
+            merkle_map::load(&mut store2, app_state_hash),
+            merkle_map::load(&mut store3, logs_hash),
         )?;
 
         let block = serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?;
@@ -343,7 +355,6 @@ impl KolmeBackingStore for Store {
         AppState: MerkleSerialize,
     >(
         &self,
-        merkle_manager: &MerkleManager,
         StorableBlock {
             height,
             blockhash,
@@ -362,9 +373,9 @@ impl KolmeBackingStore for Store {
         let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
 
         let (framework_state, app_state, logs) = tokio::try_join!(
-            merkle_manager.save(&mut store1, framework_state),
-            merkle_manager.save(&mut store2, app_state),
-            merkle_manager.save(&mut store3, logs)
+            merkle_map::save(&mut store1, framework_state),
+            merkle_map::save(&mut store2, app_state),
+            merkle_map::save(&mut store3, logs)
         )?;
 
         let framework_state_hash = framework_state.hash;
@@ -455,24 +466,19 @@ impl KolmeBackingStore for Store {
         Ok(())
     }
 
-    async fn save<T: MerkleSerializeRaw>(
-        &self,
-        merkle_manager: &MerkleManager,
-        value: &T,
-    ) -> anyhow::Result<Arc<MerkleContents>> {
+    async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> anyhow::Result<Arc<MerkleContents>> {
         let mut store = self.new_store();
-        let contents = merkle_manager.save(&mut store, value).await?;
+        let contents = merkle_map::save(&mut store, value).await?;
         self.consume_stores(&self.pool, [store]).await?;
         Ok(contents)
     }
     async fn load<T: MerkleDeserializeRaw>(
         &self,
-        merkle_manager: &MerkleManager,
         hash: Sha256Hash,
     ) -> Result<T, MerkleSerialError> {
         let mut store = self.new_store();
 
-        merkle_manager.load::<T, _>(&mut store, hash).await
+        merkle_map::load::<T, _>(&mut store, hash).await
     }
 
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
@@ -520,5 +526,15 @@ impl KolmeBackingStore for Store {
             .fetch_max(height, Ordering::SeqCst);
 
         Ok(())
+    }
+
+    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>> {
+        Ok(None)
+    }
+
+    async fn set_next_missing_layer(&self, _height: u64) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!(
+            "PostgreSQL store does not support missing layers feature"
+        ))
     }
 }

@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::*;
 
 impl<K, V> TreeContents<K, V> {
@@ -135,18 +133,9 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
             byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
         };
         let mut branches = std::array::from_fn(|_| Node::default());
-        let mut missing = HashSet::new();
         for branch in &mut branches {
             let hash = Sha256Hash::merkle_deserialize_raw(deserializer)?;
-            match deserializer.load_by_hash_optional(hash)? {
-                Some(value) => *branch = value,
-                None => {
-                    missing.insert(hash);
-                }
-            }
-        }
-        if !missing.is_empty() {
-            return Err(MerkleSerialError::HashesNotFound { hashes: missing });
+            *branch = deserializer.load_by_given_hash(hash)?;
         }
         let tree = TreeContents {
             len,

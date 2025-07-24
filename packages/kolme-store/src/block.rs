@@ -111,7 +111,7 @@ impl<
 mod tests {
     use super::StorableBlock;
     use merkle_map::{
-        MerkleContents, MerkleDeserialize, MerkleDeserializer, MerkleManager, MerkleMemoryStore,
+        MerkleContents, MerkleDeserialize, MerkleDeserializer, MerkleMemoryStore,
         MerkleSerialError, MerkleSerialize, MerkleSerializeRaw, MerkleSerializer, Sha256Hash,
     };
     use std::sync::Arc;
@@ -145,8 +145,7 @@ mod tests {
     }
 
     fn serialize<T: MerkleSerializeRaw>(item: &T) -> Arc<MerkleContents> {
-        let manager = MerkleManager::new(10);
-        let result = manager.serialize(item);
+        let result = merkle_map::api::serialize(item);
 
         result.expect("Unable to serialize item")
     }
@@ -160,7 +159,6 @@ mod tests {
         let app_state_merkle = serialize(&app_state);
         let logs = Arc::from(vec![vec!["Dummy".to_owned()], vec!["Logs".to_owned()]]);
         let logs_merkle = serialize(&logs);
-        let manager = MerkleManager::new(10);
         let mut store = MerkleMemoryStore::default();
         let block = StorableBlock {
             height: 0,
@@ -173,8 +171,7 @@ mod tests {
         };
 
         // Act
-        let storable_block_merkle = manager
-            .save(&mut store, &block)
+        let storable_block_merkle = merkle_map::save(&mut store, &block)
             .await
             .expect("Unable to save storable block");
         let snapshot = store.get_map_snapshot();
@@ -239,7 +236,6 @@ mod tests {
         let app_state = Arc::new(DummyBytes(b"Dummy AppState".to_vec()));
         let logs: Arc<[Vec<String>]> =
             Arc::from(vec![vec!["Dummy".to_owned()], vec!["Logs".to_owned()]]);
-        let manager = MerkleManager::new(10);
         let mut store = MerkleMemoryStore::default();
         let block = StorableBlock {
             height: 0,
@@ -250,17 +246,17 @@ mod tests {
             app_state: app_state.clone(),
             block: Arc::new(DummyBytes(b"Dummy block".to_vec())),
         };
-        let storable_block_merkle = manager
-            .save(&mut store, &block)
+        let storable_block_merkle = merkle_map::save(&mut store, &block)
             .await
             .expect("Unable to save storable block");
 
         // Act
-        let storable_block = manager
-            .deserialize::<StorableBlock<DummyBytes, DummyBytes, DummyBytes>>(
+        let storable_block =
+            merkle_map::load::<StorableBlock<DummyBytes, DummyBytes, DummyBytes>, _>(
+                &mut store,
                 storable_block_merkle.hash,
-                storable_block_merkle.payload.clone(),
             )
+            .await
             .expect("Unable to deserialize storable_block");
 
         // Assert
@@ -292,12 +288,17 @@ mod tests {
         ]
         .into();
         let payload_hash = Sha256Hash::hash(&payload);
-        let manager = MerkleManager::new(10);
+        let contents = MerkleContents {
+            hash: payload_hash,
+            payload,
+            children: vec![].into(),
+        };
 
         // Act
-        let storable_block = manager
-            .deserialize::<StorableBlock<DummyBytes, DummyBytes, DummyBytes>>(payload_hash, payload)
-            .expect("Unable to deserialize block with version 0");
+        let storable_block = merkle_map::api::deserialize::<
+            StorableBlock<DummyBytes, DummyBytes, DummyBytes>,
+        >(Arc::new(contents))
+        .expect("Unable to deserialize block with version 0");
 
         // Assert
         assert_eq!(

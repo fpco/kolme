@@ -4,15 +4,13 @@ use crate::*;
 pub struct MerkleSerializer {
     buff: Vec<u8>,
     children: Vec<Arc<MerkleContents>>,
-    manager: MerkleManager,
 }
 
 impl MerkleSerializer {
-    pub(crate) fn new(manager: MerkleManager) -> Self {
+    pub(crate) fn new() -> Self {
         MerkleSerializer {
             buff: vec![],
             children: vec![],
-            manager,
         }
     }
 
@@ -35,11 +33,7 @@ impl MerkleSerializer {
 
     /// Finish generating the output and return the completed buffer.
     pub(crate) fn finish(self) -> MerkleContents {
-        let MerkleSerializer {
-            buff,
-            children,
-            manager: _,
-        } = self;
+        let MerkleSerializer { buff, children } = self;
         let buff = Arc::<[u8]>::from(buff);
         let hash = Sha256Hash::hash(&buff);
         MerkleContents {
@@ -102,7 +96,7 @@ impl MerkleSerializer {
         &mut self,
         child: &T,
     ) -> Result<(), MerkleSerialError> {
-        let contents = self.manager.serialize(child)?;
+        let contents = crate::api::serialize(child)?;
         let hash = contents.hash;
         self.children.push(contents);
         hash.merkle_serialize_raw(self)

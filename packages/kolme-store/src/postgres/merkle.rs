@@ -109,7 +109,7 @@ impl MerkleStore for MerklePostgresStore<'_> {
         &mut self,
         hash: Sha256Hash,
     ) -> Result<Option<merkle_map::MerkleLayerContents>, merkle_map::MerkleSerialError> {
-        if let Some(contents) = self.merkle_cache.read().get(&hash) {
+        if let Some(contents) = self.merkle_cache.lock().get(&hash) {
             return Ok(Some(contents.clone()));
         }
 
@@ -151,7 +151,7 @@ impl MerkleStore for MerklePostgresStore<'_> {
             bytes: ChildrenInner(layer.children.clone()),
         });
 
-        self.merkle_cache.write().insert(hash, layer.clone());
+        self.merkle_cache.lock().put(hash, layer.clone());
 
         Ok(())
     }
@@ -160,7 +160,7 @@ impl MerkleStore for MerklePostgresStore<'_> {
         &mut self,
         hash: Sha256Hash,
     ) -> Result<bool, merkle_map::MerkleSerialError> {
-        if self.merkle_cache.read().contains_key(&hash) {
+        if self.merkle_cache.lock().contains(&hash) {
             return Ok(true);
         }
 

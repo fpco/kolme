@@ -47,8 +47,9 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
+        cache_size: usize,
     ) -> Result<Self> {
-        KolmeStoreInner::new_postgres_with_options(connect, options)
+        KolmeStoreInner::new_postgres_with_options(connect, options, cache_size)
             .await
             .map(KolmeStore::from)
             .map_err(anyhow::Error::from)
@@ -63,12 +64,8 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
-    pub(super) async fn validate_genesis_info(
-        &self,
-        merkle_manager: &MerkleManager,
-        expected: &GenesisInfo,
-    ) -> Result<()> {
-        if let Some(actual) = self.load_genesis_info(merkle_manager).await? {
+    pub(super) async fn validate_genesis_info(&self, expected: &GenesisInfo) -> Result<()> {
+        if let Some(actual) = self.load_genesis_info().await? {
             anyhow::ensure!(
                 &actual == expected,
                 "Mismatched genesis info.\nActual:   {actual:?}\nExpected: {expected:?}"
@@ -77,14 +74,8 @@ impl<App: KolmeApp> KolmeStore<App> {
         Ok(())
     }
 
-    async fn load_genesis_info(
-        &self,
-        merkle_manager: &MerkleManager,
-    ) -> Result<Option<GenesisInfo>> {
-        let Some(block) = self
-            .load_signed_block(merkle_manager, BlockHeight::start())
-            .await?
-        else {
+    async fn load_genesis_info(&self) -> Result<Option<GenesisInfo>> {
+        let Some(block) = self.load_signed_block(BlockHeight::start()).await? else {
             return Ok(None);
         };
         let messages = &block.tx().0.message.as_inner().messages;
@@ -134,6 +125,17 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(crate) async fn get_latest_archived_block_height(&self) -> Result<Option<u64>> {
         self.inner.get_latest_archived_block_height().await
     }
+
+    pub(super) async fn get_next_missing_layer(&self) -> Result<Option<BlockHeight>> {
+        self.inner
+            .get_next_missing_layer()
+            .await
+            .map(|x| x.map(BlockHeight))
+    }
+
+    pub(super) async fn set_next_missing_layer(&self, height: BlockHeight) -> Result<()> {
+        self.inner.set_next_missing_layer(height.0).await
+    }
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
@@ -143,14 +145,13 @@ impl<App: KolmeApp> KolmeStore<App> {
 
     pub async fn load_block(
         &self,
-        merkle_manager: &MerkleManager,
         height: BlockHeight,
     ) -> Result<Option<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.clone()));
         }
 
-        Ok(self.inner.load_block(merkle_manager, height.0).await?)
+        Ok(self.inner.load_block(height.0).await?)
     }
 
     pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
@@ -163,7 +164,6 @@ impl<App: KolmeApp> KolmeStore<App> {
 
     pub async fn load_signed_block(
         &self,
-        merkle_manager: &MerkleManager,
         height: BlockHeight,
     ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
@@ -172,10 +172,7 @@ impl<App: KolmeApp> KolmeStore<App> {
 
         Ok(self
             .inner
-            .load_signed_block::<SignedBlock<App::Message>, FrameworkState, App::State>(
-                merkle_manager,
-                height.0,
-            )
+            .load_signed_block::<SignedBlock<App::Message>, FrameworkState, App::State>(height.0)
             .await?)
     }
 
@@ -189,21 +186,15 @@ impl<App: KolmeApp> KolmeStore<App> {
 
     pub(super) async fn add_block(
         &self,
-        merkle_manager: &MerkleManager,
         block: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
     ) -> Result<()> {
         let inner = block.block.0.message.as_inner();
-        self.save(
-            merkle_manager,
-            &block.framework_state,
-            inner.framework_state,
-        )
-        .await?;
-        self.save(merkle_manager, &block.app_state, inner.app_state)
+        self.save(&block.framework_state, inner.framework_state)
             .await?;
-        self.save(merkle_manager, &block.logs, inner.logs).await?;
+        self.save(&block.app_state, inner.app_state).await?;
+        self.save(&block.logs, inner.logs).await?;
 
-        let insertion_result = self.inner.add_block(merkle_manager, &block).await;
+        let insertion_result = self.inner.add_block(&block).await;
         match insertion_result {
             Err(KolmeStoreError::MatchingBlockAlreadyInserted { .. }) | Ok(_) => {
                 self.block_cache
@@ -221,11 +212,10 @@ impl<App: KolmeApp> KolmeStore<App> {
     /// Save data to the merkle store.
     pub(super) async fn save<T: MerkleSerializeRaw>(
         &self,
-        merkle_manager: &MerkleManager,
         value: &T,
         expected: Sha256Hash,
     ) -> Result<()> {
-        let actual = self.inner.save(merkle_manager, value).await?;
+        let actual = self.inner.save(value).await?;
         anyhow::ensure!(
             expected == actual.hash,
             "Hash mismatch, expected {expected} but received {}",
@@ -237,10 +227,9 @@ impl<App: KolmeApp> KolmeStore<App> {
     /// Load data from the merkle store.
     pub(super) async fn load<T: MerkleDeserializeRaw>(
         &self,
-        merkle_manager: &MerkleManager,
         hash: Sha256Hash,
     ) -> Result<T, MerkleSerialError> {
-        self.inner.load(merkle_manager, hash).await
+        self.inner.load(hash).await
     }
 
     fn trigger_notify(&self) {

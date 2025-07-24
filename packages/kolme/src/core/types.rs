@@ -1848,17 +1848,26 @@ mod tests {
             (dec!(12.3456789), 1234567890)
         );
     }
+
+    #[tokio::main]
+    async fn idempotency_helper<T>(value: T) -> quickcheck::TestResult
+    where
+        T: MerkleSerializeRaw + MerkleDeserializeRaw + PartialEq,
+    {
+        let mut store = MerkleMemoryStore::default();
+        let serialized = merkle_map::save(&mut store, &value).await.unwrap();
+        let deserialized = merkle_map::load::<T, _>(&mut store, serialized.hash)
+            .await
+            .unwrap();
+
+        quickcheck::TestResult::from_bool(value == deserialized)
+    }
+
     macro_rules! serializing_idempotency_for {
         ($value_type: ty, $test_name: ident) => {
             quickcheck! {
                 fn $test_name(value: $value_type) -> quickcheck::TestResult {
-                    let manager = MerkleManager::new(1024);
-                    let serialized = manager.serialize(&value).unwrap();
-                    let deserialized = manager
-                        .deserialize::<$value_type>(serialized.hash, serialized.payload.clone())
-                        .unwrap();
-
-                    quickcheck::TestResult::from_bool(value == deserialized)
+                    idempotency_helper(value)
                 }
             }
         };

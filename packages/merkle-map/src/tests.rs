@@ -86,14 +86,12 @@ async fn load_should_have_locked_status() {
     let mut tree = MerkleMap::<u8, u8>::new();
     tree.insert(1, 1);
     tree.assert_locked_status(false);
-    let manager = MerkleManager::new(TEST_CACHE_SIZE);
     let mut store = MerkleMemoryStore::default();
 
-    let tree_contents = manager.save(&mut store, &tree).await.unwrap();
+    let tree_contents = save(&mut store, &tree).await.unwrap();
     tree.assert_locked_status(true);
 
-    let mut same_tree: MerkleMap<u8, u8> =
-        manager.load(&mut store, tree_contents.hash).await.unwrap();
+    let mut same_tree: MerkleMap<u8, u8> = load(&mut store, tree_contents.hash).await.unwrap();
     assert_eq!(same_tree, tree);
     same_tree.assert_locked_status(true);
 
@@ -229,15 +227,11 @@ quickcheck! {
     }
 }
 
-const TEST_CACHE_SIZE: usize = 1024;
-
 #[tokio::main]
 async fn test_store_usize_inner(x: usize) -> bool {
-    let manager = MerkleManager::new(TEST_CACHE_SIZE);
-    let contents = manager.serialize(&x).unwrap();
-    let y = manager
-        .deserialize::<usize>(contents.hash, contents.payload.clone())
-        .unwrap();
+    let mut store = MerkleMemoryStore::default();
+    let contents = save(&mut store, &x).await.unwrap();
+    let y = load::<usize, _>(&mut store, contents.hash).await.unwrap();
     assert_eq!(x, y);
     true
 }
@@ -251,12 +245,11 @@ async fn memory_manager_helper(size: u32) {
     m.assert_locked_status(false);
 
     let mut store = MerkleMemoryStore::default();
-    let manager = MerkleManager::new(TEST_CACHE_SIZE);
-    let contents = manager.save(&mut store, &m).await.unwrap();
+    let contents = save(&mut store, &m).await.unwrap();
 
     m.assert_locked_status(true);
 
-    let m2 = manager.load(&mut store, contents.hash).await.unwrap();
+    let m2 = load(&mut store, contents.hash).await.unwrap();
 
     m.assert_locked_status(true);
 
@@ -269,7 +262,8 @@ async fn memory_manager(size: u32) {
     memory_manager_helper(size).await
 }
 
-fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
+#[tokio::main]
+async fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
     #[derive(Debug, PartialEq, Eq)]
     struct Person {
         name: String,
@@ -313,9 +307,9 @@ fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u32>) {
         inventory,
     };
 
-    let manager = MerkleManager::new(TEST_CACHE_SIZE);
-    let contents = manager.serialize(&person).unwrap();
-    let person2 = manager.deserialize_cached(contents.hash).unwrap().unwrap();
+    let mut store = MerkleMemoryStore::default();
+    let contents = save(&mut store, &person).await.unwrap();
+    let person2 = load(&mut store, contents.hash).await.unwrap();
     assert_eq!(person, person2);
 }
 
@@ -766,17 +760,23 @@ fn range_sample() {
     assert_eq!(expected, actual);
 }
 
+#[tokio::main]
+async fn serializing_idempotency_helper<T>(value: T) -> quickcheck::TestResult
+where
+    T: MerkleSerializeRaw + MerkleDeserializeRaw + PartialEq,
+{
+    let mut store = MerkleMemoryStore::default();
+    let serialized = save(&mut store, &value).await.unwrap();
+    let deserialized = load::<T, _>(&mut store, serialized.hash).await.unwrap();
+
+    quickcheck::TestResult::from_bool(value == deserialized)
+}
+
 macro_rules! serializing_idempotency_for_type {
     ($value_type: ty, $test_name: ident) => {
         quickcheck! {
             fn $test_name(value: $value_type) -> quickcheck::TestResult {
-                let manager = MerkleManager::new(TEST_CACHE_SIZE);
-                let serialized = manager.serialize(&value).unwrap();
-                let deserialized = manager
-                    .deserialize::<$value_type>(serialized.hash, serialized.payload.clone())
-                    .unwrap();
-
-                quickcheck::TestResult::from_bool(value == deserialized)
+                serializing_idempotency_helper(value)
             }
         }
 
@@ -784,39 +784,21 @@ macro_rules! serializing_idempotency_for_type {
             // tests for Option<T>
             quickcheck!{
                 fn [<$test_name _option>] (value: Option<$value_type>) -> quickcheck::TestResult {
-                    let manager = MerkleManager::new(TEST_CACHE_SIZE);
-                    let serialized = manager.serialize(&value).unwrap();
-                    let deserialized = manager
-                        .deserialize::<Option<$value_type>>(serialized.hash, serialized.payload.clone())
-                        .unwrap();
-
-                    quickcheck::TestResult::from_bool(value == deserialized)
+                    serializing_idempotency_helper(value)
                 }
             }
 
             // tests for [T]
             quickcheck!{
                 fn [<$test_name _slice>] (value: SerializableSlice<'static, $value_type>) -> quickcheck::TestResult {
-                    let manager = MerkleManager::new(TEST_CACHE_SIZE);
-                    let serialized = manager.serialize(value.0).unwrap();
-                    let deserialized = manager
-                        .deserialize::<Vec<$value_type>>(serialized.hash, serialized.payload.clone())
-                        .unwrap();
-
-                    quickcheck::TestResult::from_bool(value.0 == deserialized)
+                    serializing_idempotency_helper(value.0.to_vec())
                 }
             }
 
             // tests for BTreeSet<T>
             quickcheck!{
                 fn [<$test_name _btreeset>] (value: BTreeSet<$value_type>) -> quickcheck::TestResult {
-                    let manager = MerkleManager::new(TEST_CACHE_SIZE);
-                    let serialized = manager.serialize(&value).unwrap();
-                    let deserialized = manager
-                        .deserialize::<BTreeSet<$value_type>>(serialized.hash, serialized.payload.clone())
-                        .unwrap();
-
-                    quickcheck::TestResult::from_bool(value == deserialized)
+                    serializing_idempotency_helper(value)
                 }
             }
         }
@@ -832,51 +814,21 @@ serializing_idempotency_for_type!(u128, serializing_is_idempotent_for_u128);
 
 quickcheck! {
     fn serializing_is_idempotent_for_btreemap_string_u64(value: BTreeMap<String, u64>) -> quickcheck::TestResult {
-        let manager = MerkleManager::new(TEST_CACHE_SIZE);
-        let serialized = manager.serialize(&value).unwrap();
-        let deserialized = manager
-            .deserialize::<BTreeMap<String, u64>>(serialized.hash, serialized.payload.clone())
-            .unwrap();
-
-        quickcheck::TestResult::from_bool(value == deserialized)
+        serializing_idempotency_helper(value)
     }
     fn serializing_is_idempotent_for_merklemap_string_u64 (value: SerializableMerkleMap<String, u64>) -> quickcheck::TestResult {
-        let manager = MerkleManager::new(TEST_CACHE_SIZE);
-        let serialized = manager.serialize(&value.0).unwrap();
-        let deserialized = manager
-            .deserialize::<MerkleMap<String, u64>>(serialized.hash, serialized.payload.clone())
-            .unwrap();
-
-        quickcheck::TestResult::from_bool(value == SerializableMerkleMap(deserialized))
+        serializing_idempotency_helper(value.0)
     }
     fn serializing_is_idempotent_for_timestamp (value: SerializableTimestamp) -> quickcheck::TestResult {
-        let manager = MerkleManager::new(TEST_CACHE_SIZE);
-        let serialized = manager.serialize(&value.0).unwrap();
-        let deserialized = SerializableTimestamp(manager
-            .deserialize(serialized.hash, serialized.payload.clone())
-            .unwrap());
-
-        quickcheck::TestResult::from_bool(value == deserialized)
+        serializing_idempotency_helper(value.0)
     }
 
     fn serializing_is_idempotent_for_smallvec_u64_4 (value: SerializableSmallVec<[u64;4]>) -> quickcheck::TestResult {
-        let manager = MerkleManager::new(TEST_CACHE_SIZE);
-        let serialized = manager.serialize(&value.0).unwrap();
-        let deserialized = SerializableSmallVec(manager
-            .deserialize(serialized.hash, serialized.payload.clone())
-            .unwrap());
-
-        quickcheck::TestResult::from_bool(value == deserialized)
+        serializing_idempotency_helper(value.0)
     }
 
     fn serializing_is_idempotent_for_2_tuple_of_primitives(value: (u64, String))-> quickcheck::TestResult {
-        let manager = MerkleManager::new(TEST_CACHE_SIZE);
-        let serialized = manager.serialize(&value).unwrap();
-        let deserialized: (u64, String) = manager
-            .deserialize(serialized.hash, serialized.payload.clone())
-            .unwrap();
-
-        quickcheck::TestResult::from_bool(value == deserialized)
+        serializing_idempotency_helper(value)
     }
 
 }

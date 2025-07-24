@@ -60,7 +60,7 @@ impl StoreEnv for Store {
         }
     }
 
-    async fn run(&mut self, manager: &kolme::MerkleManager, map: RawMerkleMap) {
+    async fn run(&mut self, map: RawMerkleMap) {
         let mut merkle_store = merkle::MerklePostgresStore {
             pool: &self.pool,
             merkle_cache: &self.merkle_cache,
@@ -69,8 +69,7 @@ impl StoreEnv for Store {
             childrens_to_insert: Vec::new(),
         };
 
-        manager
-            .save(&mut merkle_store, &map.0)
+        merkle_map::save(&mut merkle_store, &map.0)
             .await
             .expect("Unable to save MekrleMap");
 

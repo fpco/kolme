@@ -10,7 +10,7 @@ pub use error::KolmeStoreError;
 use fjall::Store as KolmeFjallStore;
 use in_memory::Store as KolmeInMemoryStore;
 use merkle_map::{
-    MerkleContents, MerkleDeserialize, MerkleDeserializeRaw, MerkleLayerContents, MerkleManager,
+    MerkleContents, MerkleDeserialize, MerkleDeserializeRaw, MerkleLayerContents,
     MerkleSerialError, MerkleSerialize, MerkleSerializeRaw, Sha256Hash,
 };
 use postgres::Store as KolmePostgresStore;
@@ -43,9 +43,10 @@ impl KolmeStore {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
+        cache_size: usize,
     ) -> anyhow::Result<Self> {
         Ok(KolmeStore::KolmePostgresStore(
-            postgres::Store::new_with_options(connect, options).await?,
+            postgres::Store::new_with_options(connect, options, cache_size).await?,
         ))
     }
 
@@ -59,7 +60,6 @@ impl KolmeStore {
 
     pub async fn load_signed_block<Block, FrameworkState, AppState>(
         &self,
-        merkle_manager: &MerkleManager,
         height: u64,
     ) -> Result<Option<Arc<Block>>, KolmeStoreError>
     where
@@ -79,15 +79,17 @@ impl KolmeStore {
                 .transpose()
                 .map_err(KolmeStoreError::custom)?,
             KolmeStore::KolmeFjallStore(kolme_store_fjall) => kolme_store_fjall
-                .load_block::<Block, FrameworkState, AppState>(merkle_manager, height)
+                .load_block::<Block, FrameworkState, AppState>(height)
                 .await
                 .map_err(KolmeStoreError::custom)?
                 .map(|x| x.block),
             KolmeStore::KolmeInMemoryStore(kolme_store_in_memory) => kolme_store_in_memory
-                .load_block::<Block, FrameworkState, AppState>(merkle_manager, height)
+                .load_block::<Block, FrameworkState, AppState>(height)
                 .await
                 .map_err(KolmeStoreError::custom)?
                 .map(|x| x.block),
         })
     }
 }
+
+const DEFAULT_CACHE_SIZE: usize = 1024 * 512;
