@@ -15,8 +15,9 @@ use messages::*;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
+    identify,
     kad::RecordKey,
-    noise,
+    noise, ping,
     request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
@@ -63,6 +64,8 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 's
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
     kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
+    identify: identify::Behaviour,
+    ping: ping::Behaviour,
 }
 
 /// Config for a Gossip listener.
@@ -304,10 +307,18 @@ impl GossipBuilder {
                     kademlia.add_address(&peer, address);
                 }
 
+                let identify = identify::Behaviour::new(identify::Config::new(
+                    "/kolme/1.0.0".to_owned(),
+                    key.public(),
+                ));
+                let ping = ping::Behaviour::new(ping::Config::new());
+
                 Ok(KolmeBehaviour {
                     gossipsub,
                     request_response,
                     kademlia,
+                    identify,
+                    ping,
                 })
             })?
             .build();
