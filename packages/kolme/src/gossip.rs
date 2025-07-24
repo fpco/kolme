@@ -15,6 +15,7 @@ use messages::*;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
+    kad::RecordKey,
     noise,
     request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
@@ -44,6 +45,15 @@ pub struct Gossip<App: KolmeApp> {
     sync_manager: Mutex<SyncManager<App>>,
     /// LRU cache for notifications received via P2p layer
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
+    /// Kademlia key for discovering other peers for this network.
+    ///
+    /// MSS 2025-07-24: I've found conflicting information about Kademlia peer discovery
+    /// online. Some of it indicates that bootstrap for peer discovery should be fully
+    /// automatic. Other sources say that we need to get providers of a shared key to
+    /// find nodes. Empirically, adding in this start_providing/get_providers bit seems
+    /// to have improved the discovery process, so including, but this is worth deeper
+    /// investigation in the future.
+    dht_key: RecordKey,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -323,6 +333,7 @@ impl GossipBuilder {
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
         let sync_manager = Mutex::new(SyncManager::default());
+        let dht_key = RecordKey::new(&format!("/kolme-dht/{genesis_hash}/1.0"));
 
         Ok(Gossip {
             kolme,
@@ -336,6 +347,7 @@ impl GossipBuilder {
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
+            dht_key,
         })
     }
 }
@@ -365,6 +377,8 @@ impl<App: KolmeApp> Gossip<App> {
         self.kolme.set_block_requester(block_requester);
 
         let mut sync_manager_subscriber = self.sync_manager.lock().await.subscribe();
+
+        self.dht_peer_discovery(&mut swarm);
 
         loop {
             tokio::select! {
@@ -402,11 +416,32 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
+    fn dht_peer_discovery(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        // Help out peer discovery, this is _probably_ not appropriate to run
+        // every 5 seconds, but we'll start here.
+        if let Err(e) = swarm
+            .behaviour_mut()
+            .kademlia
+            .start_providing(self.dht_key.clone())
+        {
+            tracing::error!(
+                "{}: unable to start providing DHT key {:?}: {e}",
+                self.local_display_name,
+                self.dht_key
+            );
+        }
+        swarm
+            .behaviour_mut()
+            .kademlia
+            .get_providers(self.dht_key.clone());
+    }
+
     async fn on_interval(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
         self.request_block_heights(swarm);
         self.process_sync_manager(swarm).await;
         self.broadcast_latest_block(swarm);
         self.broadcast_mempool_entries(swarm);
+        self.dht_peer_discovery(swarm);
     }
 
     fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
