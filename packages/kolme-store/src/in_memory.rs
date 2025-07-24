@@ -4,7 +4,9 @@ use std::{
 };
 
 use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
-use merkle_map::{MerkleDeserialize, MerkleMemoryStore, MerkleSerialize, MerkleStore, Sha256Hash};
+use merkle_map::{
+    MerkleDeserializeRaw, MerkleMemoryStore, MerkleSerializeRaw, MerkleStore, Sha256Hash,
+};
 use tokio::sync::Semaphore;
 
 #[derive(Clone)]
@@ -58,9 +60,9 @@ impl KolmeBackingStore for Store {
         height: u64,
     ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
     where
-        Block: serde::de::DeserializeOwned + MerkleDeserialize + MerkleSerialize,
-        FrameworkState: MerkleDeserialize + MerkleSerialize,
-        AppState: MerkleDeserialize + MerkleSerialize,
+        Block: serde::de::DeserializeOwned + MerkleDeserializeRaw + MerkleSerializeRaw,
+        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
+        AppState: MerkleDeserializeRaw + MerkleSerializeRaw,
     {
         let mut guard = self.0.write().await;
         let Some(hash) = guard.blocks.get(&height) else {
@@ -87,9 +89,9 @@ impl KolmeBackingStore for Store {
         block: &StorableBlock<Block, FrameworkState, AppState>,
     ) -> Result<(), KolmeStoreError>
     where
-        Block: serde::Serialize + MerkleSerialize,
-        FrameworkState: MerkleSerialize,
-        AppState: MerkleSerialize,
+        Block: serde::Serialize + MerkleSerializeRaw,
+        FrameworkState: MerkleSerializeRaw,
+        AppState: MerkleSerializeRaw,
     {
         let height = block.height;
         let txhash = block.txhash;

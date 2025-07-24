@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Context as _;
 use lru::LruCache;
 use merkle_map::{
-    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerialize,
+    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
     MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
 use parking_lot::Mutex;
@@ -351,8 +351,8 @@ impl KolmeBackingStore for Store {
 
     async fn add_block<
         Block: serde::Serialize,
-        FrameworkState: MerkleSerialize,
-        AppState: MerkleSerialize,
+        FrameworkState: MerkleSerializeRaw,
+        AppState: MerkleSerializeRaw,
     >(
         &self,
         StorableBlock {

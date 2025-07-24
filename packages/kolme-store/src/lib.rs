@@ -10,8 +10,8 @@ pub use error::KolmeStoreError;
 use fjall::Store as KolmeFjallStore;
 use in_memory::Store as KolmeInMemoryStore;
 use merkle_map::{
-    MerkleContents, MerkleDeserialize, MerkleDeserializeRaw, MerkleLayerContents,
-    MerkleSerialError, MerkleSerialize, MerkleSerializeRaw, Sha256Hash,
+    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
+    MerkleSerializeRaw, Sha256Hash,
 };
 use postgres::Store as KolmePostgresStore;
 pub use r#trait::KolmeBackingStore;
@@ -63,9 +63,9 @@ impl KolmeStore {
         height: u64,
     ) -> Result<Option<Arc<Block>>, KolmeStoreError>
     where
-        Block: serde::de::DeserializeOwned + MerkleDeserialize + MerkleSerialize,
-        FrameworkState: MerkleDeserialize + MerkleSerialize,
-        AppState: MerkleDeserialize + MerkleSerialize,
+        Block: serde::de::DeserializeOwned + MerkleDeserializeRaw + MerkleSerializeRaw,
+        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
+        AppState: MerkleDeserializeRaw + MerkleSerializeRaw,
     {
         Ok(match &self {
             KolmeStore::KolmePostgresStore(kolme_store_postgres) => kolme_store_postgres

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock};
 use enum_dispatch::enum_dispatch;
 use merkle_map::{
-    MerkleContents, MerkleDeserialize, MerkleDeserializeRaw, MerkleLayerContents,
-    MerkleSerialError, MerkleSerialize, MerkleSerializeRaw, Sha256Hash,
+    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
+    MerkleSerializeRaw, Sha256Hash,
 };
 
 #[enum_dispatch(KolmeStore)]
@@ -27,9 +27,9 @@ pub trait KolmeBackingStore {
         height: u64,
     ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
     where
-        Block: serde::de::DeserializeOwned + MerkleDeserialize + MerkleSerialize,
-        FrameworkState: MerkleDeserialize + MerkleSerialize,
-        AppState: MerkleDeserialize + MerkleSerialize;
+        Block: serde::de::DeserializeOwned + MerkleDeserializeRaw + MerkleSerializeRaw,
+        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
+        AppState: MerkleDeserializeRaw + MerkleSerializeRaw;
 
     async fn has_block(&self, height: u64) -> Result<bool, KolmeStoreError>;
     async fn has_merkle_hash(&self, hash: Sha256Hash) -> Result<bool, MerkleSerialError>;
@@ -39,9 +39,9 @@ pub trait KolmeBackingStore {
         block: &StorableBlock<Block, FrameworkState, AppState>,
     ) -> Result<(), KolmeStoreError>
     where
-        Block: serde::Serialize + MerkleSerialize,
-        FrameworkState: MerkleSerialize,
-        AppState: MerkleSerialize;
+        Block: serde::Serialize + MerkleSerializeRaw,
+        FrameworkState: MerkleSerializeRaw,
+        AppState: MerkleSerializeRaw;
     async fn add_merkle_layer(
         &self,
         hash: Sha256Hash,
