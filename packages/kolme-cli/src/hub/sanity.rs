@@ -9,6 +9,7 @@ pub(crate) struct SanityOpt {
 }
 
 pub(super) async fn sanity(opt: SanityOpt) -> Result<()> {
+    init_logger(true, None);
     TestTasks::start(sanity_inner, opt).await
 }
 
@@ -38,6 +39,7 @@ async fn sanity_inner(testtasks: TestTasks, opt: SanityOpt) -> Result<()> {
     testtasks.try_spawn_persistent(Processor::new(kolme_processor.clone(), validator).run());
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
+            .set_local_display_name("processor")
             .add_bootstrap(hub.peer, hub.address.clone())
             .build(kolme_processor.clone())?
             .run(),
@@ -46,6 +48,7 @@ async fn sanity_inner(testtasks: TestTasks, opt: SanityOpt) -> Result<()> {
     let kolme = Kolme::new(app.clone(), VERSION, KolmeStore::new_in_memory()).await?;
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
+            .set_local_display_name("client")
             .add_bootstrap(hub.peer, hub.address.clone())
             .build(kolme.clone())?
             .run(),
@@ -60,6 +63,7 @@ async fn sanity_inner(testtasks: TestTasks, opt: SanityOpt) -> Result<()> {
         )
         .await?;
 
+    kolme.wait_for_block(BlockHeight(1)).await?;
     assert_eq!(kolme.read().get_app_state().count, 1);
 
     Ok(())
