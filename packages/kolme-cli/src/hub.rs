@@ -112,6 +112,7 @@ async fn start(opt: StartOpt) -> Result<()> {
             let store = MemoryStore::new(key.public().to_peer_id());
             let mut kademlia =
                 kad::Behaviour::with_config(key.public().to_peer_id(), store, kademlia_config);
+            kademlia.set_mode(Some(kad::Mode::Server));
 
             let relay = relay::Behaviour::new(key.public().to_peer_id(), relay::Config::default());
 
