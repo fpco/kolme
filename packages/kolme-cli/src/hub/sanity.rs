@@ -35,11 +35,30 @@ async fn sanity_inner(testtasks: TestTasks, opt: SanityOpt) -> Result<()> {
         },
     };
 
+    // This is a (temporary?) workaround. The processor and client need to be able
+    // to connect to each other. So we provide the processor with an "external"
+    // address. Since both are running on the same machine/local network, the external
+    // address is actually private.
+    //
+    // We'd rather not rely on this and instead get automatic NAT traversal of some kind,
+    // but this is a decent first step.
+    //
+    // First, get a randomly available port, then use it below.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port();
+
     let kolme_processor = Kolme::new(app.clone(), VERSION, KolmeStore::new_in_memory()).await?;
     testtasks.try_spawn_persistent(Processor::new(kolme_processor.clone(), validator).run());
     testtasks.try_spawn_persistent(
         GossipBuilder::new()
             .set_local_display_name("processor")
+            .add_listener(gossip::GossipListener {
+                proto: gossip::GossipProto::Quic,
+                ip: gossip::GossipIp::Ip4,
+                port,
+            })
+            .add_external_address(format!("/ip4/127.0.0.1/udp/{port}/quic-v1").parse()?)
             .add_bootstrap(hub.peer, hub.address.clone())
             .build(kolme_processor.clone())?
             .run(),
