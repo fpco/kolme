@@ -21,7 +21,7 @@ use libp2p::{
     noise, ping,
     request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
+    tcp, upnp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
 use sync_manager::{DataLabel, DataRequest, SyncManager};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
@@ -69,6 +69,7 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 's
     ping: ping::Behaviour,
     autonat: autonat::Behaviour,
     dcutr: dcutr::Behaviour,
+    upnp: upnp::tokio::Behaviour,
 }
 
 /// Config for a Gossip listener.
@@ -318,6 +319,7 @@ impl GossipBuilder {
                 let autonat =
                     autonat::Behaviour::new(key.public().to_peer_id(), autonat::Config::default());
                 let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
+                let upnp = upnp::tokio::Behaviour::default();
 
                 Ok(KolmeBehaviour {
                     gossipsub,
@@ -327,6 +329,7 @@ impl GossipBuilder {
                     ping,
                     autonat,
                     dcutr,
+                    upnp,
                 })
             })?
             .build();
