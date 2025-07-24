@@ -19,18 +19,24 @@ jiff = { workspace = true }
 kolme-solana-bridge-client = { workspace = true }
 kolme-store.workspace = true
 libp2p = { workspace = true, features = [
+  "autonat",
   "cbor",
+  "dcutr",
   "dns",
   "gossipsub",
+  "identify",
   "kad",
   "macros",
   "noise",
   "ping",
   "quic",
+  "relay",
+  "rendezvous",
   "request-response",
   "rsa",
   "tcp",
   "tokio",
+  "upnp",
   "yamux",
 ] }
 lru.workspace = true
