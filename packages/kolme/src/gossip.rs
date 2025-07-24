@@ -13,6 +13,7 @@ use crate::*;
 use messages::*;
 
 use libp2p::{
+    autonat,
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
     identify,
@@ -66,6 +67,7 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 's
     kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
+    autonat: autonat::Behaviour,
 }
 
 /// Config for a Gossip listener.
@@ -312,6 +314,8 @@ impl GossipBuilder {
                     key.public(),
                 ));
                 let ping = ping::Behaviour::new(ping::Config::new());
+                let autonat =
+                    autonat::Behaviour::new(key.public().to_peer_id(), autonat::Config::default());
 
                 Ok(KolmeBehaviour {
                     gossipsub,
@@ -319,6 +323,7 @@ impl GossipBuilder {
                     kademlia,
                     identify,
                     ping,
+                    autonat,
                 })
             })?
             .build();
