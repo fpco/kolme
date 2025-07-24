@@ -125,6 +125,7 @@ pub struct GossipBuilder {
     data_load_validation: DataLoadValidation,
     local_display_name: Option<String>,
     duplicate_cache_time: Duration,
+    external_addrs: Vec<Multiaddr>,
 }
 
 impl Default for GossipBuilder {
@@ -140,6 +141,7 @@ impl Default for GossipBuilder {
             local_display_name: Default::default(),
             // Same default as libp2p_gossip
             duplicate_cache_time: Duration::from_secs(60),
+            external_addrs: vec![],
         }
     }
 }
@@ -195,6 +197,15 @@ impl GossipBuilder {
     /// If none are provided, one random listener is set up.
     pub fn add_listener(mut self, listener: GossipListener) -> Self {
         self.listeners.push(listener);
+        self
+    }
+
+    /// Add an external address.
+    ///
+    /// For situations like NAT traversals and load balancers, this allows
+    /// the node to advertise its publicly accessible address.
+    pub fn add_external_address(mut self, addr: Multiaddr) -> Self {
+        self.external_addrs.push(addr);
         self
     }
 
@@ -303,6 +314,10 @@ impl GossipBuilder {
             for listener in &self.listeners {
                 swarm.listen_on(listener.multiaddr())?;
             }
+        }
+
+        for addr in self.external_addrs {
+            swarm.add_external_address(addr);
         }
 
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
