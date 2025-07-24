@@ -566,6 +566,9 @@ impl<App: KolmeApp> Gossip<App> {
             // Catch some events that we don't even want to print at debug level
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
                 libp2p::request_response::Event::ResponseSent { .. },
+            ))
+            | SwarmEvent::Behaviour(KolmeBehaviourEvent::Kademlia(
+                libp2p::kad::Event::OutboundQueryProgressed { .. },
             )) => tracing::trace!(
                 "{local_display_name}: Received and ignoring libp2p event: {event:?}"
             ),
