@@ -18,7 +18,7 @@ use libp2p::{
     gossipsub::{self, IdentTopic},
     identify,
     kad::RecordKey,
-    noise, ping,
+    noise, ping, relay, rendezvous,
     request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, upnp, yamux, StreamProtocol, Swarm, SwarmBuilder,
@@ -70,6 +70,8 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 's
     autonat: autonat::Behaviour,
     dcutr: dcutr::Behaviour,
     upnp: upnp::tokio::Behaviour,
+    relay: relay::Behaviour,
+    rendezvous: rendezvous::client::Behaviour,
 }
 
 /// Config for a Gossip listener.
@@ -320,6 +322,9 @@ impl GossipBuilder {
                     autonat::Behaviour::new(key.public().to_peer_id(), autonat::Config::default());
                 let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
                 let upnp = upnp::tokio::Behaviour::default();
+                let relay =
+                    relay::Behaviour::new(key.public().to_peer_id(), relay::Config::default());
+                let rendezvous = rendezvous::client::Behaviour::new(key.clone());
 
                 Ok(KolmeBehaviour {
                     gossipsub,
@@ -330,6 +335,8 @@ impl GossipBuilder {
                     autonat,
                     dcutr,
                     upnp,
+                    relay,
+                    rendezvous,
                 })
             })?
             .build();
