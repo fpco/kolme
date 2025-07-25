@@ -153,8 +153,8 @@ async fn setup_postgres() -> Result<(Kolme<TestApp>, SocketAddr)> {
 
     let store = KolmeStore::new_postgres_with_options(
         options,
-        PgPoolOptions::new().max_connections(2),
-        1024,
+        PgPoolOptions::new().max_connections(3),
+        1,
     )
     .await?;
     let code_version = app.genesis.version.clone();
