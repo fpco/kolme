@@ -61,7 +61,6 @@ impl Store {
         options: PoolOptions<Postgres>,
         cache_size: usize,
     ) -> anyhow::Result<Self> {
-        anyhow::ensure!(cache_size >= 1024, "PostgreSQL backend currently requires a cache size of at least 1024. This is an open bug that needs investigation.");
         let pool = options
             .connect_with(connect)
             .await
