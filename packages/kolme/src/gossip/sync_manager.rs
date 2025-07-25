@@ -57,7 +57,7 @@ struct PendingBlock<AppMessage> {
 #[derive(Debug)]
 pub(super) struct DataRequest {
     pub(super) data: DataLabel,
-    pub(super) current_peers: SmallVec<[PeerId; REQUEST_COUNT]>,
+    pub(super) current_peers: SmallVec<[PeerId; DEFAULT_PEER_COUNT]>,
     pub(super) request_new_peers: bool,
 }
 
@@ -76,7 +76,7 @@ struct RequestStatus {
     /// This starts off as [None]. The first time we make a request, we use the original peer only. Thereafter, we always request new peers as well.
     last_sent: Option<Instant>,
     /// Peers we can query for the data.
-    peers: SmallVec<[PeerId; REQUEST_COUNT]>,
+    peers: SmallVec<[PeerId; DEFAULT_PEER_COUNT]>,
     /// Last time we updated the warning state.
     ///
     /// Warning state is to track how long a request has been unanswered. We update it (1) the first time we make a request and (2) every time we print out a warning.
@@ -107,7 +107,7 @@ impl RequestStatus {
         }
     }
 
-    fn add_peer(&mut self, peer: PeerId) {
+    fn add_peer<App: KolmeApp>(&mut self, gossip: &Gossip<App>, peer: PeerId) {
         // Don't add a duplicate
         if self.peers.contains(&peer) {
             return;
@@ -119,8 +119,8 @@ impl RequestStatus {
             self.last_sent = None;
         }
 
-        if self.peers.len() >= REQUEST_COUNT {
-            debug_assert!(self.peers.len() == REQUEST_COUNT);
+        if self.peers.len() >= gossip.max_peer_count {
+            debug_assert!(self.peers.len() == gossip.max_peer_count);
             self.peers.remove(0);
         }
         self.peers.push(peer);
@@ -151,7 +151,7 @@ impl RequestStatus {
         match self.warning_updated {
             None => self.warning_updated = Some(now),
             Some(warning_updated) => {
-                if now.duration_since(warning_updated).as_secs() >= WARNING_PERIOD_SECS {
+                if now.duration_since(warning_updated) >= gossip.warning_period {
                     tracing::warn!(
                         "{}: still waiting on request for {label}",
                         gossip.local_display_name
@@ -204,9 +204,14 @@ impl<App: KolmeApp> SyncManager<App> {
         Ok(())
     }
 
-    pub(super) fn add_block_peer(&mut self, height: BlockHeight, peer: PeerId) {
+    pub(super) fn add_block_peer(
+        &mut self,
+        gossip: &Gossip<App>,
+        height: BlockHeight,
+        peer: PeerId,
+    ) {
         if let Some(WaitingBlock::Needed(status)) = self.needed_blocks.get_mut(&height) {
-            status.add_peer(peer);
+            status.add_peer(gossip, peer);
             self.trigger.trigger();
         }
     }
@@ -311,7 +316,7 @@ impl<App: KolmeApp> SyncManager<App> {
     pub(super) async fn get_data_requests(
         &mut self,
         gossip: &Gossip<App>,
-    ) -> Result<SmallVec<[DataRequest; REQUEST_COUNT]>> {
+    ) -> Result<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>> {
         // We need to make sure that we are correctly performing
         // requests in order. That means that, in some cases, we'll
         // need to insert earlier block requests so that we fill in
@@ -375,7 +380,7 @@ impl<App: KolmeApp> SyncManager<App> {
         gossip: &Gossip<App>,
         height: BlockHeight,
         waiting: &mut WaitingBlock<App::Message>,
-    ) -> Result<Option<SmallVec<[DataRequest; REQUEST_COUNT]>>> {
+    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>> {
         let label = DataLabel::Block(height);
         // Check if it got added to our store in the meanwhile
         if gossip.kolme.has_block(height).await? {
@@ -458,12 +463,12 @@ impl<App: KolmeApp> SyncManager<App> {
     async fn get_block_data_requests(
         gossip: &Gossip<App>,
         pending: &mut PendingBlock<App::Message>,
-    ) -> Result<Option<SmallVec<[DataRequest; REQUEST_COUNT]>>> {
+    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>> {
         let mut active_count = 0;
-        let mut layers_to_drop = SmallVec::<[Sha256Hash; REQUEST_COUNT]>::new();
+        let mut layers_to_drop = SmallVec::<[Sha256Hash; DEFAULT_REQUEST_COUNT]>::new();
         let mut res = SmallVec::new();
         for (hash, status) in &mut pending.needed_layers {
-            if active_count >= REQUEST_COUNT {
+            if active_count >= gossip.concurrent_request_limit {
                 break;
             }
             let hash = *hash;
@@ -558,13 +563,13 @@ impl<App: KolmeApp> SyncManager<App> {
         Ok(())
     }
 
-    pub(super) fn add_layer_peer(&mut self, hash: Sha256Hash, peer: PeerId) {
+    pub(super) fn add_layer_peer(&mut self, gossip: &Gossip<App>, hash: Sha256Hash, peer: PeerId) {
         let Some(mut entry) = self.needed_blocks.first_entry() else {
             return;
         };
         if let WaitingBlock::Pending(pending) = entry.get_mut() {
             if let Some(status) = pending.needed_layers.get_mut(&hash) {
-                status.add_peer(peer);
+                status.add_peer(gossip, peer);
                 self.trigger.trigger();
             }
         }
@@ -618,5 +623,6 @@ impl<App: KolmeApp> SyncManager<App> {
     }
 }
 
-const REQUEST_COUNT: usize = 4;
-const WARNING_PERIOD_SECS: u64 = 5;
+pub(super) const DEFAULT_PEER_COUNT: usize = 4;
+pub(super) const DEFAULT_REQUEST_COUNT: usize = 8;
+pub(super) const DEFAULT_WARNING_PERIOD_SECS: u64 = 5;
