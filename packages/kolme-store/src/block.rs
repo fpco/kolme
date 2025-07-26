@@ -16,6 +16,15 @@ pub struct StorableBlock<Block, FrameworkState, AppState> {
     pub logs: Arc<[Vec<String>]>,
 }
 
+#[derive(Debug)]
+pub struct LightBlock<Block> {
+    pub height: u64,
+    pub blockhash: Sha256Hash,
+    pub txhash: Sha256Hash,
+    pub block: Arc<Block>,
+    pub logshash: Sha256Hash
+}
+
 impl<Block, FrameworkState, AppState> Clone for StorableBlock<Block, FrameworkState, AppState> {
     fn clone(&self) -> Self {
         Self {

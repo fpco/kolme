@@ -4,8 +4,7 @@ use std::{num::NonZeroUsize, path::Path};
 use kolme_store::sqlx::postgres::PgConnectOptions;
 use kolme_store::sqlx::{pool::PoolOptions, Postgres};
 use kolme_store::{
-    KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
-    StorableBlock,
+    KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError, LightBlock, StorableBlock
 };
 use lru::LruCache;
 use parking_lot::RwLock;
@@ -141,6 +140,11 @@ impl<App: KolmeApp> KolmeStore<App> {
 impl<App: KolmeApp> KolmeStore<App> {
     pub async fn load_latest_block(&self) -> Result<Option<BlockHeight>> {
         Ok(self.inner.load_latest_block().await?.map(BlockHeight))
+    }
+
+    pub async fn load_only_block(&self, height: BlockHeight) -> Result<Option<LightBlock<SignedBlock<App::Message>>>> {
+        // todo: add cache
+        Ok(self.inner.load_block_only(height.0).await?)
     }
 
     pub async fn load_block(

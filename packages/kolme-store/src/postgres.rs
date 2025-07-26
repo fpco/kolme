@@ -1,5 +1,5 @@
 use crate::{
-    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock,
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, LightBlock, StorableBlock,
     DEFAULT_CACHE_SIZE,
 };
 use anyhow::Context as _;
@@ -252,6 +252,68 @@ impl KolmeBackingStore for Store {
 
         Ok(Some(height.load(Ordering::Relaxed)))
     }
+
+    async fn load_block_only<Block: serde::de::DeserializeOwned>(
+        &self,
+        height: u64,
+    ) -> Result<Option<LightBlock<Block>>, KolmeStoreError> {
+        let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
+        struct Output {
+            blockhash: Vec<u8>,
+            txhash: Vec<u8>,
+            rendered: String,
+            framework_state_hash: Vec<u8>,
+            app_state_hash: Vec<u8>,
+            logs_hash: Vec<u8>,
+        }
+        let output = sqlx::query_as!(
+            Output,
+            r#"
+                SELECT
+                    blockhash, txhash, rendered,
+                    framework_state_hash, app_state_hash, logs_hash
+                FROM blocks
+                WHERE height=$1
+                LIMIT 1
+            "#,
+            height_i64,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(KolmeStoreError::custom)
+        .inspect_err(|err| tracing::error!("{err:?}"))?;
+
+        let Some(Output {
+            blockhash,
+            txhash,
+            rendered,
+            framework_state_hash,
+            app_state_hash,
+            logs_hash,
+        }) = output
+        else {
+            return Ok(None);
+        };
+
+        fn to_sha256hash(bytes: &[u8]) -> Result<Sha256Hash, KolmeStoreError> {
+            Sha256Hash::from_hash(bytes).map_err(KolmeStoreError::custom)
+        }
+
+        let blockhash = to_sha256hash(&blockhash)?;
+        let txhash = to_sha256hash(&txhash)?;
+        let logshash = to_sha256hash(&logs_hash)?;
+
+        let block = serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?;
+        let result = LightBlock {
+            height,
+            blockhash,
+            txhash,
+            block: Arc::new(block),
+            logshash,
+        };
+        Ok(Some(result))
+    }
+
     async fn load_block<
         Block: serde::de::DeserializeOwned,
         FrameworkState: MerkleDeserializeRaw,

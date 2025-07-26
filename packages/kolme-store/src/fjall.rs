@@ -1,6 +1,5 @@
 use crate::{
-    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock,
-    DEFAULT_CACHE_SIZE,
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, LightBlock, StorableBlock, DEFAULT_CACHE_SIZE
 };
 use anyhow::Context;
 use lru::LruCache;
@@ -63,6 +62,13 @@ impl KolmeBackingStore for Store {
 
     async fn take_construct_lock(&self) -> Result<crate::KolmeConstructLock, KolmeStoreError> {
         Ok(KolmeConstructLock::NoLocking)
+    }
+
+    async fn load_block_only<Block: serde::de::DeserializeOwned>(
+        &self,
+        height: u64,
+    ) -> Result<Option<LightBlock<Block>>, KolmeStoreError> {
+        panic!("Unimplemented for fjall")
     }
 
     async fn get_merkle_layer(

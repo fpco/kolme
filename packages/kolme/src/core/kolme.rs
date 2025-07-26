@@ -4,7 +4,7 @@ mod store;
 
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
-use kolme_store::{KolmeConstructLock, KolmeStoreError, StorableBlock};
+use kolme_store::{KolmeConstructLock, KolmeStoreError, LightBlock, StorableBlock};
 use parking_lot::RwLock;
 use solana_client::nonblocking::pubsub_client::PubsubClient;
 pub use store::KolmeStore;
@@ -1106,6 +1106,10 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.store.load_block(height).await
     }
 
+    pub async fn get_only_block(&self, height: BlockHeight) -> Result<Option<LightBlock<SignedBlock<App::Message>>>> {
+        self.inner.store.load_only_block(height).await
+    }
+
     /// Check if the given block is available in storage.
     pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
         self.inner.store.has_block(height).await
@@ -1230,6 +1234,8 @@ impl<App: KolmeApp> Kolme<App> {
         }
         Ok(next)
     }
+
+
 }
 
 impl<App: KolmeApp> KolmeRead<App> {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{KolmeConstructLock, KolmeStoreError, LightBlock, StorableBlock};
 use enum_dispatch::enum_dispatch;
 use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
@@ -22,6 +22,9 @@ pub trait KolmeBackingStore {
     async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>>;
 
     async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError>;
+    async fn load_block_only<Block>(&self, height: u64) -> Result<Option<LightBlock<Block>>, KolmeStoreError>
+    where
+        Block: serde::de::DeserializeOwned;
     async fn load_block<Block, FrameworkState, AppState>(
         &self,
         height: u64,

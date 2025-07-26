@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, LightBlock, StorableBlock};
 use merkle_map::{
     MerkleDeserializeRaw, MerkleMemoryStore, MerkleSerializeRaw, MerkleStore, Sha256Hash,
 };
@@ -39,6 +39,13 @@ impl KolmeBackingStore for Store {
         guard.blocks.clear();
         guard.txhashes.clear();
         Ok(())
+    }
+
+    async fn load_block_only<Block: serde::de::DeserializeOwned>(
+        &self,
+        height: u64,
+    ) -> Result<Option<LightBlock<Block>>, KolmeStoreError> {
+        panic!("Unimplemented for in memory store")
     }
 
     async fn delete_block(&self, height: u64) -> Result<(), KolmeStoreError> {

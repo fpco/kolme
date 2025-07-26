@@ -6,6 +6,7 @@ mod postgres;
 mod r#trait;
 
 pub use block::StorableBlock;
+pub use block::LightBlock;
 pub use error::KolmeStoreError;
 use fjall::Store as KolmeFjallStore;
 use in_memory::Store as KolmeInMemoryStore;

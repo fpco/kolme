@@ -45,6 +45,7 @@ pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
         .route("/broadcast", put(broadcast))
         .route("/get-next-nonce", get(get_next_nonce))
         .route("/block/{height}", get(get_block))
+        .route("/only/block/{height}", get(get_only_block))
         .route("/notifications", get(ws_handler::<App>))
 }
 
@@ -105,6 +106,35 @@ async fn get_next_nonce<App: KolmeApp>(
 ) -> impl IntoResponse {
     let nonce = kolme.read().get_next_nonce(pubkey);
     Json(serde_json::json!({"next_nonce":nonce})).into_response()
+}
+
+async fn get_only_block<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Path(height): Path<BlockHeight>,
+) -> impl IntoResponse {
+    #[derive(serde::Serialize)]
+    struct Response<'a, App: KolmeApp> {
+        blockhash: Sha256Hash,
+        txhash: Sha256Hash,
+        block: &'a SignedBlock<App::Message>,
+    }
+
+    match kolme.get_only_block(height).await {
+        Ok(Some(block)) => {
+            let resp: Response<'_, App> = Response {
+                blockhash: block.blockhash,
+                txhash: block.txhash,
+                block: &block.block,
+            };
+            Json(resp).into_response()
+        }
+        Ok(None) => Json(serde_json::json!(null)).into_response(),
+        Err(e) => {
+            let mut res = e.to_string().into_response();
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            res
+        }
+    }
 }
 
 async fn get_block<App: KolmeApp>(
