@@ -391,7 +391,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .approvers
             .contains(&key));
         let old = action.approvals.insert(key, signature);
-        assert!(old.is_none(), "Cannot approve bridge action ID {action_id} for chain {chain} with already-used public key {key}");
+        anyhow::ensure!(old.is_none(), "Cannot approve bridge action ID {action_id} for chain {chain} with already-used public key {key}");
         Ok(())
     }
 
