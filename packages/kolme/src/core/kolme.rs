@@ -10,7 +10,12 @@ use solana_client::nonblocking::pubsub_client::PubsubClient;
 pub use store::KolmeStore;
 use utils::trigger::TriggerSubscriber;
 
-use std::{collections::HashMap, ops::Deref, sync::OnceLock, time::Duration};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -1073,10 +1078,16 @@ impl<App: KolmeApp> Kolme<App> {
     /// Ingest all blocks from the given Kolme into this one.
     pub async fn ingest_blocks_from(&self, other: &Self) -> Result<()> {
         loop {
+            let instant = Instant::now();
             let to_archive = self.get_next_to_archive().await?;
             let Some(block) = other.get_block(to_archive).await? else {
                 break Ok(());
             };
+            tracing::info!(
+                "Time to get block {to_archive}: {} seconds",
+                instant.elapsed().as_secs()
+            );
+            let instant1 = Instant::now();
             self.inner
                 .store
                 .save(
@@ -1084,15 +1095,33 @@ impl<App: KolmeApp> Kolme<App> {
                     block.block.0.message.as_inner().framework_state,
                 )
                 .await?;
+            tracing::info!(
+                "Time to save framework state for {to_archive}: {} seconds",
+                instant1.elapsed().as_secs()
+            );
+            let instant1 = Instant::now();
             self.inner
                 .store
                 .save(&block.app_state, block.block.0.message.as_inner().app_state)
                 .await?;
+            tracing::info!(
+                "Time to save block state for {to_archive}: {} seconds",
+                instant1.elapsed().as_secs()
+            );
+            let instant1 = Instant::now();
             self.inner
                 .store
                 .save(&block.logs, block.block.0.message.as_inner().logs)
                 .await?;
+            tracing::info!(
+                "Time to save block logs for {to_archive}: {} seconds",
+                instant1.elapsed().as_secs()
+            );
             self.add_block_with_state(block.block).await?;
+            tracing::info!(
+                "Total time for loading and saving block {to_archive}: {} seconds",
+                instant.elapsed().as_secs()
+            );
         }
     }
 }
