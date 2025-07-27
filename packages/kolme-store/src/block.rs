@@ -22,7 +22,8 @@ pub struct LightBlock<Block> {
     pub blockhash: Sha256Hash,
     pub txhash: Sha256Hash,
     pub block: Arc<Block>,
-    pub logshash: Sha256Hash
+    pub logshash: Sha256Hash,
+    pub logs: Arc<[Vec<String>]>
 }
 
 impl<Block, FrameworkState, AppState> Clone for StorableBlock<Block, FrameworkState, AppState> {

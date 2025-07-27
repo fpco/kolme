@@ -304,12 +304,16 @@ impl KolmeBackingStore for Store {
         let logshash = to_sha256hash(&logs_hash)?;
 
         let block = serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?;
+        let mut logs_store = self.new_store();
+        let logs = merkle_map::load(&mut logs_store, logshash).await?;
+
         let result = LightBlock {
             height,
             blockhash,
             txhash,
             block: Arc::new(block),
             logshash,
+            logs
         };
         Ok(Some(result))
     }

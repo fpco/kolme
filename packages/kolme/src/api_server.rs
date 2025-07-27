@@ -117,6 +117,7 @@ async fn get_only_block<App: KolmeApp>(
         blockhash: Sha256Hash,
         txhash: Sha256Hash,
         block: &'a SignedBlock<App::Message>,
+        logs: &'a [Vec<String>],
     }
 
     match kolme.get_only_block(height).await {
@@ -125,6 +126,7 @@ async fn get_only_block<App: KolmeApp>(
                 blockhash: block.blockhash,
                 txhash: block.txhash,
                 block: &block.block,
+                logs: &block.logs
             };
             Json(resp).into_response()
         }
