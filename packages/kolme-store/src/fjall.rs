@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Context;
 use lru::LruCache;
 use merkle_map::{
-    MerkleDeserialize, MerkleLayerContents, MerkleSerialize, MerkleStore as _, Sha256Hash,
+    MerkleDeserializeRaw, MerkleLayerContents, MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
 };
 use parking_lot::Mutex;
 use std::{num::NonZeroUsize, path::Path, sync::Arc};
@@ -105,9 +105,9 @@ impl KolmeBackingStore for Store {
         height: u64,
     ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
     where
-        Block: MerkleDeserialize + MerkleSerialize,
-        FrameworkState: MerkleDeserialize + MerkleSerialize,
-        AppState: MerkleDeserialize + MerkleSerialize,
+        Block: MerkleDeserializeRaw + MerkleSerializeRaw,
+        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
+        AppState: MerkleDeserializeRaw + MerkleSerializeRaw,
     {
         let Some(hash_bytes) = self
             .merkle
@@ -149,9 +149,9 @@ impl KolmeBackingStore for Store {
         block: &StorableBlock<Block, FrameworkState, AppState>,
     ) -> Result<(), KolmeStoreError>
     where
-        Block: MerkleSerialize,
-        FrameworkState: MerkleSerialize,
-        AppState: MerkleSerialize,
+        Block: MerkleSerializeRaw,
+        FrameworkState: MerkleSerializeRaw,
+        AppState: MerkleSerializeRaw,
     {
         let key = block_key(block.height);
         let contents = merkle_map::api::serialize(block).map_err(KolmeStoreError::custom)?;
@@ -175,11 +175,12 @@ impl KolmeBackingStore for Store {
         }
 
         let mut store = self.merkle.clone();
-        merkle_map::api::save_merkle_contents(&mut store, &contents).await?;
+        let hash = contents.hash;
+        merkle_map::api::save_merkle_contents(&mut store, contents).await?;
 
         self.merkle
             .handle
-            .insert(key, contents.hash.as_array())
+            .insert(key, hash.as_array())
             .map_err(KolmeStoreError::custom)?;
         self.merkle
             .handle

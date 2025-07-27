@@ -44,6 +44,9 @@ pub struct Gossip<App: KolmeApp> {
     sync_manager: Mutex<SyncManager<App>>,
     /// LRU cache for notifications received via P2p layer
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
+    concurrent_request_limit: usize,
+    max_peer_count: usize,
+    warning_period: Duration,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -125,6 +128,10 @@ pub struct GossipBuilder {
     data_load_validation: DataLoadValidation,
     local_display_name: Option<String>,
     duplicate_cache_time: Duration,
+    external_addrs: Vec<Multiaddr>,
+    concurrent_request_limit: usize,
+    max_peer_count: usize,
+    warning_period: Duration,
 }
 
 impl Default for GossipBuilder {
@@ -140,6 +147,10 @@ impl Default for GossipBuilder {
             local_display_name: Default::default(),
             // Same default as libp2p_gossip
             duplicate_cache_time: Duration::from_secs(60),
+            external_addrs: vec![],
+            concurrent_request_limit: sync_manager::DEFAULT_REQUEST_COUNT,
+            max_peer_count: sync_manager::DEFAULT_PEER_COUNT,
+            warning_period: Duration::from_secs(sync_manager::DEFAULT_WARNING_PERIOD_SECS),
         }
     }
 }
@@ -198,6 +209,15 @@ impl GossipBuilder {
         self
     }
 
+    /// Add an external address.
+    ///
+    /// For situations like NAT traversals and load balancers, this allows
+    /// the node to advertise its publicly accessible address.
+    pub fn add_external_address(mut self, addr: Multiaddr) -> Self {
+        self.external_addrs.push(addr);
+        self
+    }
+
     /// Set time between each heartbeat (default is 10 seconds).
     pub fn heartbeat_interval(mut self, heartbeat_interval: Duration) -> Self {
         self.heartbeat_interval = heartbeat_interval;
@@ -220,6 +240,24 @@ impl GossipBuilder {
         self
     }
 
+    /// Set the number of allowed concurrent data requests when state syncing.
+    pub fn set_concurrent_request_limit(mut self, limit: usize) -> Self {
+        self.concurrent_request_limit = limit;
+        self
+    }
+
+    /// Set the maximum number of peers to query simultaneously for data.
+    pub fn set_max_peer_count(mut self, count: usize) -> Self {
+        self.max_peer_count = count;
+        self
+    }
+
+    /// Set the duration to wait before printing a warning about block/layer data not being downloaded.
+    pub fn set_data_warning_period(mut self, period: Duration) -> Self {
+        self.warning_period = period;
+        self
+    }
+
     pub fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>> {
         let builder = match self.keypair {
             Some(keypair) => SwarmBuilder::with_existing_identity(keypair),
@@ -228,7 +266,7 @@ impl GossipBuilder {
         let mut swarm = builder
             .with_tokio()
             .with_tcp(
-                tcp::Config::default(),
+                tcp::Config::default().nodelay(true),
                 noise::Config::new,
                 yamux::Config::default,
             )?
@@ -305,6 +343,10 @@ impl GossipBuilder {
             }
         }
 
+        for addr in self.external_addrs {
+            swarm.add_external_address(addr);
+        }
+
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
         let sync_manager = Mutex::new(SyncManager::default());
@@ -321,6 +363,9 @@ impl GossipBuilder {
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
+            concurrent_request_limit: self.concurrent_request_limit,
+            max_peer_count: self.max_peer_count,
+            warning_period: self.warning_period,
         })
     }
 }
@@ -722,11 +767,14 @@ impl<App: KolmeApp> Gossip<App> {
                 self.sync_manager
                     .lock()
                     .await
-                    .add_block_peer(*height, *peer);
+                    .add_block_peer(self, *height, *peer);
                 BlockResponse::Ack
             }
             BlockRequest::LayerAvailable { hash, peer } => {
-                self.sync_manager.lock().await.add_layer_peer(*hash, *peer);
+                self.sync_manager
+                    .lock()
+                    .await
+                    .add_layer_peer(self, *hash, *peer);
                 BlockResponse::Ack
             }
         };
