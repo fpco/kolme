@@ -55,6 +55,12 @@ impl KolmeStore {
         Ok(KolmeStore::KolmeFjallStore(fjall::Store::new(fjall_dir)?))
     }
 
+    pub fn new_fjall_with(fjall_dir: impl AsRef<Path>, cache_size: usize) -> anyhow::Result<Self> {
+        Ok(KolmeStore::KolmeFjallStore(fjall::Store::new_with(
+            fjall_dir, cache_size,
+        )?))
+    }
+
     pub fn new_in_memory() -> Self {
         KolmeStore::KolmeInMemoryStore(in_memory::Store::default())
     }

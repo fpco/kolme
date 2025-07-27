@@ -58,6 +58,10 @@ impl<App: KolmeApp> KolmeStore<App> {
         KolmeStoreInner::new_fjall(dir).map(KolmeStore::from)
     }
 
+    pub fn new_fjall_with(dir: impl AsRef<Path>, cache_size: usize) -> Result<Self> {
+        KolmeStoreInner::new_fjall_with(dir, cache_size).map(KolmeStore::from)
+    }
+
     pub fn new_in_memory() -> Self {
         KolmeStoreInner::new_in_memory().into()
     }
