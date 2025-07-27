@@ -13,12 +13,15 @@ use crate::*;
 use messages::*;
 
 use libp2p::{
+    autonat, dcutr,
     futures::StreamExt,
     gossipsub::{self, IdentTopic},
-    noise,
+    identify,
+    kad::RecordKey,
+    noise, ping, relay, rendezvous,
     request_response::{ProtocolSupport, ResponseChannel},
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, StreamProtocol, Swarm, SwarmBuilder,
+    tcp, upnp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
 use sync_manager::{DataLabel, DataRequest, SyncManager};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
@@ -44,6 +47,15 @@ pub struct Gossip<App: KolmeApp> {
     sync_manager: Mutex<SyncManager<App>>,
     /// LRU cache for notifications received via P2p layer
     lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
+    /// Kademlia key for discovering other peers for this network.
+    ///
+    /// MSS 2025-07-24: I've found conflicting information about Kademlia peer discovery
+    /// online. Some of it indicates that bootstrap for peer discovery should be fully
+    /// automatic. Other sources say that we need to get providers of a shared key to
+    /// find nodes. Empirically, adding in this start_providing/get_providers bit seems
+    /// to have improved the discovery process, so including, but this is worth deeper
+    /// investigation in the future.
+    dht_key: RecordKey,
     concurrent_request_limit: usize,
     max_peer_count: usize,
     warning_period: Duration,
@@ -56,6 +68,13 @@ struct KolmeBehaviour<AppMessage: serde::de::DeserializeOwned + Send + Sync + 's
     request_response:
         libp2p::request_response::cbor::Behaviour<BlockRequest, BlockResponse<AppMessage>>,
     kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
+    identify: identify::Behaviour,
+    ping: ping::Behaviour,
+    autonat: autonat::Behaviour,
+    dcutr: dcutr::Behaviour,
+    upnp: upnp::tokio::Behaviour,
+    relay: relay::Behaviour,
+    rendezvous: rendezvous::client::Behaviour,
 }
 
 /// Config for a Gossip listener.
@@ -321,10 +340,30 @@ impl GossipBuilder {
                     kademlia.add_address(&peer, address);
                 }
 
+                let identify = identify::Behaviour::new(identify::Config::new(
+                    "/kolme/1.0.0".to_owned(),
+                    key.public(),
+                ));
+                let ping = ping::Behaviour::new(ping::Config::new());
+                let autonat =
+                    autonat::Behaviour::new(key.public().to_peer_id(), autonat::Config::default());
+                let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
+                let upnp = upnp::tokio::Behaviour::default();
+                let relay =
+                    relay::Behaviour::new(key.public().to_peer_id(), relay::Config::default());
+                let rendezvous = rendezvous::client::Behaviour::new(key.clone());
+
                 Ok(KolmeBehaviour {
                     gossipsub,
                     request_response,
                     kademlia,
+                    identify,
+                    ping,
+                    autonat,
+                    dcutr,
+                    upnp,
+                    relay,
+                    rendezvous,
                 })
             })?
             .build();
@@ -350,6 +389,7 @@ impl GossipBuilder {
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
         let sync_manager = Mutex::new(SyncManager::default());
+        let dht_key = RecordKey::new(&format!("/kolme-dht/{genesis_hash}/1.0"));
 
         Ok(Gossip {
             kolme,
@@ -363,6 +403,7 @@ impl GossipBuilder {
             local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
             sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
+            dht_key,
             concurrent_request_limit: self.concurrent_request_limit,
             max_peer_count: self.max_peer_count,
             warning_period: self.warning_period,
@@ -396,6 +437,8 @@ impl<App: KolmeApp> Gossip<App> {
 
         let mut sync_manager_subscriber = self.sync_manager.lock().await.subscribe();
 
+        self.dht_peer_discovery(&mut swarm);
+
         loop {
             tokio::select! {
                 // Our local Kolme generated a notification to be sent through the
@@ -409,12 +452,9 @@ impl<App: KolmeApp> Gossip<App> {
                 }
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
-                _ = interval.tick() => async {
-                    self.request_block_heights(&mut swarm);
-                    self.process_sync_manager(&mut swarm).await;
-                    self.broadcast_latest_block(&mut swarm);
-                    self.broadcast_mempool_entries(&mut swarm);
-                }.await,
+                _ = interval.tick() => {
+                    self.on_interval(&mut swarm).await;
+                },
                 _ = sync_manager_subscriber.listen() => {
                     self.process_sync_manager(&mut swarm).await;
                 }
@@ -433,6 +473,34 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
         }
+    }
+
+    fn dht_peer_discovery(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        // Help out peer discovery, this is _probably_ not appropriate to run
+        // every 5 seconds, but we'll start here.
+        if let Err(e) = swarm
+            .behaviour_mut()
+            .kademlia
+            .start_providing(self.dht_key.clone())
+        {
+            tracing::error!(
+                "{}: unable to start providing DHT key {:?}: {e}",
+                self.local_display_name,
+                self.dht_key
+            );
+        }
+        swarm
+            .behaviour_mut()
+            .kademlia
+            .get_providers(self.dht_key.clone());
+    }
+
+    async fn on_interval(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
+        self.request_block_heights(swarm);
+        self.process_sync_manager(swarm).await;
+        self.broadcast_latest_block(swarm);
+        self.broadcast_mempool_entries(swarm);
+        self.dht_peer_discovery(swarm);
     }
 
     fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
@@ -592,6 +660,9 @@ impl<App: KolmeApp> Gossip<App> {
             // Catch some events that we don't even want to print at debug level
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
                 libp2p::request_response::Event::ResponseSent { .. },
+            ))
+            | SwarmEvent::Behaviour(KolmeBehaviourEvent::Kademlia(
+                libp2p::kad::Event::OutboundQueryProgressed { .. },
             )) => tracing::trace!(
                 "{local_display_name}: Received and ignoring libp2p event: {event:?}"
             ),
