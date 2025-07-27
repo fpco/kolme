@@ -50,7 +50,7 @@ impl Store {
         let connect_options = url.parse()?;
         Self::new_with_options(
             connect_options,
-            PoolOptions::new().max_connections(5),
+            PoolOptions::new().max_connections(10),
             DEFAULT_CACHE_SIZE,
         )
         .await
