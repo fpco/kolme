@@ -307,6 +307,8 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let pubkey = secret.public_key();
         let mut nonce = self.read().get_next_nonce(pubkey);
+        let mut attempt = 1;
+        const MAX_NONCE_ATTEMPTS: usize = 5;
         loop {
             let tx = Arc::new(self.read().create_signed_transaction_with(
                 secret,
@@ -324,8 +326,9 @@ impl<App: KolmeApp> Kolme<App> {
                         actual,
                     }) = e.downcast_ref()
                     {
-                        if actual < expected {
-                            tracing::warn!("Retrying with new nonce: {e}");
+                        if actual < expected && attempt < MAX_NONCE_ATTEMPTS {
+                            tracing::warn!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}: {e}");
+                            attempt += 1;
                             nonce = *expected;
                             continue;
                         }
