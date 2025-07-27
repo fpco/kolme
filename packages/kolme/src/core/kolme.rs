@@ -232,13 +232,6 @@ impl<App: KolmeApp> Kolme<App> {
             let note = recv.recv().await?;
             match note {
                 Notification::NewBlock(block) => {
-                    // Make sure the block is properly ingested so that nonces work correctly
-                    // on the next request.
-                    //
-                    // TODO: this may not work as expected in some configurations of gossip,
-                    // for example if we have block sync turned on and have missing blocks,
-                    // or if there's a code version mismatch.
-                    self.wait_for_block(block.height()).await?;
                     if block.tx().hash() == txhash_orig {
                         break Ok(block);
                     }
