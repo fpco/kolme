@@ -6,7 +6,7 @@ use axum::{
     http::header::CONTENT_TYPE,
     response::IntoResponse,
     routing::{get, put},
-    Json,
+    Json, Router,
 };
 use reqwest::{Method, StatusCode};
 use tokio::sync::broadcast;
@@ -14,13 +14,25 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::*;
 
+pub use axum;
+
 pub struct ApiServer<App: KolmeApp> {
     kolme: Kolme<App>,
+    extra_routes: Option<Router>,
 }
 
 impl<App: KolmeApp> ApiServer<App> {
     pub fn new(kolme: Kolme<App>) -> Self {
-        ApiServer { kolme }
+        ApiServer {
+            kolme,
+            extra_routes: None,
+        }
+    }
+
+    /// Add in extra routes to be served.
+    pub fn with_extra_routes(mut self, extra_routes: Router) -> Self {
+        self.extra_routes = Some(extra_routes);
+        self
     }
 
     pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<()> {
@@ -29,7 +41,11 @@ impl<App: KolmeApp> ApiServer<App> {
             .allow_origin(Any)
             .allow_headers([CONTENT_TYPE]);
 
-        let app = base_api_router().layer(cors).with_state(self.kolme);
+        let mut app = base_api_router().with_state(self.kolme);
+        if let Some(extra_routes) = self.extra_routes {
+            app = app.merge(extra_routes);
+        }
+        app = app.layer(cors);
 
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         tracing::info!("Starting API server on {:?}", listener.local_addr()?);

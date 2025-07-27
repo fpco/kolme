@@ -1,4 +1,5 @@
 mod block_info;
+mod import_export;
 mod mempool;
 mod store;
 
@@ -298,11 +299,17 @@ impl<App: KolmeApp> Kolme<App> {
         secret: &SecretKey,
         tx_builder: TxBuilder<App::Message>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
+        let pubkey = secret.public_key();
+        let mut nonce = self.read().get_next_nonce(pubkey);
+        let mut attempt = 1;
+        const MAX_NONCE_ATTEMPTS: usize = 5;
         loop {
-            let tx = Arc::new(
-                self.read()
-                    .create_signed_transaction(secret, tx_builder.clone())?,
-            );
+            let tx = Arc::new(self.read().create_signed_transaction_with(
+                secret,
+                tx_builder.clone(),
+                pubkey,
+                nonce,
+            )?);
             match self.propose_and_await_transaction_inner(tx).await {
                 Ok(block) => break Ok(block),
                 Err(e) => {
@@ -313,8 +320,10 @@ impl<App: KolmeApp> Kolme<App> {
                         actual,
                     }) = e.downcast_ref()
                     {
-                        if actual < expected {
-                            tracing::warn!("Retrying with new nonce: {e}");
+                        if actual < expected && attempt < MAX_NONCE_ATTEMPTS {
+                            tracing::warn!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}: {e}");
+                            attempt += 1;
+                            nonce = *expected;
                             continue;
                         }
                     }
@@ -1330,6 +1339,16 @@ impl<App: KolmeApp> KolmeRead<App> {
     ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key();
         let nonce = self.get_next_nonce(pubkey);
+        self.create_signed_transaction_with(secret, tx_builder, pubkey, nonce)
+    }
+
+    fn create_signed_transaction_with<T: Into<TxBuilder<App::Message>>>(
+        &self,
+        secret: &SecretKey,
+        tx_builder: T,
+        pubkey: PublicKey,
+        nonce: AccountNonce,
+    ) -> Result<SignedTransaction<App::Message>> {
         let TxBuilder {
             messages,
             max_height,

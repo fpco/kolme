@@ -3,6 +3,8 @@ mod archiver;
 #[cfg(test)]
 mod auth;
 #[cfg(test)]
+mod block_export;
+#[cfg(test)]
 mod kademlia;
 #[cfg(test)]
 mod key_rotation;

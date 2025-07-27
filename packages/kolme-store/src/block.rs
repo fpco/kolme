@@ -1,4 +1,7 @@
-use merkle_map::{MerkleDeserialize, MerkleSerialError, MerkleSerialize, Sha256Hash};
+use merkle_map::{
+    MerkleDeserialize, MerkleDeserializeRaw, MerkleSerialError, MerkleSerialize,
+    MerkleSerializeRaw, Sha256Hash,
+};
 use std::sync::Arc;
 
 /// Contents of a block to be stored in a database.
@@ -27,8 +30,11 @@ impl<Block, FrameworkState, AppState> Clone for StorableBlock<Block, FrameworkSt
     }
 }
 
-impl<Block: MerkleSerialize, FrameworkState: MerkleSerialize, AppState: MerkleSerialize>
-    MerkleSerialize for StorableBlock<Block, FrameworkState, AppState>
+impl<
+        Block: MerkleSerializeRaw,
+        FrameworkState: MerkleSerializeRaw,
+        AppState: MerkleSerializeRaw,
+    > MerkleSerialize for StorableBlock<Block, FrameworkState, AppState>
 {
     fn merkle_serialize(
         &self,
@@ -59,9 +65,9 @@ impl<Block: MerkleSerialize, FrameworkState: MerkleSerialize, AppState: MerkleSe
 }
 
 impl<
-        Block: MerkleSerialize + MerkleDeserialize,
-        FrameworkState: MerkleSerialize + MerkleDeserialize,
-        AppState: MerkleSerialize + MerkleDeserialize,
+        Block: MerkleSerializeRaw + MerkleDeserializeRaw,
+        FrameworkState: MerkleSerializeRaw + MerkleDeserializeRaw,
+        AppState: MerkleSerializeRaw + MerkleDeserializeRaw,
     > MerkleDeserialize for StorableBlock<Block, FrameworkState, AppState>
 {
     fn merkle_deserialize(

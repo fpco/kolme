@@ -56,6 +56,9 @@ pub struct Gossip<App: KolmeApp> {
     /// to have improved the discovery process, so including, but this is worth deeper
     /// investigation in the future.
     dht_key: RecordKey,
+    concurrent_request_limit: usize,
+    max_peer_count: usize,
+    warning_period: Duration,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -145,6 +148,9 @@ pub struct GossipBuilder {
     local_display_name: Option<String>,
     duplicate_cache_time: Duration,
     external_addrs: Vec<Multiaddr>,
+    concurrent_request_limit: usize,
+    max_peer_count: usize,
+    warning_period: Duration,
 }
 
 impl Default for GossipBuilder {
@@ -161,6 +167,9 @@ impl Default for GossipBuilder {
             // Same default as libp2p_gossip
             duplicate_cache_time: Duration::from_secs(60),
             external_addrs: vec![],
+            concurrent_request_limit: sync_manager::DEFAULT_REQUEST_COUNT,
+            max_peer_count: sync_manager::DEFAULT_PEER_COUNT,
+            warning_period: Duration::from_secs(sync_manager::DEFAULT_WARNING_PERIOD_SECS),
         }
     }
 }
@@ -247,6 +256,24 @@ impl GossipBuilder {
 
     pub fn set_local_display_name(mut self, display_name: &str) -> Self {
         self.local_display_name = Some(String::from(display_name));
+        self
+    }
+
+    /// Set the number of allowed concurrent data requests when state syncing.
+    pub fn set_concurrent_request_limit(mut self, limit: usize) -> Self {
+        self.concurrent_request_limit = limit;
+        self
+    }
+
+    /// Set the maximum number of peers to query simultaneously for data.
+    pub fn set_max_peer_count(mut self, count: usize) -> Self {
+        self.max_peer_count = count;
+        self
+    }
+
+    /// Set the duration to wait before printing a warning about block/layer data not being downloaded.
+    pub fn set_data_warning_period(mut self, period: Duration) -> Self {
+        self.warning_period = period;
         self
     }
 
@@ -377,6 +404,9 @@ impl GossipBuilder {
             sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
             dht_key,
+            concurrent_request_limit: self.concurrent_request_limit,
+            max_peer_count: self.max_peer_count,
+            warning_period: self.warning_period,
         })
     }
 }
@@ -808,11 +838,14 @@ impl<App: KolmeApp> Gossip<App> {
                 self.sync_manager
                     .lock()
                     .await
-                    .add_block_peer(*height, *peer);
+                    .add_block_peer(self, *height, *peer);
                 BlockResponse::Ack
             }
             BlockRequest::LayerAvailable { hash, peer } => {
-                self.sync_manager.lock().await.add_layer_peer(*hash, *peer);
+                self.sync_manager
+                    .lock()
+                    .await
+                    .add_layer_peer(self, *hash, *peer);
                 BlockResponse::Ack
             }
         };

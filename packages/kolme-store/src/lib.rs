@@ -10,8 +10,8 @@ pub use error::KolmeStoreError;
 use fjall::Store as KolmeFjallStore;
 use in_memory::Store as KolmeInMemoryStore;
 use merkle_map::{
-    MerkleContents, MerkleDeserialize, MerkleDeserializeRaw, MerkleLayerContents,
-    MerkleSerialError, MerkleSerialize, MerkleSerializeRaw, Sha256Hash,
+    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
+    MerkleSerializeRaw, Sha256Hash,
 };
 use postgres::Store as KolmePostgresStore;
 pub use r#trait::KolmeBackingStore;
@@ -54,6 +54,12 @@ impl KolmeStore {
         Ok(KolmeStore::KolmeFjallStore(fjall::Store::new(fjall_dir)?))
     }
 
+    pub fn new_fjall_with(fjall_dir: impl AsRef<Path>, cache_size: usize) -> anyhow::Result<Self> {
+        Ok(KolmeStore::KolmeFjallStore(fjall::Store::new_with(
+            fjall_dir, cache_size,
+        )?))
+    }
+
     pub fn new_in_memory() -> Self {
         KolmeStore::KolmeInMemoryStore(in_memory::Store::default())
     }
@@ -63,9 +69,9 @@ impl KolmeStore {
         height: u64,
     ) -> Result<Option<Arc<Block>>, KolmeStoreError>
     where
-        Block: serde::de::DeserializeOwned + MerkleDeserialize + MerkleSerialize,
-        FrameworkState: MerkleDeserialize + MerkleSerialize,
-        AppState: MerkleDeserialize + MerkleSerialize,
+        Block: serde::de::DeserializeOwned + MerkleDeserializeRaw + MerkleSerializeRaw,
+        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
+        AppState: MerkleDeserializeRaw + MerkleSerializeRaw,
     {
         Ok(match &self {
             KolmeStore::KolmePostgresStore(kolme_store_postgres) => kolme_store_postgres
