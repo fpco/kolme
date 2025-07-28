@@ -19,16 +19,16 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<()> {
         let dest = tokio::fs::File::create(dest).await?;
         let mut dest = BufWriter::new(dest);
-        let mut stored_hashes = HashSet::new();
         let mut curr = match range.start_bound() {
             Bound::Included(start) => *start,
             Bound::Excluded(start) => start.next(),
             Bound::Unbounded => BlockHeight::start(),
         };
+        let mut written_layers = HashSet::new();
 
         while range.contains(&curr) {
             tracing::info!("Exporting block {curr}");
-            self.export_block(&mut dest, &mut stored_hashes, curr)
+            self.export_block(&mut dest, &mut written_layers, curr)
                 .await?;
             curr = curr.next();
         }
@@ -42,7 +42,7 @@ impl<App: KolmeApp> Kolme<App> {
     async fn export_block(
         &self,
         dest: &mut BufWriter<tokio::fs::File>,
-        stored_hashes: &mut std::collections::HashSet<Sha256Hash>,
+        written_layers: &mut std::collections::HashSet<Sha256Hash>,
         height: BlockHeight,
     ) -> Result<()> {
         let block = self.load_block(height).await?;
@@ -50,9 +50,7 @@ impl<App: KolmeApp> Kolme<App> {
         let mut work_list = vec![];
 
         let mut push_with_check = |contents: Arc<MerkleContents>| {
-            if !stored_hashes.contains(&contents.hash) {
-                let was_added = stored_hashes.insert(contents.hash);
-                debug_assert!(was_added);
+            if !written_layers.contains(&contents.hash) {
                 work_list.push((contents, true));
             }
         };
@@ -64,15 +62,12 @@ impl<App: KolmeApp> Kolme<App> {
             if check_children {
                 work_list.push((contents.clone(), false));
                 for child in contents.children.iter() {
-                    if !stored_hashes.contains(&child.hash) {
+                    if !written_layers.contains(&child.hash) {
                         work_list.push((child.clone(), true));
-                        let was_added = stored_hashes.insert(child.hash);
-                        debug_assert!(was_added);
                     }
                 }
             } else {
-                write_layer(dest, &contents).await?;
-                debug_assert!(stored_hashes.contains(&contents.hash));
+                write_layer(dest, &contents, written_layers).await?;
             }
         }
         write_block(dest, &block.block).await?;
@@ -83,6 +78,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn import_blocks_from<P: AsRef<Path>>(&self, src: P) -> Result<()> {
         let src = tokio::fs::File::open(src).await?;
         let mut src = tokio::io::BufReader::new(src);
+        let mut hashes = HashSet::new();
         loop {
             let b = match src.read_u8().await {
                 Ok(b) => b,
@@ -104,27 +100,39 @@ impl<App: KolmeApp> Kolme<App> {
                     src.read_exact(&mut payload).await?;
                     let children_len = src.read_u32().await?;
                     let mut children = SmallVec::with_capacity(usize::try_from(children_len)?);
+                    let hash = Sha256Hash::hash(&payload);
                     for _ in 0..children_len {
                         let mut buff = [0u8; 32];
                         src.read_exact(&mut buff).await?;
-                        let hash = Sha256Hash::from_array(buff);
-                        anyhow::ensure!(self.has_merkle_hash(hash).await?);
-                        children.push(hash);
+                        let child = Sha256Hash::from_array(buff);
+                        anyhow::ensure!(
+                            hashes.contains(&child),
+                            "Child hash {} was not previously written.",
+                            child
+                        );
+                        anyhow::ensure!(self.has_merkle_hash(child).await?, "Merkle hash {child} of a child not found in Merkle store for parent {hash}");
+                        children.push(child);
                     }
-                    let hash = Sha256Hash::hash(&payload);
                     let layer = MerkleLayerContents {
                         payload: payload.into(),
                         children,
                     };
                     self.add_merkle_layer(hash, &layer).await?;
+                    hashes.insert(hash);
                 }
                 1 => {
                     // Block
                     let len = usize::try_from(src.read_u32().await?)?;
                     let mut buff = vec![0; len];
                     src.read_exact(&mut buff).await?;
-                    let block = serde_json::from_slice(&buff)?;
-                    self.add_block_with_state(block).await?;
+                    let block: Arc<SignedBlock<App::Message>> = serde_json::from_slice(&buff)?;
+                    let height = block.height();
+                    if self.has_block(height).await? {
+                        tracing::info!("Block height {height} already present");
+                    } else {
+                        tracing::info!("Writing block {height}");
+                        self.add_block_with_state(block).await?;
+                    }
                 }
                 b => anyhow::bail!("Import blocks failed, found unexpected byte {b}"),
             }
@@ -135,7 +143,11 @@ impl<App: KolmeApp> Kolme<App> {
 async fn write_layer(
     dest: &mut BufWriter<tokio::fs::File>,
     contents: &MerkleContents,
+    written_layers: &mut HashSet<Sha256Hash>,
 ) -> Result<()> {
+    if written_layers.contains(&contents.hash) {
+        return Ok(());
+    }
     dest.write_u8(0).await?;
     dest.write_u32(u32::try_from(contents.payload.len()).context("Payload is too large")?)
         .await?;
@@ -143,8 +155,15 @@ async fn write_layer(
     dest.write_u32(u32::try_from(contents.children.len()).context("Too many children")?)
         .await?;
     for child in contents.children.iter() {
+        anyhow::ensure!(
+            written_layers.contains(&child.hash),
+            "Logic error, writing layer {} but its child {} is not yet written",
+            contents.hash,
+            child.hash
+        );
         dest.write_all(child.hash.as_array()).await?;
     }
+    written_layers.insert(contents.hash);
     Ok(())
 }
 
