@@ -169,9 +169,14 @@ impl<App: KolmeApp> Processor<App> {
         .await;
         if let Err(e) = &res {
             // kolme#144 - Discard unneeded fields
-            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
+            if let Some(KolmeStoreError::ConflictingBlockInDb {
+                height,
+                adding,
+                existing,
+            }) = e.downcast_ref()
+            {
                 tracing::warn!(
-                    "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this"
+                    "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this. Height: {height}. Adding: {adding}. Existing: {existing}."
                 );
             } else {
                 tracing::warn!("Giving up on adding transaction {txhash}: {e}");

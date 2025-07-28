@@ -14,13 +14,7 @@ use sqlx::{
     postgres::{PgAdvisoryLock, PgConnectOptions},
     Executor, Postgres,
 };
-use std::{
-    num::NonZeroUsize,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, OnceLock,
-    },
-};
+use std::{num::NonZeroUsize, sync::Arc};
 mod merkle;
 
 pub struct ConstructLock {
@@ -41,8 +35,6 @@ type MerkleCache = Arc<Mutex<LruCache<Sha256Hash, MerkleLayerContents>>>;
 pub struct Store {
     pool: sqlx::PgPool,
     merkle_cache: MerkleCache,
-    latest_block: Arc<OnceLock<AtomicU64>>,
-    latest_archived_block: Arc<OnceLock<AtomicU64>>,
 }
 
 impl Store {
@@ -74,36 +66,8 @@ impl Store {
             .context("Unable to execute migrations")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
 
-        let latest_block_query = sqlx::query_scalar!(
-            r#"
-            SELECT height
-            FROM blocks
-            ORDER BY height DESC
-            LIMIT 1
-            "#
-        )
-        .fetch_optional(&pool);
-        let latest_archived_block_query = sqlx::query_scalar!(
-            r#"
-            SELECT height as "height!" FROM latest_archived_block_height
-            "#
-        )
-        .fetch_optional(&pool);
-
-        let (latest_block, latest_archived_block) =
-            tokio::try_join!(latest_block_query, latest_archived_block_query)
-                .context("Unable to query for latest height and archived block height")?;
-
         Ok(Self {
             pool,
-            latest_block: Arc::new(match latest_block {
-                Some(height) => OnceLock::from(AtomicU64::new(height as u64)),
-                None => OnceLock::new(),
-            }),
-            latest_archived_block: Arc::new(match latest_archived_block {
-                Some(height) => OnceLock::from(AtomicU64::new(height as u64)),
-                None => OnceLock::new(),
-            }),
             merkle_cache: Arc::new(Mutex::new(LruCache::new(
                 NonZeroUsize::new(cache_size).context("new_with_options: cache size of 0")?,
             ))),
@@ -246,11 +210,19 @@ impl KolmeBackingStore for Store {
     }
 
     async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError> {
-        let Some(height) = self.latest_block.get() else {
-            return Ok(None);
-        };
-
-        Ok(Some(height.load(Ordering::Relaxed)))
+        sqlx::query_scalar!(
+            r#"
+            SELECT height
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1
+            "#
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(KolmeStoreError::custom)?
+        .map(|x| u64::try_from(x).map_err(KolmeStoreError::custom))
+        .transpose()
     }
     async fn load_block<Block: serde::de::DeserializeOwned>(
         &self,
@@ -385,7 +357,9 @@ impl KolmeBackingStore for Store {
                         } else {
                             return Err(KolmeStoreError::ConflictingBlockInDb {
                                 height: *height,
-                                hash: Sha256Hash::from_hash(&actualhash)
+                                existing: Sha256Hash::from_hash(&actualhash)
+                                    .map_err(KolmeStoreError::custom)?,
+                                adding: Sha256Hash::from_hash(blockhash)
                                     .map_err(KolmeStoreError::custom)?,
                             });
                         }
@@ -398,10 +372,6 @@ impl KolmeBackingStore for Store {
         } else {
             tx.commit().await.map_err(KolmeStoreError::custom)?;
         }
-
-        self.latest_block
-            .get_or_init(|| AtomicU64::new(*height))
-            .fetch_max(*height, Ordering::SeqCst);
 
         Ok(())
     }
@@ -433,10 +403,15 @@ impl KolmeBackingStore for Store {
     }
 
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
-        Ok(self
-            .latest_archived_block
-            .get()
-            .map(|height| height.load(Ordering::Relaxed)))
+        sqlx::query_scalar!(
+            r#"
+            SELECT height as "height!" FROM latest_archived_block_height
+            "#
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|x| u64::try_from(x).map_err(anyhow::Error::from))
+        .transpose()
     }
 
     async fn archive_block(&self, height: u64) -> anyhow::Result<()> {
@@ -471,10 +446,6 @@ impl KolmeBackingStore for Store {
         tx.commit()
             .await
             .context("Unable to commit archive block height changes")?;
-
-        self.latest_archived_block
-            .get_or_init(|| AtomicU64::new(height))
-            .fetch_max(height, Ordering::SeqCst);
 
         Ok(())
     }

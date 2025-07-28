@@ -11,8 +11,12 @@ pub enum KolmeStoreError {
     #[error("KolmeStore::delete_block is not supported by this store: {0}")]
     UnsupportedDeleteOperation(&'static str),
     // kolme#144 - Reports a diverging hash with same height
-    #[error("Block with height {height} in database with different hash {hash}")]
-    ConflictingBlockInDb { height: u64, hash: Sha256Hash },
+    #[error("Block with height {height} in database with different hash {existing}, trying to add {adding}")]
+    ConflictingBlockInDb {
+        height: u64,
+        adding: Sha256Hash,
+        existing: Sha256Hash,
+    },
     // kolme#144 - Reports a double insert (Block already exists with same hash and insert)
     #[error("Block already in database: {height}")]
     MatchingBlockAlreadyInserted { height: u64 },

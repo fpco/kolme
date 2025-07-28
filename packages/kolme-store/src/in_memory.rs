@@ -95,7 +95,8 @@ impl KolmeBackingStore for Store {
             if existing_hash != &block.blockhash {
                 return Err(KolmeStoreError::ConflictingBlockInDb {
                     height,
-                    hash: *existing_hash,
+                    existing: *existing_hash,
+                    adding: block.blockhash,
                 });
             } else {
                 return Err(KolmeStoreError::MatchingBlockAlreadyInserted { height });
