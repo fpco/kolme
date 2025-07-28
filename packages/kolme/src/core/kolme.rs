@@ -335,13 +335,32 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Resync with the database.
     pub async fn resync(&self) -> Result<()> {
-        loop {
-            let next = self.inner.current_block.read().get_next_height();
-            let Some(block) = self.inner.store.load_signed_block(next).await? else {
-                break Ok(());
-            };
-            self.add_block(block).await?;
+        if let Some(height) = self.inner.store.load_latest_block().await? {
+            if self.read().get_next_height() < height.next() {
+                let block = self
+                    .inner
+                    .store
+                    .load_signed_block(height)
+                    .await?
+                    .with_context(|| format!("Expected block {height} not found during resync"))?;
+
+                let state = BlockState {
+                    blockhash: block.hash(),
+                    framework_state: Arc::new(
+                        self.load_framework_state(block.as_inner().framework_state)
+                            .await?,
+                    ),
+                    app_state: Arc::new(self.load_app_state(block.as_inner().app_state).await?),
+                };
+                let block_info = BlockInfo { block, state };
+
+                let mut guard = self.inner.current_block.write();
+                if guard.get_next_height() < height.next() {
+                    *guard = Arc::new(MaybeBlockInfo::Some(block_info));
+                }
+            }
         }
+        Ok(())
     }
 
     /// Validate and append the given block.
@@ -826,6 +845,12 @@ impl<App: KolmeApp> Kolme<App> {
             // First subscribe to avoid a race condition...
             let mut recv = self.subscribe();
             loop {
+                // TODO: Consider if we need a better mechanism overall here.
+                // We resync here because it's possible that we added a new block via state sync but haven't loaded it yet. The fact that this bug could exist indicates we should have a better notification and block loading system.
+                if let Err(e) = self.resync().await {
+                    tracing::error!("Error resyncing in wait_for_active_version: {e}");
+                }
+
                 // And then check if we are at the desired version.
                 if self.read().get_chain_version() == self.get_code_version() {
                     return;
