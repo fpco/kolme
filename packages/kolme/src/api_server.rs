@@ -47,6 +47,7 @@ pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
         .route("/block/{height}", get(get_block))
         .route("/only/block/{height}", get(get_only_block))
         .route("/notifications", get(ws_handler::<App>))
+        .route("/account-id/wallet/{wallet}", get(account_id_for_wallet))
 }
 
 async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResponse {
@@ -251,4 +252,37 @@ pub enum ApiNotification<AppMessage> {
     FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
     LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
     EvictMempoolTransaction(Arc<SignedTaggedJson<TxHash>>),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountIdResp {
+    NotFound {},
+    Found { account_id: AccountId },
+}
+
+async fn account_id_for_wallet<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Path(wallet): Path<Wallet>,
+) -> Result<Json<AccountIdResp>, axum::response::Response> {
+    async {
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            kolme.wait_account_for_wallet(&wallet),
+        )
+        .await
+        .ok()
+        .transpose()
+        .map(|res| match res {
+            Some(account_id) => AccountIdResp::Found { account_id },
+            None => AccountIdResp::NotFound {},
+        })
+    }
+    .await
+    .map(Json)
+    .map_err(|e| {
+        let mut res = e.to_string().into_response();
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        res
+    })
 }

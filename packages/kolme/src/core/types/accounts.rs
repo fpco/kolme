@@ -211,6 +211,14 @@ impl Accounts {
         Some((*account_id, self.accounts.get(account_id).unwrap()))
     }
 
+    pub(in crate::core) fn get_account_for_wallet(
+        &self,
+        wallet: &Wallet,
+    ) -> Option<(AccountId, &Account)> {
+        let account_id = self.wallets.get(wallet)?;
+        Some((*account_id, self.accounts.get(account_id).unwrap()))
+    }
+
     pub(in crate::core) fn remove_pubkey_from_account(
         &mut self,
         id: AccountId,

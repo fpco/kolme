@@ -889,6 +889,22 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Wait for the given wallet to have an account ID and then return it.
+    pub async fn wait_account_for_wallet(&self, wallet: &Wallet) -> Result<AccountId> {
+        loop {
+            let kolme = self.read();
+            if let Some((id, _)) = kolme
+                .get_framework_state()
+                .accounts
+                .get_account_for_wallet(wallet)
+            {
+                break Ok(id);
+            }
+
+            self.wait_for_block(kolme.get_next_height()).await?;
+        }
+    }
+
     /// Wait until the given bridge event ID lands.
     pub async fn wait_for_bridge_event(
         &self,
