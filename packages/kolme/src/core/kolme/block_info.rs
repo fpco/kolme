@@ -48,17 +48,22 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
 
     pub(super) async fn load(store: &KolmeStore<App>, app: &App) -> Result<Self> {
         let output = store.load_latest_block().await?;
+        tracing::info!("Latest block: {output:?}");
         let res = match output {
             Some(height) => {
+                tracing::info!("Loading block {height}");
                 let storable = store.load_block(height).await?.with_context(|| {
                     format!(
                         "Latest block height is {height}, but it wasn't found in the data store"
                     )
                 })?;
+                tracing::info!("Loading framework state for {height}");
                 let framework_state = store
                     .load(storable.block.as_inner().framework_state)
                     .await?;
+                tracing::info!("Loading app state for {height}");
                 let app_state = store.load(storable.block.as_inner().app_state).await?;
+                tracing::info!("Loading logs for {height}");
                 let state = BlockState {
                     blockhash: BlockHash(storable.blockhash),
                     framework_state,

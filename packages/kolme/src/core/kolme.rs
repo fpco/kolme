@@ -653,9 +653,14 @@ impl<App: KolmeApp> Kolme<App> {
         code_version: impl Into<String>,
         store: KolmeStore<App>,
     ) -> Result<Self> {
+        tracing::info!("Initializing a new Kolme, starting by loading the latest block");
         // FIXME in the future do some validation of code version, and allow
         // for explicit events for upgrading to a newer code version
         let current_block = MaybeBlockInfo::<App>::load(&store, &app).await?;
+        tracing::info!(
+            "Latest block is loaded: next height is {}",
+            current_block.get_next_height()
+        );
         let inner = KolmeInner {
             store,
             app,
@@ -679,12 +684,15 @@ impl<App: KolmeApp> Kolme<App> {
             tx_await_duration: tokio::time::Duration::from_secs(10),
         };
 
+        tracing::info!("Performing an initial resync...");
         kolme.resync().await?;
+        tracing::info!("Initial resync complete");
         kolme
             .inner
             .store
             .validate_genesis_info(kolme.get_app().genesis_info())
             .await?;
+        tracing::info!("Validated genesis info");
 
         Ok(kolme)
     }
