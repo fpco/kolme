@@ -1,4 +1,4 @@
-mod api_server;
+pub mod api_server;
 mod approver;
 mod common;
 mod core;
