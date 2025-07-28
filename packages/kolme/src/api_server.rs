@@ -4,7 +4,7 @@ use axum::{
         Path, Query, State, WebSocketUpgrade,
     },
     http::header::CONTENT_TYPE,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, put},
     Json, Router,
 };
@@ -127,6 +127,17 @@ async fn get_block<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
     Path(height): Path<BlockHeight>,
 ) -> impl IntoResponse {
+    get_block_inner(&kolme, height).await.map_err(|e| {
+        let mut res = e.to_string().into_response();
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        res
+    })
+}
+
+async fn get_block_inner<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    height: BlockHeight,
+) -> Result<Response, anyhow::Error> {
     #[derive(serde::Serialize)]
     struct Response<'a, App: KolmeApp> {
         blockhash: Sha256Hash,
@@ -135,25 +146,20 @@ async fn get_block<App: KolmeApp>(
         logs: &'a [Vec<String>],
     }
 
-    match kolme.get_block(height).await {
-        Ok(Some(block)) => {
-            let resp: Response<'_, App> = Response {
-                blockhash: block.blockhash,
-                txhash: block.txhash,
-                block: &block.block,
-                logs: &block.logs,
-            };
+    let Some(block) = kolme.get_block(height).await? else {
+        return Ok(Json(serde_json::json!(null)).into_response());
+    };
+    let logs = kolme
+        .get_merkle_by_hash::<Vec<_>>(block.block.0.message.as_inner().logs)
+        .await?;
+    let resp: Response<'_, App> = Response {
+        blockhash: block.blockhash,
+        txhash: block.txhash,
+        block: &block.block,
+        logs: &logs,
+    };
 
-            Json(resp).into_response()
-        }
-        Ok(None) => Json(serde_json::json!(null)).into_response(),
-        Err(e) => {
-            let mut res = e.to_string().into_response();
-            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-
-            res
-        }
-    }
+    Ok(Json(resp).into_response())
 }
 
 async fn ws_handler<App: KolmeApp>(
@@ -177,7 +183,20 @@ async fn handle_websocket<App: KolmeApp>(
             Notification::NewBlock(block) => {
                 let height = block.height();
                 let logs = match kolme.get_block(height).await {
-                    Ok(Some(block)) => block.logs.clone(),
+                    Ok(Some(block)) => {
+                        match kolme
+                            .get_merkle_by_hash(block.block.0.message.as_inner().logs)
+                            .await
+                        {
+                            Ok(logs) => logs,
+                            Err(e) => {
+                                tracing::error!(
+                                    "No logs found in Merkle store for block {height}: {e}"
+                                );
+                                break;
+                            }
+                        }
+                    }
                     Ok(None) => {
                         tracing::error!(
                             "No information about logs for the awaited block at {height}"

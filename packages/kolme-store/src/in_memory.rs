@@ -55,14 +55,12 @@ impl KolmeBackingStore for Store {
         Ok(Some(*key))
     }
 
-    async fn load_block<Block, FrameworkState, AppState>(
+    async fn load_block<Block>(
         &self,
         height: u64,
-    ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
+    ) -> Result<Option<StorableBlock<Block>>, KolmeStoreError>
     where
         Block: serde::de::DeserializeOwned + MerkleDeserializeRaw + MerkleSerializeRaw,
-        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
-        AppState: MerkleDeserializeRaw + MerkleSerializeRaw,
     {
         let mut guard = self.0.write().await;
         let Some(hash) = guard.blocks.get(&height) else {
@@ -84,14 +82,9 @@ impl KolmeBackingStore for Store {
         Ok(self.0.read().await.txhashes.get(&txhash).copied())
     }
 
-    async fn add_block<Block, FrameworkState, AppState>(
-        &self,
-        block: &StorableBlock<Block, FrameworkState, AppState>,
-    ) -> Result<(), KolmeStoreError>
+    async fn add_block<Block>(&self, block: &StorableBlock<Block>) -> Result<(), KolmeStoreError>
     where
         Block: serde::Serialize + MerkleSerializeRaw,
-        FrameworkState: MerkleSerializeRaw,
-        AppState: MerkleSerializeRaw,
     {
         let height = block.height;
         let txhash = block.txhash;
@@ -179,15 +172,5 @@ impl KolmeBackingStore for Store {
 
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
         Ok(self.0.read().await.latest_archived_block)
-    }
-
-    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>> {
-        Ok(None)
-    }
-
-    async fn set_next_missing_layer(&self, _height: u64) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!(
-            "In memory store does not support missing layers feature"
-        ))
     }
 }

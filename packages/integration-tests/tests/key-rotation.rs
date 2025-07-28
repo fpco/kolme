@@ -314,8 +314,11 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         .unwrap();
 
     let block = kolme.get_block(block.height()).await.unwrap().unwrap();
-    let chain_state = block
-        .framework_state
+    let framework_state = kolme
+        .load_framework_state(block.block.as_inner().framework_state)
+        .await
+        .unwrap();
+    let chain_state = framework_state
         .get_chain_states()
         .get(ExternalChain::OsmosisLocal)
         .unwrap();
@@ -396,8 +399,11 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
         .unwrap();
 
     let block = kolme.get_block(block.height()).await.unwrap().unwrap();
-    let chain_state = block
-        .framework_state
+    let framework_state = kolme
+        .load_framework_state(block.block.as_inner().framework_state)
+        .await
+        .unwrap();
+    let chain_state = framework_state
         .get_chain_states()
         .get(ExternalChain::OsmosisLocal)
         .unwrap();
@@ -532,8 +538,11 @@ async fn test_solana_contract_update(self_replace: bool) {
         .unwrap();
 
     let block = kolme.get_block(block.height()).await.unwrap().unwrap();
-    let chain_state = block
-        .framework_state
+    let framework_state = kolme
+        .load_framework_state(block.block.as_inner().framework_state)
+        .await
+        .unwrap();
+    let chain_state = framework_state
         .get_chain_states()
         .get(ExternalChain::SolanaLocal)
         .unwrap();
@@ -615,8 +624,11 @@ async fn test_solana_contract_update(self_replace: bool) {
         .unwrap();
 
     let block = kolme.get_block(block.height()).await.unwrap().unwrap();
-    let chain_state = block
-        .framework_state
+    let framework_state = kolme
+        .load_framework_state(block.block.as_inner().framework_state)
+        .await
+        .unwrap();
+    let chain_state = framework_state
         .get_chain_states()
         .get(ExternalChain::SolanaLocal)
         .unwrap();

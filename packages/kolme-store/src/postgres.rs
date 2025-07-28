@@ -1,6 +1,6 @@
 use crate::{
-    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock,
-    DEFAULT_CACHE_SIZE,
+    r#trait::KolmeBackingStore, BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError,
+    StorableBlock, DEFAULT_CACHE_SIZE,
 };
 use anyhow::Context as _;
 use lru::LruCache;
@@ -252,29 +252,20 @@ impl KolmeBackingStore for Store {
 
         Ok(Some(height.load(Ordering::Relaxed)))
     }
-    async fn load_block<
-        Block: serde::de::DeserializeOwned,
-        FrameworkState: MerkleDeserializeRaw,
-        AppState: MerkleDeserializeRaw,
-    >(
+    async fn load_block<Block: serde::de::DeserializeOwned>(
         &self,
         height: u64,
-    ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError> {
+    ) -> Result<Option<StorableBlock<Block>>, KolmeStoreError> {
         let height_i64 = i64::try_from(height).map_err(KolmeStoreError::custom)?;
         struct Output {
             blockhash: Vec<u8>,
             txhash: Vec<u8>,
             rendered: String,
-            framework_state_hash: Vec<u8>,
-            app_state_hash: Vec<u8>,
-            logs_hash: Vec<u8>,
         }
         let output = sqlx::query_as!(
             Output,
             r#"
-                SELECT
-                    blockhash, txhash, rendered,
-                    framework_state_hash, app_state_hash, logs_hash
+                SELECT blockhash, txhash, rendered
                 FROM blocks
                 WHERE height=$1
                 LIMIT 1
@@ -290,9 +281,6 @@ impl KolmeBackingStore for Store {
             blockhash,
             txhash,
             rendered,
-            framework_state_hash,
-            app_state_hash,
-            logs_hash,
         }) = output
         else {
             return Ok(None);
@@ -304,19 +292,6 @@ impl KolmeBackingStore for Store {
 
         let blockhash = to_sha256hash(&blockhash)?;
         let txhash = to_sha256hash(&txhash)?;
-        let framework_state_hash = to_sha256hash(&framework_state_hash)?;
-        let app_state_hash = to_sha256hash(&app_state_hash)?;
-        let logs_hash = to_sha256hash(&logs_hash)?;
-
-        let mut store1 = self.new_store();
-        let mut store2 = self.new_store();
-        let mut store3 = self.new_store();
-
-        let (framework_state, app_state, logs) = tokio::try_join!(
-            merkle_map::load(&mut store1, framework_state_hash),
-            merkle_map::load(&mut store2, app_state_hash),
-            merkle_map::load(&mut store3, logs_hash),
-        )?;
 
         let block = serde_json::from_str(&rendered).map_err(KolmeStoreError::custom)?;
 
@@ -324,9 +299,6 @@ impl KolmeBackingStore for Store {
             height,
             blockhash,
             txhash,
-            framework_state,
-            app_state,
-            logs,
             block: Arc::new(block),
         }))
     }
@@ -349,47 +321,26 @@ impl KolmeBackingStore for Store {
         merkle.contains_hash(hash).await
     }
 
-    async fn add_block<
-        Block: serde::Serialize,
-        FrameworkState: MerkleSerializeRaw,
-        AppState: MerkleSerializeRaw,
-    >(
+    async fn add_block<Block: serde::Serialize + HasBlockHashes>(
         &self,
         StorableBlock {
             height,
             blockhash,
             txhash,
-            framework_state,
-            app_state,
-            logs,
             block,
-        }: &StorableBlock<Block, FrameworkState, AppState>,
+        }: &StorableBlock<Block>,
     ) -> Result<(), KolmeStoreError> {
         let height_i64 = i64::try_from(*height).map_err(KolmeStoreError::custom)?;
 
-        let mut store1 = self.new_store();
-        let mut store2 = self.new_store();
-        let mut store3 = self.new_store();
         let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
-
-        let (framework_state, app_state, logs) = tokio::try_join!(
-            merkle_map::save(&mut store1, framework_state),
-            merkle_map::save(&mut store2, app_state),
-            merkle_map::save(&mut store3, logs)
-        )?;
-
-        let framework_state_hash = framework_state.hash;
-        let app_state_hash = app_state.hash;
-        let logs_hash = logs.hash;
-
-        self.consume_stores(&mut *tx, [store1, store2, store3])
-            .await?;
 
         let blockhash = blockhash.as_array().as_slice();
         let txhash = txhash.as_array().as_slice();
-        let framework_state_hash = framework_state_hash.as_array().as_slice();
-        let app_state_hash = app_state_hash.as_array().as_slice();
-        let logs_hash = logs_hash.as_array().as_slice();
+        let BlockHashes {
+            framework_state,
+            app_state,
+            logs,
+        } = block.get_block_hashes();
         let rendered = serde_json::to_string(&block).map_err(KolmeStoreError::custom)?;
 
         let res = sqlx::query!(
@@ -402,9 +353,9 @@ impl KolmeBackingStore for Store {
             blockhash,
             rendered,
             txhash,
-            framework_state_hash,
-            app_state_hash,
-            logs_hash,
+            framework_state.as_array().as_slice(),
+            app_state.as_array().as_slice(),
+            logs.as_array().as_slice(),
         )
         .execute(&mut *tx)
         .await;
@@ -526,15 +477,5 @@ impl KolmeBackingStore for Store {
             .fetch_max(height, Ordering::SeqCst);
 
         Ok(())
-    }
-
-    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>> {
-        Ok(None)
-    }
-
-    async fn set_next_missing_layer(&self, _height: u64) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!(
-            "PostgreSQL store does not support missing layers feature"
-        ))
     }
 }

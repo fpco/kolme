@@ -444,15 +444,15 @@ impl<App: KolmeApp> Kolme<App> {
         let logs: Arc<[_]> = logs.into();
         let height = signed_block.height();
 
-        let framework_state_contents = merkle_map::api::serialize(&framework_state)?;
+        let framework_state_contents = self.inner.store.save(&framework_state).await?;
         anyhow::ensure!(
             framework_state_contents.hash == signed_block.0.message.as_inner().framework_state
         );
 
-        let app_state_contents = merkle_map::api::serialize(&app_state)?;
+        let app_state_contents = self.inner.store.save(&app_state).await?;
         anyhow::ensure!(app_state_contents.hash == signed_block.0.message.as_inner().app_state);
 
-        let logs_contents = merkle_map::api::serialize(&logs)?;
+        let logs_contents = self.inner.store.save(&logs).await?;
         anyhow::ensure!(logs_contents.hash == signed_block.0.message.as_inner().logs);
 
         self.inner
@@ -462,12 +462,6 @@ impl<App: KolmeApp> Kolme<App> {
                 blockhash: signed_block.hash().0,
                 txhash: signed_block.tx().hash().0,
                 block: signed_block.clone(),
-                // TODO possible future optimization, either use MerkleLockable
-                // around these fields or pass in the _contents values from
-                // above to avoid double-serialization
-                framework_state: framework_state.clone(),
-                app_state: app_state.clone(),
-                logs: logs.clone(),
             })
             .await?;
 
@@ -483,7 +477,6 @@ impl<App: KolmeApp> Kolme<App> {
 
             *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
                 block: signed_block.clone(),
-                logs,
                 state: BlockState {
                     blockhash: signed_block.hash(),
                     framework_state,
@@ -542,12 +535,6 @@ impl<App: KolmeApp> Kolme<App> {
                 .await?,
         );
         let app_state = Arc::new(self.inner.store.load::<App::State>(block.app_state).await?);
-        let logs = Arc::<[Vec<String>]>::from(
-            self.inner
-                .store
-                .load::<Vec<Vec<String>>>(block.logs)
-                .await?,
-        );
 
         self.inner
             .store
@@ -556,9 +543,6 @@ impl<App: KolmeApp> Kolme<App> {
                 blockhash: signed_block.hash().0,
                 txhash: signed_block.tx().hash().0,
                 block: signed_block.clone(),
-                framework_state: framework_state.clone(),
-                app_state: app_state.clone(),
-                logs: logs.clone(),
             })
             .await?;
 
@@ -573,7 +557,6 @@ impl<App: KolmeApp> Kolme<App> {
 
         *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
             block: signed_block.clone(),
-            logs,
             state: BlockState {
                 blockhash: signed_block.hash(),
                 framework_state,
@@ -931,12 +914,30 @@ impl<App: KolmeApp> Kolme<App> {
             .get_block(height)
             .await?
             .with_context(|| format!("get_log_events_for({height}: block not available"))?;
-        Ok(block
-            .logs
+        let logs = self.load_logs(block.block.as_inner().logs).await?;
+        Ok(logs
             .iter()
             .flatten()
             .flat_map(|s| serde_json::from_str::<LogEvent>(s).ok())
             .collect())
+    }
+
+    /// Load up logs by the given Merkle hash.
+    pub async fn load_logs(&self, hash: Sha256Hash) -> Result<Vec<Vec<String>>, MerkleSerialError> {
+        self.get_merkle_by_hash(hash).await
+    }
+
+    /// Load up framework state by the given Merkle hash.
+    pub async fn load_framework_state(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<FrameworkState, MerkleSerialError> {
+        self.get_merkle_by_hash(hash).await
+    }
+
+    /// Load up app state by the given Merkle hash.
+    pub async fn load_app_state(&self, hash: Sha256Hash) -> Result<App::State, MerkleSerialError> {
+        self.get_merkle_by_hash(hash).await
     }
 
     pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
@@ -1079,6 +1080,14 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.store.add_merkle_layer(hash, layer).await
     }
 
+    /// Get the contents of a Merkle hash.
+    pub(crate) async fn get_merkle_by_hash<T: MerkleDeserializeRaw>(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<T, MerkleSerialError> {
+        self.inner.store.load(hash).await
+    }
+
     /// Ingest all blocks from the given Kolme into this one.
     pub async fn ingest_blocks_from(&self, other: &Self) -> Result<()> {
         loop {
@@ -1086,23 +1095,47 @@ impl<App: KolmeApp> Kolme<App> {
             let Some(block) = other.get_block(to_archive).await? else {
                 break Ok(());
             };
-            self.inner
-                .store
-                .save(
-                    &block.framework_state,
-                    block.block.0.message.as_inner().framework_state,
-                )
+            self.ingest_layer_from(other, block.block.as_inner().framework_state)
                 .await?;
-            self.inner
-                .store
-                .save(&block.app_state, block.block.0.message.as_inner().app_state)
+            self.ingest_layer_from(other, block.block.as_inner().app_state)
                 .await?;
-            self.inner
-                .store
-                .save(&block.logs, block.block.0.message.as_inner().logs)
+            self.ingest_layer_from(other, block.block.as_inner().logs)
                 .await?;
             self.add_block_with_state(block.block).await?;
         }
+    }
+
+    async fn ingest_layer_from(&self, other: &Self, hash: Sha256Hash) -> Result<()> {
+        enum Work {
+            Process(Sha256Hash),
+            Write(Sha256Hash, Box<MerkleLayerContents>),
+        }
+        let mut work_queue = vec![Work::Process(hash)];
+        while let Some(work) = work_queue.pop() {
+            match work {
+                Work::Process(hash) => {
+                    if self.has_merkle_hash(hash).await? {
+                        continue;
+                    }
+                    let layer = other
+                        .get_merkle_layer(hash)
+                        .await?
+                        .with_context(|| format!("Missing layer {hash} in source store"))?;
+                    let children = layer.children.clone();
+                    work_queue.push(Work::Write(hash, Box::new(layer)));
+                    for child in children {
+                        work_queue.push(Work::Process(child));
+                    }
+                }
+                Work::Write(hash, layer) => {
+                    if self.has_merkle_hash(hash).await? {
+                        continue;
+                    }
+                    self.add_merkle_layer(hash, &layer).await?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1111,7 +1144,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn get_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>> {
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>> {
         self.inner.store.load_block(height).await
     }
 
@@ -1134,71 +1167,10 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn load_block(
         &self,
         height: BlockHeight,
-    ) -> Result<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>> {
+    ) -> Result<StorableBlock<SignedBlock<App::Message>>> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
-    }
-
-    /// Ensure that all states are stored directly as their own Merkle layers.
-    ///
-    /// This is a helper method to workaround a data integrity issue from older versions
-    /// of Kolme. This traverses all blocks in the store and ensures that the framework state, app state, and logs are stored directly in the merkle store. With older versions of Kolme, these were mistakenly only stored in the block data itself.
-    pub async fn fix_missing_layers(&self) -> Result<()> {
-        let Some(mut height) = self.inner.store.get_next_missing_layer().await? else {
-            tracing::info!("Skipping fix_missing_layers since we're using a storage backend that doesn't support it.");
-            return Ok(());
-        };
-        while self.has_block(height).await? {
-            tracing::info!("Attempting to fix missing layers for block height {height}");
-
-            let block = self.load_block(height).await.with_context(|| {
-                format!("fix_missing_layers: error while loading block height {height}")
-            })?;
-            {
-                let contents = merkle_map::api::serialize(&block.framework_state)?;
-                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
-                if !exists {
-                    tracing::info!(
-                        "Saving Merkle layer for {height}/framework_state: {}",
-                        contents.hash
-                    );
-                    self.inner
-                        .store
-                        .save(&block.framework_state, contents.hash)
-                        .await?;
-                }
-            }
-            {
-                let contents = merkle_map::api::serialize(&block.app_state)?;
-                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
-                if !exists {
-                    tracing::info!(
-                        "Saving Merkle layer for {height}/app_state: {}",
-                        contents.hash
-                    );
-                    self.inner
-                        .store
-                        .save(&block.app_state, contents.hash)
-                        .await?;
-                }
-            }
-            {
-                let contents = merkle_map::api::serialize(&block.logs)?;
-                let exists = self.get_merkle_layer(contents.hash).await?.is_some();
-                tracing::debug!("height: {height} logs: {exists}: {}", contents.hash);
-                if !exists {
-                    tracing::info!("Saving Merkle layer for {height}/logs: {}", contents.hash);
-                    self.inner.store.save(&block.logs, contents.hash).await?;
-                }
-            }
-
-            height = height.next();
-            self.inner.store.set_next_missing_layer(height).await?;
-        }
-
-        tracing::info!("Finished fixing missing layers, first missing block found is: {height}");
-        Ok(())
     }
 
     /// Marks the current block to not be resynced by the Archiver

@@ -6,6 +6,7 @@ use std::{collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
 
 use base64::Engine;
 use cosmwasm_std::{Binary, CosmosMsg, Uint128};
+use kolme_store::{BlockHashes, HasBlockHashes};
 
 use crate::*;
 
@@ -892,6 +893,10 @@ impl<AppMessage> SignedBlock<AppMessage> {
     pub fn tx(&self) -> &SignedTransaction<AppMessage> {
         &self.0.message.as_inner().tx
     }
+
+    pub fn as_inner(&self) -> &Block<AppMessage> {
+        self.0.message.as_inner()
+    }
 }
 
 impl<AppMessage> MerkleSerialize for SignedBlock<AppMessage> {
@@ -916,6 +921,17 @@ impl<T> PartialEq for SignedBlock<T> {
 }
 
 impl<T> Eq for SignedBlock<T> {}
+
+impl<T> HasBlockHashes for SignedBlock<T> {
+    fn get_block_hashes(&self) -> BlockHashes {
+        let inner = self.0.message.as_inner();
+        BlockHashes {
+            framework_state: inner.framework_state,
+            app_state: inner.app_state,
+            logs: inner.logs,
+        }
+    }
+}
 
 /// The hash of a [Block].
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]

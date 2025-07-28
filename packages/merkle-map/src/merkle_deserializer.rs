@@ -130,4 +130,11 @@ impl MerkleDeserializer {
     pub(crate) fn get_position(&self) -> usize {
         self.pos
     }
+
+    /// Ignore the remaining data, not generating an error on unconsumed input.
+    ///
+    /// Useful for migrating to a new data format that drops old fields.
+    pub fn ignore_remaining(&mut self) {
+        self.pos = self.contents.payload.len()
+    }
 }
