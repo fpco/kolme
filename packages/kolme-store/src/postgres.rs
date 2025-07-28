@@ -369,7 +369,6 @@ impl KolmeBackingStore for Store {
         let mut store1 = self.new_store();
         let mut store2 = self.new_store();
         let mut store3 = self.new_store();
-        let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
 
         let (framework_state, app_state, logs) = tokio::try_join!(
             merkle_map::save(&mut store1, framework_state),
@@ -381,7 +380,7 @@ impl KolmeBackingStore for Store {
         let app_state_hash = app_state.hash;
         let logs_hash = logs.hash;
 
-        self.consume_stores(&mut *tx, [store1, store2, store3])
+        self.consume_stores(&self.pool, [store1, store2, store3])
             .await?;
 
         let blockhash = blockhash.as_array().as_slice();
@@ -405,7 +404,7 @@ impl KolmeBackingStore for Store {
             app_state_hash,
             logs_hash,
         )
-        .execute(&mut *tx)
+        .execute(&self.pool)
         .await;
 
         if let Err(e) = res {
@@ -444,7 +443,7 @@ impl KolmeBackingStore for Store {
             }
             return Err(KolmeStoreError::custom(e));
         } else {
-            tx.commit().await.map_err(KolmeStoreError::custom)?;
+            // tx.commit().await.map_err(KolmeStoreError::custom)?;
         }
 
         self.latest_block
@@ -453,6 +452,7 @@ impl KolmeBackingStore for Store {
 
         Ok(())
     }
+
     async fn add_merkle_layer(
         &self,
         hash: Sha256Hash,
