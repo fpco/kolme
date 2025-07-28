@@ -4,6 +4,7 @@ use cosmos::{
     proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
     SeedPhrase, TxBuilder,
 };
+use gossip::GossipListener;
 use integration_tests::{get_cosmos_connection, prepare_local_contract};
 use kolme::*;
 use rust_decimal::dec;
@@ -160,6 +161,9 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
     );
     testtasks.try_spawn_persistent(Approver::new(kolme.clone(), validator).run());
 
+    let api_server_port = GossipListener::random().unwrap().port;
+    testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(("::", api_server_port)));
+
     kolme
         .wait_for_block(BlockHeight::start().next())
         .await
@@ -240,6 +244,33 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
             denom: "uosmo".to_owned(),
             amount: "5".to_owned(),
         }]
+    );
+
+    // Check the account ID endpoint
+    let expected_account_id = tokio::time::timeout(
+        tokio::time::Duration::from_millis(500),
+        kolme
+            .read()
+            .wait_account_for_wallet(&Wallet(user_wallet.get_address_string())),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let res = reqwest::get(format!(
+        "http://127.0.0.1:{api_server_port}/account-id/wallet/{user_wallet}"
+    ))
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap()
+    .json::<kolme::api_server::AccountIdResp>()
+    .await
+    .unwrap();
+    assert_eq!(
+        res,
+        kolme::api_server::AccountIdResp::Found {
+            account_id: expected_account_id
+        }
     );
 
     // TODO attempt to withdraw more than 5uosmo and confirm that
