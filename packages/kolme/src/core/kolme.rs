@@ -513,12 +513,17 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block: Arc<SignedBlock<App::Message>>,
     ) -> Result<()> {
         // Don't accept blocks we already have
+        let instant = Instant::now();
         if self.has_block(signed_block.height()).await? {
             anyhow::bail!(
                 "Tried to add block with height {}, but it's already present in the store.",
                 signed_block.height()
             );
         }
+        tracing::info!(
+            "Time to check block existence: {}  seconds",
+            instant.elapsed().as_secs()
+        );
         let kolme = self.read();
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
@@ -527,24 +532,45 @@ impl<App: KolmeApp> Kolme<App> {
             "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
         );
 
+        let instant = Instant::now();
         let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
+        tracing::info!(
+            "Time to validate singature: {}  seconds",
+            instant.elapsed().as_secs()
+        );
         let block = signed_block.0.message.as_inner();
 
+        let instant = Instant::now();
         let framework_state = Arc::new(
             self.inner
                 .store
                 .load::<FrameworkState>(block.framework_state)
                 .await?,
         );
+        tracing::info!(
+            "Time to load framework state: {}  seconds",
+            instant.elapsed().as_secs()
+        );
+        let instant = Instant::now();
         let app_state = Arc::new(self.inner.store.load::<App::State>(block.app_state).await?);
+        tracing::info!(
+            "Time to load app state: {}  seconds",
+            instant.elapsed().as_secs()
+        );
+        let instant = Instant::now();
         let logs = Arc::<[Vec<String>]>::from(
             self.inner
                 .store
                 .load::<Vec<Vec<String>>>(block.logs)
                 .await?,
         );
+        tracing::info!(
+            "Time to load logs state: {}  seconds",
+            instant.elapsed().as_secs()
+        );
 
+        let instant = Instant::now();
         self.inner
             .store
             .add_block(StorableBlock {
@@ -557,6 +583,10 @@ impl<App: KolmeApp> Kolme<App> {
                 logs: logs.clone(),
             })
             .await?;
+        tracing::info!(
+            "Time to add storable block: {}  seconds",
+            instant.elapsed().as_secs()
+        );
 
         self.inner.mempool.drop_tx(txhash);
 
