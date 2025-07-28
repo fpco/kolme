@@ -653,8 +653,6 @@ impl<App: KolmeApp> Kolme<App> {
         code_version: impl Into<String>,
         store: KolmeStore<App>,
     ) -> Result<Self> {
-        // FIXME in the future do some validation of code version, and allow
-        // for explicit events for upgrading to a newer code version
         let current_block = MaybeBlockInfo::<App>::load(&store, &app).await?;
         let inner = KolmeInner {
             store,
@@ -679,7 +677,6 @@ impl<App: KolmeApp> Kolme<App> {
             tx_await_duration: tokio::time::Duration::from_secs(10),
         };
 
-        kolme.resync().await?;
         kolme
             .inner
             .store
