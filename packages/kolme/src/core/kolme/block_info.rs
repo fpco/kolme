@@ -1,12 +1,8 @@
-use kolme_store::StorableBlock;
-
 use crate::core::*;
 
 /// Information on a specific block.
 pub(in crate::core) struct BlockInfo<App: KolmeApp> {
     pub(super) block: Arc<SignedBlock<App::Message>>,
-    #[allow(dead_code)]
-    pub(super) logs: Arc<[Vec<String>]>,
     pub(super) state: BlockState<App>,
 }
 
@@ -59,7 +55,19 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
                         "Latest block height is {height}, but it wasn't found in the data store"
                     )
                 })?;
-                MaybeBlockInfo::Some(storable.try_into()?)
+                let framework_state = store
+                    .load(storable.block.as_inner().framework_state)
+                    .await?;
+                let app_state = store.load(storable.block.as_inner().app_state).await?;
+                let state = BlockState {
+                    blockhash: BlockHash(storable.blockhash),
+                    framework_state,
+                    app_state,
+                };
+                MaybeBlockInfo::Some(BlockInfo {
+                    block: storable.block,
+                    state,
+                })
             }
             None => MaybeBlockInfo::None(BlockState {
                 framework_state: Arc::new(FrameworkState::new(app.genesis_info())),
@@ -69,34 +77,5 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
         };
         res.get_framework_state().validate()?;
         Ok(res)
-    }
-}
-
-impl<App: KolmeApp> TryFrom<StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>>
-    for BlockInfo<App>
-{
-    type Error = anyhow::Error;
-
-    fn try_from(
-        StorableBlock {
-            height,
-            blockhash,
-            txhash: _,
-            block,
-            framework_state,
-            app_state,
-            logs,
-        }: StorableBlock<SignedBlock<App::Message>, FrameworkState, App::State>,
-    ) -> Result<Self> {
-        anyhow::ensure!(height == block.height().0);
-        Ok(Self {
-            block,
-            logs,
-            state: BlockState {
-                blockhash: BlockHash(blockhash),
-                framework_state,
-                app_state,
-            },
-        })
     }
 }

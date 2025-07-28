@@ -47,27 +47,40 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<()> {
         let block = self.load_block(height).await?;
 
-        let mut work_list = vec![];
+        enum Work {
+            Process(Sha256Hash),
+            Write(Sha256Hash, Box<MerkleLayerContents>),
+        }
+        let mut work_queue = vec![
+            Work::Process(block.block.as_inner().framework_state),
+            Work::Process(block.block.as_inner().app_state),
+            Work::Process(block.block.as_inner().logs),
+        ];
 
-        let mut push_with_check = |contents: Arc<MerkleContents>| {
-            if !written_layers.contains(&contents.hash) {
-                work_list.push((contents, true));
-            }
-        };
-        push_with_check(merkle_map::api::serialize(&block.framework_state)?);
-        push_with_check(merkle_map::api::serialize(&block.app_state)?);
-        push_with_check(merkle_map::api::serialize(&block.logs)?);
-
-        while let Some((contents, check_children)) = work_list.pop() {
-            if check_children {
-                work_list.push((contents.clone(), false));
-                for child in contents.children.iter() {
-                    if !written_layers.contains(&child.hash) {
-                        work_list.push((child.clone(), true));
+        while let Some(work) = work_queue.pop() {
+            match work {
+                Work::Process(hash) => {
+                    if written_layers.contains(&hash) {
+                        continue;
+                    }
+                    let layer = self
+                        .get_merkle_layer(hash)
+                        .await?
+                        .with_context(|| format!("Missing layer {hash}"))?;
+                    let children = layer.children.clone();
+                    work_queue.push(Work::Write(hash, Box::new(layer)));
+                    for child in children {
+                        if !written_layers.contains(&child) {
+                            work_queue.push(Work::Process(child));
+                        }
                     }
                 }
-            } else {
-                write_layer(dest, &contents, written_layers).await?;
+                Work::Write(hash, layer) => {
+                    if written_layers.contains(&hash) {
+                        continue;
+                    }
+                    write_layer(dest, hash, &layer, written_layers).await?;
+                }
             }
         }
         write_block(dest, &block.block).await?;
@@ -142,28 +155,24 @@ impl<App: KolmeApp> Kolme<App> {
 
 async fn write_layer(
     dest: &mut BufWriter<tokio::fs::File>,
-    contents: &MerkleContents,
+    hash: Sha256Hash,
+    layer: &MerkleLayerContents,
     written_layers: &mut HashSet<Sha256Hash>,
 ) -> Result<()> {
-    if written_layers.contains(&contents.hash) {
-        return Ok(());
-    }
     dest.write_u8(0).await?;
-    dest.write_u32(u32::try_from(contents.payload.len()).context("Payload is too large")?)
+    dest.write_u32(u32::try_from(layer.payload.len()).context("Payload is too large")?)
         .await?;
-    dest.write_all(&contents.payload).await?;
-    dest.write_u32(u32::try_from(contents.children.len()).context("Too many children")?)
+    dest.write_all(&layer.payload).await?;
+    dest.write_u32(u32::try_from(layer.children.len()).context("Too many children")?)
         .await?;
-    for child in contents.children.iter() {
+    for child in &layer.children {
         anyhow::ensure!(
-            written_layers.contains(&child.hash),
-            "Logic error, writing layer {} but its child {} is not yet written",
-            contents.hash,
-            child.hash
+            written_layers.contains(child),
+            "Logic error, writing layer {hash} but its child {child} is not yet written"
         );
-        dest.write_all(child.hash.as_array()).await?;
+        dest.write_all(child.as_array()).await?;
     }
-    written_layers.insert(contents.hash);
+    written_layers.insert(hash);
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{BlockHashes, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use enum_dispatch::enum_dispatch;
 use merkle_map::{
     MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
@@ -22,26 +22,19 @@ pub trait KolmeBackingStore {
     async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>>;
 
     async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError>;
-    async fn load_block<Block, FrameworkState, AppState>(
+    async fn load_block<Block>(
         &self,
         height: u64,
-    ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
+    ) -> Result<Option<StorableBlock<Block>>, KolmeStoreError>
     where
-        Block: serde::de::DeserializeOwned + MerkleDeserializeRaw + MerkleSerializeRaw,
-        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
-        AppState: MerkleDeserializeRaw + MerkleSerializeRaw;
+        Block: serde::de::DeserializeOwned + MerkleDeserializeRaw + MerkleSerializeRaw;
 
     async fn has_block(&self, height: u64) -> Result<bool, KolmeStoreError>;
     async fn has_merkle_hash(&self, hash: Sha256Hash) -> Result<bool, MerkleSerialError>;
 
-    async fn add_block<Block, FrameworkState, AppState>(
-        &self,
-        block: &StorableBlock<Block, FrameworkState, AppState>,
-    ) -> Result<(), KolmeStoreError>
+    async fn add_block<Block>(&self, block: &StorableBlock<Block>) -> Result<(), KolmeStoreError>
     where
-        Block: serde::Serialize + MerkleSerializeRaw,
-        FrameworkState: MerkleSerializeRaw,
-        AppState: MerkleSerializeRaw;
+        Block: serde::Serialize + MerkleSerializeRaw + HasBlockHashes;
     async fn add_merkle_layer(
         &self,
         hash: Sha256Hash,
@@ -57,7 +50,8 @@ pub trait KolmeBackingStore {
     async fn load<T>(&self, hash: Sha256Hash) -> Result<T, MerkleSerialError>
     where
         T: MerkleDeserializeRaw;
+}
 
-    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>>;
-    async fn set_next_missing_layer(&self, height: u64) -> anyhow::Result<()>;
+pub trait HasBlockHashes {
+    fn get_block_hashes(&self) -> BlockHashes;
 }

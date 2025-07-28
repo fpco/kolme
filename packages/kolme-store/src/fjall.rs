@@ -13,7 +13,6 @@ use std::{num::NonZeroUsize, path::Path, sync::Arc};
 mod merkle;
 
 const LATEST_ARCHIVED_HEIGHT_KEY: &[u8] = b"LATEST";
-const NEXT_MISSING_LAYER_KEY: &[u8] = b"NEXT_MISSING";
 
 #[derive(Clone)]
 pub struct Store {
@@ -100,14 +99,12 @@ impl KolmeBackingStore for Store {
         Ok(Some(u64::from_be_bytes(height)))
     }
 
-    async fn load_block<Block, FrameworkState, AppState>(
+    async fn load_block<Block>(
         &self,
         height: u64,
-    ) -> Result<Option<StorableBlock<Block, FrameworkState, AppState>>, KolmeStoreError>
+    ) -> Result<Option<StorableBlock<Block>>, KolmeStoreError>
     where
         Block: MerkleDeserializeRaw + MerkleSerializeRaw,
-        FrameworkState: MerkleDeserializeRaw + MerkleSerializeRaw,
-        AppState: MerkleDeserializeRaw + MerkleSerializeRaw,
     {
         let Some(hash_bytes) = self
             .merkle
@@ -144,14 +141,9 @@ impl KolmeBackingStore for Store {
         merkle.contains_hash(hash).await
     }
 
-    async fn add_block<Block, FrameworkState, AppState>(
-        &self,
-        block: &StorableBlock<Block, FrameworkState, AppState>,
-    ) -> Result<(), KolmeStoreError>
+    async fn add_block<Block>(&self, block: &StorableBlock<Block>) -> Result<(), KolmeStoreError>
     where
         Block: MerkleSerializeRaw,
-        FrameworkState: MerkleSerializeRaw,
-        AppState: MerkleSerializeRaw,
     {
         let key = block_key(block.height);
         let contents = merkle_map::api::serialize(block).map_err(KolmeStoreError::custom)?;
@@ -165,7 +157,9 @@ impl KolmeBackingStore for Store {
             if existing_hash != contents.hash.as_array() {
                 return Err(KolmeStoreError::ConflictingBlockInDb {
                     height: block.height,
-                    hash: Sha256Hash::from_hash(&existing_hash).map_err(KolmeStoreError::custom)?,
+                    existing: Sha256Hash::from_hash(&existing_hash)
+                        .map_err(KolmeStoreError::custom)?,
+                    adding: contents.hash,
                 });
             } else {
                 return Err(KolmeStoreError::MatchingBlockAlreadyInserted {
@@ -238,27 +232,6 @@ impl KolmeBackingStore for Store {
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
             .context("Unable to retrieve latest height")?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
-    }
-
-    async fn get_next_missing_layer(&self) -> anyhow::Result<Option<u64>> {
-        Ok(Some(
-            self.merkle
-                .handle
-                .get(NEXT_MISSING_LAYER_KEY)
-                .context("Unable to retrieve latest height")?
-                .map_or(0, |contents| {
-                    u64::from_be_bytes(std::array::from_fn(|i| contents[i]))
-                }),
-        ))
-    }
-
-    async fn set_next_missing_layer(&self, height: u64) -> anyhow::Result<()> {
-        self.merkle
-            .handle
-            .insert(NEXT_MISSING_LAYER_KEY, height.to_be_bytes())
-            .context("Unable to update partition with given next missing layer")?;
-
-        Ok(())
     }
 }
 

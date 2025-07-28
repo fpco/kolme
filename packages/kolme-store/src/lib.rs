@@ -5,7 +5,7 @@ mod in_memory;
 mod postgres;
 mod r#trait;
 
-pub use block::StorableBlock;
+pub use block::{BlockHashes, StorableBlock};
 pub use error::KolmeStoreError;
 use fjall::Store as KolmeFjallStore;
 use in_memory::Store as KolmeInMemoryStore;
@@ -14,7 +14,7 @@ use merkle_map::{
     MerkleSerializeRaw, Sha256Hash,
 };
 use postgres::Store as KolmePostgresStore;
-pub use r#trait::KolmeBackingStore;
+pub use r#trait::{HasBlockHashes, KolmeBackingStore};
 pub use sqlx;
 use sqlx::{pool::PoolOptions, postgres::PgConnectOptions, Postgres};
 use std::{path::Path, sync::Arc};
@@ -85,12 +85,12 @@ impl KolmeStore {
                 .transpose()
                 .map_err(KolmeStoreError::custom)?,
             KolmeStore::KolmeFjallStore(kolme_store_fjall) => kolme_store_fjall
-                .load_block::<Block, FrameworkState, AppState>(height)
+                .load_block::<Block>(height)
                 .await
                 .map_err(KolmeStoreError::custom)?
                 .map(|x| x.block),
             KolmeStore::KolmeInMemoryStore(kolme_store_in_memory) => kolme_store_in_memory
-                .load_block::<Block, FrameworkState, AppState>(height)
+                .load_block::<Block>(height)
                 .await
                 .map_err(KolmeStoreError::custom)?
                 .map(|x| x.block),
