@@ -513,7 +513,7 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block: Arc<SignedBlock<App::Message>>,
     ) -> Result<()> {
         // Don't accept blocks we already have
-        let instant = Instant::now();
+        let initial = Instant::now();
         if self.has_block(signed_block.height()).await? {
             anyhow::bail!(
                 "Tried to add block with height {}, but it's already present in the store.",
@@ -522,7 +522,7 @@ impl<App: KolmeApp> Kolme<App> {
         }
         tracing::info!(
             "Time to check block existence: {}  seconds",
-            instant.elapsed().as_secs()
+            initial.elapsed().as_secs()
         );
         let kolme = self.read();
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
@@ -588,6 +588,8 @@ impl<App: KolmeApp> Kolme<App> {
             instant.elapsed().as_secs()
         );
 
+
+        let instant = Instant::now();
         self.inner.mempool.drop_tx(txhash);
 
         // Now do the write lock
@@ -609,7 +611,14 @@ impl<App: KolmeApp> Kolme<App> {
         std::mem::drop(guard);
 
         self.notify(Notification::NewBlock(signed_block));
-
+        tracing::info!(
+            "Time for remaining computation: {}  seconds",
+            instant.elapsed().as_secs()
+        );
+        tracing::info!(
+            "Time time for add_block_with_state: {}  seconds",
+            initial.elapsed().as_secs()
+        );
         Ok(())
     }
 
