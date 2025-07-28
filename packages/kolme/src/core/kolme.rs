@@ -505,6 +505,10 @@ impl<App: KolmeApp> Kolme<App> {
     /// and hashes.
     ///
     /// The state values must already be in the store.
+    ///
+    /// Note that for efficiency reasons, this method will not automatically
+    /// load up the block for the next [Kolme::read] call. If you need to work
+    /// with that block, you can use [Kolme::resync] to force the latest block to load.
     pub async fn add_block_with_state(
         &self,
         signed_block: Arc<SignedBlock<App::Message>>,
@@ -528,13 +532,21 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
 
-        let framework_state = Arc::new(
-            self.inner
-                .store
-                .load::<FrameworkState>(block.framework_state)
-                .await?,
+        anyhow::ensure!(
+            self.has_merkle_hash(block.framework_state).await?,
+            "Framework state {} not written to Merkle store",
+            block.framework_state
         );
-        let app_state = Arc::new(self.inner.store.load::<App::State>(block.app_state).await?);
+        anyhow::ensure!(
+            self.has_merkle_hash(block.app_state).await?,
+            "App state {} not written to Merkle store",
+            block.app_state
+        );
+        anyhow::ensure!(
+            self.has_merkle_hash(block.logs).await?,
+            "Logs {} not written to Merkle store",
+            block.logs
+        );
 
         self.inner
             .store
@@ -547,23 +559,6 @@ impl<App: KolmeApp> Kolme<App> {
             .await?;
 
         self.inner.mempool.drop_tx(txhash);
-
-        // Now do the write lock
-        let mut guard = self.inner.current_block.write();
-
-        if guard.get_next_height() > signed_block.height() {
-            return Ok(());
-        }
-
-        *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
-            block: signed_block.clone(),
-            state: BlockState {
-                blockhash: signed_block.hash(),
-                framework_state,
-                app_state,
-            },
-        }));
-        std::mem::drop(guard);
 
         self.notify(Notification::NewBlock(signed_block));
 
@@ -1093,6 +1088,7 @@ impl<App: KolmeApp> Kolme<App> {
         loop {
             let to_archive = self.get_next_to_archive().await?;
             let Some(block) = other.get_block(to_archive).await? else {
+                self.resync().await?;
                 break Ok(());
             };
             self.ingest_layer_from(other, block.block.as_inner().framework_state)

@@ -515,6 +515,7 @@ impl<App: KolmeApp> SyncManager<App> {
                 .kolme
                 .add_block_with_state(pending.block.clone())
                 .await?;
+            gossip.kolme.resync().await?;
             Ok(None)
         } else {
             Ok(Some(res))
