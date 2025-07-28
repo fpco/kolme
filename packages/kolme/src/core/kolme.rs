@@ -679,14 +679,15 @@ impl<App: KolmeApp> Kolme<App> {
             block_requester: OnceLock::new(),
         };
 
+        tracing::info!("Created KolmeInner value");
+
         let kolme = Kolme {
             inner: Arc::new(inner),
             tx_await_duration: tokio::time::Duration::from_secs(10),
         };
 
-        tracing::info!("Performing an initial resync...");
-        kolme.resync().await?;
-        tracing::info!("Initial resync complete");
+        tracing::info!("Created Kolme value");
+
         kolme
             .inner
             .store
