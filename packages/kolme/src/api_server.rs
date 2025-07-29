@@ -65,6 +65,7 @@ pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
         .route("/block/{height}", get(get_block))
         .route("/notifications", get(ws_handler::<App>))
         .route("/account-id/wallet/{wallet}", get(account_id_for_wallet))
+        .route("/healthz", get(healthz))
 }
 
 async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResponse {
@@ -93,6 +94,10 @@ async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResp
     };
 
     Json(basics).into_response()
+}
+
+async fn healthz() -> &'static str {
+    "Healthy!"
 }
 
 async fn broadcast<App: KolmeApp>(
