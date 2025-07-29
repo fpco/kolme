@@ -691,6 +691,10 @@ impl<App: KolmeApp> Gossip<App> {
                             .await
                             .add_new_block(self, block)
                             .await;
+
+                        if let Err(e) = self.kolme.resync().await {
+                            tracing::error!(%self.local_display_name, "Error while resyncing after a NewBlock notification: {e}");
+                        }
                     }
                     Notification::GenesisInstantiation { .. } => (),
                     // TODO should we validate that this has a proper signature from
@@ -698,7 +702,11 @@ impl<App: KolmeApp> Gossip<App> {
                     //
                     // See propose_and_await_transaction for an example.
                     Notification::FailedTransaction(_) => (),
-                    Notification::LatestBlock(_) => (),
+                    Notification::LatestBlock(_) => {
+                        if let Err(e) = self.kolme.resync().await {
+                            tracing::error!(%self.local_display_name, "Error while resyncing after a LatestBlock notification: {e}");
+                        }
+                    }
                     Notification::EvictMempoolTransaction(signed_json) => {
                         let pubkey = signed_json.verify_signature();
                         match pubkey {
