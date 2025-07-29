@@ -300,7 +300,7 @@ impl<App: KolmeApp> Kolme<App> {
         tx_builder: TxBuilder<App::Message>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let pubkey = secret.public_key();
-        let mut nonce = self.read().get_next_nonce(pubkey);
+        let mut nonce = self.read().get_next_nonce(pubkey).1;
         let mut attempt = 1;
         const MAX_NONCE_ATTEMPTS: usize = 5;
         loop {
@@ -1346,7 +1346,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         tx_builder: T,
     ) -> Result<SignedTransaction<App::Message>> {
         let pubkey = secret.public_key();
-        let nonce = self.get_next_nonce(pubkey);
+        let nonce = self.get_next_nonce(pubkey).1;
         self.create_signed_transaction_with(secret, tx_builder, pubkey, nonce)
     }
 
@@ -1376,11 +1376,14 @@ impl<App: KolmeApp> KolmeRead<App> {
     /// This function is read-only, and works for both accounts that do and don't exist.
     ///
     /// For new accounts, it will always return the initial nonce.
-    pub fn get_next_nonce(&self, key: PublicKey) -> AccountNonce {
+    pub fn get_next_nonce(&self, key: PublicKey) -> (Option<AccountId>, AccountNonce) {
         self.get_framework_state()
             .accounts
             .get_account_for_key(key)
-            .map_or_else(AccountNonce::start, |(_, account)| account.get_next_nonce())
+            .map_or_else(
+                || (None, AccountNonce::start()),
+                |(account_id, account)| (Some(account_id), account.get_next_nonce()),
+            )
     }
 
     pub fn get_admin_proposal_payload(

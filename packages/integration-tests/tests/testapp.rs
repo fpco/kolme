@@ -532,7 +532,7 @@ fn wait_for_nonce<'a>(
 ) -> futures::future::BoxFuture<'a, ()> {
     Box::pin(async move {
         loop {
-            let account_nonce = kolme.read().get_next_nonce(secret.public_key());
+            let account_nonce = kolme.read().get_next_nonce(secret.public_key()).1;
             if account_nonce > nonce {
                 tracing::debug!("Got {} new account nonce", account_nonce);
                 return;
@@ -635,7 +635,7 @@ async fn test_concurrent_transactions_inner(
         let kolme_clone = kolme.clone();
 
         let task = tokio::spawn(async move {
-            let next_nonce = kolme_clone.read().get_next_nonce(secret.public_key());
+            let next_nonce = kolme_clone.read().get_next_nonce(secret.public_key()).1;
 
             let tx = Transaction {
                 pubkey: secret.public_key(),

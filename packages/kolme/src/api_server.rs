@@ -129,8 +129,8 @@ async fn get_next_nonce<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
     Query(NextNonce { pubkey }): Query<NextNonce>,
 ) -> impl IntoResponse {
-    let nonce = kolme.read().get_next_nonce(pubkey);
-    Json(serde_json::json!({"next_nonce":nonce})).into_response()
+    let (account_id, nonce) = kolme.read().get_next_nonce(pubkey);
+    Json(serde_json::json!({"next_nonce":nonce, "account_id":account_id})).into_response()
 }
 
 async fn get_block<App: KolmeApp>(
