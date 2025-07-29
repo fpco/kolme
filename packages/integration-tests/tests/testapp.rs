@@ -179,6 +179,15 @@ where
             .await?
             .context("WebSocket stream terminated")??;
 
+        let message = match message {
+            tungstenite::Message::Text(_) => message,
+            tungstenite::Message::Binary(_) => message,
+            tungstenite::Message::Ping(_) => continue,
+            tungstenite::Message::Pong(_) => continue,
+            tungstenite::Message::Close(_) => panic!("Connection closed"),
+            tungstenite::Message::Frame(_) => continue,
+        };
+
         let notification: ApiNotification<TestMessage> =
             serde_json::from_slice(&message.into_data()).unwrap();
         if let ApiNotification::LatestBlock(_) = &notification {
