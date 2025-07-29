@@ -213,6 +213,8 @@ impl<App: KolmeApp> Submitter<App> {
             }
         };
 
+        tracing::info!("Handling bridge action {action_id} for chain: {chain?}.");
+
         let tx_hash = match &self.args {
             ChainArgs::Cosmos { seed_phrase } => {
                 let Some(cosmos_chain) = chain.to_cosmos_chain() else {
