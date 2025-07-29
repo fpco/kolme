@@ -36,11 +36,14 @@ pub async fn execute(
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: String,
 ) -> Result<String> {
-    tracing::info!("Executing signed message on bridge: {program_id}");
-
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
     let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
+
+    tracing::info!(
+        "Executing signed message on bridge {program_id} with ID: {}",
+        payload.id
+    );
 
     let program_id = Pubkey::from_str(program_id)?;
     let metas = if let SignedAction::Execute(ref action) = payload.action {
