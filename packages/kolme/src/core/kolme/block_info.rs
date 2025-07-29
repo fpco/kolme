@@ -55,10 +55,10 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
                         "Latest block height is {height}, but it wasn't found in the data store"
                     )
                 })?;
-                let framework_state = store
-                    .load(storable.block.as_inner().framework_state)
-                    .await?;
-                let app_state = store.load(storable.block.as_inner().app_state).await?;
+                let (framework_state, app_state) = tokio::try_join!(
+                    store.load(storable.block.as_inner().framework_state),
+                    store.load(storable.block.as_inner().app_state)
+                )?;
                 let state = BlockState {
                     blockhash: BlockHash(storable.blockhash),
                     framework_state,
