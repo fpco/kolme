@@ -65,6 +65,8 @@ pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
         .route("/block/{height}", get(get_block))
         .route("/notifications", get(ws_handler::<App>))
         .route("/account-id/wallet/{wallet}", get(account_id_for_wallet))
+        .route("/account-id/pubkey/{wallet}", get(account_id_for_pubkey))
+        .route("/account-id/{account_id}", get(account_id))
         .route("/healthz", get(healthz))
 }
 
@@ -290,22 +292,31 @@ pub enum AccountIdResp {
     Found { account_id: AccountId },
 }
 
+#[derive(serde::Deserialize)]
+struct AccountIdQuery {
+    timeout: Option<u64>,
+}
+
+impl AccountIdQuery {
+    fn duration(&self) -> tokio::time::Duration {
+        tokio::time::Duration::from_millis(self.timeout.unwrap_or(5000))
+    }
+}
+
 async fn account_id_for_wallet<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
     Path(wallet): Path<Wallet>,
+    Query(timeout): Query<AccountIdQuery>,
 ) -> Result<Json<AccountIdResp>, axum::response::Response> {
     async {
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            kolme.wait_account_for_wallet(&wallet),
-        )
-        .await
-        .ok()
-        .transpose()
-        .map(|res| match res {
-            Some(account_id) => AccountIdResp::Found { account_id },
-            None => AccountIdResp::NotFound {},
-        })
+        tokio::time::timeout(timeout.duration(), kolme.wait_account_for_wallet(&wallet))
+            .await
+            .ok()
+            .transpose()
+            .map(|res| match res {
+                Some(account_id) => AccountIdResp::Found { account_id },
+                None => AccountIdResp::NotFound {},
+            })
     }
     .await
     .map(Json)
@@ -314,4 +325,55 @@ async fn account_id_for_wallet<App: KolmeApp>(
         *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         res
     })
+}
+
+async fn account_id_for_pubkey<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Path(pubkey): Path<PublicKey>,
+    Query(timeout): Query<AccountIdQuery>,
+) -> Result<Json<AccountIdResp>, axum::response::Response> {
+    async {
+        tokio::time::timeout(timeout.duration(), kolme.wait_account_for_key(pubkey))
+            .await
+            .ok()
+            .transpose()
+            .map(|res| match res {
+                Some(account_id) => AccountIdResp::Found { account_id },
+                None => AccountIdResp::NotFound {},
+            })
+    }
+    .await
+    .map(Json)
+    .map_err(|e| {
+        let mut res = e.to_string().into_response();
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        res
+    })
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountResp {
+    NotFound {},
+    Found {
+        wallets: BTreeSet<Wallet>,
+        pubkeys: BTreeSet<PublicKey>,
+    },
+}
+
+async fn account_id<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Path(account_id): Path<AccountId>,
+) -> Json<AccountResp> {
+    Json(
+        kolme
+            .read()
+            .get_framework_state()
+            .get_accounts()
+            .get_account(account_id)
+            .map_or(AccountResp::NotFound {}, |account| AccountResp::Found {
+                wallets: account.get_wallets().clone(),
+                pubkeys: account.get_pubkeys().clone(),
+            }),
+    )
 }

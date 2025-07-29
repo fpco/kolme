@@ -344,13 +344,15 @@ impl<App: KolmeApp> Kolme<App> {
                     .await?
                     .with_context(|| format!("Expected block {height} not found during resync"))?;
 
+                let (framework_state, app_state) = tokio::try_join!(
+                    self.load_framework_state(block.as_inner().framework_state),
+                    self.load_app_state(block.as_inner().app_state)
+                )?;
+
                 let state = BlockState {
                     blockhash: block.hash(),
-                    framework_state: Arc::new(
-                        self.load_framework_state(block.as_inner().framework_state)
-                            .await?,
-                    ),
-                    app_state: Arc::new(self.load_app_state(block.as_inner().app_state).await?),
+                    framework_state: Arc::new(framework_state),
+                    app_state: Arc::new(app_state),
                 };
                 let block_info = BlockInfo { block, state };
 
