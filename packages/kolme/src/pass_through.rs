@@ -189,7 +189,7 @@ async fn handle_websocket(mut socket: WebSocket, mut rx: broadcast::Receiver<Bri
         };
 
         if let Err(error) = socket.send(WsMessage::Text(msg.into())).await {
-            tracing::debug!("Client disconnected with error: {}", error);
+            tracing::warn!("Client disconnected with error: {}", error);
             break;
         }
         tracing::debug!("Notification sent to WebSocket client.");

@@ -941,6 +941,15 @@ mod tests {
             let message = tokio::time::timeout_at(timeout_at, ws.next())
                 .await?
                 .context("WebSocket stream terminated")??;
+            let message = match message {
+                tokio_tungstenite::tungstenite::Message::Text(_) => message,
+                tokio_tungstenite::tungstenite::Message::Binary(_) => message,
+                tokio_tungstenite::tungstenite::Message::Ping(_) => continue,
+                tokio_tungstenite::tungstenite::Message::Pong(_) => continue,
+                tokio_tungstenite::tungstenite::Message::Close(_) => continue,
+                tokio_tungstenite::tungstenite::Message::Frame(_) => continue,
+            };
+
             let notification =
                 serde_json::from_slice::<ApiNotification<AppMessage>>(&message.into_data())?;
             if let ApiNotification::NewBlock { block, logs } = notification {
