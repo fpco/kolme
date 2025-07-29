@@ -239,6 +239,10 @@ impl FrameworkState {
         &self.chains
     }
 
+    pub fn get_accounts(&self) -> &Accounts {
+        &self.accounts
+    }
+
     pub(super) fn validate(&self) -> Result<(), ValidatorSetError> {
         self.get_validator_set().validate()
     }

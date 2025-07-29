@@ -202,6 +202,23 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
         vec![]
     );
 
+    // Confirm that no account is set up yet
+    let res = tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
+        reqwest::get(format!(
+            "http://127.0.0.1:{api_server_port}/account-id/wallet/{user_wallet}?timeout=0"
+        ))
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json::<kolme::api_server::AccountIdResp>()
+        .await
+        .unwrap()
+    })
+    .await
+    .unwrap();
+    assert_eq!(res, kolme::api_server::AccountIdResp::NotFound {});
+
     // Deposit some funds and make sure the balances update correctly
     let secret = SecretKey::random();
     let tx_response = contract
@@ -270,6 +287,35 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
         res,
         kolme::api_server::AccountIdResp::Found {
             account_id: expected_account_id
+        }
+    );
+    let res2 = reqwest::get(format!(
+        "http://127.0.0.1:{api_server_port}/account-id/pubkey/{}",
+        secret.public_key()
+    ))
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap()
+    .json::<kolme::api_server::AccountIdResp>()
+    .await
+    .unwrap();
+    assert_eq!(res, res2);
+    let res3 = reqwest::get(format!(
+        "http://127.0.0.1:{api_server_port}/account-id/{expected_account_id}"
+    ))
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap()
+    .json::<kolme::api_server::AccountResp>()
+    .await
+    .unwrap();
+    assert_eq!(
+        res3,
+        kolme::api_server::AccountResp::Found {
+            wallets: std::iter::once(Wallet(user_wallet.get_address_string())).collect(),
+            pubkeys: std::iter::once(secret.public_key()).collect()
         }
     );
 

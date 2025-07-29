@@ -52,6 +52,14 @@ impl Account {
     pub(crate) fn get_next_nonce(&self) -> AccountNonce {
         self.next_nonce
     }
+
+    pub fn get_wallets(&self) -> &BTreeSet<Wallet> {
+        &self.wallets
+    }
+
+    pub fn get_pubkeys(&self) -> &BTreeSet<PublicKey> {
+        &self.pubkeys
+    }
 }
 
 impl Accounts {
@@ -131,6 +139,10 @@ impl Accounts {
     /// Mostly useful for writing test cases.
     pub fn add_account(&mut self, id: AccountId) {
         self.accounts.get_or_default(id);
+    }
+
+    pub fn get_account(&self, id: AccountId) -> Option<&Account> {
+        self.accounts.get(&id)
     }
 
     pub(in crate::core) fn add_pubkey_to_account_error_overlap(
