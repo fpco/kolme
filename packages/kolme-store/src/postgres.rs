@@ -53,7 +53,6 @@ impl Store {
         options: PoolOptions<Postgres>,
         cache_size: usize,
     ) -> anyhow::Result<Self> {
-        anyhow::ensure!(cache_size >= 1024, "PostgreSQL backend currently requires a cache size of at least 1024. This is an open bug that needs investigation.");
         let pool = options
             .connect_with(connect)
             .await
@@ -304,8 +303,6 @@ impl KolmeBackingStore for Store {
     ) -> Result<(), KolmeStoreError> {
         let height_i64 = i64::try_from(*height).map_err(KolmeStoreError::custom)?;
 
-        let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
-
         let blockhash = blockhash.as_array().as_slice();
         let txhash = txhash.as_array().as_slice();
         let BlockHashes {
@@ -329,7 +326,7 @@ impl KolmeBackingStore for Store {
             app_state.as_array().as_slice(),
             logs.as_array().as_slice(),
         )
-        .execute(&mut *tx)
+        .execute(&self.pool)
         .await;
 
         if let Err(e) = res {
@@ -369,8 +366,6 @@ impl KolmeBackingStore for Store {
                 }
             }
             return Err(KolmeStoreError::custom(e));
-        } else {
-            tx.commit().await.map_err(KolmeStoreError::custom)?;
         }
 
         Ok(())
