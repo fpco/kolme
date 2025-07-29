@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
@@ -9,7 +11,7 @@ use axum::{
     Json, Router,
 };
 use reqwest::{Method, StatusCode};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::*;
@@ -174,10 +176,29 @@ async fn ws_handler<App: KolmeApp>(
 
 async fn handle_websocket<App: KolmeApp>(
     kolme: Kolme<App>,
-    mut socket: WebSocket,
+    socket: WebSocket,
     mut rx: broadcast::Receiver<Notification<App::Message>>,
 ) {
     tracing::debug!("WebSocket subscribed to Kolme notifications");
+    let socket = Arc::new(Mutex::new(socket));
+    let ping_socket = socket.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            tracing::debug!("Sending ping");
+            let res = ping_socket
+                .lock()
+                .await
+                .send(axum::extract::ws::Message::Ping(Vec::new().into()))
+                .await;
+            if let Err(e) = res {
+                tracing::warn!("Client connection closed, stopping pings: {e}");
+                break;
+            }
+        }
+    });
 
     while let Ok(notification) = rx.recv().await {
         let notification = match notification {
@@ -228,7 +249,7 @@ async fn handle_websocket<App: KolmeApp>(
             }
         };
 
-        if let Err(error) = socket.send(WsMessage::Text(msg.into())).await {
+        if let Err(error) = socket.lock().await.send(WsMessage::Text(msg.into())).await {
             tracing::debug!("Client disconnected with error: {}", error);
             break;
         }
