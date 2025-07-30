@@ -15,6 +15,11 @@ async fn main() -> Result<()> {
 enum Cmd {
     /// Generate a new keypair.
     GenKeypair {},
+    /// Print public key
+    PubKey {
+        #[clap(long, env = "KOLME_CLI_SECRET_KEY")]
+        secret: SecretKey,
+    },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
     /// Kolme Hub functionality
@@ -40,6 +45,10 @@ async fn main_inner() -> Result<()> {
         Cmd::GenKeypair {} => gen_keypair(),
         Cmd::SendTx(opt) => send_tx(opt).await?,
         Cmd::Hub(cmd) => hub::run(cmd).await?,
+        Cmd::PubKey { secret } => {
+            let public = secret.public_key();
+            eprintln!("Public key: {public}");
+        }
     }
     Ok(())
 }
