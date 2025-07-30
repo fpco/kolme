@@ -18,7 +18,7 @@ enum Cmd {
     /// Print public key
     PubKey {
         #[clap(long, env = "KOLME_CLI_SECRET_KEY")]
-        secret: SecretKey
+        secret: SecretKey,
     },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
