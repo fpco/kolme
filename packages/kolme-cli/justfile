@@ -1,0 +1,9 @@
+set fallback := true
+
+# List all recipes
+default:
+    just --list --unsorted
+
+# Show public key
+public:
+    cargo run -- pub-key
