@@ -233,6 +233,7 @@ impl<App: KolmeApp> Kolme<App> {
             match note {
                 Notification::NewBlock(block) => {
                     if block.tx().hash() == txhash_orig {
+                        self.wait_for_block(block.height()).await?;
                         break Ok(block);
                     }
                 }
