@@ -624,11 +624,7 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                     Ok(message) => {
                         tracing::debug!("{local_display_name}: Received message: {message}");
-                        if let Err(e) = self.handle_message(message, swarm).await {
-                            tracing::warn!(
-                                "{local_display_name}: Error while handling message: {e}"
-                            );
-                        }
+                        self.handle_message(message, swarm).await;
                     }
                 }
             }
@@ -678,7 +674,7 @@ impl<App: KolmeApp> Gossip<App> {
         &self,
         message: GossipMessage<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-    ) -> Result<()> {
+    ) {
         let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::Notification(msg) => {
@@ -788,8 +784,6 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
         }
-
-        Ok(())
     }
 
     async fn handle_request(
