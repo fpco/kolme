@@ -5,7 +5,7 @@ mod merkle_serialize;
 pub mod quickcheck_arbitrary;
 mod to_merkle_key;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use shared::types::Sha256Hash;
 
@@ -102,10 +102,11 @@ pub trait MerkleStore {
     /// any children. This allows the library to reconstruct
     /// the entire [MerkleContents] for any given hash.
     #[allow(async_fn_in_trait)]
-    async fn load_by_hash(
+    async fn load_by_hashes(
         &mut self,
-        hash: Sha256Hash,
-    ) -> Result<Option<MerkleLayerContents>, MerkleSerialError>;
+        hashes: &[Sha256Hash],
+        dest: &mut HashMap<Sha256Hash, MerkleLayerContents>,
+    ) -> Result<(), MerkleSerialError>;
 
     /// Save the payload within the Merkle store.
     ///
