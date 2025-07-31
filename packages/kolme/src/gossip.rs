@@ -369,8 +369,10 @@ impl GossipBuilder {
             .build();
 
         // Create the Gossipsub topics
-        let genesis_hash = FirstEightChars(kolme.get_genesis_hash()?);
+        let full_genesis_hash = kolme.get_genesis_hash()?;
+        let genesis_hash = FirstEightChars(full_genesis_hash);
         let gossip_topic = gossipsub::IdentTopic::new(format!("/kolme-gossip/{genesis_hash}/1.0"));
+        tracing::info!("Subscribing to gossip. Full genesis hash: {full_genesis_hash}. Abbreviated: {genesis_hash}. Topic: {gossip_topic}.");
         // And subscribe
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
