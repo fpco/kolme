@@ -659,6 +659,8 @@ impl<App: KolmeApp> Gossip<App> {
                 established_in,
             } =>
                 tracing::info!("{local_display_name}: connection established to {peer_id} on {endpoint:?}, established in {established_in:?}"),
+            SwarmEvent::ConnectionClosed { peer_id, connection_id:_, endpoint, num_established:_, cause } =>
+                tracing::info!("{local_display_name}: connection closed to {peer_id} on {endpoint:?}, cause: {cause:?}"),
             // Catch some events that we don't even want to print at debug level
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
                 libp2p::request_response::Event::ResponseSent { .. },
