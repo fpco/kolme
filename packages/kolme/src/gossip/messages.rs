@@ -75,7 +75,7 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     Ack,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub(super) enum GossipMessage<App: KolmeApp> {
     RequestBlockHeights(jiff::Timestamp),
     ReportBlockHeight(ReportBlockHeight),
@@ -126,7 +126,7 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub(super) struct ReportBlockHeight {
     pub(super) next: BlockHeight,
     #[serde(
@@ -174,11 +174,13 @@ impl<App: KolmeApp> GossipMessage<App> {
             "{}: Publishing message to gossipsub: {self}",
             gossip.local_display_name
         );
+        gossip.websockets_manager.publish(&self);
         // TODO should we put in some retry logic to handle the "InsufficientPeers" case?
+        let msg = serde_json::to_vec(&self)?;
         let result = swarm
             .behaviour_mut()
             .gossipsub
-            .publish(gossip.gossip_topic.clone(), serde_json::to_vec(&self)?);
+            .publish(gossip.gossip_topic.clone(), msg);
         match result {
             Ok(_id) => Ok(true),
             Err(PublishError::Duplicate) => {

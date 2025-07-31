@@ -1,9 +1,11 @@
 mod messages;
 mod sync_manager;
+mod websockets;
 
 use std::{
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
+    net::SocketAddr,
     num::NonZeroUsize,
     str::FromStr,
     time::{Duration, Instant},
@@ -24,10 +26,14 @@ use libp2p::{
     tcp, upnp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
 use sync_manager::{DataLabel, DataRequest, SyncManager};
-use tokio::sync::{broadcast::error::RecvError, Mutex};
+use tokio::{
+    sync::{broadcast::error::RecvError, Mutex},
+    task::JoinSet,
+};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
 use utils::trigger::Trigger;
+use websockets::{WebsocketsManager, WebsocketsMessage};
 
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
@@ -59,6 +65,8 @@ pub struct Gossip<App: KolmeApp> {
     concurrent_request_limit: usize,
     max_peer_count: usize,
     warning_period: Duration,
+    websockets_manager: WebsocketsManager<App>,
+    set: Option<JoinSet<()>>,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -151,6 +159,8 @@ pub struct GossipBuilder {
     concurrent_request_limit: usize,
     max_peer_count: usize,
     warning_period: Duration,
+    websockets_binds: Vec<SocketAddr>,
+    websockets_servers: Vec<String>,
 }
 
 impl Default for GossipBuilder {
@@ -170,6 +180,8 @@ impl Default for GossipBuilder {
             concurrent_request_limit: sync_manager::DEFAULT_REQUEST_COUNT,
             max_peer_count: sync_manager::DEFAULT_PEER_COUNT,
             warning_period: Duration::from_secs(sync_manager::DEFAULT_WARNING_PERIOD_SECS),
+            websockets_binds: vec![],
+            websockets_servers: vec![],
         }
     }
 }
@@ -234,6 +246,16 @@ impl GossipBuilder {
     /// the node to advertise its publicly accessible address.
     pub fn add_external_address(mut self, addr: Multiaddr) -> Self {
         self.external_addrs.push(addr);
+        self
+    }
+
+    pub fn add_websockets_bind(mut self, bind: SocketAddr) -> Self {
+        self.websockets_binds.push(bind);
+        self
+    }
+
+    pub fn add_websockets_server(mut self, host: String) -> Self {
+        self.websockets_servers.push(host);
         self
     }
 
@@ -380,12 +402,8 @@ impl GossipBuilder {
         // And subscribe
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
-        if self.listeners.is_empty() {
-            swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-        } else {
-            for listener in &self.listeners {
-                swarm.listen_on(listener.multiaddr())?;
-            }
+        for listener in &self.listeners {
+            swarm.listen_on(listener.multiaddr())?;
         }
 
         for addr in self.external_addrs {
@@ -396,6 +414,9 @@ impl GossipBuilder {
         let local_peer_id = *swarm.local_peer_id();
         let sync_manager = Mutex::new(SyncManager::default());
         let dht_key = RecordKey::new(&format!("/kolme-dht/{genesis_hash}/1.0"));
+        let mut set = JoinSet::new();
+        let websockets_manager =
+            WebsocketsManager::new(&mut set, self.websockets_binds, self.websockets_servers)?;
 
         Ok(Gossip {
             kolme,
@@ -413,6 +434,8 @@ impl GossipBuilder {
             concurrent_request_limit: self.concurrent_request_limit,
             max_peer_count: self.max_peer_count,
             warning_period: self.warning_period,
+            websockets_manager,
+            set: Some(set),
         })
     }
 }
@@ -426,7 +449,14 @@ impl<App: KolmeApp> Gossip<App> {
         self.watch_network_ready.subscribe()
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
+        let mut set = self.set.take().unwrap();
+        set.spawn(self.run_inner());
+        let res = set.join_next().await;
+        panic!("Unexpected exit in gossip: {res:?}");
+    }
+
+    async fn run_inner(mut self) {
         let mut subscription = self.kolme.subscribe();
         let mut swarm = self.swarm.lock().await;
 
@@ -471,6 +501,9 @@ impl<App: KolmeApp> Gossip<App> {
                 // And any time we add something new to the mempool, broadcast all items.
                 _ = mempool_additions.listen() => {
                     self.broadcast_mempool_entries(&mut swarm);
+                }
+                msg = self.websockets_manager.get_incoming() => {
+                    self.handle_websockets_message(msg).await;
                 }
                 Some(height) = block_requester_rx.recv() => {
                     if let Err(e) = self.sync_manager.lock().await.add_needed_block(&self, height, None).await {
@@ -790,6 +823,10 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
         }
+    }
+
+    async fn handle_websockets_message(&self, msg: WebsocketsMessage<App>) {
+        todo!()
     }
 
     async fn handle_request(

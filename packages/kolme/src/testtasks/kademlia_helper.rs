@@ -41,6 +41,26 @@ impl TestTasks {
         KademliaDiscovery { peer, addr }
     }
 
+    pub fn launch_websockets_discovery<App: KolmeApp>(
+        &self,
+        kolme: Kolme<App>,
+        display_name: &str,
+    ) -> WebsocketsDiscovery {
+        let listener = GossipListener::random().unwrap();
+        let port = listener.port;
+        assert_ne!(port, 0);
+
+        let gossip = GossipBuilder::new()
+            .set_local_display_name(display_name)
+            .add_websockets_bind(format!("127.0.0.1:{port}").parse().unwrap());
+        let gossip = gossip.build(kolme).unwrap();
+
+        // And now launch a gossip node for this Kolme
+        self.try_spawn_persistent(gossip.run());
+
+        WebsocketsDiscovery { port }
+    }
+
     pub async fn launch_kademlia_client<App: KolmeApp>(
         &self,
         kolme: Kolme<App>,
@@ -77,10 +97,37 @@ impl TestTasks {
             .expect("Timed out waiting for network to be ready")
             .unwrap();
     }
+
+    pub async fn launch_websockets_client<App: KolmeApp>(
+        &self,
+        kolme: Kolme<App>,
+        display_name: &str,
+        discovery: &WebsocketsDiscovery,
+    ) {
+        let builder = GossipBuilder::new()
+            .set_local_display_name(display_name)
+            .add_websockets_server(
+                format!("ws://127.0.0.1:{}", discovery.port)
+                    .parse()
+                    .unwrap(),
+            );
+        let gossip = builder.build(kolme.clone()).unwrap();
+        let mut ready = gossip.subscribe_network_ready();
+        self.try_spawn_persistent(gossip.run());
+        tokio::time::timeout(tokio::time::Duration::from_secs(30), ready.changed())
+            .await
+            .expect("Timed out waiting for network to be ready")
+            .unwrap();
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct KademliaDiscovery {
     peer: PeerId,
     addr: Multiaddr,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebsocketsDiscovery {
+    port: u16,
 }

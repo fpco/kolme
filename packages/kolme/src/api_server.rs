@@ -49,7 +49,7 @@ impl<App: KolmeApp> ApiServer<App> {
         }
         app = app.layer(cors);
 
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await?;
         tracing::info!("Starting API server on {:?}", listener.local_addr()?);
         axum::serve(listener, app)
             .await

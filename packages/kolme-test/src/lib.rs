@@ -25,6 +25,8 @@ mod p2p_large;
 #[cfg(test)]
 mod p2p_sanity;
 #[cfg(test)]
+mod p2p_websockets_sanity;
+#[cfg(test)]
 mod store;
 #[cfg(test)]
 mod sync_older;
