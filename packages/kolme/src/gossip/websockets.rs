@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicU64;
+
 use axum::{
     extract::{ws::WebSocket, State, WebSocketUpgrade},
     response::IntoResponse,
@@ -22,7 +24,35 @@ pub(super) struct WebsocketsManager<App: KolmeApp> {
 
 pub(super) struct WebsocketsMessage<App: KolmeApp> {
     pub(super) payload: WebsocketsPayload<App>,
+    pub(super) tx: WebsocketsPrivateSender<App>,
 }
+
+pub(super) struct WebsocketsPrivateSender<App: KolmeApp> {
+    pub(super) tx: tokio::sync::mpsc::Sender<WebsocketsPayload<App>>,
+    id: u64,
+}
+
+impl<App: KolmeApp> std::fmt::Debug for WebsocketsPrivateSender<App> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "WebsocketsPrivateSender({})", self.id)
+    }
+}
+
+impl<App: KolmeApp> Clone for WebsocketsPrivateSender<App> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            id: self.id,
+        }
+    }
+}
+
+impl<App: KolmeApp> PartialEq for WebsocketsPrivateSender<App> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl<App: KolmeApp> Eq for WebsocketsPrivateSender<App> {}
 
 impl<App: KolmeApp> WebsocketsManager<App> {
     pub(super) fn publish(&self, msg: &GossipMessage<App>) {
@@ -146,7 +176,7 @@ async fn ws_handler_wrapper<App: KolmeApp>(
     ws.on_upgrade(move |socket| ws_handler(server_state, socket))
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(bound(serialize = "", deserialize = ""))]
 #[allow(clippy::large_enum_variant)]
@@ -262,43 +292,61 @@ async fn ws_helper<App: KolmeApp, S: WebSocketWrapper>(
     tx_message: &mut tokio::sync::mpsc::Sender<WebsocketsMessage<App>>,
     mut socket: S,
 ) {
-    enum Double<A, B> {
+    let (tx_private, mut rx_private) = tokio::sync::mpsc::channel(16);
+
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let tx_private = WebsocketsPrivateSender {
+        tx: tx_private,
+        id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    };
+    enum Triple<A, B, C> {
         One(A),
         Two(B),
+        Three(C),
     }
     loop {
         let next = tokio::select! {
-            msg = socket.recv::<App>() => Double::One(msg),
-            gossip = rx_gossip.recv() => Double::Two(gossip),
+            msg = socket.recv::<App>() => Triple::One(msg),
+            gossip = rx_gossip.recv() => Triple::Two(gossip),
+            payload = rx_private.recv() => Triple::Three(payload),
         };
 
-        match next {
-            Double::One(recv) => match recv {
+        let payload = match next {
+            Triple::One(recv) => match recv {
                 WebsocketsRecv::Close => break,
-                WebsocketsRecv::Skip => (),
-                WebsocketsRecv::Payload(payload) => {
-                    if let Err(e) = tx_message
-                        .send(WebsocketsMessage { payload: *payload })
-                        .await
-                    {
-                        tracing::error!("Gossip WebSockets error on delivering payload: {e}");
-                        break;
-                    }
-                }
+                WebsocketsRecv::Skip => continue,
+                WebsocketsRecv::Payload(payload) => *payload,
                 WebsocketsRecv::Err(e) => {
                     tracing::error!("Gossip WebSockets error: {e}");
+                    break;
                 }
             },
-            Double::Two(Ok(gossip)) => {
+            Triple::Two(Ok(gossip)) => {
                 if let Err(e) = socket.send_payload(WebsocketsPayload::Gossip(gossip)).await {
                     tracing::error!("Gossip WebSockets: error sending gossip message: {e}");
                     break;
                 }
+                continue;
             }
-            Double::Two(Err(e)) => {
+            Triple::Two(Err(e)) => {
                 tracing::error!("Gossip WebSockets: received error from rx_gossip: {e}");
                 break;
             }
+            Triple::Three(None) => {
+                tracing::error!("Logic error in Gossip WebSockets: rx_private returned None");
+                break;
+            }
+            Triple::Three(Some(payload)) => payload,
+        };
+        if let Err(e) = tx_message
+            .send(WebsocketsMessage {
+                payload,
+                tx: tx_private.clone(),
+            })
+            .await
+        {
+            tracing::error!("Gossip WebSockets error on delivering payload: {e}");
+            break;
         }
     }
 }

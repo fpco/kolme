@@ -75,7 +75,7 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     Ack,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub(super) enum GossipMessage<App: KolmeApp> {
     RequestBlockHeights(jiff::Timestamp),
     ReportBlockHeight(ReportBlockHeight),
