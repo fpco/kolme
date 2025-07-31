@@ -75,7 +75,7 @@ pub(super) enum BlockResponse<AppMessage: serde::de::DeserializeOwned> {
     Ack,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub(super) enum GossipMessage<App: KolmeApp> {
     RequestBlockHeights(jiff::Timestamp),
     ReportBlockHeight(ReportBlockHeight),
@@ -123,6 +123,12 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
                 write!(f, "Request layer contents {hash} for {peer}")
             }
         }
+    }
+}
+
+impl<App: KolmeApp> std::fmt::Debug for GossipMessage<App> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self)
     }
 }
 

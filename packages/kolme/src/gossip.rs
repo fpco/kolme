@@ -410,13 +410,19 @@ impl GossipBuilder {
             swarm.add_external_address(addr);
         }
 
+        let local_display_name = self.local_display_name.unwrap_or(String::from("gossip"));
+
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
         let sync_manager = Mutex::new(SyncManager::default());
         let dht_key = RecordKey::new(&format!("/kolme-dht/{genesis_hash}/1.0"));
         let mut set = JoinSet::new();
-        let websockets_manager =
-            WebsocketsManager::new(&mut set, self.websockets_binds, self.websockets_servers)?;
+        let websockets_manager = WebsocketsManager::new(
+            &mut set,
+            self.websockets_binds,
+            self.websockets_servers,
+            &local_display_name,
+        )?;
 
         Ok(Gossip {
             kolme,
@@ -427,7 +433,7 @@ impl GossipBuilder {
             local_peer_id,
             trigger_broadcast_height: Trigger::new("broadcast_height"),
             watch_network_ready,
-            local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
+            local_display_name,
             sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
             dht_key,
