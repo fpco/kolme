@@ -72,7 +72,7 @@ impl KolmeBackingStore for Store {
         if let Some(layer) = layer {
             Ok(Some(layer))
         } else {
-            self.merkle.clone().load_by_hash(hash).await
+            self.merkle.clone().load_by_hash(hash)
         }
     }
 

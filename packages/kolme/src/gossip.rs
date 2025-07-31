@@ -369,8 +369,14 @@ impl GossipBuilder {
             .build();
 
         // Create the Gossipsub topics
-        let genesis_hash = FirstEightChars(kolme.get_genesis_hash()?);
+        tracing::info!(
+            "Genesis info: {}",
+            serde_json::to_string(kolme.get_genesis_info())?
+        );
+        let full_genesis_hash = kolme.get_genesis_hash()?;
+        let genesis_hash = FirstEightChars(full_genesis_hash);
         let gossip_topic = gossipsub::IdentTopic::new(format!("/kolme-gossip/{genesis_hash}/1.0"));
+        tracing::info!("Subscribing to gossip. Full genesis hash: {full_genesis_hash}. Abbreviated: {genesis_hash}. Topic: {gossip_topic}.");
         // And subscribe
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
@@ -622,11 +628,7 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                     Ok(message) => {
                         tracing::debug!("{local_display_name}: Received message: {message}");
-                        if let Err(e) = self.handle_message(message, swarm).await {
-                            tracing::warn!(
-                                "{local_display_name}: Error while handling message: {e}"
-                            );
-                        }
+                        self.handle_message(message, swarm).await;
                     }
                 }
             }
@@ -657,6 +659,8 @@ impl<App: KolmeApp> Gossip<App> {
                 established_in,
             } =>
                 tracing::info!("{local_display_name}: connection established to {peer_id} on {endpoint:?}, established in {established_in:?}"),
+            SwarmEvent::ConnectionClosed { peer_id, connection_id:_, endpoint, num_established:_, cause } =>
+                tracing::info!("{local_display_name}: connection closed to {peer_id} on {endpoint:?}, cause: {cause:?}"),
             // Catch some events that we don't even want to print at debug level
             SwarmEvent::Behaviour(KolmeBehaviourEvent::RequestResponse(
                 libp2p::request_response::Event::ResponseSent { .. },
@@ -676,7 +680,7 @@ impl<App: KolmeApp> Gossip<App> {
         &self,
         message: GossipMessage<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-    ) -> Result<()> {
+    ) {
         let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::Notification(msg) => {
@@ -786,8 +790,6 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
         }
-
-        Ok(())
     }
 
     async fn handle_request(

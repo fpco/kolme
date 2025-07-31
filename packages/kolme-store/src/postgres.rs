@@ -14,7 +14,7 @@ use sqlx::{
     postgres::{PgAdvisoryLock, PgConnectOptions},
     Executor, Postgres,
 };
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 mod merkle;
 
 pub struct ConstructLock {
@@ -192,7 +192,9 @@ impl KolmeBackingStore for Store {
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
         let mut merkle = self.new_store();
-        merkle.load_by_hash(hash).await
+        let mut dest = HashMap::new();
+        merkle.load_by_hashes(&[hash], &mut dest).await?;
+        Ok(dest.remove(&hash))
     }
     async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>> {
         let txhash = txhash.as_array().as_slice();

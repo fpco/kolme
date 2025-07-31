@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            TRUNCATE TABLE bench_merkle_contents\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "50062d6a4bbcb852234107d7f7ba73396c2e5b501f11a34a07d168343759124b"
+}

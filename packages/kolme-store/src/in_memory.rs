@@ -128,8 +128,7 @@ impl KolmeBackingStore for Store {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<merkle_map::MerkleLayerContents>, merkle_map::MerkleSerialError> {
-        let mut merkle = self.get_merkle_store().await;
-        merkle.load_by_hash(hash).await
+        Ok(self.get_merkle_store().await.load_by_hash(hash))
     }
 
     async fn has_merkle_hash(

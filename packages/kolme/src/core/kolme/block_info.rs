@@ -1,3 +1,5 @@
+use tokio::task::JoinSet;
+
 use crate::core::*;
 
 /// Information on a specific block.
@@ -47,7 +49,18 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
     }
 
     pub(super) async fn load(store: &KolmeStore<App>, app: &App) -> Result<Self> {
+        // Use a JoinSet for convenient, so that the task will be canceled when the set
+        // is dropped.
+        let mut set = JoinSet::new();
         let output = store.load_latest_block().await?;
+        set.spawn(async move {
+            tracing::info!("Loading initial block, latest block in database is: {output:?}");
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+            loop {
+                interval.tick().await;
+                tracing::info!("Still attempting to load initial block...");
+            }
+        });
         let res = match output {
             Some(height) => {
                 let storable = store.load_block(height).await?.with_context(|| {
