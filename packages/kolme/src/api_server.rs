@@ -11,7 +11,7 @@ use axum::{
     Json, Router,
 };
 use reqwest::{Method, StatusCode};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::*;
@@ -183,84 +183,100 @@ async fn ws_handler<App: KolmeApp>(
 
 async fn handle_websocket<App: KolmeApp>(
     kolme: Kolme<App>,
-    socket: WebSocket,
+    mut socket: WebSocket,
     mut rx: broadcast::Receiver<Notification<App::Message>>,
 ) {
     tracing::debug!("WebSocket subscribed to Kolme notifications");
-    let socket = Arc::new(Mutex::new(socket));
-    let ping_socket = socket.clone();
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
 
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
-        loop {
-            interval.tick().await;
-            tracing::debug!("Sending ping");
-            let res = ping_socket
-                .lock()
-                .await
-                .send(axum::extract::ws::Message::Ping(Vec::new().into()))
-                .await;
-            if let Err(e) = res {
-                tracing::warn!("Client connection closed, stopping pings: {e}");
+    enum Action<AppMessage> {
+        Ping,
+        Notification(Notification<AppMessage>),
+    }
+
+    loop {
+        let action = tokio::select! {
+            _ = interval.tick() => Ok(Action::Ping),
+            res = rx.recv() => res.map(Action::Notification),
+        };
+
+        let action = match action {
+            Ok(action) => action,
+            Err(e) => {
+                tracing::error!("API server websockets: error on receiving notification: {e}");
                 break;
             }
-        }
-    });
+        };
 
-    while let Ok(notification) = rx.recv().await {
-        let notification = match notification {
-            Notification::NewBlock(block) => {
-                let height = block.height();
-                let logs = match kolme.get_block(height).await {
-                    Ok(Some(block)) => {
-                        match kolme
-                            .get_merkle_by_hash(block.block.0.message.as_inner().logs)
-                            .await
-                        {
-                            Ok(logs) => logs,
-                            Err(e) => {
-                                tracing::error!(
-                                    "No logs found in Merkle store for block {height}: {e}"
-                                );
-                                break;
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        tracing::error!(
-                            "No information about logs for the awaited block at {height}"
-                        );
-                        break;
-                    }
+        let msg = match action {
+            Action::Ping => {
+                tracing::debug!("Sending ping");
+                axum::extract::ws::Message::Ping(Vec::new().into())
+            }
+            Action::Notification(notification) => {
+                let api_notification = match to_api_notification(&kolme, notification).await {
+                    Ok(api_notification) => api_notification,
                     Err(e) => {
-                        tracing::error!("Failed to get logs for block: {}", e);
+                        tracing::error!("API server websockets: Error converting Notification to ApiNotification: {e}");
                         break;
                     }
                 };
-                ApiNotification::NewBlock { block, logs }
-            }
-            Notification::GenesisInstantiation { chain, contract } => {
-                ApiNotification::GenesisInstantiation { chain, contract }
-            }
-            Notification::FailedTransaction(failed) => ApiNotification::FailedTransaction(failed),
-            Notification::LatestBlock(latest_block) => ApiNotification::LatestBlock(latest_block),
-            Notification::EvictMempoolTransaction(txhash) => {
-                ApiNotification::EvictMempoolTransaction(txhash)
-            }
-        };
-        let msg = match serde_json::to_string(&notification) {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::error!("Failed to serialize notification to JSON: {}", e);
-                break;
+                let msg = match serde_json::to_string(&api_notification) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        tracing::error!("API server websockets: error serializing API notification to string: {e}");
+                        break;
+                    }
+                };
+                WsMessage::Text(msg.into())
             }
         };
+        let res = socket.send(msg).await;
 
-        if let Err(error) = socket.lock().await.send(WsMessage::Text(msg.into())).await {
-            tracing::debug!("Client disconnected with error: {}", error);
+        if let Err(e) = res {
+            tracing::warn!("Client connection closed, stopping pings: {e}");
             break;
         }
         tracing::debug!("Notification sent to WebSocket client.");
+    }
+}
+
+async fn to_api_notification<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    notification: Notification<App::Message>,
+) -> Result<ApiNotification<App::Message>> {
+    match notification {
+        Notification::NewBlock(block) => {
+            let height = block.height();
+            let logs = match kolme.get_block(height).await {
+                Ok(Some(block)) => {
+                    match kolme
+                        .get_merkle_by_hash(block.block.0.message.as_inner().logs)
+                        .await
+                    {
+                        Ok(logs) => logs,
+                        Err(e) => {
+                            anyhow::bail!("No logs found in Merkle store for block {height}: {e}");
+                        }
+                    }
+                }
+                Ok(None) => {
+                    anyhow::bail!("No information about logs for the awaited block at {height}")
+                }
+                Err(e) => {
+                    anyhow::bail!("Failed to get logs for block: {}", e);
+                }
+            };
+            Ok(ApiNotification::NewBlock { block, logs })
+        }
+        Notification::GenesisInstantiation { chain, contract } => {
+            Ok(ApiNotification::GenesisInstantiation { chain, contract })
+        }
+        Notification::FailedTransaction(failed) => Ok(ApiNotification::FailedTransaction(failed)),
+        Notification::LatestBlock(latest_block) => Ok(ApiNotification::LatestBlock(latest_block)),
+        Notification::EvictMempoolTransaction(txhash) => {
+            Ok(ApiNotification::EvictMempoolTransaction(txhash))
+        }
     }
 }
 
