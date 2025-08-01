@@ -61,7 +61,10 @@ impl MerkleFjallStore {
             return Ok(None);
         };
         let children = parse_children(&children)?;
-        Ok(Some(MerkleLayerContents { payload, children }))
+        Ok(Some(MerkleLayerContents {
+            payload: merkle_map::CachedBytes::new_hash(hash, payload),
+            children,
+        }))
     }
 }
 
@@ -79,14 +82,10 @@ impl MerkleStore for MerkleFjallStore {
         Ok(())
     }
 
-    async fn save_by_hash(
-        &mut self,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-    ) -> Result<(), MerkleSerialError> {
-        let Keys { payload, children } = Keys::from_hash(hash);
+    async fn save_by_hash(&mut self, layer: &MerkleLayerContents) -> Result<(), MerkleSerialError> {
+        let Keys { payload, children } = Keys::from_hash(layer.payload.hash());
         self.handle
-            .insert(payload, &*layer.payload)
+            .insert(payload, layer.payload.bytes().clone())
             .map_err(MerkleSerialError::custom)?;
         self.handle
             .insert(children, render_children(&layer.children))

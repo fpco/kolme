@@ -254,10 +254,10 @@ impl<App: KolmeApp> Processor<App> {
             processor: secret.public_key(),
             height: proposed_height,
             parent: kolme.get_current_block_hash(),
-            framework_state: merkle_map::api::serialize(&framework_state)?.hash,
-            app_state: merkle_map::api::serialize(&app_state)?.hash,
+            framework_state: merkle_map::api::serialize(&framework_state)?.hash(),
+            app_state: merkle_map::api::serialize(&app_state)?.hash(),
             loads,
-            logs: merkle_map::api::serialize(&logs)?.hash,
+            logs: merkle_map::api::serialize(&logs)?.hash(),
         };
         let block = TaggedJson::new(approved_block)?;
         let signed_block = Arc::new(SignedBlock(block.sign(secret)?));

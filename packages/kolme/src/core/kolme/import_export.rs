@@ -113,7 +113,7 @@ impl<App: KolmeApp> Kolme<App> {
                     src.read_exact(&mut payload).await?;
                     let children_len = src.read_u32().await?;
                     let mut children = SmallVec::with_capacity(usize::try_from(children_len)?);
-                    let hash = Sha256Hash::hash(&payload);
+                    let payload = CachedBytes::new_bytes(payload);
                     for _ in 0..children_len {
                         let mut buff = [0u8; 32];
                         src.read_exact(&mut buff).await?;
@@ -123,14 +123,12 @@ impl<App: KolmeApp> Kolme<App> {
                             "Child hash {} was not previously written.",
                             child
                         );
-                        anyhow::ensure!(self.has_merkle_hash(child).await?, "Merkle hash {child} of a child not found in Merkle store for parent {hash}");
+                        anyhow::ensure!(self.has_merkle_hash(child).await?, "Merkle hash {child} of a child not found in Merkle store for parent {}", payload.hash());
                         children.push(child);
                     }
-                    let layer = MerkleLayerContents {
-                        payload: payload.into(),
-                        children,
-                    };
-                    self.add_merkle_layer(hash, &layer).await?;
+                    let hash = payload.hash();
+                    let layer = MerkleLayerContents { payload, children };
+                    self.add_merkle_layer(&layer).await?;
                     hashes.insert(hash);
                 }
                 1 => {
@@ -162,7 +160,7 @@ async fn write_layer(
     dest.write_u8(0).await?;
     dest.write_u32(u32::try_from(layer.payload.len()).context("Payload is too large")?)
         .await?;
-    dest.write_all(&layer.payload).await?;
+    dest.write_all(layer.payload.bytes()).await?;
     dest.write_u32(u32::try_from(layer.children.len()).context("Too many children")?)
         .await?;
     for child in &layer.children {

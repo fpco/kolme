@@ -13,7 +13,7 @@ async fn deep() {
         max_depth >= 4,
         "Max depth is {max_depth}, expecting at least 4"
     );
-    let m2 = load(&mut store, contents.hash).await.unwrap();
+    let m2 = load(&mut store, contents.hash()).await.unwrap();
     assert_eq!(m, m2);
 }
 

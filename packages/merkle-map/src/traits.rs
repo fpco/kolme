@@ -112,11 +112,7 @@ pub trait MerkleStore {
     ///
     /// Invariant: the hash must be the correct hash of the given payload.
     #[allow(async_fn_in_trait)]
-    async fn save_by_hash(
-        &mut self,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-    ) -> Result<(), MerkleSerialError>;
+    async fn save_by_hash(&mut self, layer: &MerkleLayerContents) -> Result<(), MerkleSerialError>;
 
     /// Checks if the store already has a blob matching the given hash.
     #[allow(async_fn_in_trait)]

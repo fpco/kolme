@@ -35,11 +35,7 @@ pub trait KolmeBackingStore {
     async fn add_block<Block>(&self, block: &StorableBlock<Block>) -> Result<(), KolmeStoreError>
     where
         Block: serde::Serialize + MerkleSerializeRaw + HasBlockHashes;
-    async fn add_merkle_layer(
-        &self,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-    ) -> anyhow::Result<()>;
+    async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> anyhow::Result<()>;
 
     async fn archive_block(&self, height: u64) -> anyhow::Result<()>;
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>>;

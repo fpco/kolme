@@ -538,7 +538,7 @@ impl<App: KolmeApp> SyncManager<App> {
                     }
 
                     // OK, we have all the children! Time to store it.
-                    gossip.kolme.add_merkle_layer(hash, entry.get()).await?;
+                    gossip.kolme.add_merkle_layer(entry.get()).await?;
 
                     entry.remove_entry();
                 }
