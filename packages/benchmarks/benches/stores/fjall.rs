@@ -44,6 +44,7 @@ mod merkle {
     use std::{collections::HashMap, path::Path, sync::Arc};
 
     use fjall::PartitionCreateOptions;
+    use kolme::CachedBytes;
     use merkle_map::{MerkleLayerContents, MerkleSerialError, MerkleStore, Sha256Hash};
     use smallvec::SmallVec;
 
@@ -104,7 +105,10 @@ mod merkle {
                 return Ok(None);
             };
             let children = parse_children(&children)?;
-            Ok(Some(MerkleLayerContents { payload, children }))
+            Ok(Some(MerkleLayerContents {
+                payload: CachedBytes::new_hash(hash, payload),
+                children,
+            }))
         }
     }
 
@@ -124,12 +128,11 @@ mod merkle {
 
         async fn save_by_hash(
             &mut self,
-            hash: Sha256Hash,
             layer: &MerkleLayerContents,
         ) -> Result<(), MerkleSerialError> {
-            let Keys { payload, children } = Keys::from_hash(hash);
+            let Keys { payload, children } = Keys::from_hash(layer.payload.hash());
             self.handle
-                .insert(payload, &*layer.payload)
+                .insert(payload, layer.payload.bytes().clone())
                 .map_err(MerkleSerialError::custom)?;
             self.handle
                 .insert(children, render_children(&layer.children))

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use merkle_map::{MerkleLayerContents, MerkleSerialError, MerkleStore, Sha256Hash};
+use merkle_map::{CachedBytes, MerkleLayerContents, MerkleSerialError, MerkleStore, Sha256Hash};
 use smallvec::SmallVec;
 use sqlx::{
     encode::IsNull,
@@ -140,8 +140,6 @@ impl MerkleStore for MerklePostgresStore<'_> {
 
         for row in rows {
             let hash = Sha256Hash::from_hash(&row.hash).map_err(MerkleSerialError::custom)?;
-            let payload = row.payload.into();
-            debug_assert_eq!(hash, Sha256Hash::hash(&payload));
             let children = row
                 .children
                 .into_iter()
@@ -150,7 +148,7 @@ impl MerkleStore for MerklePostgresStore<'_> {
             dest.insert(
                 hash,
                 merkle_map::MerkleLayerContents {
-                    payload,
+                    payload: CachedBytes::new_hash(hash, row.payload),
                     children: children.into(),
                 },
             );
@@ -160,11 +158,12 @@ impl MerkleStore for MerklePostgresStore<'_> {
 
     async fn save_by_hash(
         &mut self,
-        hash: Sha256Hash,
         layer: &merkle_map::MerkleLayerContents,
     ) -> Result<(), merkle_map::MerkleSerialError> {
+        let hash = layer.payload.hash();
         self.hashes_to_insert.push(Hash(hash));
-        self.payloads_to_insert.push(Payload(layer.payload.clone()));
+        self.payloads_to_insert
+            .push(Payload(layer.payload.bytes().clone()));
         self.childrens_to_insert.push(Children {
             bytes: ChildrenInner(layer.children.clone()),
         });

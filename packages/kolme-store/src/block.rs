@@ -87,8 +87,8 @@ pub struct BlockHashes {
 mod tests {
     use super::StorableBlock;
     use merkle_map::{
-        MerkleContents, MerkleDeserialize, MerkleDeserializer, MerkleSerialError, MerkleSerialize,
-        MerkleSerializer, Sha256Hash,
+        CachedBytes, MerkleContents, MerkleDeserialize, MerkleDeserializer, MerkleSerialError,
+        MerkleSerialize, MerkleSerializer, Sha256Hash,
     };
     use std::sync::Arc;
 
@@ -132,10 +132,8 @@ mod tests {
             116, 97, 116, 101, 2, 1, 5, 68, 117, 109, 109, 121, 1, 4, 76, 111, 103, 115,
         ]
         .into();
-        let payload_hash = Sha256Hash::hash(&payload);
         let contents = MerkleContents {
-            hash: payload_hash,
-            payload,
+            payload: CachedBytes::new_bytes(payload),
             children: vec![].into(),
         };
 

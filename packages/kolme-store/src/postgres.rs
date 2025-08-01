@@ -372,13 +372,9 @@ impl KolmeBackingStore for Store {
 
         Ok(())
     }
-    async fn add_merkle_layer(
-        &self,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-    ) -> anyhow::Result<()> {
+    async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> anyhow::Result<()> {
         let mut merkle = self.new_store();
-        merkle.save_by_hash(hash, layer).await?;
+        merkle.save_by_hash(layer).await?;
         self.consume_stores(&self.pool, [merkle]).await?;
 
         Ok(())
