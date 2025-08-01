@@ -41,8 +41,8 @@ pub async fn execute(
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
 
     tracing::info!(
-        "Executing signed message on bridge {program_id} with ID: {}",
-        payload.id
+        "Executing signed message on bridge {program_id}: {:?}",
+        payload
     );
 
     let program_id = Pubkey::from_str(program_id)?;
