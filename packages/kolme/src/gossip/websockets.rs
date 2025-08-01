@@ -20,7 +20,6 @@ use crate::*;
 pub(super) struct WebsocketsManager<App: KolmeApp> {
     tx_gossip: Sender<GossipMessage<App>>,
     rx_message: tokio::sync::mpsc::Receiver<WebsocketsMessage<App>>,
-    local_display_name: Arc<str>,
 }
 
 pub(super) struct WebsocketsMessage<App: KolmeApp> {
@@ -91,17 +90,13 @@ impl<App: KolmeApp> WebsocketsManager<App> {
         Ok(WebsocketsManager {
             tx_gossip,
             rx_message,
-            local_display_name,
         })
     }
 
     pub(super) async fn get_incoming(&mut self) -> WebsocketsMessage<App> {
         match self.rx_message.recv().await {
             Some(msg) => msg,
-            None => loop {
-                tracing::info!(%self.local_display_name, "Gossip's websockets are unused, sleeping indefinitely");
-                tokio::time::sleep(tokio::time::Duration::from_secs(60 * 60 * 24)).await;
-            },
+            None => std::future::pending().await,
         }
     }
 }
