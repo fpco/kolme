@@ -207,7 +207,7 @@ async fn load_from_zero_helper(people: Vec<Person0>, to_modify: usize, new_stree
     let mut store = MerkleMemoryStore::default();
     let m0_contents = save(&mut store, &m0).await.unwrap();
 
-    let parsed1 = load(&mut store, m0_contents.hash).await.unwrap();
+    let parsed1 = load(&mut store, m0_contents.hash()).await.unwrap();
     assert_eq!(m1, parsed1);
 
     // Serializing m1 directly should generate a different hash because it will use
@@ -217,17 +217,17 @@ async fn load_from_zero_helper(people: Vec<Person0>, to_modify: usize, new_stree
     // to reserialize.
     let m1_contents = save(&mut store, &m1).await.unwrap();
     if !m0.is_empty() {
-        assert_ne!(m0_contents.hash, m1_contents.hash);
+        assert_ne!(m0_contents.hash(), m1_contents.hash());
     }
 
     // Reserializing without any changes should produce the same hash, since it's already cached
     let parsed1_contents = save(&mut store, &parsed1).await.unwrap();
-    assert_eq!(m0_contents.hash, parsed1_contents.hash);
+    assert_eq!(m0_contents.hash(), parsed1_contents.hash());
 
     // Should also work to load directly into Person2
-    let parsed2 = load(&mut store, m0_contents.hash).await.unwrap();
+    let parsed2 = load(&mut store, m0_contents.hash()).await.unwrap();
     assert_eq!(m2, parsed2);
-    let parsed2 = load(&mut store, m1_contents.hash).await.unwrap();
+    let parsed2 = load(&mut store, m1_contents.hash()).await.unwrap();
     assert_eq!(m2, parsed2);
 
     // Now try modifying some random part of the Map and ensure we can get everything to match.
@@ -244,7 +244,7 @@ async fn load_from_zero_helper(people: Vec<Person0>, to_modify: usize, new_stree
     assert!(m2.insert(to_modify, person.into()).is_some());
 
     let m1_contents = save(&mut store, &m1).await.unwrap();
-    let parsed2 = load(&mut store, m1_contents.hash).await.unwrap();
+    let parsed2 = load(&mut store, m1_contents.hash()).await.unwrap();
     assert_eq!(m2, parsed2);
 
     true

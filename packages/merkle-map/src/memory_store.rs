@@ -34,9 +34,9 @@ impl MerkleStore for MerkleMemoryStore {
 
     async fn save_by_hash(
         &mut self,
-        hash: Sha256Hash,
         payload: &MerkleLayerContents,
     ) -> Result<(), MerkleSerialError> {
+        let hash = payload.payload.hash();
         if let Some(value) = self.0.read().unwrap().get(&hash) {
             assert_eq!(value, payload);
             return Ok(());

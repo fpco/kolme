@@ -34,11 +34,8 @@ impl MerkleSerializer {
     /// Finish generating the output and return the completed buffer.
     pub(crate) fn finish(self) -> MerkleContents {
         let MerkleSerializer { buff, children } = self;
-        let buff = Arc::<[u8]>::from(buff);
-        let hash = Sha256Hash::hash(&buff);
         MerkleContents {
-            hash,
-            payload: buff,
+            payload: CachedBytes::new_bytes(buff),
             children: children.into(),
         }
     }
@@ -97,7 +94,7 @@ impl MerkleSerializer {
         child: &T,
     ) -> Result<(), MerkleSerialError> {
         let contents = crate::api::serialize(child)?;
-        let hash = contents.hash;
+        let hash = contents.hash();
         self.children.push(contents);
         hash.merkle_serialize_raw(self)
     }

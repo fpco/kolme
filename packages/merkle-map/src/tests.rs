@@ -91,7 +91,7 @@ async fn load_should_have_locked_status() {
     let tree_contents = save(&mut store, &tree).await.unwrap();
     tree.assert_locked_status(true);
 
-    let mut same_tree: MerkleMap<u8, u8> = load(&mut store, tree_contents.hash).await.unwrap();
+    let mut same_tree: MerkleMap<u8, u8> = load(&mut store, tree_contents.hash()).await.unwrap();
     assert_eq!(same_tree, tree);
     same_tree.assert_locked_status(true);
 
@@ -231,7 +231,7 @@ quickcheck! {
 async fn test_store_usize_inner(x: usize) -> bool {
     let mut store = MerkleMemoryStore::default();
     let contents = save(&mut store, &x).await.unwrap();
-    let y = load::<usize, _>(&mut store, contents.hash).await.unwrap();
+    let y = load::<usize, _>(&mut store, contents.hash()).await.unwrap();
     assert_eq!(x, y);
     true
 }
@@ -249,7 +249,7 @@ async fn memory_manager_helper(size: u32) {
 
     m.assert_locked_status(true);
 
-    let m2 = load(&mut store, contents.hash).await.unwrap();
+    let m2 = load(&mut store, contents.hash()).await.unwrap();
 
     m.assert_locked_status(true);
 
@@ -309,7 +309,7 @@ async fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u
 
     let mut store = MerkleMemoryStore::default();
     let contents = save(&mut store, &person).await.unwrap();
-    let person2 = load(&mut store, contents.hash).await.unwrap();
+    let person2 = load(&mut store, contents.hash()).await.unwrap();
     assert_eq!(person, person2);
 }
 
@@ -767,7 +767,7 @@ where
 {
     let mut store = MerkleMemoryStore::default();
     let serialized = save(&mut store, &value).await.unwrap();
-    let deserialized = load::<T, _>(&mut store, serialized.hash).await.unwrap();
+    let deserialized = load::<T, _>(&mut store, serialized.hash()).await.unwrap();
 
     quickcheck::TestResult::from_bool(value == deserialized)
 }
