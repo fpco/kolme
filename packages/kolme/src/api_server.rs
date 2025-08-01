@@ -248,25 +248,15 @@ async fn to_api_notification<App: KolmeApp>(
     match notification {
         Notification::NewBlock(block) => {
             let height = block.height();
-            let logs = match kolme.get_block(height).await {
-                Ok(Some(block)) => {
-                    match kolme
-                        .get_merkle_by_hash(block.block.0.message.as_inner().logs)
-                        .await
-                    {
-                        Ok(logs) => logs,
-                        Err(e) => {
-                            anyhow::bail!("No logs found in Merkle store for block {height}: {e}");
-                        }
-                    }
-                }
-                Ok(None) => {
-                    anyhow::bail!("No information about logs for the awaited block at {height}")
-                }
-                Err(e) => {
-                    anyhow::bail!("Failed to get logs for block: {}", e);
-                }
-            };
+            // Ensure we have the block in local storage.
+            let block = tokio::time::timeout(
+                tokio::time::Duration::from_secs(20),
+                kolme.wait_for_block(height),
+            )
+            .await
+            .with_context(|| format!("Loading logs: took too long to load block {height}"))?
+            .with_context(|| format!("Failed to get block {height} in order to load logs"))?;
+            let logs = kolme.load_logs(block.as_inner().logs).await?.into();
             Ok(ApiNotification::NewBlock { block, logs })
         }
         Notification::GenesisInstantiation { chain, contract } => {
