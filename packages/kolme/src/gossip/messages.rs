@@ -175,7 +175,7 @@ impl<App: KolmeApp> GossipMessage<App> {
         self,
         gossip: &Gossip<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         tracing::debug!(
             "{}: Publishing message to gossipsub: {self}",
             gossip.local_display_name
@@ -183,25 +183,28 @@ impl<App: KolmeApp> GossipMessage<App> {
         gossip.websockets_manager.publish(&self);
         // TODO should we put in some retry logic to handle the "InsufficientPeers" case?
         let msg = serde_json::to_vec(&self)?;
+        if !gossip.use_libp2p {
+            return Ok(());
+        }
         let result = swarm
             .behaviour_mut()
             .gossipsub
             .publish(gossip.gossip_topic.clone(), msg);
         match result {
-            Ok(_id) => Ok(true),
+            Ok(_id) => Ok(()),
             Err(PublishError::Duplicate) => {
                 tracing::debug!(
                     "{}: Skipping sending duplicate message",
                     gossip.local_display_name
                 );
-                Ok(true)
+                Ok(())
             }
             Err(PublishError::NoPeersSubscribedToTopic) => {
                 tracing::info!(
                     "{}: No peers are subscribed to the topic, unable to send this message",
                     gossip.local_display_name
                 );
-                Ok(false)
+                Ok(())
             }
             Err(err) => Err(err).with_context(|| {
                 format!(

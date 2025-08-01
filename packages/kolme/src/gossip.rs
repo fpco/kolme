@@ -67,6 +67,7 @@ pub struct Gossip<App: KolmeApp> {
     warning_period: Duration,
     websockets_manager: WebsocketsManager<App>,
     set: Option<JoinSet<()>>,
+    use_libp2p: bool,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -304,6 +305,7 @@ impl GossipBuilder {
             Some(keypair) => SwarmBuilder::with_existing_identity(keypair),
             None => SwarmBuilder::with_new_identity(),
         };
+        let use_libp2p = !self.listeners.is_empty() || !self.bootstrap.is_empty();
         let mut swarm = builder
             .with_tokio()
             .with_tcp(
@@ -442,6 +444,7 @@ impl GossipBuilder {
             warning_period: self.warning_period,
             websockets_manager,
             set: Some(set),
+            use_libp2p,
         })
     }
 }
@@ -548,27 +551,28 @@ impl<App: KolmeApp> Gossip<App> {
         self.dht_peer_discovery(swarm);
     }
 
+    fn mark_network_ready(&self) {
+        if !*self.watch_network_ready.borrow() {
+            tracing::info!(
+                "{}: Successfully received message from network, gossip network is ready",
+                self.local_display_name
+            );
+            self.watch_network_ready.send_replace(true);
+        }
+    }
+
     fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
         if *self.watch_network_ready.borrow() {
             // We already sent this request successfully, no need to repeat.
             return;
         }
-        match GossipMessage::RequestBlockHeights(jiff::Timestamp::now()).publish(self, swarm) {
-            Ok(sent) => {
-                if sent {
-                    tracing::info!(
-                        "{}: Successfully sent a block height request, p2p network is ready",
-                        self.local_display_name
-                    );
-                    self.watch_network_ready.send_replace(true);
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "{}: Unable to request block heights: {e:?}",
-                    self.local_display_name
-                );
-            }
+        if let Err(e) =
+            GossipMessage::RequestBlockHeights(jiff::Timestamp::now()).publish(self, swarm)
+        {
+            tracing::warn!(
+                "{}: Unable to request block heights: {e:?}",
+                self.local_display_name
+            );
         }
     }
 
@@ -593,9 +597,7 @@ impl<App: KolmeApp> Gossip<App> {
             let txhash = tx.hash();
             let msg = GossipMessage::BroadcastTx { tx };
             match msg.publish(self, swarm) {
-                Ok(true) => self.kolme.mark_mempool_entry_gossiped(txhash),
-                // No peers received the message
-                Ok(false) => (),
+                Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
                 Err(e) => tracing::error!(
                     "{}: Unable to broadcast transaction {txhash}: {e:?}",
                     self.local_display_name
@@ -721,6 +723,7 @@ impl<App: KolmeApp> Gossip<App> {
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
         ws_sender: Option<WebsocketsPrivateSender<App>>,
     ) {
+        self.mark_network_ready();
         let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::Notification(msg) => {
@@ -870,6 +873,7 @@ impl<App: KolmeApp> Gossip<App> {
         msg: WebsocketsMessage<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) {
+        self.mark_network_ready();
         match msg.payload {
             websockets::WebsocketsPayload::Gossip(message) => {
                 self.handle_message(message, swarm, Some(msg.tx)).await
