@@ -306,7 +306,7 @@ impl WebSocketWrapper for WebSocketStream<MaybeTlsStream<TcpStream>> {
                 tokio_tungstenite::tungstenite::Message::Ping(_) => WebsocketsRecv::Skip,
                 tokio_tungstenite::tungstenite::Message::Pong(_) => WebsocketsRecv::Skip,
                 msg => {
-                    tracing::warn!(%local_display_name, "Unhandled Gossip WebSockets server message: {msg:?}");
+                    tracing::warn!(%local_display_name, "Unhandled Gossip WebSockets client message: {msg:?}");
                     WebsocketsRecv::Close
                 }
             },
