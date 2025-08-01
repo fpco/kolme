@@ -1,9 +1,11 @@
 mod messages;
 mod sync_manager;
+mod websockets;
 
 use std::{
     fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
+    net::SocketAddr,
     num::NonZeroUsize,
     str::FromStr,
     time::{Duration, Instant},
@@ -24,10 +26,14 @@ use libp2p::{
     tcp, upnp, yamux, StreamProtocol, Swarm, SwarmBuilder,
 };
 use sync_manager::{DataLabel, DataRequest, SyncManager};
-use tokio::sync::{broadcast::error::RecvError, Mutex};
+use tokio::{
+    sync::{broadcast::error::RecvError, Mutex},
+    task::JoinSet,
+};
 
 pub use libp2p::{identity::Keypair, Multiaddr, PeerId};
 use utils::trigger::Trigger;
+use websockets::{WebsocketsManager, WebsocketsMessage, WebsocketsPrivateSender};
 
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
@@ -59,6 +65,9 @@ pub struct Gossip<App: KolmeApp> {
     concurrent_request_limit: usize,
     max_peer_count: usize,
     warning_period: Duration,
+    websockets_manager: WebsocketsManager<App>,
+    set: Option<JoinSet<()>>,
+    use_libp2p: bool,
 }
 
 // We create a custom network behaviour that combines Gossipsub, Request/Response and Kademlia.
@@ -151,6 +160,8 @@ pub struct GossipBuilder {
     concurrent_request_limit: usize,
     max_peer_count: usize,
     warning_period: Duration,
+    websockets_binds: Vec<SocketAddr>,
+    websockets_servers: Vec<String>,
 }
 
 impl Default for GossipBuilder {
@@ -170,6 +181,8 @@ impl Default for GossipBuilder {
             concurrent_request_limit: sync_manager::DEFAULT_REQUEST_COUNT,
             max_peer_count: sync_manager::DEFAULT_PEER_COUNT,
             warning_period: Duration::from_secs(sync_manager::DEFAULT_WARNING_PERIOD_SECS),
+            websockets_binds: vec![],
+            websockets_servers: vec![],
         }
     }
 }
@@ -237,6 +250,16 @@ impl GossipBuilder {
         self
     }
 
+    pub fn add_websockets_bind(mut self, bind: SocketAddr) -> Self {
+        self.websockets_binds.push(bind);
+        self
+    }
+
+    pub fn add_websockets_server(mut self, host: String) -> Self {
+        self.websockets_servers.push(host);
+        self
+    }
+
     /// Set time between each heartbeat (default is 10 seconds).
     pub fn heartbeat_interval(mut self, heartbeat_interval: Duration) -> Self {
         self.heartbeat_interval = heartbeat_interval;
@@ -282,6 +305,7 @@ impl GossipBuilder {
             Some(keypair) => SwarmBuilder::with_existing_identity(keypair),
             None => SwarmBuilder::with_new_identity(),
         };
+        let use_libp2p = !self.listeners.is_empty() || !self.bootstrap.is_empty();
         let mut swarm = builder
             .with_tokio()
             .with_tcp(
@@ -380,22 +404,27 @@ impl GossipBuilder {
         // And subscribe
         swarm.behaviour_mut().gossipsub.subscribe(&gossip_topic)?;
 
-        if self.listeners.is_empty() {
-            swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-        } else {
-            for listener in &self.listeners {
-                swarm.listen_on(listener.multiaddr())?;
-            }
+        for listener in &self.listeners {
+            swarm.listen_on(listener.multiaddr())?;
         }
 
         for addr in self.external_addrs {
             swarm.add_external_address(addr);
         }
 
+        let local_display_name = self.local_display_name.unwrap_or(String::from("gossip"));
+
         let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let local_peer_id = *swarm.local_peer_id();
         let sync_manager = Mutex::new(SyncManager::default());
         let dht_key = RecordKey::new(&format!("/kolme-dht/{genesis_hash}/1.0"));
+        let mut set = JoinSet::new();
+        let websockets_manager = WebsocketsManager::new(
+            &mut set,
+            self.websockets_binds,
+            self.websockets_servers,
+            &local_display_name,
+        )?;
 
         Ok(Gossip {
             kolme,
@@ -406,13 +435,16 @@ impl GossipBuilder {
             local_peer_id,
             trigger_broadcast_height: Trigger::new("broadcast_height"),
             watch_network_ready,
-            local_display_name: self.local_display_name.unwrap_or(String::from("gossip")),
+            local_display_name,
             sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
             dht_key,
             concurrent_request_limit: self.concurrent_request_limit,
             max_peer_count: self.max_peer_count,
             warning_period: self.warning_period,
+            websockets_manager,
+            set: Some(set),
+            use_libp2p,
         })
     }
 }
@@ -426,7 +458,14 @@ impl<App: KolmeApp> Gossip<App> {
         self.watch_network_ready.subscribe()
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
+        let mut set = self.set.take().unwrap();
+        set.spawn(self.run_inner());
+        let res = set.join_next().await;
+        panic!("Unexpected exit in gossip: {res:?}");
+    }
+
+    async fn run_inner(mut self) {
         let mut subscription = self.kolme.subscribe();
         let mut swarm = self.swarm.lock().await;
 
@@ -472,6 +511,9 @@ impl<App: KolmeApp> Gossip<App> {
                 _ = mempool_additions.listen() => {
                     self.broadcast_mempool_entries(&mut swarm);
                 }
+                msg = self.websockets_manager.get_incoming() => {
+                    self.handle_websockets_message(msg, &mut swarm).await;
+                }
                 Some(height) = block_requester_rx.recv() => {
                     if let Err(e) = self.sync_manager.lock().await.add_needed_block(&self, height, None).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
@@ -509,27 +551,28 @@ impl<App: KolmeApp> Gossip<App> {
         self.dht_peer_discovery(swarm);
     }
 
+    fn mark_network_ready(&self) {
+        if !*self.watch_network_ready.borrow() {
+            tracing::info!(
+                "{}: Successfully received message from network, gossip network is ready",
+                self.local_display_name
+            );
+            self.watch_network_ready.send_replace(true);
+        }
+    }
+
     fn request_block_heights(&self, swarm: &mut Swarm<KolmeBehaviour<App::Message>>) {
         if *self.watch_network_ready.borrow() {
             // We already sent this request successfully, no need to repeat.
             return;
         }
-        match GossipMessage::RequestBlockHeights(jiff::Timestamp::now()).publish(self, swarm) {
-            Ok(sent) => {
-                if sent {
-                    tracing::info!(
-                        "{}: Successfully sent a block height request, p2p network is ready",
-                        self.local_display_name
-                    );
-                    self.watch_network_ready.send_replace(true);
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "{}: Unable to request block heights: {e:?}",
-                    self.local_display_name
-                );
-            }
+        if let Err(e) =
+            GossipMessage::RequestBlockHeights(jiff::Timestamp::now()).publish(self, swarm)
+        {
+            tracing::warn!(
+                "{}: Unable to request block heights: {e:?}",
+                self.local_display_name
+            );
         }
     }
 
@@ -554,9 +597,7 @@ impl<App: KolmeApp> Gossip<App> {
             let txhash = tx.hash();
             let msg = GossipMessage::BroadcastTx { tx };
             match msg.publish(self, swarm) {
-                Ok(true) => self.kolme.mark_mempool_entry_gossiped(txhash),
-                // No peers received the message
-                Ok(false) => (),
+                Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
                 Err(e) => tracing::error!(
                     "{}: Unable to broadcast transaction {txhash}: {e:?}",
                     self.local_display_name
@@ -628,7 +669,7 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                     Ok(message) => {
                         tracing::debug!("{local_display_name}: Received message: {message}");
-                        self.handle_message(message, swarm).await;
+                        self.handle_message(message, swarm, None).await;
                     }
                 }
             }
@@ -648,7 +689,7 @@ impl<App: KolmeApp> Gossip<App> {
                 libp2p::request_response::Message::Response {
                     request_id: _,
                     response,
-                } => self.handle_response(response, peer).await,
+                } => self.handle_response(response, PeerOrWs::Peer(peer)).await,
             },
             SwarmEvent::ConnectionEstablished {
                 peer_id,
@@ -680,7 +721,9 @@ impl<App: KolmeApp> Gossip<App> {
         &self,
         message: GossipMessage<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
+        ws_sender: Option<WebsocketsPrivateSender<App>>,
     ) {
+        self.mark_network_ready();
         let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::Notification(msg) => {
@@ -742,10 +785,11 @@ impl<App: KolmeApp> Gossip<App> {
                 self.trigger_broadcast_height.trigger();
             }
             GossipMessage::ReportBlockHeight(report) => {
+                let peer = ws_sender.map_or(PeerOrWs::Peer(report.peer), PeerOrWs::Ws);
                 self.sync_manager
                     .lock()
                     .await
-                    .add_report_block_height(self, report)
+                    .add_report_block_height(self, report, peer)
                     .await;
             }
             GossipMessage::BroadcastTx { tx } => {
@@ -762,13 +806,29 @@ impl<App: KolmeApp> Gossip<App> {
                     }
                     Ok(false) => (),
                     Ok(true) => {
-                        swarm.behaviour_mut().request_response.send_request(
-                            &peer,
-                            BlockRequest::BlockAvailable {
-                                height,
-                                peer: self.peer_id(),
-                            },
-                        );
+                        let req = BlockRequest::BlockAvailable {
+                            height,
+                            peer: self.peer_id(),
+                        };
+                        match ws_sender {
+                            Some(ws_sender) => {
+                                if let Err(e) = ws_sender
+                                    .tx
+                                    .send(websockets::WebsocketsPayload::Request(req))
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Unexpected error on ws_sender.send BlockAvailable: {e}"
+                                    );
+                                }
+                            }
+                            None => {
+                                swarm
+                                    .behaviour_mut()
+                                    .request_response
+                                    .send_request(&peer, req);
+                            }
+                        }
                     }
                 }
             }
@@ -779,27 +839,73 @@ impl<App: KolmeApp> Gossip<App> {
                     ),
                     Ok(false) => (),
                     Ok(true) => {
-                        swarm.behaviour_mut().request_response.send_request(
-                            &peer,
-                            BlockRequest::LayerAvailable {
-                                hash,
-                                peer: self.peer_id(),
-                            },
-                        );
+                        let req = BlockRequest::LayerAvailable {
+                            hash,
+                            peer: self.peer_id(),
+                        };
+                        match ws_sender {
+                            Some(ws_sender) => {
+                                if let Err(e) = ws_sender
+                                    .tx
+                                    .send(websockets::WebsocketsPayload::Request(req))
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Unexpected error on ws_sender.send LayerAvailable: {e}"
+                                    );
+                                }
+                            }
+                            None => {
+                                swarm
+                                    .behaviour_mut()
+                                    .request_response
+                                    .send_request(&peer, req);
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    async fn handle_request(
+    async fn handle_websockets_message(
         &self,
-        request: BlockRequest,
-        channel: ResponseChannel<BlockResponse<App::Message>>,
+        msg: WebsocketsMessage<App>,
         swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
     ) {
+        self.mark_network_ready();
+        match msg.payload {
+            websockets::WebsocketsPayload::Gossip(message) => {
+                self.handle_message(message, swarm, Some(msg.tx)).await
+            }
+            websockets::WebsocketsPayload::Request(request) => {
+                let res = self
+                    .handle_request_helper(request, Some(msg.tx.clone()))
+                    .await;
+                if let Err(e) = msg
+                    .tx
+                    .tx
+                    .send(websockets::WebsocketsPayload::Response(res))
+                    .await
+                {
+                    tracing::error!(
+                        "handle_websockets_message: unexpected error sending response: {e}"
+                    );
+                }
+            }
+            websockets::WebsocketsPayload::Response(response) => {
+                self.handle_response(response, PeerOrWs::Ws(msg.tx)).await;
+            }
+        }
+    }
+
+    async fn handle_request_helper(
+        &self,
+        request: BlockRequest,
+        ws_sender: Option<WebsocketsPrivateSender<App>>,
+    ) -> BlockResponse<App::Message> {
         let local_display_name = self.local_display_name.clone();
-        let res = match &request {
+        match &request {
             BlockRequest::BlockAtHeight(height) | BlockRequest::BlockWithStateAtHeight(height) => {
                 let height = *height;
                 match self.kolme.read().get_block(height).await {
@@ -845,31 +951,44 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             BlockRequest::BlockAvailable { height, peer } => {
-                self.sync_manager
-                    .lock()
-                    .await
-                    .add_block_peer(self, *height, *peer);
+                self.sync_manager.lock().await.add_block_peer(
+                    self,
+                    *height,
+                    ws_sender.map_or(PeerOrWs::Peer(*peer), PeerOrWs::Ws),
+                );
                 BlockResponse::Ack
             }
             BlockRequest::LayerAvailable { hash, peer } => {
-                self.sync_manager
-                    .lock()
-                    .await
-                    .add_layer_peer(self, *hash, *peer);
+                self.sync_manager.lock().await.add_layer_peer(
+                    self,
+                    *hash,
+                    ws_sender.map_or(PeerOrWs::Peer(*peer), PeerOrWs::Ws),
+                );
                 BlockResponse::Ack
             }
-        };
+        }
+    }
 
+    async fn handle_request(
+        &self,
+        request: BlockRequest,
+        channel: ResponseChannel<BlockResponse<App::Message>>,
+        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
+    ) {
+        let res = self.handle_request_helper(request, None).await;
         if let Err(e) = swarm
             .behaviour_mut()
             .request_response
             .send_response(channel, res)
         {
-            tracing::warn!("{local_display_name}: Unable to answer {request}: {e:?}");
+            tracing::warn!(
+                "{}: Unable to answer {request}: {e:?}",
+                self.local_display_name
+            );
         }
     }
 
-    async fn handle_response(&self, response: BlockResponse<App::Message>, peer: PeerId) {
+    async fn handle_response(&self, response: BlockResponse<App::Message>, peer: PeerOrWs<App>) {
         let local_display_name = self.local_display_name.clone();
         match response {
             BlockResponse::Block(block) | BlockResponse::BlockWithState { block } => {
@@ -881,7 +1000,7 @@ impl<App: KolmeApp> Gossip<App> {
             }
             BlockResponse::HeightNotFound(height) => {
                 tracing::warn!(
-                    "{local_display_name}: Tried to find block height {height}, but peer {peer} didn't find it"
+                    "{local_display_name}: Tried to find block height {height}, but peer {peer:?} didn't find it"
                 );
                 self.sync_manager
                     .lock()
@@ -890,7 +1009,7 @@ impl<App: KolmeApp> Gossip<App> {
             }
             BlockResponse::MerkleNotFound(hash) => {
                 tracing::warn!(
-                    "{local_display_name}: Tried to find merkle layer {hash}, but peer {peer} didn't find it"
+                    "{local_display_name}: Tried to find merkle layer {hash}, but peer {peer:?} didn't find it"
                 );
                 self.sync_manager.lock().await.remove_layer_peer(hash, peer);
             }
@@ -947,13 +1066,30 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             for peer in current_peers {
-                swarm.behaviour_mut().request_response.send_request(
-                    &peer,
-                    match data {
-                        DataLabel::Block(height) => BlockRequest::BlockAtHeight(height),
-                        DataLabel::Merkle(hash) => BlockRequest::Merkle(hash),
-                    },
-                );
+                let req = match data {
+                    DataLabel::Block(height) => BlockRequest::BlockAtHeight(height),
+                    DataLabel::Merkle(hash) => BlockRequest::Merkle(hash),
+                };
+                match peer {
+                    PeerOrWs::Peer(peer) => {
+                        swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_request(&peer, req);
+                    }
+                    PeerOrWs::Ws(ws) => {
+                        if let Err(e) = ws
+                            .tx
+                            .send(websockets::WebsocketsPayload::Request(req))
+                            .await
+                        {
+                            tracing::warn!(
+                                "{}: unable to send {req:?}: {e}",
+                                self.local_display_name
+                            );
+                        }
+                    }
+                }
             }
         }
     }
@@ -1039,6 +1175,39 @@ struct FirstEightChars(Sha256Hash);
 impl Display for FirstEightChars {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", hex::encode(&self.0.as_array()[0..4]))
+    }
+}
+
+enum PeerOrWs<App: KolmeApp> {
+    Peer(PeerId),
+    Ws(WebsocketsPrivateSender<App>),
+}
+
+impl<App: KolmeApp> Clone for PeerOrWs<App> {
+    fn clone(&self) -> Self {
+        match self {
+            PeerOrWs::Peer(peer_id) => PeerOrWs::Peer(*peer_id),
+            PeerOrWs::Ws(ws) => PeerOrWs::Ws(ws.clone()),
+        }
+    }
+}
+
+impl<App: KolmeApp> PartialEq for PeerOrWs<App> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PeerOrWs::Peer(x), PeerOrWs::Peer(y)) => x == y,
+            (PeerOrWs::Ws(x), PeerOrWs::Ws(y)) => x == y,
+            (PeerOrWs::Peer(_), PeerOrWs::Ws(_)) | (PeerOrWs::Ws(_), PeerOrWs::Peer(_)) => false,
+        }
+    }
+}
+
+impl<App: KolmeApp> std::fmt::Debug for PeerOrWs<App> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            PeerOrWs::Peer(peer) => f.debug_tuple("Peer").field(peer).finish(),
+            PeerOrWs::Ws(ws) => f.debug_tuple("Ws").field(ws).finish(),
+        }
     }
 }
 
