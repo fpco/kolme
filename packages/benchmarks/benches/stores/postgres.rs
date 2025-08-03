@@ -25,7 +25,7 @@ impl Store {
 
         sqlx::query(
             r#"
-            INSERT INTO merkle_contents(hash, payload, children)
+            INSERT INTO bench_merkle_contents(hash, payload, children)
             SELECT t.hash, t.payload, t.children
             FROM UNNEST($1::bytea[], $2::bytea[], $3::children[]) as t(hash, payload, children)
             ON CONFLICT (hash) DO NOTHING
@@ -79,7 +79,7 @@ impl StoreEnv for Store {
     async fn cleanup(&mut self) {
         sqlx::query!(
             r#"
-            TRUNCATE TABLE merkle_contents
+            TRUNCATE TABLE bench_merkle_contents
             "#,
         )
         .execute(&self.pool)
@@ -183,7 +183,7 @@ mod merkle {
     }
 
     #[derive(sqlx::Type)]
-    #[sqlx(type_name = "children")]
+    #[sqlx(type_name = "bench_children")]
     pub(super) struct Children {
         bytes: ChildrenInner,
     }
@@ -214,13 +214,13 @@ mod merkle {
 
             let query = sqlx::query!(
                 r#"
-            SELECT
-                hash     as "hash!",
-                payload  as "payload!",
-                children as "children!"
-            FROM merkle_contents
-            WHERE hash=ANY($1)
-            "#,
+                SELECT
+                    hash     as "hash!",
+                    payload  as "payload!",
+                    children as "children!"
+                FROM bench_merkle_contents
+                WHERE hash=ANY($1)
+                "#,
                 &to_request,
             );
 
