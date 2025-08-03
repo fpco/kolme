@@ -31,7 +31,7 @@ async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
     .unwrap();
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     test_tasks.try_spawn_persistent(processor.run());
-    let discovery = test_tasks.launch_kademlia_discovery_with(kolme.clone(), "kolme", |g| {
+    let discovery = test_tasks.launch_websockets_discovery_with(kolme.clone(), "kolme", |g| {
         g.set_duplicate_cache_time(Duration::from_micros(100))
     });
 
@@ -52,7 +52,7 @@ async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
     .unwrap();
     test_tasks.try_spawn(repeat_client(kolme.clone()));
     test_tasks
-        .launch_kademlia_client_with(kolme.clone(), "kolme-client", &discovery, |item| {
+        .launch_websockets_client_with(kolme.clone(), "kolme-client", &discovery, |item| {
             item.set_duplicate_cache_time(Duration::from_micros(100))
         })
         .await;
@@ -110,7 +110,7 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     test_tasks.try_spawn_persistent(processor.run());
-    let discovery = test_tasks.launch_kademlia_discovery(kolme.clone(), "kolme");
+    let discovery = test_tasks.launch_websockets_discovery(kolme.clone(), "kolme");
 
     timeout(
         Duration::from_secs(30),
@@ -130,7 +130,7 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     let mutex = Arc::new(Mutex::new(Vec::new()));
     test_tasks.try_spawn(client(kolme.clone(), sender, mutex.clone()));
     test_tasks
-        .launch_kademlia_client(kolme.clone(), "kolme-client", &discovery)
+        .launch_websockets_client(kolme.clone(), "kolme-client", &discovery)
         .await;
 
     let kolme = Kolme::new(
@@ -143,7 +143,7 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     let kolme = kolme.set_tx_await_duration(Duration::from_secs(5));
     test_tasks.try_spawn(no_op_node(kolme.clone(), receiver, mutex));
     test_tasks
-        .launch_kademlia_client(kolme, "kolme-no-op", &discovery)
+        .launch_websockets_client(kolme, "kolme-no-op", &discovery)
         .await;
 }
 
