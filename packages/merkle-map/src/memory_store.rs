@@ -11,14 +11,25 @@ impl MerkleMemoryStore {
     pub fn get_map_snapshot(&self) -> HashMap<Sha256Hash, MerkleLayerContents> {
         self.0.read().unwrap().clone()
     }
+
+    pub fn load_by_hash(&self, hash: Sha256Hash) -> Option<MerkleLayerContents> {
+        self.0.read().unwrap().get(&hash).cloned()
+    }
 }
 
 impl MerkleStore for MerkleMemoryStore {
-    async fn load_by_hash(
+    async fn load_by_hashes(
         &mut self,
-        hash: Sha256Hash,
-    ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
-        Ok(self.0.read().unwrap().get(&hash).cloned())
+        hashes: &[Sha256Hash],
+        dest: &mut HashMap<Sha256Hash, MerkleLayerContents>,
+    ) -> Result<(), MerkleSerialError> {
+        let guard = self.0.read().unwrap();
+        for hash in hashes {
+            if let Some(layer) = guard.get(hash).cloned() {
+                dest.insert(*hash, layer);
+            }
+        }
+        Ok(())
     }
 
     async fn save_by_hash(

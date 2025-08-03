@@ -1,6 +1,9 @@
 //! Helper types and functions for buffer reading and writing.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    sync::Arc,
+};
 
 use shared::types::Sha256Hash;
 
@@ -129,34 +132,129 @@ pub async fn load<T: MerkleDeserializeRaw, Store: MerkleStore>(
 /// Load up a [MerkleContents] from the store.
 pub async fn load_merkle_contents<Store: MerkleStore>(
     store: &mut Store,
-    hash: Sha256Hash,
+    orig_hash: Sha256Hash,
 ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
-    let layer =
-        store
-            .load_by_hash(hash)
-            .await?
-            .ok_or_else(|| MerkleSerialError::HashesNotFound {
-                hashes: std::iter::once(hash).collect(),
-            })?;
+    // We want this code to be as parallelized as possible. That means
+    // discovering as many needed layers as possible in each iteration.
+    // This is a fairly complex algorithm, the basic idea is:
+    //
+    // * Keep a list of "layers we know need to be loaded"
+    // * Load those all up
+    // * If anything didn't come through, error out due to missing hashes
+    // * Otherwise, process each new layer
+    // * If it has children we haven't loaded yet, add those to the list to load and add a reverse dependency to fill in the layer when ready
+    // * If all children have been loaded, then populate the contents
+    let mut layers = HashMap::<Sha256Hash, MerkleLayerContents>::new();
+    let mut all_contents = HashMap::<Sha256Hash, Arc<MerkleContents>>::new();
+    let mut reverses = HashMap::<Sha256Hash, HashSet<Sha256Hash>>::new();
+    let mut needed = vec![orig_hash];
+    let mut missing = HashSet::<Sha256Hash>::new();
+    let mut to_process = BTreeSet::<Sha256Hash>::new();
 
-    let mut children = vec![];
-    let mut missing = HashSet::new();
+    while !needed.is_empty() {
+        #[cfg(debug_assertions)]
+        {
+            for hash in &needed {
+                assert!(!layers.contains_key(hash));
+                assert!(!all_contents.contains_key(hash));
+            }
+        }
+        store.load_by_hashes(&needed, &mut layers).await?;
 
-    for child in layer.children {
-        match Box::pin(load_merkle_contents(store, child)).await {
-            Ok(child) => children.push(child),
-            Err(MerkleSerialError::HashesNotFound { hashes }) => missing.extend(hashes.into_iter()),
-            Err(e) => return Err(e),
+        // Swap out the old needed list and process
+        let old_needed = std::mem::take(&mut needed);
+
+        for hash in old_needed {
+            if layers.contains_key(&hash) {
+                // OK, we got the layer we wanted, so add it to the to_process queue.
+                // We'll iterate over everything we've loaded there, since we may
+                // need to process parent layers too.
+                to_process.insert(hash);
+            } else {
+                // The layer didn't get loaded, so report an error.
+                // We could exit immediately, but this allows us to collect
+                // a more meaningful error message.
+                missing.insert(hash);
+            };
+        }
+
+        // Error out if anything was missing
+        if !missing.is_empty() {
+            return Err(MerkleSerialError::HashesNotFound { hashes: missing });
+        }
+
+        // Now begin the to_process loop, handling all reverse dependencies in the process.
+        while let Some(hash) = to_process.pop_first() {
+            debug_assert!(
+                !all_contents.contains_key(&hash),
+                "to_process loop: all_contents already contains {hash}"
+            );
+            let layer = layers
+                .get(&hash)
+                .expect("Logic error: missing layer in to_process loop");
+
+            // Check if all the children are fully loaded.
+            let mut children = vec![];
+            for child in &layer.children {
+                match all_contents.get(child) {
+                    // This child is fully loaded, add it
+                    Some(child) => children.push(child.clone()),
+                    // Not fully loaded yet
+                    None => {
+                        // If we have the layer, we're just waiting for children.
+                        // If we don't have the layer, add it to needed.
+                        if !layers.contains_key(child) {
+                            needed.push(*child);
+                        }
+
+                        // And we want to be notified when this child is completed.
+                        // Add it to the reverse dependencies.
+                        reverses.entry(*child).or_default().insert(hash);
+                    }
+                }
+            }
+
+            // Did we get all the children?
+            if children.len() != layer.children.len() {
+                // We haven't fully loaded all children. We've already
+                // registered necessary reverse entries above. Now we wait.
+                continue;
+            }
+
+            // All children are fully loaded, so we can create our MerkleContents.
+            let contents = Arc::new(MerkleContents {
+                hash,
+                payload: layer.payload.clone(),
+                children: children.into(),
+            });
+
+            // If this is the original hash, we're done with our work!
+            if hash == orig_hash {
+                return Ok(contents);
+            }
+
+            // For all other hashes, we're the child of something else. In that case,
+            // update all_contents with our contents...
+            let old = all_contents.insert(hash, contents);
+            debug_assert!(
+                old.is_none(),
+                "Logic error: hash {hash} already fully loaded"
+            );
+
+            // ... and then process all the reverse dependencies.
+            let reverses = reverses
+                .remove(&hash)
+                .expect("Logic error: impossible missing reverses");
+
+            // Process all reverses
+            for reverse in reverses {
+                // Only bother processing if we haven't already
+                if !all_contents.contains_key(&reverse) {
+                    to_process.insert(reverse);
+                }
+            }
         }
     }
 
-    if !missing.is_empty() {
-        return Err(MerkleSerialError::HashesNotFound { hashes: missing });
-    }
-
-    Ok(Arc::new(MerkleContents {
-        hash,
-        payload: layer.payload,
-        children: children.into(),
-    }))
+    panic!("Logic error: impossible missing contents, we should have discovered the contents in the processing loop")
 }

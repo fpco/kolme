@@ -25,7 +25,7 @@ impl Store {
 
         sqlx::query(
             r#"
-            INSERT INTO merkle_contents(hash, payload, children)
+            INSERT INTO bench_merkle_contents(hash, payload, children)
             SELECT t.hash, t.payload, t.children
             FROM UNNEST($1::bytea[], $2::bytea[], $3::children[]) as t(hash, payload, children)
             ON CONFLICT (hash) DO NOTHING
@@ -79,7 +79,7 @@ impl StoreEnv for Store {
     async fn cleanup(&mut self) {
         sqlx::query!(
             r#"
-            TRUNCATE TABLE merkle_contents
+            TRUNCATE TABLE bench_merkle_contents
             "#,
         )
         .execute(&self.pool)
@@ -89,8 +89,9 @@ impl StoreEnv for Store {
 }
 
 mod merkle {
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
+    use kolme::{MerkleLayerContents, MerkleSerialError};
     use merkle_map::{MerkleStore, Sha256Hash};
     use smallvec::SmallVec;
     use sqlx::{
@@ -182,7 +183,7 @@ mod merkle {
     }
 
     #[derive(sqlx::Type)]
-    #[sqlx(type_name = "children")]
+    #[sqlx(type_name = "bench_children")]
     pub(super) struct Children {
         bytes: ChildrenInner,
     }
@@ -196,40 +197,57 @@ mod merkle {
     }
 
     impl MerkleStore for MerklePostgresStore<'_> {
-        async fn load_by_hash(
+        async fn load_by_hashes(
             &mut self,
-            hash: Sha256Hash,
-        ) -> Result<Option<merkle_map::MerkleLayerContents>, merkle_map::MerkleSerialError>
-        {
-            if let Some(contents) = self.merkle_cache.read().get(&hash) {
-                return Ok(Some(contents.clone()));
+            hashes: &[Sha256Hash],
+            dest: &mut HashMap<Sha256Hash, MerkleLayerContents>,
+        ) -> Result<(), merkle_map::MerkleSerialError> {
+            let mut to_request = vec![];
+            for hash in hashes {
+                match self.merkle_cache.read().get(hash) {
+                    None => to_request.push(hash.as_array().to_vec()),
+                    Some(layer) => {
+                        dest.insert(*hash, layer.clone());
+                    }
+                }
             }
 
-            Ok(sqlx::query!(
+            let query = sqlx::query!(
                 r#"
                 SELECT
+                    hash     as "hash!",
                     payload  as "payload!",
                     children as "children!"
-                FROM merkle_contents
-                WHERE hash = $1
+                FROM bench_merkle_contents
+                WHERE hash=ANY($1)
                 "#,
-                hash.as_array()
-            )
-            .fetch_optional(self.pool)
-            .await
-            .map_err(merkle_map::MerkleSerialError::custom)
-            .inspect_err(|err| tracing::error!("{err:?}"))?
-            .map(|row| merkle_map::MerkleLayerContents {
-                payload: row.payload.into(),
-                children: row
+                &to_request,
+            );
+
+            let rows = query
+                .fetch_all(self.pool)
+                .await
+                .map_err(merkle_map::MerkleSerialError::custom)
+                .inspect_err(|err| tracing::error!("{err:?}"))?;
+
+            for row in rows {
+                let hash = Sha256Hash::from_hash(&row.hash).map_err(MerkleSerialError::custom)?;
+                let payload = row.payload.into();
+                debug_assert_eq!(hash, Sha256Hash::hash(&payload));
+                let children = row
                     .children
                     .into_iter()
-                    .map(|hash| {
-                        let hash_array = std::array::from_fn::<u8, 32, _>(|i| hash[i]);
-                        Sha256Hash::from_array(hash_array)
-                    })
-                    .collect(),
-            }))
+                    .map(|hash| Sha256Hash::from_hash(&hash).map_err(MerkleSerialError::custom))
+                    .collect::<Result<Vec<_>, _>>()?;
+                dest.insert(
+                    hash,
+                    merkle_map::MerkleLayerContents {
+                        payload,
+                        children: children.into(),
+                    },
+                );
+            }
+            Ok(())
         }
 
         async fn save_by_hash(

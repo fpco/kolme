@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use fjall::PartitionCreateOptions;
 use merkle_map::{MerkleLayerContents, MerkleSerialError, MerkleStore, Sha256Hash};
@@ -38,8 +38,8 @@ impl Keys {
     }
 }
 
-impl MerkleStore for MerkleFjallStore {
-    async fn load_by_hash(
+impl MerkleFjallStore {
+    pub(crate) fn load_by_hash(
         &mut self,
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
@@ -62,6 +62,21 @@ impl MerkleStore for MerkleFjallStore {
         };
         let children = parse_children(&children)?;
         Ok(Some(MerkleLayerContents { payload, children }))
+    }
+}
+
+impl MerkleStore for MerkleFjallStore {
+    async fn load_by_hashes(
+        &mut self,
+        hashes: &[Sha256Hash],
+        dest: &mut HashMap<Sha256Hash, MerkleLayerContents>,
+    ) -> Result<(), MerkleSerialError> {
+        for hash in hashes {
+            if let Some(layer) = self.load_by_hash(*hash)? {
+                dest.insert(*hash, layer);
+            }
+        }
+        Ok(())
     }
 
     async fn save_by_hash(
