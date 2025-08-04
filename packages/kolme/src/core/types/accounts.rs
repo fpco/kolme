@@ -219,18 +219,12 @@ impl Accounts {
         self.accounts.get(&id).map(|account| &account.wallets)
     }
 
-    pub(in crate::core) fn get_account_for_key(
-        &self,
-        public_key: PublicKey,
-    ) -> Option<(AccountId, &Account)> {
+    pub fn get_account_for_key(&self, public_key: PublicKey) -> Option<(AccountId, &Account)> {
         let account_id = self.pubkeys.get(&public_key)?;
         Some((*account_id, self.accounts.get(account_id).unwrap()))
     }
 
-    pub(in crate::core) fn get_account_for_wallet(
-        &self,
-        wallet: &Wallet,
-    ) -> Option<(AccountId, &Account)> {
+    pub fn get_account_for_wallet(&self, wallet: &Wallet) -> Option<(AccountId, &Account)> {
         let account_id = self.wallets.get(wallet)?;
         Some((*account_id, self.accounts.get(account_id).unwrap()))
     }
