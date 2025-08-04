@@ -60,6 +60,10 @@ impl Account {
     pub fn get_pubkeys(&self) -> &BTreeSet<PublicKey> {
         &self.pubkeys
     }
+
+    pub fn get_assets(&self) -> &BTreeMap<AssetId, Decimal> {
+        &self.assets
+    }
 }
 
 impl Accounts {
