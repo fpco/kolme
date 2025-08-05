@@ -1,7 +1,7 @@
 mod block;
 mod error;
-mod in_memory;
 pub mod fjall;
+mod in_memory;
 pub mod postgres;
 mod r#trait;
 
