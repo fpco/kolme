@@ -15,7 +15,7 @@ use sqlx::{
     Executor, Postgres,
 };
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
-mod merkle;
+pub mod merkle;
 
 pub struct ConstructLock {
     tx_unlock: Option<tokio::sync::oneshot::Sender<()>>,

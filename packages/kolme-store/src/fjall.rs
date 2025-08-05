@@ -10,7 +10,7 @@ use merkle_map::{
 use parking_lot::Mutex;
 use std::{num::NonZeroUsize, path::Path, sync::Arc};
 
-mod merkle;
+pub mod merkle;
 
 const LATEST_ARCHIVED_HEIGHT_KEY: &[u8] = b"LATEST";
 

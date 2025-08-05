@@ -12,7 +12,7 @@ use sqlx::{
 use super::MerkleCache;
 
 // Helper structs for sqlx serialization
-pub(super) struct Hash(Sha256Hash);
+pub struct Hash(Sha256Hash);
 
 impl Type<Postgres> for Hash {
     fn type_info() -> <Postgres as sqlx::Database>::TypeInfo {
@@ -37,7 +37,7 @@ impl PgHasArrayType for Hash {
     }
 }
 
-pub(super) struct Payload(Arc<[u8]>);
+pub struct Payload(Arc<[u8]>);
 
 impl Type<Postgres> for Payload {
     fn type_info() -> <Postgres as sqlx::Database>::TypeInfo {
@@ -62,7 +62,7 @@ impl<'a> Encode<'a, Postgres> for Payload {
     }
 }
 
-pub(super) struct ChildrenInner(SmallVec<[Sha256Hash; 16]>);
+pub struct ChildrenInner(SmallVec<[Sha256Hash; 16]>);
 
 impl Type<Postgres> for ChildrenInner {
     fn type_info() -> <Postgres as sqlx::Database>::TypeInfo {
@@ -92,16 +92,16 @@ impl<'a> Decode<'a, Postgres> for ChildrenInner {
 
 #[derive(sqlx::Type)]
 #[sqlx(type_name = "children")]
-pub(super) struct Children {
+pub struct Children {
     bytes: ChildrenInner,
 }
 
 pub struct MerklePostgresStore<'a> {
-    pub(super) pool: &'a sqlx::PgPool,
-    pub(super) merkle_cache: &'a MerkleCache,
-    pub(super) hashes_to_insert: Vec<Hash>,
-    pub(super) payloads_to_insert: Vec<Payload>,
-    pub(super) childrens_to_insert: Vec<Children>,
+    pub pool: &'a sqlx::PgPool,
+    pub merkle_cache: &'a MerkleCache,
+    pub hashes_to_insert: Vec<Hash>,
+    pub payloads_to_insert: Vec<Payload>,
+    pub childrens_to_insert: Vec<Children>,
 }
 
 impl MerkleStore for MerklePostgresStore<'_> {
