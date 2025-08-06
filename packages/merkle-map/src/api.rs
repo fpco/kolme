@@ -17,7 +17,7 @@ impl MerkleSerialError {
 
 impl std::fmt::Debug for MerkleContents {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_tuple("MerkleContents").field(&self.hash).finish()
+        f.debug_tuple("MerkleContents").field(&self.hash()).finish()
     }
 }
 
@@ -42,7 +42,7 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
     contents: Arc<MerkleContents>,
 ) -> Result<(), MerkleSerialError> {
     // Bypass everything below: if this already exists, just exit.
-    if store.contains_hash(contents.hash).await? {
+    if store.contains_hash(contents.hash()).await? {
         return Ok(());
     }
 
@@ -77,7 +77,7 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
                 check_children: false,
             });
             for child in children.iter() {
-                if !store.contains_hash(child.hash).await? {
+                if !store.contains_hash(child.hash()).await? {
                     work.push(Work {
                         contents: child.clone(),
                         check_children: true,
@@ -86,13 +86,10 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
             }
         } else {
             store
-                .save_by_hash(
-                    contents.hash,
-                    &MerkleLayerContents {
-                        payload: contents.payload.clone(),
-                        children: contents.children.iter().map(|c| c.hash).collect(),
-                    },
-                )
+                .save_by_hash(&MerkleLayerContents {
+                    payload: contents.payload.clone(),
+                    children: contents.children.iter().map(|c| c.hash()).collect(),
+                })
                 .await?;
         }
     }
@@ -223,7 +220,6 @@ pub async fn load_merkle_contents<Store: MerkleStore>(
 
             // All children are fully loaded, so we can create our MerkleContents.
             let contents = Arc::new(MerkleContents {
-                hash,
                 payload: layer.payload.clone(),
                 children: children.into(),
             });

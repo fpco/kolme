@@ -10,7 +10,7 @@ use merkle_map::{
 use parking_lot::Mutex;
 use std::{num::NonZeroUsize, path::Path, sync::Arc};
 
-mod merkle;
+pub mod merkle;
 
 const LATEST_ARCHIVED_HEIGHT_KEY: &[u8] = b"LATEST";
 
@@ -154,12 +154,12 @@ impl KolmeBackingStore for Store {
             .get(key)
             .map_err(KolmeStoreError::custom)?
         {
-            if existing_hash != contents.hash.as_array() {
+            if existing_hash != contents.hash().as_array() {
                 return Err(KolmeStoreError::ConflictingBlockInDb {
                     height: block.height,
                     existing: Sha256Hash::from_hash(&existing_hash)
                         .map_err(KolmeStoreError::custom)?,
-                    adding: contents.hash,
+                    adding: contents.hash(),
                 });
             } else {
                 return Err(KolmeStoreError::MatchingBlockAlreadyInserted {
@@ -169,7 +169,7 @@ impl KolmeBackingStore for Store {
         }
 
         let mut store = self.merkle.clone();
-        let hash = contents.hash;
+        let hash = contents.hash();
         merkle_map::api::save_merkle_contents(&mut store, contents).await?;
 
         self.merkle
@@ -190,12 +190,11 @@ impl KolmeBackingStore for Store {
 
     async fn add_merkle_layer(
         &self,
-        hash: Sha256Hash,
         layer: &merkle_map::MerkleLayerContents,
     ) -> anyhow::Result<()> {
         let mut merkle = self.merkle.clone();
-        merkle.save_by_hash(hash, layer).await?;
-        self.cache.lock().put(hash, layer.clone());
+        merkle.save_by_hash(layer).await?;
+        self.cache.lock().put(layer.payload.hash(), layer.clone());
         Ok(())
     }
 

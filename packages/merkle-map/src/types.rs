@@ -1,3 +1,4 @@
+mod cached_bytes;
 mod key_bytes;
 #[cfg(test)]
 pub mod quickcheck_newtypes;
@@ -5,6 +6,7 @@ pub mod quickcheck_newtypes;
 use std::collections::HashSet;
 
 use crate::*;
+pub use cached_bytes::CachedBytes;
 pub use key_bytes::MerkleKey;
 use smallvec::SmallVec;
 
@@ -51,15 +53,20 @@ pub(crate) struct TreeContents<K, V> {
 /// This includes the hash and payload which will be stored in the database.
 /// It also includes all direct children nodes encountered during serialization,
 /// so that they can be checked as present in the database and added if missing.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct MerkleContents {
-    pub hash: Sha256Hash,
-    #[serde(
-        serialize_with = "serialize_base64",
-        deserialize_with = "deserialize_base64"
-    )]
-    pub payload: Arc<[u8]>,
+    pub payload: CachedBytes,
     pub children: Arc<[Arc<MerkleContents>]>,
+}
+
+impl MerkleContents {
+    pub fn hash(&self) -> Sha256Hash {
+        self.payload.hash()
+    }
+
+    pub fn bytes(&self) -> &Arc<[u8]> {
+        self.payload.bytes()
+    }
 }
 
 /// The contents of a single layer of a merkle data structure.
@@ -72,22 +79,22 @@ pub struct MerkleLayerContents {
         serialize_with = "serialize_base64",
         deserialize_with = "deserialize_base64"
     )]
-    pub payload: Arc<[u8]>,
+    pub payload: CachedBytes,
     /// The hashes of the direct children of this layer.
     pub children: SmallVec<[Sha256Hash; 16]>,
 }
 
-fn serialize_base64<S>(data: &Arc<[u8]>, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_base64<S>(data: &CachedBytes, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
     use base64::prelude::*;
-    let base64 = BASE64_STANDARD.encode(data);
+    let base64 = BASE64_STANDARD.encode(data.bytes());
     serializer.serialize_str(&base64)
 }
 
 // Deserialize base64 string to Arc<[u8]>
-fn deserialize_base64<'de, D>(deserializer: D) -> Result<Arc<[u8]>, D::Error>
+fn deserialize_base64<'de, D>(deserializer: D) -> Result<CachedBytes, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -96,7 +103,7 @@ where
     let bytes = BASE64_STANDARD
         .decode(&base64)
         .map_err(serde::de::Error::custom)?;
-    Ok(Arc::from(bytes))
+    Ok(CachedBytes::new_bytes(bytes))
 }
 
 /// Errors that can occur during serialization of data.

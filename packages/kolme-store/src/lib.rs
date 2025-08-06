@@ -1,8 +1,8 @@
 mod block;
 mod error;
-mod fjall;
+pub mod fjall;
 mod in_memory;
-mod postgres;
+pub mod postgres;
 mod r#trait;
 
 pub use block::{BlockHashes, StorableBlock};

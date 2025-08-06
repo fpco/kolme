@@ -13,12 +13,12 @@ impl MerkleDeserializer {
         MerkleDeserializer { contents, pos: 0 }
     }
 
-    pub fn get_full_payload(&self) -> Arc<[u8]> {
-        self.contents.payload.clone()
+    pub fn get_full_payload(&self) -> &CachedBytes {
+        &self.contents.payload
     }
 
     pub fn get_hash(&self) -> Sha256Hash {
-        self.contents.hash
+        self.contents.payload.hash()
     }
 
     /// Look at the next byte without consuming it from the stream.
@@ -26,6 +26,7 @@ impl MerkleDeserializer {
         let byte = *self
             .contents
             .payload
+            .bytes()
             .get(self.pos)
             .ok_or(MerkleSerialError::InsufficientInput)?;
         Ok(byte)
@@ -44,7 +45,7 @@ impl MerkleDeserializer {
         if end > self.contents.payload.len() {
             Err(MerkleSerialError::InsufficientInput)
         } else {
-            let slice = &self.contents.payload[self.pos..end];
+            let slice = &self.contents.payload.bytes()[self.pos..end];
             self.pos = end;
             Ok(slice)
         }
@@ -109,7 +110,7 @@ impl MerkleDeserializer {
         // that a scan of the slice is faster than a HashMap lookup, and will involve
         // less allocation. If this assumption turns out to be wrong in the future,
         // we can create a HashMap of all the children when creating the MerkleDeserializer.
-        match self.contents.children.iter().find(|c| c.hash == hash) {
+        match self.contents.children.iter().find(|c| c.hash() == hash) {
             None => Err(MerkleSerialError::HashesNotFound {
                 hashes: HashSet::from_iter([hash]),
             }),
