@@ -1,5 +1,6 @@
 mod kolme_test './packages/kolme-test/justfile'
 mod store './packages/kolme-store/justfile'
+mod benchmarks './packages/benchmarks/justfile'
 
 # List all recipes
 default:
@@ -45,6 +46,7 @@ test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
 sqlx-prepare $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres": postgres
     just store::sqlx-prepare
     just kolme_test::sqlx-prepare
+    just benchmarks::sqlx-prepare
 
 # Build contracts
 build-contracts:
