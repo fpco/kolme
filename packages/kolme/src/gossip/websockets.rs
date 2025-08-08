@@ -82,7 +82,7 @@ impl<App: KolmeApp> WebsocketsManager<App> {
         for server in websockets_servers {
             set.spawn(launch_client(
                 local_display_name.clone(),
-                tx_gossip.subscribe(),
+                tx_gossip.clone(),
                 tx_message.clone(),
                 server,
             ));
@@ -103,11 +103,12 @@ impl<App: KolmeApp> WebsocketsManager<App> {
 
 async fn launch_client<App: KolmeApp>(
     local_display_name: Arc<str>,
-    mut rx_gossip: Receiver<GossipMessage<App>>,
+    tx_gossip: Sender<GossipMessage<App>>,
     mut tx_message: tokio::sync::mpsc::Sender<WebsocketsMessage<App>>,
     server: String,
 ) {
     loop {
+        let mut rx_gossip = tx_gossip.subscribe();
         match launch_client_inner(
             local_display_name.clone(),
             &mut rx_gossip,
