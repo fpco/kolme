@@ -72,6 +72,7 @@ pub async fn execute(
     };
 
     let blockhash = client.get_latest_blockhash().await?;
+    tracing::info!("Constructing and sending tx using blockhash {blockhash}");
     let tx =
         signed_tx(program_id, blockhash, keypair, &data, &metas).map_err(|x| anyhow::anyhow!(x))?;
 
@@ -79,8 +80,9 @@ pub async fn execute(
         Ok(sig) => Ok(sig.to_string()),
         Err(e) => {
             tracing::error!(
-                "Solana submitter failed to execute signed transaction: {}",
-                e
+                "Solana submitter failed to execute signed transaction: {}, error kind: {:?}",
+                e,
+                e.kind
             );
 
             Err(anyhow::anyhow!(e))
