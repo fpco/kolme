@@ -116,9 +116,7 @@ impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for TreeContents<
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
-    for MerkleLockable<TreeContents<K, V>>
-{
+impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for TreeContents<K, V> {
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -142,10 +140,6 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
             leaf,
             branches,
         };
-        Ok(MerkleLockable::new(tree))
-    }
-
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.locked.set(contents.clone()).ok();
+        Ok(tree)
     }
 }

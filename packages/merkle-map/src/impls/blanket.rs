@@ -9,12 +9,12 @@ impl<T: MerkleSerialize> MerkleSerializeRaw for T {
         T::merkle_serialize(self, serializer)
     }
 
-    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
-        self.get_merkle_contents()
+    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
+        self.get_merkle_hash()
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.set_merkle_contents(contents);
+    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
+        self.set_merkle_hash(hash);
     }
 }
 
@@ -35,9 +35,5 @@ impl<T: MerkleSerialize + MerkleDeserialize> MerkleDeserializeRaw for T {
         } else {
             T::merkle_deserialize(deserializer, version)
         }
-    }
-
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        MerkleDeserialize::set_merkle_contents(self, contents);
     }
 }

@@ -4,7 +4,7 @@ use crate::*;
 
 /// Allows a value to be locked with a pre-computed Merkle hash.
 pub struct MerkleLockable<T> {
-    pub(super) locked: Arc<OnceLock<Arc<MerkleContents>>>,
+    pub(super) locked: Arc<OnceLock<Sha256Hash>>,
     inner: Arc<T>,
 }
 
@@ -44,12 +44,12 @@ impl<T: MerkleSerializeRaw> MerkleSerializeRaw for MerkleLockable<T> {
         self.inner.merkle_serialize_raw(serializer)
     }
 
-    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
-        self.locked.get().cloned()
+    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
+        self.locked.get().copied()
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.locked.set(contents.clone()).ok();
+    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
+        self.locked.set(hash).ok();
     }
 }
 
@@ -60,8 +60,8 @@ impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleLockable<T> {
         T::merkle_deserialize_raw(deserializer).map(MerkleLockable::new)
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.locked.set(contents.clone()).unwrap()
+    fn load_merkle_by_hash(hash: Sha256Hash) -> Option<Self> {
+        todo!()
     }
 }
 
