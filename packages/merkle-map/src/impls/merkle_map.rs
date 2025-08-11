@@ -165,7 +165,11 @@ impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
     }
 }
 
-impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for MerkleMap<K, V> {
+impl<K, V> MerkleSerializeRaw for MerkleMap<K, V>
+where
+    K: ToMerkleKey + Send + Sync + 'static,
+    V: MerkleSerializeRaw + Send + Sync + 'static,
+{
     fn merkle_serialize_raw(
         &self,
         serializer: &mut MerkleSerializer,
@@ -173,24 +177,28 @@ impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for MerkleMap<K, 
         self.0.merkle_serialize_raw(serializer)
     }
 
-    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
-        self.0.get_merkle_contents_raw()
+    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
+        self.0.get_merkle_hash_raw()
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.0.set_merkle_contents_raw(contents)
+    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
+        self.0.set_merkle_hash_raw(hash);
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleMap<K, V> {
+impl<K, V> MerkleDeserializeRaw for MerkleMap<K, V>
+where
+    K: FromMerkleKey + Send + Sync + 'static,
+    V: MerkleDeserializeRaw + Send + Sync + 'static,
+{
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         Node::merkle_deserialize_raw(deserializer).map(MerkleMap)
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.0.set_merkle_contents_raw(contents);
+    fn load_merkle_by_hash(hash: Sha256Hash) -> Option<Self> {
+        MerkleDeserializeRaw::load_merkle_by_hash(hash).map(Self)
     }
 }
 

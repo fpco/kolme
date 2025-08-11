@@ -40,13 +40,11 @@ pub trait MerkleSerialize {
         0
     }
 
-    /// Optimization: if we already know our serialized contents, return them.
-    fn get_merkle_contents(&self) -> Option<Arc<MerkleContents>> {
+    fn get_merkle_hash(&self) -> Option<Sha256Hash> {
         None
     }
 
-    /// Update the cached Merkle hash and payload, if supported by this type.
-    fn set_merkle_contents(&self, _contents: &Arc<MerkleContents>) {}
+    fn set_merkle_hash(&self, _hash: Sha256Hash) {}
 }
 
 /// A type that can be serialized, without requiring a version number in its payload.
@@ -59,13 +57,11 @@ pub trait MerkleSerializeRaw {
         serializer: &mut MerkleSerializer,
     ) -> Result<(), MerkleSerialError>;
 
-    /// Optimization: if we already know our serialized contents, return them.
-    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
+    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
         None
     }
 
-    /// Update the cached Merkle hash and payload, if supported by this type.
-    fn set_merkle_contents_raw(&self, _contents: &Arc<MerkleContents>) {}
+    fn set_merkle_hash_raw(&self, _hash: Sha256Hash) {}
 }
 
 /// A value that can be deserialized back into a [MerkleMap] value.
@@ -90,7 +86,9 @@ pub trait MerkleDeserializeRaw: Sized {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError>;
 
-    fn set_merkle_contents_raw(&self, _contents: &Arc<MerkleContents>) {}
+    fn load_merkle_by_hash(_hash: Sha256Hash) -> Option<Self> {
+        None
+    }
 }
 
 /// A backing store for raw blobs used by a [MerkleMap].

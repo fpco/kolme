@@ -73,18 +73,22 @@ impl<K: Clone, V: Clone> Node<K, V> {
     }
 }
 
-impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for Node<K, V> {
-    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
+impl<K, V> MerkleSerializeRaw for Node<K, V>
+where
+    K: ToMerkleKey + Send + Sync + 'static,
+    V: MerkleSerializeRaw + Send + Sync + 'static,
+{
+    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
         match self {
-            Node::Leaf(leaf) => leaf.get_merkle_contents_raw(),
-            Node::Tree(tree) => tree.get_merkle_contents_raw(),
+            Node::Leaf(leaf) => leaf.get_merkle_hash_raw(),
+            Node::Tree(tree) => tree.get_merkle_hash_raw(),
         }
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
+    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
         match self {
-            Node::Leaf(leaf) => leaf.set_merkle_contents_raw(contents),
-            Node::Tree(tree) => tree.set_merkle_contents_raw(contents),
+            Node::Leaf(leaf) => leaf.set_merkle_hash_raw(hash),
+            Node::Tree(tree) => tree.set_merkle_hash_raw(hash),
         }
     }
 
@@ -99,7 +103,11 @@ impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for Node<K, V> {
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for Node<K, V> {
+impl<K, V> MerkleDeserializeRaw for Node<K, V>
+where
+    K: FromMerkleKey + Send + Sync + 'static,
+    V: MerkleDeserializeRaw + Send + Sync + 'static,
+{
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -112,10 +120,11 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for Node<K,
         }
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        match self {
-            Node::Leaf(lockable) => lockable.set_merkle_contents_raw(contents),
-            Node::Tree(lockable) => lockable.set_merkle_contents_raw(contents),
+    fn load_merkle_by_hash(hash: Sha256Hash) -> Option<Self> {
+        if let Some(leaf) = MerkleDeserializeRaw::load_merkle_by_hash(hash) {
+            Some(Node::Leaf(leaf))
+        } else {
+            MerkleDeserializeRaw::load_merkle_by_hash(hash).map(Node::Tree)
         }
     }
 }

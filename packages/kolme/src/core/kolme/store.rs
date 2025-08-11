@@ -191,10 +191,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Save data to the merkle store.
-    pub(super) async fn save<T: MerkleSerializeRaw>(
-        &self,
-        value: &T,
-    ) -> Result<Arc<MerkleContents>> {
+    pub(super) async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> Result<Sha256Hash> {
         self.inner.save(value).await
     }
 

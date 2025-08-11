@@ -466,16 +466,14 @@ impl<App: KolmeApp> Kolme<App> {
         let logs: Arc<[_]> = logs.into();
         let height = signed_block.height();
 
-        let framework_state_contents = self.inner.store.save(&framework_state).await?;
-        anyhow::ensure!(
-            framework_state_contents.hash() == signed_block.0.message.as_inner().framework_state
-        );
+        let framework_state_hash = self.inner.store.save(&framework_state).await?;
+        anyhow::ensure!(framework_state_hash == signed_block.0.message.as_inner().framework_state);
 
-        let app_state_contents = self.inner.store.save(&app_state).await?;
-        anyhow::ensure!(app_state_contents.hash() == signed_block.0.message.as_inner().app_state);
+        let app_state_hash = self.inner.store.save(&app_state).await?;
+        anyhow::ensure!(app_state_hash == signed_block.0.message.as_inner().app_state);
 
-        let logs_contents = self.inner.store.save(&logs).await?;
-        anyhow::ensure!(logs_contents.hash() == signed_block.0.message.as_inner().logs);
+        let logs_hash = self.inner.store.save(&logs).await?;
+        anyhow::ensure!(logs_hash == signed_block.0.message.as_inner().logs);
 
         self.inner
             .store
