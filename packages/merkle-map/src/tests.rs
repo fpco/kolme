@@ -12,13 +12,21 @@ use crate::quickcheck_newtypes::{
 
 use crate::*;
 
-impl<K, V> MerkleMap<K, V> {
+impl<K, V> MerkleMap<K, V>
+where
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
     pub fn assert_locked_status(&self, expected: bool) {
         self.0.assert_locked_status(expected);
     }
 }
 
-impl<K, V> Node<K, V> {
+impl<K, V> Node<K, V>
+where
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
     pub fn assert_locked_status(&self, expected: bool) {
         match self {
             Node::Leaf(leaf) => leaf.assert_locked_status(expected),

@@ -6,7 +6,10 @@ use crate::*;
 #[derive(Clone)]
 pub struct MerkleVec<T>(MerkleMap<u32, T>);
 
-impl<T: MerkleSerializeRaw> MerkleSerializeRaw for MerkleVec<T> {
+impl<T> MerkleSerializeRaw for MerkleVec<T>
+where
+    T: MerkleSerializeRaw + Send + Sync + 'static,
+{
     fn merkle_serialize_raw(
         &self,
         serializer: &mut MerkleSerializer,
@@ -15,7 +18,10 @@ impl<T: MerkleSerializeRaw> MerkleSerializeRaw for MerkleVec<T> {
     }
 }
 
-impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleVec<T> {
+impl<T> MerkleDeserializeRaw for MerkleVec<T>
+where
+    T: MerkleDeserializeRaw + Send + Sync + 'static,
+{
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {

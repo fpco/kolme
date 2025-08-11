@@ -113,11 +113,12 @@ pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
 pub fn deserialize<T: MerkleDeserializeRaw>(
     contents: Arc<MerkleContents>,
 ) -> Result<T, MerkleSerialError> {
+    if let Some(value) = T::load_merkle_by_hash(contents.hash()) {
+        return Ok(value);
+    }
     let mut deserializer = MerkleDeserializer::new(contents.clone());
     let value = T::merkle_deserialize_raw(&mut deserializer)?;
-    // FIXME do we need the finish method on deserializer? Should we cache the hash?
-    // let contents = Arc::new(deserializer.finish()?);
-    // value.set_merkle_contents_raw(&contents);
+    deserializer.finish()?;
     Ok(value)
 }
 

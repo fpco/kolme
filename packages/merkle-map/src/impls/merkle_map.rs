@@ -165,7 +165,11 @@ impl<K: Debug, V: Debug> Debug for MerkleMap<K, V> {
     }
 }
 
-impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for MerkleMap<K, V> {
+impl<K, V> MerkleSerializeRaw for MerkleMap<K, V>
+where
+    K: ToMerkleKey + Send + Sync + 'static,
+    V: MerkleSerializeRaw + Send + Sync + 'static,
+{
     fn merkle_serialize_raw(
         &self,
         serializer: &mut MerkleSerializer,
@@ -182,7 +186,11 @@ impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for MerkleMap<K, 
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleMap<K, V> {
+impl<K, V> MerkleDeserializeRaw for MerkleMap<K, V>
+where
+    K: FromMerkleKey + Send + Sync + 'static,
+    V: MerkleDeserializeRaw + Send + Sync + 'static,
+{
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {

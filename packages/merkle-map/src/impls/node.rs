@@ -73,7 +73,11 @@ impl<K: Clone, V: Clone> Node<K, V> {
     }
 }
 
-impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for Node<K, V> {
+impl<K, V> MerkleSerializeRaw for Node<K, V>
+where
+    K: ToMerkleKey + Send + Sync + 'static,
+    V: MerkleSerializeRaw + Send + Sync + 'static,
+{
     fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
         match self {
             Node::Leaf(leaf) => leaf.get_merkle_hash_raw(),
@@ -99,7 +103,11 @@ impl<K: ToMerkleKey, V: MerkleSerializeRaw> MerkleSerializeRaw for Node<K, V> {
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for Node<K, V> {
+impl<K, V> MerkleDeserializeRaw for Node<K, V>
+where
+    K: FromMerkleKey + Send + Sync + 'static,
+    V: MerkleDeserializeRaw + Send + Sync + 'static,
+{
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
