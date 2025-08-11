@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use crate::{BlockHashes, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use enum_dispatch::enum_dispatch;
 use merkle_map::{
-    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
-    MerkleSerializeRaw, Sha256Hash,
+    MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerializeRaw, Sha256Hash,
 };
 
 #[enum_dispatch(KolmeStore)]
@@ -40,7 +37,7 @@ pub trait KolmeBackingStore {
     async fn archive_block(&self, height: u64) -> anyhow::Result<()>;
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>>;
 
-    async fn save<T>(&self, value: &T) -> anyhow::Result<Arc<MerkleContents>>
+    async fn save<T>(&self, value: &T) -> anyhow::Result<Sha256Hash>
     where
         T: MerkleSerializeRaw;
     async fn load<T>(&self, hash: Sha256Hash) -> Result<T, MerkleSerialError>

@@ -198,13 +198,13 @@ impl KolmeBackingStore for Store {
         Ok(())
     }
 
-    async fn save<T>(&self, value: &T) -> anyhow::Result<std::sync::Arc<merkle_map::MerkleContents>>
+    async fn save<T>(&self, value: &T) -> anyhow::Result<Sha256Hash>
     where
         T: merkle_map::MerkleSerializeRaw,
     {
         let mut store = self.merkle.clone();
-        let contents = merkle_map::save(&mut store, value).await?;
-        Ok(contents)
+        let hash = merkle_map::save(&mut store, value).await?;
+        Ok(hash)
     }
 
     async fn load<T>(&self, hash: Sha256Hash) -> Result<T, merkle_map::MerkleSerialError>

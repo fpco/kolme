@@ -1872,7 +1872,7 @@ mod tests {
     {
         let mut store = MerkleMemoryStore::default();
         let serialized = merkle_map::save(&mut store, &value).await.unwrap();
-        let deserialized = merkle_map::load::<T, _>(&mut store, serialized.hash())
+        let deserialized = merkle_map::load::<T, _>(&mut store, serialized)
             .await
             .unwrap();
 
