@@ -26,6 +26,7 @@ enum ChainArgs {
     },
     Solana {
         keypair: kolme_solana_bridge_client::keypair::Keypair,
+        fee_per_cu: Option<u64>,
     },
     #[cfg(feature = "pass_through")]
     PassThrough {
@@ -58,10 +59,14 @@ impl<App: KolmeApp> Submitter<App> {
     pub fn new_solana(
         kolme: Kolme<App>,
         keypair: kolme_solana_bridge_client::keypair::Keypair,
+        fee_per_cu: Option<u64>,
     ) -> Self {
         Submitter {
             kolme,
-            args: ChainArgs::Solana { keypair },
+            args: ChainArgs::Solana {
+                keypair,
+                fee_per_cu,
+            },
             last_submitted: HashMap::new(),
             genesis_created: HashSet::new(),
         }
@@ -156,7 +161,11 @@ impl<App: KolmeApp> Submitter<App> {
                 program_id,
                 validator_set: args,
             } => {
-                let ChainArgs::Solana { keypair } = &self.args else {
+                let ChainArgs::Solana {
+                    keypair,
+                    fee_per_cu: _,
+                } = &self.args
+                else {
                     return Ok(());
                 };
 
@@ -233,7 +242,10 @@ impl<App: KolmeApp> Submitter<App> {
                 )
                 .await?
             }
-            ChainArgs::Solana { keypair } => {
+            ChainArgs::Solana {
+                keypair,
+                fee_per_cu,
+            } => {
                 let Some(solana_chain) = chain.to_solana_chain() else {
                     return Ok(());
                 };
@@ -247,6 +259,7 @@ impl<App: KolmeApp> Submitter<App> {
                     *processor,
                     approvals,
                     payload.clone(),
+                    *fee_per_cu,
                 )
                 .await?
             }

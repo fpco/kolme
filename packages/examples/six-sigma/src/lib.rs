@@ -129,7 +129,7 @@ impl SixSigmaApp {
         let submitter = Arc::new(submitter.to_bytes());
         let make_submitter = Arc::new(move |kolme: Kolme<SixSigmaApp>| {
             let submitter = SolanaKeypair::from_bytes(submitter.deref()).unwrap();
-            Submitter::new_solana(kolme, submitter)
+            Submitter::new_solana(kolme, submitter, None)
         });
 
         Self::new(chains, ExternalChain::SolanaLocal, make_submitter)

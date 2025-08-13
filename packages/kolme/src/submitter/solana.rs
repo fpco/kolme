@@ -4,6 +4,7 @@ use base64::Engine;
 use borsh::BorshDeserialize;
 use kolme_solana_bridge_client::{
     init_tx, instruction::account_meta::AccountMeta, keypair::Keypair, pubkey::Pubkey, signed_tx,
+    ComputeBudgetInstruction,
 };
 use shared::solana::{InitializeIxData, Payload, SignedAction, SignedMsgIxData};
 
@@ -35,6 +36,7 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: String,
+    fee_per_cu: Option<u64>,
 ) -> Result<String> {
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
     let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
@@ -73,8 +75,19 @@ pub async fn execute(
 
     let blockhash = client.get_latest_blockhash().await?;
     tracing::info!("Constructing and sending tx using blockhash {blockhash}");
-    let tx =
-        signed_tx(program_id, blockhash, keypair, &data, &metas).map_err(|x| anyhow::anyhow!(x))?;
+    let mut leading_instructions = vec![];
+    if let Some(fee_per_cu) = fee_per_cu {
+        leading_instructions.push(ComputeBudgetInstruction::set_compute_unit_price(fee_per_cu));
+    }
+    let tx = signed_tx(
+        leading_instructions,
+        program_id,
+        blockhash,
+        keypair,
+        &data,
+        &metas,
+    )
+    .map_err(|x| anyhow::anyhow!(x))?;
 
     match client.send_and_confirm_transaction(&tx).await {
         Ok(sig) => Ok(sig.to_string()),

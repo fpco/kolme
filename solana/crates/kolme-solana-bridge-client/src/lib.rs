@@ -1,3 +1,4 @@
+pub use solana_compute_budget_interface::ComputeBudgetInstruction;
 pub use solana_hash as hash;
 pub use solana_instruction as instruction;
 pub use solana_keypair as keypair;
@@ -75,18 +76,27 @@ pub fn init_ix(
 }
 
 pub fn signed_tx(
+    leading_instructions: impl IntoIterator<Item = Instruction>,
     program_id: Pubkey,
     blockhash: Hash,
     sender: &Keypair,
     data: &SignedMsgIxData,
     additional: &[AccountMeta],
 ) -> borsh::io::Result<Transaction> {
-    let msg = signed_ix(program_id, &blockhash, sender.pubkey(), data, additional)?;
+    let msg = signed_ix(
+        leading_instructions,
+        program_id,
+        &blockhash,
+        sender.pubkey(),
+        data,
+        additional,
+    )?;
 
     Ok(Transaction::new(&[sender], msg, blockhash))
 }
 
 pub fn signed_ix(
+    leading_instructions: impl IntoIterator<Item = Instruction>,
     program_id: Pubkey,
     blockhash: &Hash,
     sender: Pubkey,
@@ -106,12 +116,17 @@ pub fn signed_ix(
 
     accounts.extend_from_slice(additional);
 
-    Ok(Message::new_with_blockhash(
-        &[Instruction {
+    let instructions = leading_instructions
+        .into_iter()
+        .chain([Instruction {
             program_id,
             accounts,
             data: bytes,
-        }],
+        }])
+        .collect::<Vec<_>>();
+
+    Ok(Message::new_with_blockhash(
+        &instructions,
         Some(&sender),
         blockhash,
     ))

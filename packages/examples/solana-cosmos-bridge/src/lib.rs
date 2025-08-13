@@ -188,7 +188,7 @@ pub async fn serve(
     let submitter = Submitter::new_cosmos(kolme.clone(), cosmos_submitter);
     set.spawn(submitter.run());
 
-    let submitter = Submitter::new_solana(kolme.clone(), solana_submitter);
+    let submitter = Submitter::new_solana(kolme.clone(), solana_submitter, None);
     set.spawn(submitter.run());
 
     let api_server = ApiServer::new(kolme);
