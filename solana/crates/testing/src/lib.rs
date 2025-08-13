@@ -159,7 +159,7 @@ impl Program {
         additional: &[AccountMeta],
     ) -> TransactionResult {
         let blockhash = self.svm.latest_blockhash();
-        let tx = signed_tx(ID, blockhash, sender, data, additional).unwrap();
+        let tx = signed_tx([], ID, blockhash, sender, data, additional).unwrap();
 
         let res = self.svm.send_transaction(tx);
 
