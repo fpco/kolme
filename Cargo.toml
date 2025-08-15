@@ -62,6 +62,7 @@ shared = { path = "packages/shared" }
 smallvec = { version = "1.13.2", default-features = false, features = ["serde"] }
 solana-client = "2.2.7"
 solana-commitment-config = "2.2.1"
+solana-compute-budget-interface = "2.2.1"
 solana-hash = "2.2"
 solana-instruction = "2.2"
 solana-keypair = "2.2"
