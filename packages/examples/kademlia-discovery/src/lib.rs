@@ -244,10 +244,7 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
 
 pub async fn new_version_node() -> Result<()> {
     const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
-    let kolme_store = KolmeStore::new_fjall(
-        "./fjall",
-    )
-    .unwrap();
+    let kolme_store = KolmeStore::new_fjall("./fjall").unwrap();
     let kolme = Kolme::new(
         KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
         VERSION2,
