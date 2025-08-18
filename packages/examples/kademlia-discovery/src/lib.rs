@@ -284,8 +284,7 @@ pub async fn validators(port: u16, enable_api_server: bool, start_upgrade: bool)
 
     if start_upgrade {
         let processor_upgrader = Upgrader::new(kolme.clone(), my_secret_key().clone(), VERSION2);
-        let listener_upgrader =
-            Upgrader::new(kolme.clone(), my_listener_key().clone(), VERSION2);
+        let listener_upgrader = Upgrader::new(kolme.clone(), my_listener_key().clone(), VERSION2);
         let approver_upgrader = Upgrader::new(kolme, my_approver_key().clone(), VERSION2);
         set.spawn(async move {
             processor_upgrader.run().await;
