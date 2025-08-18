@@ -242,13 +242,83 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
     }
 }
 
-pub async fn validators(port: u16, enable_api_server: bool, start_upgrade: bool) -> Result<()> {
+pub async fn new_version_node() -> Result<()> {
+    const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
+    let kolme_store = KolmeStore::new_fjall(
+        "./fjall",
+    )
+    .unwrap();
+    let kolme = Kolme::new(
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
+        VERSION2,
+        kolme_store,
+    )
+    .await?;
+
+    let mut set = JoinSet::new();
+
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
+    // Processor consumes mempool transactions and add new transactions into blockchain storage.
+    set.spawn(processor.run());
+    // Listens bridge events. Based on bridge event ID, fetches the
+    // event from chain and then constructs a tx which leads to adding
+    // new mempool entry.
+    let listener = Listener::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(listener.run(ChainName::Cosmos));
+    // Approves pending bridge actions.
+    let approver = Approver::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(approver.run());
+
+    let api_server = ApiServer::new(kolme.clone());
+    set.spawn(api_server.run(("0.0.0.0", 2003)));
+
+    let gossip = GossipBuilder::new()
+        .add_listener(GossipListener {
+            proto: gossip::GossipProto::Tcp,
+            ip: gossip::GossipIp::Ip4,
+            port: 3003,
+        })
+        .set_duplicate_cache_time(Duration::from_secs(1))
+        .set_keypair(Keypair::rsa_from_pkcs8(
+            &mut VALIDATOR_KEYPAIR_BYTES.to_owned(),
+        )?)
+        .build(kolme.clone())?;
+    set.spawn(gossip.run());
+
+    while let Some(res) = set.join_next().await {
+        match res {
+            Err(e) => {
+                set.abort_all();
+                return Err(anyhow::anyhow!("Task panicked: {e}"));
+            }
+            Ok(Err(e)) => {
+                set.abort_all();
+                return Err(e);
+            }
+            Ok(Ok(())) => (),
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn validators(
+    port: u16,
+    enable_api_server: bool,
+    start_upgrade: bool,
+    use_fjall_storage: bool,
+) -> Result<()> {
     const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
 
+    let kolme_store = if use_fjall_storage {
+        KolmeStore::new_fjall("./fjall").unwrap()
+    } else {
+        KolmeStore::new_in_memory()
+    };
     let kolme = Kolme::new(
         KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
         VERSION1,
-        KolmeStore::new_in_memory(),
+        kolme_store,
     )
     .await?;
 
@@ -322,6 +392,24 @@ pub async fn client(
     signing_secret: SecretKey,
     continous: bool,
 ) -> Result<()> {
+    client_inner(validator_addr, signing_secret, continous, 3001, VERSION1).await
+}
+
+pub async fn new_node_client(
+    validator_addr: &str,
+    signing_secret: SecretKey,
+    continous: bool,
+) -> Result<()> {
+    client_inner(validator_addr, signing_secret, continous, 3002, VERSION2).await
+}
+
+async fn client_inner(
+    validator_addr: &str,
+    signing_secret: SecretKey,
+    continous: bool,
+    port: u16,
+    version: &str,
+) -> Result<()> {
     // Corresponding to the one in ../assets/validator-keypair.pem
     const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
 
@@ -329,7 +417,7 @@ pub async fn client(
 
     let kolme = Kolme::new(
         KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
-        VERSION1,
+        version,
         KolmeStore::new_in_memory(),
     )
     .await?;
@@ -340,7 +428,7 @@ pub async fn client(
         .add_listener(GossipListener {
             proto: gossip::GossipProto::Tcp,
             ip: gossip::GossipIp::Ip4,
-            port: 3001,
+            port,
         })
         .set_keypair(Keypair::rsa_from_pkcs8(&mut client_keypair.to_owned()).unwrap())
         .add_bootstrap(VALIDATOR_PEER_ID.parse()?, validator_addr.parse()?)
