@@ -235,7 +235,7 @@ impl TestUpgrader {
         println!("Going to start upgrade process");
         let mut kolme_v2 = Kolme::new(
             KademliaTestApp::default(),
-            VERSION2,
+            VERSION1,
             KolmeStore::new_in_memory(),
         )
         .await?;
@@ -245,6 +245,20 @@ impl TestUpgrader {
         let listener = Listener::new(kolme_v2.clone(), self.listener.clone());
 
         let mut set = JoinSet::new();
+        const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
+        const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
+
+        let gossip = GossipBuilder::new()
+            .add_listener(GossipListener {
+                proto: gossip::GossipProto::Tcp,
+                ip: gossip::GossipIp::Ip4,
+                port: 3001,
+            })
+            .set_duplicate_cache_time(Duration::from_secs(1))
+            .build(kolme_v2.clone())?;
+
+        set.spawn(gossip.run());
+
         set.spawn(processor.run());
         set.spawn(listener.run(ChainName::Cosmos));
         let processor_upgrader = Upgrader::new(kolme_v2.clone(), self.processor.clone(), VERSION2);

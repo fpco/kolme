@@ -64,6 +64,8 @@ impl<App: KolmeApp> Upgrader<App> {
             return Ok(());
         }
 
+        tracing::info!("Total Proposals: {}", framework_state.get_admin_proposal_state().proposals.len());
+
         // Check if there's an existing upgrade proposal for our version
         for (id, proposal) in &framework_state.get_admin_proposal_state().proposals {
             if let ProposalPayload::Upgrade(upgrade) = &proposal.payload {
