@@ -8,6 +8,10 @@ default:
 validator:
     cargo run -- validators 2001 --enable-api-server
 
+# Run validator with upgrade components
+validator-upgrade:
+    cargo run -- validators 2001 --enable-api-server --start-upgrade
+
 # Run client
 client:
     cargo run -- client --validator /ip4/127.0.0.1/tcp/2001 --continous

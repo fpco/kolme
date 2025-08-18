@@ -10,7 +10,8 @@ use libp2p::PeerId;
 use tokio::task::JoinSet;
 use tokio::time::{self, timeout, Duration};
 
-const DUMMY_CODE_VERSION: &str = "dummy code version";
+const VERSION1: &str = "dummy code version v1";
+const VERSION2: &str = "dummy code version v2";
 
 #[derive(Clone, Debug)]
 pub struct KademliaTestApp {
@@ -73,7 +74,7 @@ impl Default for KademliaTestApp {
                 needed_approvers: 1,
             },
             chains: ConfiguredChains::default(),
-            version: DUMMY_CODE_VERSION.to_owned(),
+            version: VERSION1.to_owned(),
         };
 
         Self { genesis }
@@ -131,7 +132,7 @@ pub async fn observer_node(validator_addr: &str) -> Result<()> {
 
     let kolme = Kolme::new(
         KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
+        VERSION1,
         KolmeStore::new_in_memory(),
     )
     .await?;
@@ -169,7 +170,7 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
 
     let kolme = Kolme::new(
         KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
+        VERSION1,
         KolmeStore::new_in_memory(),
     )
     .await?;
@@ -222,12 +223,70 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
     }
 }
 
-pub async fn validators(port: u16, enable_api_server: bool) -> Result<()> {
+struct TestUpgrader {
+    processor: SecretKey,
+    listener: SecretKey,
+    approver: SecretKey,
+}
+
+impl TestUpgrader {
+    async fn run(&self) -> Result<()> {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        println!("Going to start upgrade process");
+        let mut kolme_v2 = Kolme::new(
+            KademliaTestApp::default(),
+            VERSION2,
+            KolmeStore::new_in_memory(),
+        )
+        .await?;
+        let kolme_v2 = kolme_v2.set_tx_await_duration(Duration::from_secs(4));
+
+        let processor = Processor::new(kolme_v2.clone(), self.processor.clone());
+        let listener = Listener::new(kolme_v2.clone(), self.listener.clone());
+
+        let mut set = JoinSet::new();
+        set.spawn(processor.run());
+        set.spawn(listener.run(ChainName::Cosmos));
+        let processor_upgrader = Upgrader::new(kolme_v2.clone(), self.processor.clone(), VERSION2);
+        let listener_upgrader = Upgrader::new(kolme_v2.clone(), self.listener.clone(), VERSION2);
+        let approver_upgrader = Upgrader::new(kolme_v2, self.approver.clone(), VERSION2);
+        set.spawn(async move {
+            processor_upgrader.run().await;
+            Ok(())
+        });
+        set.spawn(async move {
+            listener_upgrader.run().await;
+            Ok(())
+        });
+        set.spawn(async move {
+            approver_upgrader.run().await;
+            Ok(())
+        });
+
+        while let Some(res) = set.join_next().await {
+            match res {
+                Err(e) => {
+                    set.abort_all();
+                    return Err(anyhow::anyhow!("Upgrader Task panicked: {e}"));
+                }
+                Ok(Err(e)) => {
+                    set.abort_all();
+                    return Err(e);
+                }
+                Ok(Ok(())) => (),
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub async fn validators(port: u16, enable_api_server: bool, start_upgrade: bool) -> Result<()> {
     const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
 
     let kolme = Kolme::new(
         KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
+        VERSION1,
         KolmeStore::new_in_memory(),
     )
     .await?;
@@ -262,6 +321,15 @@ pub async fn validators(port: u16, enable_api_server: bool) -> Result<()> {
         .build(kolme.clone())?;
     set.spawn(gossip.run());
 
+    if start_upgrade {
+        let updater = TestUpgrader {
+            processor: my_secret_key().clone(),
+            listener: my_secret_key().clone(),
+            approver: my_secret_key().clone(),
+        };
+        updater.run().await?;
+    }
+
     while let Some(res) = set.join_next().await {
         match res {
             Err(e) => {
@@ -291,7 +359,7 @@ pub async fn client(
 
     let kolme = Kolme::new(
         KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
+        VERSION1,
         KolmeStore::new_in_memory(),
     )
     .await?;

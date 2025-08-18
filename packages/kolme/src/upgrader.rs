@@ -89,7 +89,9 @@ impl<App: KolmeApp> Upgrader<App> {
 
         // No matching upgrade proposal found and we're on the wrong version.
         // Time for us to propose the upgrade!
+        tracing::info!("Proposing Upgrade");
         self.propose_upgrade().await?;
+        tracing::info!("Successfully proposed Upgrade");
 
         Ok(())
     }

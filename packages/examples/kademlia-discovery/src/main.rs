@@ -19,6 +19,9 @@ enum Cmd {
         /// Run api server at 2002 port
         #[clap(long)]
         enable_api_server: bool,
+        /// Start Upgrade process
+        #[clap(long)]
+        start_upgrade: bool
     },
     /// Run a test of connecting over Kademlia
     Client {
@@ -54,7 +57,8 @@ async fn main_inner() -> Result<()> {
         Cmd::Validators {
             port,
             enable_api_server,
-        } => validators(port, enable_api_server).await,
+            start_upgrade
+        } => validators(port, enable_api_server, start_upgrade).await,
         Cmd::Client {
             validator,
             continous,
