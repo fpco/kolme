@@ -18,6 +18,32 @@ pub struct KademliaTestApp {
     pub genesis: GenesisInfo,
 }
 
+impl KademliaTestApp {
+    fn new(listener: SecretKey, approver: SecretKey) -> KademliaTestApp {
+        let my_public_key = my_secret_key().public_key();
+        let mut listeners = BTreeSet::new();
+        listeners.insert(listener.public_key());
+
+        let mut approvers = BTreeSet::new();
+        approvers.insert(approver.public_key());
+
+        let genesis = GenesisInfo {
+            kolme_ident: "Cosmos bridge example".to_owned(),
+            validator_set: ValidatorSet {
+                processor: my_public_key,
+                listeners,
+                needed_listeners: 1,
+                approvers,
+                needed_approvers: 1,
+            },
+            chains: ConfiguredChains::default(),
+            version: VERSION1.to_owned(),
+        };
+
+        Self { genesis }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct State {
     #[serde(default)]
@@ -58,27 +84,20 @@ fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl Default for KademliaTestApp {
-    fn default() -> Self {
-        let my_public_key = my_secret_key().public_key();
-        let mut set = BTreeSet::new();
-        set.insert(my_public_key);
+// Listener
+// Public key: 0339fb58c9fc020d4320058b917c26ca29ece63d1673fd564d2a5f5ec154bb86f1
+// Secret key: 837b7a2747bf49b0f9b30001454cce37c331a6e4cacc610e1582aafa8fd4277b
+const LISTENER_KEY_HEX: &str = "837b7a2747bf49b0f9b30001454cce37c331a6e4cacc610e1582aafa8fd4277b";
+fn my_listener_key() -> SecretKey {
+    SecretKey::from_hex(LISTENER_KEY_HEX).unwrap()
+}
 
-        let genesis = GenesisInfo {
-            kolme_ident: "Cosmos bridge example".to_owned(),
-            validator_set: ValidatorSet {
-                processor: my_public_key,
-                listeners: set.clone(),
-                needed_listeners: 1,
-                approvers: set,
-                needed_approvers: 1,
-            },
-            chains: ConfiguredChains::default(),
-            version: VERSION1.to_owned(),
-        };
-
-        Self { genesis }
-    }
+// Approver
+// Public key: 027a2707f3ced7f8c729563f44a133fe605d6d794f1959232b7462d2c4aebaa577
+// Secret key: 6c7d5e9c22c5bced61c060661583979e4318a990fe83dc8719e745c7fb48dbb5
+const APPROVER_KEY_HEX: &str = "6c7d5e9c22c5bced61c060661583979e4318a990fe83dc8719e745c7fb48dbb5";
+fn my_approver_key() -> SecretKey {
+    SecretKey::from_hex(APPROVER_KEY_HEX).unwrap()
 }
 
 impl KolmeApp for KademliaTestApp {
@@ -131,7 +150,7 @@ pub async fn observer_node(validator_addr: &str) -> Result<()> {
     let client = PeerId::from_public_key(&client.public());
 
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
         VERSION1,
         KolmeStore::new_in_memory(),
     )
@@ -169,7 +188,7 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
     let client_keypair: &[u8] = include_bytes!("../assets/client-keypair.pk8");
 
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
         VERSION1,
         KolmeStore::new_in_memory(),
     )
@@ -223,83 +242,11 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
     }
 }
 
-struct TestUpgrader {
-    processor: SecretKey,
-    listener: SecretKey,
-    approver: SecretKey,
-}
-
-impl TestUpgrader {
-    async fn run(&self) -> Result<()> {
-        tokio::time::sleep(Duration::from_secs(10)).await;
-        println!("Going to start upgrade process");
-        let mut kolme_v2 = Kolme::new(
-            KademliaTestApp::default(),
-            VERSION1,
-            KolmeStore::new_in_memory(),
-        )
-        .await?;
-        let kolme_v2 = kolme_v2.set_tx_await_duration(Duration::from_secs(4));
-
-        let processor = Processor::new(kolme_v2.clone(), self.processor.clone());
-        let listener = Listener::new(kolme_v2.clone(), self.listener.clone());
-
-        let mut set = JoinSet::new();
-        const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
-        const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
-
-        let gossip = GossipBuilder::new()
-            .add_listener(GossipListener {
-                proto: gossip::GossipProto::Tcp,
-                ip: gossip::GossipIp::Ip4,
-                port: 3001,
-            })
-            .set_duplicate_cache_time(Duration::from_secs(1))
-            .build(kolme_v2.clone())?;
-
-        set.spawn(gossip.run());
-
-        set.spawn(processor.run());
-        set.spawn(listener.run(ChainName::Cosmos));
-        let processor_upgrader = Upgrader::new(kolme_v2.clone(), self.processor.clone(), VERSION2);
-        let listener_upgrader = Upgrader::new(kolme_v2.clone(), self.listener.clone(), VERSION2);
-        let approver_upgrader = Upgrader::new(kolme_v2, self.approver.clone(), VERSION2);
-        set.spawn(async move {
-            processor_upgrader.run().await;
-            Ok(())
-        });
-        set.spawn(async move {
-            listener_upgrader.run().await;
-            Ok(())
-        });
-        set.spawn(async move {
-            approver_upgrader.run().await;
-            Ok(())
-        });
-
-        while let Some(res) = set.join_next().await {
-            match res {
-                Err(e) => {
-                    set.abort_all();
-                    return Err(anyhow::anyhow!("Upgrader Task panicked: {e}"));
-                }
-                Ok(Err(e)) => {
-                    set.abort_all();
-                    return Err(e);
-                }
-                Ok(Ok(())) => (),
-            }
-        }
-
-        Ok(())
-    }
-}
-
 pub async fn validators(port: u16, enable_api_server: bool, start_upgrade: bool) -> Result<()> {
     const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
 
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
         VERSION1,
         KolmeStore::new_in_memory(),
     )
@@ -336,12 +283,22 @@ pub async fn validators(port: u16, enable_api_server: bool, start_upgrade: bool)
     set.spawn(gossip.run());
 
     if start_upgrade {
-        let updater = TestUpgrader {
-            processor: my_secret_key().clone(),
-            listener: my_secret_key().clone(),
-            approver: my_secret_key().clone(),
-        };
-        updater.run().await?;
+        let processor_upgrader = Upgrader::new(kolme.clone(), my_secret_key().clone(), VERSION2);
+        let listener_upgrader =
+            Upgrader::new(kolme.clone(), my_listener_key().clone(), VERSION2);
+        let approver_upgrader = Upgrader::new(kolme, my_approver_key().clone(), VERSION2);
+        set.spawn(async move {
+            processor_upgrader.run().await;
+            Ok(())
+        });
+        set.spawn(async move {
+            listener_upgrader.run().await;
+            Ok(())
+        });
+        set.spawn(async move {
+            approver_upgrader.run().await;
+            Ok(())
+        });
     }
 
     while let Some(res) = set.join_next().await {
@@ -372,7 +329,7 @@ pub async fn client(
     let client_keypair: &[u8] = include_bytes!("../assets/client-keypair.pk8");
 
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
         VERSION1,
         KolmeStore::new_in_memory(),
     )

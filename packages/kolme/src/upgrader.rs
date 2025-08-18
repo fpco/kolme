@@ -64,7 +64,10 @@ impl<App: KolmeApp> Upgrader<App> {
             return Ok(());
         }
 
-        tracing::info!("Total Proposals: {}", framework_state.get_admin_proposal_state().proposals.len());
+        tracing::info!(
+            "Total Proposals: {}",
+            framework_state.get_admin_proposal_state().proposals.len()
+        );
 
         // Check if there's an existing upgrade proposal for our version
         for (id, proposal) in &framework_state.get_admin_proposal_state().proposals {
@@ -76,6 +79,7 @@ impl<App: KolmeApp> Upgrader<App> {
 
             // OK, we've found a proposal, check if we've already voted on it.
             if proposal.approvals.contains_key(&self.public) {
+                tracing::info!("Upgrader {} has already voted", self.public);
                 return Ok(());
             }
 
