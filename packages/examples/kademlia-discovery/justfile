@@ -8,9 +8,21 @@ default:
 validator:
     cargo run -- validators 2001 --enable-api-server
 
+# Run validator with upgrade components
+validator-upgrade:
+    cargo run -- validators 2001 --enable-api-server --start-upgrade --use-fjall-storage
+
+# Run node with new version
+node-v2:
+    cargo run -- new-version-node
+
 # Run client
 client:
     cargo run -- client --validator /ip4/127.0.0.1/tcp/2001 --continous
+
+# Run client with v2
+client-v2:
+    cargo run -- new-version-client --validator /ip4/127.0.0.1/tcp/3003 --continous
 
 # Run observer node
 observer:
