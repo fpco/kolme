@@ -100,7 +100,7 @@ pub async fn sanity_check_contract(
     Ok(())
 }
 
-pub(crate) fn to_kolme_message<T>(
+fn to_kolme_message<T>(
     msg: BridgeEventMessage,
     chain: ExternalChain,
     event_id: BridgeEventId,

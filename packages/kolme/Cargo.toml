@@ -11,12 +11,9 @@ anyhow = { workspace = true }
 axum = { workspace = true, features = ["ws"] }
 base64 = { workspace = true }
 borsh = { workspace = true }
-cosmos = { workspace = true, features = ["config"] }
-cosmwasm-std = { workspace = true }
 futures-util = { workspace = true }
 hex.workspace = true
 jiff = { workspace = true }
-kolme-solana-bridge-client = { workspace = true }
 kolme-store.workspace = true
 libp2p = { workspace = true, features = [
   "autonat",
@@ -54,12 +51,8 @@ reqwest = { workspace = true, features = [
 rust_decimal = { workspace = true, features = ["macros"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
+shared = { workspace = true, features = ["realcryptography"] }
 smallvec = { workspace = true }
-solana-client = { workspace = true }
-solana-commitment-config = { workspace = true }
-solana-signature = { workspace = true }
-solana-transaction-status-client-types = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -67,6 +60,17 @@ tokio-tungstenite = { workspace = true }
 tower-http = { workspace = true, features = ["cors"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+# Solana
+kolme-solana-bridge-client = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+solana-commitment-config = { workspace = true, optional = true }
+solana-signature = { workspace = true, optional = true }
+solana-transaction-status-client-types = { workspace = true, optional = true }
+
+# CosmWasm
+cosmos = { workspace = true, features = ["config"], optional = true }
+cosmwasm-std = { workspace = true, optional = true }
 
 [dev-dependencies]
 kademlia-discovery = { workspace = true }
@@ -77,6 +81,12 @@ tempfile = { workspace = true }
 
 [features]
 pass_through = []
+cosmwasm = ["dep:cosmos", "dep:cosmwasm-std", "shared/cosmwasm"]
+solana = [
+  "dep:solana-client", "dep:solana-commitment-config", "dep:solana-signature",
+  "dep:solana-transaction-status-client-types", "dep:kolme-solana-bridge-client",
+  "shared/solana"
+]
 
 [lints]
 workspace = true

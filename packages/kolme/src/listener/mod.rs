@@ -1,4 +1,6 @@
-pub(crate) mod cosmos;
+#[cfg(feature = "cosmwasm")]
+mod cosmos;
+#[cfg(feature = "solana")]
 mod solana;
 
 use crate::*;
@@ -31,33 +33,41 @@ impl<App: KolmeApp> Listener<App> {
     }
 
     pub async fn run(self, name: ChainName) -> Result<()> {
-        let contracts = self.wait_for_contracts(name).await?;
         let mut set = JoinSet::new();
         tracing::debug!("Listen on {name:?}");
 
         match name {
             ChainName::Cosmos => {
-                for (chain, contract) in contracts {
-                    set.spawn(cosmos::listen(
-                        self.kolme.clone(),
-                        self.secret.clone(),
-                        chain.to_cosmos_chain().unwrap(),
-                        contract,
-                    ));
+                #[cfg(feature = "cosmwasm")]
+                {
+                    let contracts = self.wait_for_contracts(name).await?;
+                    for (chain, contract) in contracts {
+                        set.spawn(cosmos::listen(
+                            self.kolme.clone(),
+                            self.secret.clone(),
+                            chain.to_cosmos_chain().unwrap(),
+                            contract,
+                        ));
+                    }
                 }
             }
             ChainName::Solana => {
-                for (chain, contract) in contracts {
-                    set.spawn(solana::listen(
-                        self.kolme.clone(),
-                        self.secret.clone(),
-                        chain.to_solana_chain().unwrap(),
-                        contract,
-                    ));
+                #[cfg(feature = "solana")]
+                {
+                    let contracts = self.wait_for_contracts(name).await?;
+                    for (chain, contract) in contracts {
+                        set.spawn(solana::listen(
+                            self.kolme.clone(),
+                            self.secret.clone(),
+                            chain.to_solana_chain().unwrap(),
+                            contract,
+                        ));
+                    }
                 }
             }
             #[cfg(feature = "pass_through")]
             ChainName::PassThrough => {
+                let contracts = self.wait_for_contracts(name).await?;
                 for (chain, contract) in contracts {
                     assert!(chain == ExternalChain::PassThrough);
                     set.spawn(pass_through::listen(
@@ -100,17 +110,21 @@ impl<App: KolmeApp> Listener<App> {
                 if next == BridgeEventId::start() {
                     let config = &kolme.get_bridge_contracts().get(chain)?.config;
 
-                    let expected_code_id = match config.bridge {
-                        BridgeContract::NeededCosmosBridge { code_id } => code_id,
-                        BridgeContract::NeededSolanaBridge { .. } => 0, // Solana has no code id to check
-                        BridgeContract::Deployed(_) => {
-                            anyhow::bail!("Already have a deployed contract on {chain:?}")
-                        }
+                    if let BridgeContract::Deployed(_) = config.bridge {
+                        anyhow::bail!("Already have a deployed contract on {chain:?}")
                     };
 
-                    let res = match ChainKind::from(chain) {
+                    let res: Result<()> = match ChainKind::from(chain) {
+                        #[cfg(feature = "cosmwasm")]
                         ChainKind::Cosmos(chain) => {
                             let cosmos = kolme.get_cosmos(chain).await?;
+                            let expected_code_id = match config.bridge {
+                                BridgeContract::NeededCosmosBridge { code_id } => code_id,
+                                BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
+                                BridgeContract::Deployed(_) => {
+                                    anyhow::bail!("Already have a deployed contract on {chain:?}")
+                                }
+                            };
 
                             cosmos::sanity_check_contract(
                                 &cosmos,
@@ -120,6 +134,9 @@ impl<App: KolmeApp> Listener<App> {
                             )
                             .await
                         }
+                        #[cfg(not(feature = "cosmwasm"))]
+                        ChainKind::Cosmos(_) => Ok(()),
+                        #[cfg(feature = "solana")]
                         ChainKind::Solana(chain) => {
                             let client = kolme.get_solana_client(chain).await;
 
@@ -130,6 +147,8 @@ impl<App: KolmeApp> Listener<App> {
                             )
                             .await
                         }
+                        #[cfg(not(feature = "solana"))]
+                        ChainKind::Solana(_) => Ok(()),
                         #[cfg(feature = "pass_through")]
                         ChainKind::PassThrough => {
                             anyhow::bail!("No wait for pass-through contract is expected")
