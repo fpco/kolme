@@ -255,6 +255,7 @@ pub async fn validators(port: u16, enable_api_server: bool) -> Result<()> {
             ip: gossip::GossipIp::Ip4,
             port,
         })
+        .add_websockets_bind("0.0.0.0:2006".parse().unwrap())
         .set_duplicate_cache_time(Duration::from_secs(1))
         .set_keypair(Keypair::rsa_from_pkcs8(
             &mut VALIDATOR_KEYPAIR_BYTES.to_owned(),

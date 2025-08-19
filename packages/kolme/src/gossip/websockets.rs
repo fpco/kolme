@@ -179,9 +179,14 @@ async fn launch_server_inner<App: KolmeApp>(
     let listener = tokio::net::TcpListener::bind(bind).await?;
     let router = axum::Router::new()
         .route("/", get(ws_handler_wrapper))
-        .with_state(server_state);
+        .with_state(server_state)
+        .route("/healthz", get(healthz));
     axum::serve(listener, router).await?;
     Ok(())
+}
+
+async fn healthz() -> &'static str {
+    "Healthy!"
 }
 
 async fn ws_handler_wrapper<App: KolmeApp>(
