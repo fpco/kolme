@@ -32,3 +32,7 @@ gen-key:
 # Run invalid client
 invalid-client:
 	cargo run -- invalid-client --validator /ip4/127.0.0.1/tcp/2001
+
+# Test websocket health endpoint
+test-ws-health:
+	curl --verbose http://localhost:2006/healthz
