@@ -111,7 +111,6 @@ pub enum CosmosChain {
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
-#[non_exhaustive]
 pub enum ChainName {
     Cosmos,
     Solana,
@@ -120,7 +119,6 @@ pub enum ChainName {
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
-#[non_exhaustive]
 pub enum ChainKind {
     Cosmos(CosmosChain),
     Solana(SolanaChain),
