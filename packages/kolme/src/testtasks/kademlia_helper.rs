@@ -46,6 +46,18 @@ impl TestTasks {
         kolme: Kolme<App>,
         display_name: &str,
     ) -> WebsocketsDiscovery {
+        self.launch_websockets_discovery_with(kolme, display_name, |f| f)
+    }
+
+    pub fn launch_websockets_discovery_with<App: KolmeApp, F>(
+        &self,
+        kolme: Kolme<App>,
+        display_name: &str,
+        f: F,
+    ) -> WebsocketsDiscovery
+    where
+        F: FnOnce(GossipBuilder) -> GossipBuilder,
+    {
         let listener = GossipListener::random().unwrap();
         let port = listener.port;
         assert_ne!(port, 0);
@@ -53,6 +65,7 @@ impl TestTasks {
         let gossip = GossipBuilder::new()
             .set_local_display_name(display_name)
             .add_websockets_bind(format!("127.0.0.1:{port}").parse().unwrap());
+        let gossip = f(gossip);
         let gossip = gossip.build(kolme).unwrap();
 
         // And now launch a gossip node for this Kolme
@@ -104,6 +117,24 @@ impl TestTasks {
         display_name: &str,
         discovery: &WebsocketsDiscovery,
     ) {
+        self.launch_websockets_client_with(kolme, display_name, discovery, |builder| {
+            builder.set_sync_mode(
+                SyncMode::BlockTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        })
+        .await;
+    }
+
+    pub async fn launch_websockets_client_with<App: KolmeApp, F>(
+        &self,
+        kolme: Kolme<App>,
+        display_name: &str,
+        discovery: &WebsocketsDiscovery,
+        f: F,
+    ) where
+        F: FnOnce(GossipBuilder) -> GossipBuilder,
+    {
         let builder = GossipBuilder::new()
             .set_local_display_name(display_name)
             .add_websockets_server(
@@ -111,6 +142,7 @@ impl TestTasks {
                     .parse()
                     .unwrap(),
             );
+        let builder = f(builder);
         let gossip = builder.build(kolme.clone()).unwrap();
         let mut ready = gossip.subscribe_network_ready();
         self.try_spawn_persistent(gossip.run());

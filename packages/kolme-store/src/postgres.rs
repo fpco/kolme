@@ -5,8 +5,8 @@ use crate::{
 use anyhow::Context as _;
 use lru::LruCache;
 use merkle_map::{
-    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
-    MerkleSerializeRaw, MerkleStore as _, Sha256Hash,
+    MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerializeRaw,
+    MerkleStore as _, Sha256Hash,
 };
 use parking_lot::Mutex;
 use sqlx::{
@@ -15,7 +15,7 @@ use sqlx::{
     Executor, Postgres,
 };
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
-mod merkle;
+pub mod merkle;
 
 pub struct ConstructLock {
     tx_unlock: Option<tokio::sync::oneshot::Sender<()>>,
@@ -372,19 +372,15 @@ impl KolmeBackingStore for Store {
 
         Ok(())
     }
-    async fn add_merkle_layer(
-        &self,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-    ) -> anyhow::Result<()> {
+    async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> anyhow::Result<()> {
         let mut merkle = self.new_store();
-        merkle.save_by_hash(hash, layer).await?;
+        merkle.save_by_hash(layer).await?;
         self.consume_stores(&self.pool, [merkle]).await?;
 
         Ok(())
     }
 
-    async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> anyhow::Result<Arc<MerkleContents>> {
+    async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> anyhow::Result<Sha256Hash> {
         let mut store = self.new_store();
         let contents = merkle_map::save(&mut store, value).await?;
         self.consume_stores(&self.pool, [store]).await?;

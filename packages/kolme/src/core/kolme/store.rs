@@ -108,17 +108,12 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.inner.has_merkle_hash(hash).await
     }
 
-    pub(crate) async fn add_merkle_layer(
-        &self,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-    ) -> Result<()> {
-        anyhow::ensure!(hash == Sha256Hash::hash(&layer.payload));
+    pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
         for child in &layer.children {
             anyhow::ensure!(self.has_merkle_hash(*child).await?);
         }
 
-        self.inner.add_merkle_layer(hash, layer).await
+        self.inner.add_merkle_layer(layer).await
     }
 
     pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<()> {
@@ -196,10 +191,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Save data to the merkle store.
-    pub(super) async fn save<T: MerkleSerializeRaw>(
-        &self,
-        value: &T,
-    ) -> Result<Arc<MerkleContents>> {
+    pub(super) async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> Result<Sha256Hash> {
         self.inner.save(value).await
     }
 

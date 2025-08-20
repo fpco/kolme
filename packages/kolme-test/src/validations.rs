@@ -54,9 +54,9 @@ async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
         processor: processor.public_key(),
         height,
         parent: genesis.hash(),
-        framework_state: merkle_map::api::serialize(&framework_state).unwrap().hash,
-        app_state: merkle_map::api::serialize(&app_state).unwrap().hash,
-        logs: merkle_map::api::serialize(&logs).unwrap().hash,
+        framework_state: merkle_map::api::serialize(&framework_state).unwrap().hash(),
+        app_state: merkle_map::api::serialize(&app_state).unwrap().hash(),
+        logs: merkle_map::api::serialize(&logs).unwrap().hash(),
         loads,
     };
 

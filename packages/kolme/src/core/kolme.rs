@@ -472,16 +472,14 @@ impl<App: KolmeApp> Kolme<App> {
         let logs: Arc<[_]> = logs.into();
         let height = signed_block.height();
 
-        let framework_state_contents = self.inner.store.save(&framework_state).await?;
-        anyhow::ensure!(
-            framework_state_contents.hash == signed_block.0.message.as_inner().framework_state
-        );
+        let framework_state_hash = self.inner.store.save(&framework_state).await?;
+        anyhow::ensure!(framework_state_hash == signed_block.0.message.as_inner().framework_state);
 
-        let app_state_contents = self.inner.store.save(&app_state).await?;
-        anyhow::ensure!(app_state_contents.hash == signed_block.0.message.as_inner().app_state);
+        let app_state_hash = self.inner.store.save(&app_state).await?;
+        anyhow::ensure!(app_state_hash == signed_block.0.message.as_inner().app_state);
 
-        let logs_contents = self.inner.store.save(&logs).await?;
-        anyhow::ensure!(logs_contents.hash == signed_block.0.message.as_inner().logs);
+        let logs_hash = self.inner.store.save(&logs).await?;
+        anyhow::ensure!(logs_hash == signed_block.0.message.as_inner().logs);
 
         self.inner
             .store
@@ -1086,13 +1084,9 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Add a Merkle layer for this hash.
     ///
-    /// Invariant: you must ensure that the payload matches the hash, and that all children are already stored.
-    pub(crate) async fn add_merkle_layer(
-        &self,
-        hash: Sha256Hash,
-        layer: &MerkleLayerContents,
-    ) -> Result<()> {
-        self.inner.store.add_merkle_layer(hash, layer).await
+    /// Invariant: you must ensure that all children are already stored.
+    pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
+        self.inner.store.add_merkle_layer(layer).await
     }
 
     /// Get the contents of a Merkle hash.
@@ -1124,7 +1118,7 @@ impl<App: KolmeApp> Kolme<App> {
     async fn ingest_layer_from(&self, other: &Self, hash: Sha256Hash) -> Result<()> {
         enum Work {
             Process(Sha256Hash),
-            Write(Sha256Hash, Box<MerkleLayerContents>),
+            Write(Box<MerkleLayerContents>),
         }
         let mut work_queue = vec![Work::Process(hash)];
         while let Some(work) = work_queue.pop() {
@@ -1138,16 +1132,16 @@ impl<App: KolmeApp> Kolme<App> {
                         .await?
                         .with_context(|| format!("Missing layer {hash} in source store"))?;
                     let children = layer.children.clone();
-                    work_queue.push(Work::Write(hash, Box::new(layer)));
+                    work_queue.push(Work::Write(Box::new(layer)));
                     for child in children {
                         work_queue.push(Work::Process(child));
                     }
                 }
-                Work::Write(hash, layer) => {
-                    if self.has_merkle_hash(hash).await? {
+                Work::Write(layer) => {
+                    if self.has_merkle_hash(layer.payload.hash()).await? {
                         continue;
                     }
-                    self.add_merkle_layer(hash, &layer).await?;
+                    self.add_merkle_layer(&layer).await?;
                 }
             }
         }

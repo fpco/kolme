@@ -17,7 +17,7 @@ impl MerkleSerialError {
 
 impl std::fmt::Debug for MerkleContents {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_tuple("MerkleContents").field(&self.hash).finish()
+        f.debug_tuple("MerkleContents").field(&self.hash()).finish()
     }
 }
 
@@ -25,14 +25,10 @@ impl std::fmt::Debug for MerkleContents {
 pub fn serialize<T: MerkleSerializeRaw + ?Sized>(
     value: &T,
 ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
-    if let Some(contents) = value.get_merkle_contents_raw() {
-        return Ok(contents);
-    }
-
     let mut serializer = MerkleSerializer::new();
     value.merkle_serialize_raw(&mut serializer)?;
     let contents = Arc::new(serializer.finish());
-    value.set_merkle_contents_raw(&contents);
+    value.set_merkle_hash_raw(contents.hash());
     Ok(contents)
 }
 
@@ -42,7 +38,7 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
     contents: Arc<MerkleContents>,
 ) -> Result<(), MerkleSerialError> {
     // Bypass everything below: if this already exists, just exit.
-    if store.contains_hash(contents.hash).await? {
+    if store.contains_hash(contents.hash()).await? {
         return Ok(());
     }
 
@@ -77,7 +73,7 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
                 check_children: false,
             });
             for child in children.iter() {
-                if !store.contains_hash(child.hash).await? {
+                if !store.contains_hash(child.hash()).await? {
                     work.push(Work {
                         contents: child.clone(),
                         check_children: true,
@@ -86,13 +82,10 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
             }
         } else {
             store
-                .save_by_hash(
-                    contents.hash,
-                    &MerkleLayerContents {
-                        payload: contents.payload.clone(),
-                        children: contents.children.iter().map(|c| c.hash).collect(),
-                    },
-                )
+                .save_by_hash(&MerkleLayerContents {
+                    payload: contents.payload.clone(),
+                    children: contents.children.iter().map(|c| c.hash()).collect(),
+                })
                 .await?;
         }
     }
@@ -104,20 +97,28 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
 pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
     store: &mut Store,
     value: &T,
-) -> Result<Arc<MerkleContents>, MerkleSerialError> {
+) -> Result<Sha256Hash, MerkleSerialError> {
+    if let Some(hash) = value.get_merkle_hash_raw() {
+        if store.contains_hash(hash).await? {
+            return Ok(hash);
+        }
+    }
     let contents = serialize(value)?;
-    save_merkle_contents(store, contents.clone()).await?;
-    Ok(contents)
+    let hash = contents.hash();
+    save_merkle_contents(store, contents).await?;
+    Ok(hash)
 }
 
 /// Deserialize a value from the given [MerkleContents].
 pub fn deserialize<T: MerkleDeserializeRaw>(
     contents: Arc<MerkleContents>,
 ) -> Result<T, MerkleSerialError> {
+    if let Some(value) = T::load_merkle_by_hash(contents.hash()) {
+        return Ok(value);
+    }
     let mut deserializer = MerkleDeserializer::new(contents.clone());
     let value = T::merkle_deserialize_raw(&mut deserializer)?;
-    let contents = Arc::new(deserializer.finish()?);
-    value.set_merkle_contents_raw(&contents);
+    deserializer.finish()?;
     Ok(value)
 }
 
@@ -126,6 +127,9 @@ pub async fn load<T: MerkleDeserializeRaw, Store: MerkleStore>(
     store: &mut Store,
     hash: Sha256Hash,
 ) -> Result<T, MerkleSerialError> {
+    if let Some(value) = T::load_merkle_by_hash(hash) {
+        return Ok(value);
+    }
     deserialize(load_merkle_contents(store, hash).await?)
 }
 
@@ -223,7 +227,6 @@ pub async fn load_merkle_contents<Store: MerkleStore>(
 
             // All children are fully loaded, so we can create our MerkleContents.
             let contents = Arc::new(MerkleContents {
-                hash,
                 payload: layer.payload.clone(),
                 children: children.into(),
             });

@@ -1,8 +1,8 @@
 mod block;
 mod error;
-mod fjall;
+pub mod fjall;
 mod in_memory;
-mod postgres;
+pub mod postgres;
 mod r#trait;
 
 pub use block::{BlockHashes, StorableBlock};
@@ -10,8 +10,7 @@ pub use error::KolmeStoreError;
 use fjall::Store as KolmeFjallStore;
 use in_memory::Store as KolmeInMemoryStore;
 use merkle_map::{
-    MerkleContents, MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError,
-    MerkleSerializeRaw, Sha256Hash,
+    MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerializeRaw, Sha256Hash,
 };
 use postgres::Store as KolmePostgresStore;
 pub use r#trait::{HasBlockHashes, KolmeBackingStore};

@@ -37,6 +37,8 @@ regex = { workspace = true }
 smallvec.workspace = true
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }
 tempdir = { workspace = true }
+kolme-store = { workspace = true }
+lru = { workspace = true }
 
 [features]
 artifacts = ["dep:plotters", "dep:plotters-svg", "dep:regex"]

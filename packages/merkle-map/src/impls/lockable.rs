@@ -1,10 +1,14 @@
+mod locked;
+
 use std::{fmt::Debug, sync::OnceLock};
+
+use locked::{LockKey, Locked};
 
 use crate::*;
 
 /// Allows a value to be locked with a pre-computed Merkle hash.
 pub struct MerkleLockable<T> {
-    pub(super) locked: Arc<OnceLock<Arc<MerkleContents>>>,
+    pub(super) locked: Arc<OnceLock<Locked<T>>>,
     inner: Arc<T>,
 }
 
@@ -29,14 +33,21 @@ impl<T: Clone> AsMut<T> for MerkleLockable<T> {
     }
 }
 
-impl<T> MerkleLockable<T> {
+impl<T: Send + Sync + 'static> MerkleLockable<T> {
     #[cfg(test)]
     pub fn assert_locked_status(&self, expected: bool) {
         assert_eq!(self.locked.get().is_some(), expected);
     }
+
+    fn lock_key_for(hash: Sha256Hash) -> LockKey {
+        LockKey {
+            type_id: std::any::TypeId::of::<T>(),
+            hash,
+        }
+    }
 }
 
-impl<T: MerkleSerializeRaw> MerkleSerializeRaw for MerkleLockable<T> {
+impl<T: MerkleSerializeRaw + Send + Sync + 'static> MerkleSerializeRaw for MerkleLockable<T> {
     fn merkle_serialize_raw(
         &self,
         serializer: &mut MerkleSerializer,
@@ -44,24 +55,32 @@ impl<T: MerkleSerializeRaw> MerkleSerializeRaw for MerkleLockable<T> {
         self.inner.merkle_serialize_raw(serializer)
     }
 
-    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
-        self.locked.get().cloned()
+    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
+        self.locked.get().map(Locked::hash)
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.locked.set(contents.clone()).ok();
+    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
+        self.locked
+            .get_or_init(|| Locked::new(Self::lock_key_for(hash), self.inner.clone()));
     }
 }
 
-impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for MerkleLockable<T> {
+impl<T: MerkleDeserializeRaw + Send + Sync + 'static> MerkleDeserializeRaw for MerkleLockable<T> {
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         T::merkle_deserialize_raw(deserializer).map(MerkleLockable::new)
     }
 
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.locked.set(contents.clone()).unwrap()
+    fn load_merkle_by_hash(hash: Sha256Hash) -> Option<Self> {
+        let locked = Locked::<T>::get(Self::lock_key_for(hash))?;
+        let inner = locked.value().clone();
+        let once_locked = OnceLock::new();
+        assert!(once_locked.set(locked).is_ok());
+        Some(Self {
+            locked: Arc::new(once_locked),
+            inner,
+        })
     }
 }
 

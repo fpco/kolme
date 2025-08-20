@@ -12,13 +12,21 @@ use crate::quickcheck_newtypes::{
 
 use crate::*;
 
-impl<K, V> MerkleMap<K, V> {
+impl<K, V> MerkleMap<K, V>
+where
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
     pub fn assert_locked_status(&self, expected: bool) {
         self.0.assert_locked_status(expected);
     }
 }
 
-impl<K, V> Node<K, V> {
+impl<K, V> Node<K, V>
+where
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
     pub fn assert_locked_status(&self, expected: bool) {
         match self {
             Node::Leaf(leaf) => leaf.assert_locked_status(expected),
@@ -88,10 +96,10 @@ async fn load_should_have_locked_status() {
     tree.assert_locked_status(false);
     let mut store = MerkleMemoryStore::default();
 
-    let tree_contents = save(&mut store, &tree).await.unwrap();
+    let tree_hash = save(&mut store, &tree).await.unwrap();
     tree.assert_locked_status(true);
 
-    let mut same_tree: MerkleMap<u8, u8> = load(&mut store, tree_contents.hash).await.unwrap();
+    let mut same_tree: MerkleMap<u8, u8> = load(&mut store, tree_hash).await.unwrap();
     assert_eq!(same_tree, tree);
     same_tree.assert_locked_status(true);
 
@@ -230,8 +238,8 @@ quickcheck! {
 #[tokio::main]
 async fn test_store_usize_inner(x: usize) -> bool {
     let mut store = MerkleMemoryStore::default();
-    let contents = save(&mut store, &x).await.unwrap();
-    let y = load::<usize, _>(&mut store, contents.hash).await.unwrap();
+    let hash = save(&mut store, &x).await.unwrap();
+    let y = load::<usize, _>(&mut store, hash).await.unwrap();
     assert_eq!(x, y);
     true
 }
@@ -245,11 +253,11 @@ async fn memory_manager_helper(size: u32) {
     m.assert_locked_status(false);
 
     let mut store = MerkleMemoryStore::default();
-    let contents = save(&mut store, &m).await.unwrap();
+    let hash = save(&mut store, &m).await.unwrap();
 
     m.assert_locked_status(true);
 
-    let m2 = load(&mut store, contents.hash).await.unwrap();
+    let m2 = load(&mut store, hash).await.unwrap();
 
     m.assert_locked_status(true);
 
@@ -308,8 +316,8 @@ async fn store_load_helper(name: String, age: u32, inventory: BTreeMap<String, u
     };
 
     let mut store = MerkleMemoryStore::default();
-    let contents = save(&mut store, &person).await.unwrap();
-    let person2 = load(&mut store, contents.hash).await.unwrap();
+    let hash = save(&mut store, &person).await.unwrap();
+    let person2 = load(&mut store, hash).await.unwrap();
     assert_eq!(person, person2);
 }
 
@@ -766,8 +774,8 @@ where
     T: MerkleSerializeRaw + MerkleDeserializeRaw + PartialEq,
 {
     let mut store = MerkleMemoryStore::default();
-    let serialized = save(&mut store, &value).await.unwrap();
-    let deserialized = load::<T, _>(&mut store, serialized.hash).await.unwrap();
+    let hash = save(&mut store, &value).await.unwrap();
+    let deserialized = load::<T, _>(&mut store, hash).await.unwrap();
 
     quickcheck::TestResult::from_bool(value == deserialized)
 }

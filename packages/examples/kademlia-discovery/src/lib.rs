@@ -10,11 +10,38 @@ use libp2p::PeerId;
 use tokio::task::JoinSet;
 use tokio::time::{self, timeout, Duration};
 
-const DUMMY_CODE_VERSION: &str = "dummy code version";
+const VERSION1: &str = "dummy code version v1";
+const VERSION2: &str = "dummy code version v2";
 
 #[derive(Clone, Debug)]
 pub struct KademliaTestApp {
     pub genesis: GenesisInfo,
+}
+
+impl KademliaTestApp {
+    fn new(listener: SecretKey, approver: SecretKey) -> KademliaTestApp {
+        let my_public_key = my_secret_key().public_key();
+        let mut listeners = BTreeSet::new();
+        listeners.insert(listener.public_key());
+
+        let mut approvers = BTreeSet::new();
+        approvers.insert(approver.public_key());
+
+        let genesis = GenesisInfo {
+            kolme_ident: "Cosmos bridge example".to_owned(),
+            validator_set: ValidatorSet {
+                processor: my_public_key,
+                listeners,
+                needed_listeners: 1,
+                approvers,
+                needed_approvers: 1,
+            },
+            chains: ConfiguredChains::default(),
+            version: VERSION1.to_owned(),
+        };
+
+        Self { genesis }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -57,27 +84,20 @@ fn my_secret_key() -> SecretKey {
     SecretKey::from_hex(SECRET_KEY_HEX).unwrap()
 }
 
-impl Default for KademliaTestApp {
-    fn default() -> Self {
-        let my_public_key = my_secret_key().public_key();
-        let mut set = BTreeSet::new();
-        set.insert(my_public_key);
+// Listener
+// Public key: 0339fb58c9fc020d4320058b917c26ca29ece63d1673fd564d2a5f5ec154bb86f1
+// Secret key: 837b7a2747bf49b0f9b30001454cce37c331a6e4cacc610e1582aafa8fd4277b
+const LISTENER_KEY_HEX: &str = "837b7a2747bf49b0f9b30001454cce37c331a6e4cacc610e1582aafa8fd4277b";
+fn my_listener_key() -> SecretKey {
+    SecretKey::from_hex(LISTENER_KEY_HEX).unwrap()
+}
 
-        let genesis = GenesisInfo {
-            kolme_ident: "Cosmos bridge example".to_owned(),
-            validator_set: ValidatorSet {
-                processor: my_public_key,
-                listeners: set.clone(),
-                needed_listeners: 1,
-                approvers: set,
-                needed_approvers: 1,
-            },
-            chains: ConfiguredChains::default(),
-            version: DUMMY_CODE_VERSION.to_owned(),
-        };
-
-        Self { genesis }
-    }
+// Approver
+// Public key: 027a2707f3ced7f8c729563f44a133fe605d6d794f1959232b7462d2c4aebaa577
+// Secret key: 6c7d5e9c22c5bced61c060661583979e4318a990fe83dc8719e745c7fb48dbb5
+const APPROVER_KEY_HEX: &str = "6c7d5e9c22c5bced61c060661583979e4318a990fe83dc8719e745c7fb48dbb5";
+fn my_approver_key() -> SecretKey {
+    SecretKey::from_hex(APPROVER_KEY_HEX).unwrap()
 }
 
 impl KolmeApp for KademliaTestApp {
@@ -130,8 +150,8 @@ pub async fn observer_node(validator_addr: &str) -> Result<()> {
     let client = PeerId::from_public_key(&client.public());
 
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
+        VERSION1,
         KolmeStore::new_in_memory(),
     )
     .await?;
@@ -168,8 +188,8 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
     let client_keypair: &[u8] = include_bytes!("../assets/client-keypair.pk8");
 
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
+        VERSION1,
         KolmeStore::new_in_memory(),
     )
     .await?;
@@ -222,13 +242,80 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
     }
 }
 
-pub async fn validators(port: u16, enable_api_server: bool) -> Result<()> {
+pub async fn new_version_node() -> Result<()> {
+    const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
+    let kolme_store = KolmeStore::new_fjall("./fjall").unwrap();
+    let kolme = Kolme::new(
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
+        VERSION2,
+        kolme_store,
+    )
+    .await?;
+
+    let mut set = JoinSet::new();
+
+    let processor = Processor::new(kolme.clone(), my_secret_key().clone());
+    // Processor consumes mempool transactions and add new transactions into blockchain storage.
+    set.spawn(processor.run());
+    // Listens bridge events. Based on bridge event ID, fetches the
+    // event from chain and then constructs a tx which leads to adding
+    // new mempool entry.
+    let listener = Listener::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(listener.run(ChainName::Cosmos));
+    // Approves pending bridge actions.
+    let approver = Approver::new(kolme.clone(), my_secret_key().clone());
+    set.spawn(approver.run());
+
+    let api_server = ApiServer::new(kolme.clone());
+    set.spawn(api_server.run(("0.0.0.0", 2003)));
+
+    let gossip = GossipBuilder::new()
+        .add_listener(GossipListener {
+            proto: gossip::GossipProto::Tcp,
+            ip: gossip::GossipIp::Ip4,
+            port: 3003,
+        })
+        .set_duplicate_cache_time(Duration::from_secs(1))
+        .set_keypair(Keypair::rsa_from_pkcs8(
+            &mut VALIDATOR_KEYPAIR_BYTES.to_owned(),
+        )?)
+        .build(kolme.clone())?;
+    set.spawn(gossip.run());
+
+    while let Some(res) = set.join_next().await {
+        match res {
+            Err(e) => {
+                set.abort_all();
+                return Err(anyhow::anyhow!("Task panicked: {e}"));
+            }
+            Ok(Err(e)) => {
+                set.abort_all();
+                return Err(e);
+            }
+            Ok(Ok(())) => (),
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn validators(
+    port: u16,
+    enable_api_server: bool,
+    start_upgrade: bool,
+    use_fjall_storage: bool,
+) -> Result<()> {
     const VALIDATOR_KEYPAIR_BYTES: &[u8] = include_bytes!("../assets/validator-keypair.pk8");
 
+    let kolme_store = if use_fjall_storage {
+        KolmeStore::new_fjall("./fjall").unwrap()
+    } else {
+        KolmeStore::new_in_memory()
+    };
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
-        KolmeStore::new_in_memory(),
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
+        VERSION1,
+        kolme_store,
     )
     .await?;
 
@@ -255,12 +342,31 @@ pub async fn validators(port: u16, enable_api_server: bool) -> Result<()> {
             ip: gossip::GossipIp::Ip4,
             port,
         })
+        .add_websockets_bind("0.0.0.0:2006".parse().unwrap())
         .set_duplicate_cache_time(Duration::from_secs(1))
         .set_keypair(Keypair::rsa_from_pkcs8(
             &mut VALIDATOR_KEYPAIR_BYTES.to_owned(),
         )?)
         .build(kolme.clone())?;
     set.spawn(gossip.run());
+
+    if start_upgrade {
+        let processor_upgrader = Upgrader::new(kolme.clone(), my_secret_key().clone(), VERSION2);
+        let listener_upgrader = Upgrader::new(kolme.clone(), my_listener_key().clone(), VERSION2);
+        let approver_upgrader = Upgrader::new(kolme, my_approver_key().clone(), VERSION2);
+        set.spawn(async move {
+            processor_upgrader.run().await;
+            Ok(())
+        });
+        set.spawn(async move {
+            listener_upgrader.run().await;
+            Ok(())
+        });
+        set.spawn(async move {
+            approver_upgrader.run().await;
+            Ok(())
+        });
+    }
 
     while let Some(res) = set.join_next().await {
         match res {
@@ -284,14 +390,32 @@ pub async fn client(
     signing_secret: SecretKey,
     continous: bool,
 ) -> Result<()> {
+    client_inner(validator_addr, signing_secret, continous, 3001, VERSION1).await
+}
+
+pub async fn new_node_client(
+    validator_addr: &str,
+    signing_secret: SecretKey,
+    continous: bool,
+) -> Result<()> {
+    client_inner(validator_addr, signing_secret, continous, 3002, VERSION2).await
+}
+
+async fn client_inner(
+    validator_addr: &str,
+    signing_secret: SecretKey,
+    continous: bool,
+    port: u16,
+    version: &str,
+) -> Result<()> {
     // Corresponding to the one in ../assets/validator-keypair.pem
     const VALIDATOR_PEER_ID: &str = "QmU7sxvvthsBmfVh6bg4XtodynvUhUHfWp3kWsRsnDKTew";
 
     let client_keypair: &[u8] = include_bytes!("../assets/client-keypair.pk8");
 
     let kolme = Kolme::new(
-        KademliaTestApp::default(),
-        DUMMY_CODE_VERSION,
+        KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
+        version,
         KolmeStore::new_in_memory(),
     )
     .await?;
@@ -302,7 +426,7 @@ pub async fn client(
         .add_listener(GossipListener {
             proto: gossip::GossipProto::Tcp,
             ip: gossip::GossipIp::Ip4,
-            port: 3001,
+            port,
         })
         .set_keypair(Keypair::rsa_from_pkcs8(&mut client_keypair.to_owned()).unwrap())
         .add_bootstrap(VALIDATOR_PEER_ID.parse()?, validator_addr.parse()?)

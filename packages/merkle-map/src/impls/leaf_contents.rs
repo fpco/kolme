@@ -127,9 +127,7 @@ impl<K, V: MerkleSerializeRaw> MerkleSerializeRaw for LeafContents<K, V> {
     }
 }
 
-impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
-    for MerkleLockable<LeafContents<K, V>>
-{
+impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for LeafContents<K, V> {
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
@@ -149,10 +147,6 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw
             values.push(LeafEntry::merkle_deserialize_raw(deserializer)?);
         }
 
-        Ok(MerkleLockable::new(LeafContents { values }))
-    }
-
-    fn set_merkle_contents_raw(&self, contents: &Arc<MerkleContents>) {
-        self.locked.set(contents.clone()).ok();
+        Ok(LeafContents { values })
     }
 }

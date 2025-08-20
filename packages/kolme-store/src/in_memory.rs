@@ -112,7 +112,7 @@ impl KolmeBackingStore for Store {
         let hash = merkle_map::save(&mut guard.merkle, block)
             .await
             .map_err(KolmeStoreError::custom)?;
-        guard.blocks.insert(height, hash.hash);
+        guard.blocks.insert(height, hash);
         guard.blockhashes.insert(height, block.blockhash);
 
         Ok(())
@@ -141,15 +141,14 @@ impl KolmeBackingStore for Store {
 
     async fn add_merkle_layer(
         &self,
-        hash: Sha256Hash,
         layer: &merkle_map::MerkleLayerContents,
     ) -> anyhow::Result<()> {
         let mut merkle = self.get_merkle_store().await;
-        merkle.save_by_hash(hash, layer).await?;
+        merkle.save_by_hash(layer).await?;
         Ok(())
     }
 
-    async fn save<T>(&self, value: &T) -> anyhow::Result<Arc<merkle_map::MerkleContents>>
+    async fn save<T>(&self, value: &T) -> anyhow::Result<Sha256Hash>
     where
         T: merkle_map::MerkleSerializeRaw,
     {

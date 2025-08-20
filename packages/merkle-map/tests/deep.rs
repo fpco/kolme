@@ -7,13 +7,16 @@ async fn deep() {
         m.insert(i * 100_000u32, i);
     }
     let mut store = MerkleMemoryStore::default();
-    let contents = save(&mut store, &m).await.unwrap();
+    let hash = save(&mut store, &m).await.unwrap();
+    let contents = merkle_map::api::load_merkle_contents(&mut store, hash)
+        .await
+        .unwrap();
     let max_depth = get_max_depth(&contents, 0);
     assert!(
         max_depth >= 4,
         "Max depth is {max_depth}, expecting at least 4"
     );
-    let m2 = load(&mut store, contents.hash).await.unwrap();
+    let m2 = load(&mut store, contents.hash()).await.unwrap();
     assert_eq!(m, m2);
 }
 

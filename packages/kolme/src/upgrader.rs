@@ -64,6 +64,11 @@ impl<App: KolmeApp> Upgrader<App> {
             return Ok(());
         }
 
+        tracing::info!(
+            "Total Proposals: {}",
+            framework_state.get_admin_proposal_state().proposals.len()
+        );
+
         // Check if there's an existing upgrade proposal for our version
         for (id, proposal) in &framework_state.get_admin_proposal_state().proposals {
             if let ProposalPayload::Upgrade(upgrade) = &proposal.payload {
@@ -74,6 +79,7 @@ impl<App: KolmeApp> Upgrader<App> {
 
             // OK, we've found a proposal, check if we've already voted on it.
             if proposal.approvals.contains_key(&self.public) {
+                tracing::info!("Upgrader {} has already voted", self.public);
                 return Ok(());
             }
 
@@ -89,7 +95,9 @@ impl<App: KolmeApp> Upgrader<App> {
 
         // No matching upgrade proposal found and we're on the wrong version.
         // Time for us to propose the upgrade!
+        tracing::info!("Proposing Upgrade");
         self.propose_upgrade().await?;
+        tracing::info!("Successfully proposed Upgrade");
 
         Ok(())
     }
