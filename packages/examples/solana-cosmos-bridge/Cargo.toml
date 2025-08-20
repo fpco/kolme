@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = { workspace = true }
 cosmos = { workspace = true }
 jiff = { workspace = true }
-kolme = { workspace = true }
+kolme = { workspace = true, features = ["solana", "cosmwasm"] }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 solana-keypair = { workspace = true }

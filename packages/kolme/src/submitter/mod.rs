@@ -1,8 +1,11 @@
+#[cfg(feature = "cosmwasm")]
 mod cosmos;
+#[cfg(feature = "solana")]
 mod solana;
 
-use crate::*;
 use std::collections::{HashMap, HashSet};
+
+use crate::*;
 
 /// Component which submits necessary transactions to the blockchain.
 pub struct Submitter<App: KolmeApp> {
@@ -16,29 +19,30 @@ pub struct Submitter<App: KolmeApp> {
     /// because our new contract will only be recognized in a later transaction.
     ///
     /// Simple solution: only instantiate once per chain.
+    #[allow(dead_code)] // Unused when only the "pass_through" feature is enabled.
     genesis_created: HashSet<ExternalChain>,
     last_submitted: HashMap<ExternalChain, BridgeActionId>,
 }
 
 enum ChainArgs {
-    Cosmos {
-        seed_phrase: ::cosmos::SeedPhrase,
-    },
+    #[cfg(feature = "cosmwasm")]
+    Cosmos { seed_phrase: ::cosmos::SeedPhrase },
+    #[cfg(feature = "solana")]
     Solana {
         keypair: kolme_solana_bridge_client::keypair::Keypair,
         fee_per_cu: Option<u64>,
     },
     #[cfg(feature = "pass_through")]
-    PassThrough {
-        port: u16,
-    },
+    PassThrough { port: u16 },
 }
 
 impl ChainArgs {
     #[inline]
     fn can_handle(&self, chain: ExternalChain) -> bool {
         match self {
+            #[cfg(feature = "cosmwasm")]
             Self::Cosmos { .. } => chain.to_cosmos_chain().is_some(),
+            #[cfg(feature = "solana")]
             Self::Solana { .. } => chain.to_solana_chain().is_some(),
             #[cfg(feature = "pass_through")]
             Self::PassThrough { .. } => chain == ExternalChain::PassThrough,
@@ -47,6 +51,7 @@ impl ChainArgs {
 }
 
 impl<App: KolmeApp> Submitter<App> {
+    #[cfg(feature = "cosmwasm")]
     pub fn new_cosmos(kolme: Kolme<App>, seed_phrase: ::cosmos::SeedPhrase) -> Self {
         Submitter {
             kolme,
@@ -56,6 +61,7 @@ impl<App: KolmeApp> Submitter<App> {
         }
     }
 
+    #[cfg(feature = "solana")]
     pub fn new_solana(
         kolme: Kolme<App>,
         keypair: kolme_solana_bridge_client::keypair::Keypair,
@@ -136,13 +142,16 @@ impl<App: KolmeApp> Submitter<App> {
     }
 
     async fn handle_genesis(&mut self, genesis_action: GenesisAction) -> Result<()> {
-        let (contract_addr, chain) = match genesis_action {
+        match genesis_action {
+            #[cfg(feature = "cosmwasm")]
             GenesisAction::InstantiateCosmos {
                 chain,
                 code_id,
                 validator_set: args,
             } => {
-                let ChainArgs::Cosmos { seed_phrase } = &self.args else {
+                #[allow(irrefutable_let_patterns)]
+                let ChainArgs::Cosmos { seed_phrase } = &self.args
+                else {
                     return Ok(());
                 };
 
@@ -151,16 +160,26 @@ impl<App: KolmeApp> Submitter<App> {
                 }
 
                 let cosmos = self.kolme.read().get_cosmos(chain).await?;
-
                 let addr = cosmos::instantiate(&cosmos, seed_phrase, code_id, args).await?;
 
-                (addr, chain.into())
+                self.kolme.notify(Notification::GenesisInstantiation {
+                    chain: chain.into(),
+                    contract: addr,
+                });
+
+                self.genesis_created.insert(chain.into());
+
+                Ok(())
             }
+            #[cfg(not(feature = "cosmwasm"))]
+            GenesisAction::InstantiateCosmos { .. } => Ok(()),
+            #[cfg(feature = "solana")]
             GenesisAction::InstantiateSolana {
                 chain,
                 program_id,
                 validator_set: args,
             } => {
+                #[allow(irrefutable_let_patterns)]
                 let ChainArgs::Solana {
                     keypair,
                     fee_per_cu: _,
@@ -174,20 +193,20 @@ impl<App: KolmeApp> Submitter<App> {
                 }
 
                 let client = self.kolme.read().get_solana_client(chain).await;
-
                 solana::instantiate(&client, keypair, &program_id, args).await?;
 
-                (program_id, chain.into())
+                self.kolme.notify(Notification::GenesisInstantiation {
+                    chain: chain.into(),
+                    contract: program_id,
+                });
+
+                self.genesis_created.insert(chain.into());
+
+                Ok(())
             }
-        };
-
-        self.kolme.notify(Notification::GenesisInstantiation {
-            chain,
-            contract: contract_addr,
-        });
-        self.genesis_created.insert(chain);
-
-        Ok(())
+            #[cfg(not(feature = "solana"))]
+            GenesisAction::InstantiateSolana { .. } => Ok(()),
+        }
     }
 
     async fn handle_bridge_action(
@@ -225,6 +244,7 @@ impl<App: KolmeApp> Submitter<App> {
         tracing::info!("Handling bridge action {action_id} for chain: {chain:?}.");
 
         let tx_hash = match &self.args {
+            #[cfg(feature = "cosmwasm")]
             ChainArgs::Cosmos { seed_phrase } => {
                 let Some(cosmos_chain) = chain.to_cosmos_chain() else {
                     return Ok(());
@@ -242,6 +262,7 @@ impl<App: KolmeApp> Submitter<App> {
                 )
                 .await?
             }
+            #[cfg(feature = "solana")]
             ChainArgs::Solana {
                 keypair,
                 fee_per_cu,
@@ -267,6 +288,9 @@ impl<App: KolmeApp> Submitter<App> {
             ChainArgs::PassThrough { port } => {
                 anyhow::ensure!(chain == ExternalChain::PassThrough);
                 let client = self.kolme.read().get_pass_through_client();
+
+                tracing::info!("Executing pass through contract: {contract}");
+
                 pass_through::execute(client, *port, *processor, approvals, payload).await?
             }
         };

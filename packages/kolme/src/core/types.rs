@@ -2,18 +2,28 @@ mod accounts;
 mod error;
 
 use crate::core::CoreStateError;
-use std::{collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
+use std::{fmt::Display, str::FromStr, sync::OnceLock};
 
-use base64::Engine;
-use cosmwasm_std::{Binary, CosmosMsg, Uint128};
 use kolme_store::{BlockHashes, HasBlockHashes};
+
+#[cfg(feature = "cosmwasm")]
+use cosmwasm_std::{Binary, CosmosMsg, Uint128};
+
+#[cfg(feature = "solana")]
+use {
+    base64::Engine,
+    kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram},
+    std::collections::HashMap,
+};
 
 use crate::*;
 
 pub use accounts::{Account, Accounts, AccountsError};
 pub use error::KolmeError;
 
+#[cfg(feature = "solana")]
 pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
+#[cfg(feature = "solana")]
 pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;
 
 #[derive(
@@ -121,6 +131,7 @@ impl CosmosChain {
         ChainName::Cosmos
     }
 
+    #[cfg(feature = "cosmwasm")]
     pub async fn make_client(self) -> Result<cosmos::Cosmos> {
         let network = match self {
             Self::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
@@ -132,17 +143,20 @@ impl CosmosChain {
     }
 }
 
+#[cfg(feature = "solana")]
 #[derive(Default)]
 pub struct SolanaEndpoints {
     pub regular: HashMap<SolanaChain, Arc<str>>,
     pub pubsub: HashMap<SolanaChain, Arc<str>>,
 }
 
+#[cfg(feature = "solana")]
 pub enum SolanaClientEndpoint {
     Static(&'static str),
     Arc(Arc<str>),
 }
 
+#[cfg(feature = "solana")]
 impl SolanaEndpoints {
     pub fn get_regular_endpoint(&self, chain: SolanaChain) -> SolanaClientEndpoint {
         self.regular.get(&chain).map_or(
@@ -169,6 +183,7 @@ impl SolanaEndpoints {
     }
 }
 
+#[cfg(feature = "solana")]
 impl SolanaClientEndpoint {
     pub fn make_client(self) -> SolanaClient {
         SolanaClient::new(match self {
@@ -1387,6 +1402,7 @@ impl ChainStates {
 pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
 
 impl ConfiguredChains {
+    #[cfg(feature = "solana")]
     pub fn insert_solana(&mut self, chain: SolanaChain, config: ChainConfig) -> Result<()> {
         use kolme_solana_bridge_client::pubkey::Pubkey;
 
@@ -1405,6 +1421,7 @@ impl ConfiguredChains {
         Ok(())
     }
 
+    #[cfg(feature = "cosmwasm")]
     pub fn insert_cosmos(&mut self, chain: CosmosChain, config: ChainConfig) -> Result<()> {
         use cosmos::Address;
 
@@ -1480,14 +1497,17 @@ pub enum ExecAction {
 impl ExecAction {
     /// - Cosmos chains: returns a JSON string of a BridgeActionId and Vec<cosmwasm_std::CosmosMsg>
     /// - Solana chains: returns a base64 encoded string of a borsh serialized kolme_solana_bridge_client::Payload binary
+    #[allow(unused)]
     pub(crate) fn to_payload(
         &self,
         chain: ExternalChain,
         config: &ChainConfig,
         id: BridgeActionId,
     ) -> Result<String> {
-        use kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram};
-        use shared::{cosmos, solana};
+        #[cfg(feature = "cosmwasm")]
+        use shared::cosmos;
+        #[cfg(feature = "solana")]
+        use shared::solana;
 
         match self {
             Self::Transfer {
@@ -1498,6 +1518,7 @@ impl ExecAction {
                 assert_eq!(&chain, chain2);
 
                 match chain.name() {
+                    #[cfg(feature = "cosmwasm")]
                     ChainName::Cosmos => {
                         let mut coins = vec![];
                         for AssetAmount { id, amount } in funds {
@@ -1527,6 +1548,9 @@ impl ExecAction {
 
                         Ok(payload)
                     }
+                    #[cfg(not(feature = "cosmwasm"))]
+                    ChainName::Cosmos => unreachable!(),
+                    #[cfg(feature = "solana")]
                     ChainName::Solana => {
                         let mut coins: Vec<(&str, u128)> = Vec::with_capacity(funds.len());
                         for coin in funds {
@@ -1563,6 +1587,8 @@ impl ExecAction {
 
                         serialize_solana_payload(&payload)
                     }
+                    #[cfg(not(feature = "solana"))]
+                    ChainName::Solana => unreachable!(),
                     #[cfg(feature = "pass_through")]
                     ChainName::PassThrough => {
                         let payload = serde_json::to_string(&pass_through::Transfer {
@@ -1575,6 +1601,7 @@ impl ExecAction {
                 }
             }
             ExecAction::SelfReplace(self_replace) => match chain.name() {
+                #[cfg(feature = "cosmwasm")]
                 ChainName::Cosmos => {
                     let payload = serde_json::to_string(&cosmos::PayloadWithId {
                         id,
@@ -1589,6 +1616,9 @@ impl ExecAction {
 
                     Ok(payload)
                 }
+                #[cfg(not(feature = "cosmwasm"))]
+                ChainName::Cosmos => unreachable!(),
+                #[cfg(feature = "solana")]
                 ChainName::Solana => {
                     let payload = solana::Payload {
                         id: id.0,
@@ -1603,6 +1633,8 @@ impl ExecAction {
 
                     serialize_solana_payload(&payload)
                 }
+                #[cfg(not(feature = "solana"))]
+                ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
@@ -1610,6 +1642,7 @@ impl ExecAction {
                 validator_set,
                 approvals,
             } => match chain.name() {
+                #[cfg(feature = "cosmwasm")]
                 ChainName::Cosmos => {
                     let payload = serde_json::to_string(&cosmos::PayloadWithId {
                         id,
@@ -1621,6 +1654,9 @@ impl ExecAction {
 
                     Ok(payload)
                 }
+                #[cfg(not(feature = "cosmwasm"))]
+                ChainName::Cosmos => unreachable!(),
+                #[cfg(feature = "solana")]
                 ChainName::Solana => {
                     let payload = solana::Payload {
                         id: id.0,
@@ -1632,11 +1668,14 @@ impl ExecAction {
 
                     serialize_solana_payload(&payload)
                 }
+                #[cfg(not(feature = "solana"))]
+                ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
             },
             ExecAction::MigrateContract { migrate_contract } => {
                 match chain.name() {
+                    #[cfg(feature = "cosmwasm")]
                     ChainName::Cosmos => {
                         let contract_addr = match &config.bridge {
                         BridgeContract::Deployed(addr) => addr.clone(),
@@ -1659,7 +1698,12 @@ impl ExecAction {
 
                         Ok(payload)
                     }
+                    #[cfg(not(feature = "cosmwasm"))]
+                    ChainName::Cosmos => unreachable!(),
+                    #[cfg(feature = "solana")]
                     ChainName::Solana => todo!(),
+                    #[cfg(not(feature = "solana"))]
+                    ChainName::Solana => unreachable!(),
                     #[cfg(feature = "pass_through")]
                     ChainName::PassThrough => todo!(),
                 }
@@ -1668,6 +1712,7 @@ impl ExecAction {
     }
 }
 
+#[cfg(feature = "solana")]
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String> {
     let len = borsh::object_length(&payload)
         .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
