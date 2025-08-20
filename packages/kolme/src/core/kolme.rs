@@ -307,7 +307,12 @@ impl<App: KolmeApp> Kolme<App> {
         tx_builder: TxBuilder<App::Message>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let pubkey = secret.public_key();
-        let mut nonce = self.read().get_next_nonce(pubkey).1;
+        let (next_block_height, mut nonce) = {
+            let kolme_r = self.read();
+            let next_block_height = kolme_r.get_next_height();
+            let nonce = kolme_r.get_next_nonce(pubkey).1;
+            (next_block_height, nonce)
+        };
         let mut attempt = 1;
         const MAX_NONCE_ATTEMPTS: usize = 5;
         loop {
@@ -328,7 +333,7 @@ impl<App: KolmeApp> Kolme<App> {
                     }) = e.downcast_ref()
                     {
                         if actual < expected && attempt < MAX_NONCE_ATTEMPTS {
-                            tracing::warn!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}: {e}");
+                            tracing::warn!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}. Retrieved attempted nonce from framework state with next_block_height {next_block_height}. Error: {e}");
                             attempt += 1;
                             nonce = *expected;
                             continue;
