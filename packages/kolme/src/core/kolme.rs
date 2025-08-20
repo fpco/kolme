@@ -7,11 +7,14 @@ use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeConstructLock, KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
+#[cfg(feature = "solana")]
 use solana_client::nonblocking::pubsub_client::PubsubClient;
 pub use store::KolmeStore;
 use utils::trigger::TriggerSubscriber;
 
-use std::{collections::HashMap, ops::Deref, sync::OnceLock, time::Duration};
+#[cfg(any(feature = "solana", feature = "cosmwasm"))]
+use std::collections::HashMap;
+use std::{ops::Deref, sync::OnceLock, time::Duration};
 
 use mempool::Mempool;
 use tokio::sync::broadcast::error::RecvError;
@@ -42,8 +45,11 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     mempool: Mempool<App::Message>,
     pub(super) store: store::KolmeStore<App>,
     pub(super) app: App,
+    #[cfg(feature = "cosmwasm")]
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
+    #[cfg(feature = "solana")]
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
+    #[cfg(feature = "solana")]
     pub(super) solana_endpoints: parking_lot::RwLock<SolanaEndpoints>,
     #[cfg(feature = "pass_through")]
     pub(super) pass_through_conn: OnceLock<reqwest::Client>,
@@ -658,7 +664,9 @@ impl<App: KolmeApp> Kolme<App> {
         let inner = KolmeInner {
             store,
             app,
+            #[cfg(feature = "cosmwasm")]
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
+            #[cfg(feature = "solana")]
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "pass_through")]
             pass_through_conn: OnceLock::new(),
@@ -667,6 +675,7 @@ impl<App: KolmeApp> Kolme<App> {
             // Default value chosen to exceed the libp2p default of 60 seconds
             mempool: Mempool::new(Duration::from_secs(90)),
             current_block: RwLock::new(Arc::new(current_block)),
+            #[cfg(feature = "solana")]
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
             latest_block: parking_lot::RwLock::new(None),
             code_version: code_version.into(),
@@ -939,6 +948,7 @@ impl<App: KolmeApp> Kolme<App> {
         self.get_merkle_by_hash(hash).await
     }
 
+    #[cfg(feature = "cosmwasm")]
     pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
         if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
@@ -964,6 +974,7 @@ impl<App: KolmeApp> Kolme<App> {
     /// # Usage
     /// Call this method to specify a custom Solana endpoint for regular connections.
     /// If no custom endpoint is set, a default endpoint will be used.
+    #[cfg(feature = "solana")]
     pub fn set_solana_endpoint_regular(&self, chain: SolanaChain, endpoint: impl Into<Arc<str>>) {
         self.inner
             .solana_endpoints
@@ -973,6 +984,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Set a Solana endpoint for pubsub connections.
+    #[cfg(feature = "solana")]
     pub fn set_solana_endpoint_pubsub(&self, chain: SolanaChain, endpoint: impl Into<Arc<str>>) {
         self.inner
             .solana_endpoints
@@ -981,6 +993,7 @@ impl<App: KolmeApp> Kolme<App> {
             .insert(chain, endpoint.into());
     }
 
+    #[cfg(feature = "solana")]
     pub async fn get_solana_client(&self, chain: SolanaChain) -> Arc<SolanaClient> {
         if let Some(client) = self.inner.solana_conns.read().await.get(&chain) {
             return client.clone();
@@ -1004,6 +1017,7 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    #[cfg(feature = "solana")]
     pub async fn get_solana_pubsub_client(&self, chain: SolanaChain) -> Result<PubsubClient> {
         // TODO do we need caching here?
 

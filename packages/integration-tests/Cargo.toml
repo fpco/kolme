@@ -8,7 +8,7 @@ license = "MIT"
 [dependencies]
 anyhow = { workspace = true }
 cosmos = { workspace = true }
-kolme = { workspace = true, features = ["pass_through"] }
+kolme = { workspace = true, features = ["cosmwasm", "solana", "pass_through"] }
 kolme-solana-bridge-client = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 rust_decimal = { workspace = true }

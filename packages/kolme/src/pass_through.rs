@@ -7,12 +7,11 @@ use axum::{
     routing::{get, post},
     Json,
 };
-use cosmwasm_std::Coin;
 use futures_util::StreamExt;
 use listener::get_next_bridge_event_id;
 use reqwest::{header::CONTENT_TYPE, Method, StatusCode};
 use serde::{Deserialize, Serialize};
-use shared::cosmos::{BridgeEventMessage, ExecuteMsg};
+use shared::types::KeyRegistration;
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio_tungstenite::connect_async;
 use tower_http::cors::{Any, CorsLayer};
@@ -32,7 +31,7 @@ pub struct PassThrough {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Msg {
     pub wallet: String,
-    pub coins: Vec<Coin>,
+    pub coins: Vec<BridgedAssetAmount>,
     pub msg: ExecuteMsg,
 }
 
@@ -48,6 +47,40 @@ pub struct Action {
     pub processor: SignatureWithRecovery,
     pub approvers: Vec<SignatureWithRecovery>,
     pub payload: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecuteMsg {
+    Regular {
+        keys: Vec<KeyRegistration>,
+    },
+    Signed {
+        /// Signature from the processor
+        processor: SignatureWithRecovery,
+        /// Signatures from the approvers
+        approvers: Vec<SignatureWithRecovery>,
+        /// The raw payload to execute
+        ///
+        /// This is a JSON encoding of [PayloadWithId]. We use a rendered
+        /// String here to ensure identical binary representation
+        /// so that the signatures will match.
+        payload: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeEventMessage {
+    Regular {
+        wallet: String,
+        funds: Vec<BridgedAssetAmount>,
+        keys: Vec<PublicKey>,
+    },
+    Signed {
+        wallet: String,
+        action_id: BridgeActionId,
+    },
 }
 
 pub async fn execute(
@@ -130,7 +163,7 @@ pub async fn listen<App: KolmeApp>(
         let message = ws.next().await.context("WebSocket stream terminated")??; //receiver.recv().await?;
         let message = serde_json::from_slice::<BridgeEventMessage>(&message.into_data())?;
         tracing::debug!("Received {}", serde_json::to_string(&message).unwrap());
-        let message = listener::cosmos::to_kolme_message::<App::Message>(
+        let message = to_kolme_message::<App::Message>(
             message,
             ExternalChain::PassThrough,
             next_bridge_event_id,
@@ -141,6 +174,36 @@ pub async fn listen<App: KolmeApp>(
             .await?;
 
         next_bridge_event_id = next_bridge_event_id.next();
+    }
+}
+
+fn to_kolme_message<T>(
+    msg: BridgeEventMessage,
+    chain: ExternalChain,
+    event_id: BridgeEventId,
+) -> Message<T> {
+    match msg {
+        BridgeEventMessage::Regular {
+            wallet,
+            funds,
+            keys,
+        } => Message::Listener {
+            chain,
+            event_id,
+            event: BridgeEvent::Regular {
+                wallet: Wallet(wallet),
+                funds,
+                keys,
+            },
+        },
+        BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
+            chain,
+            event_id,
+            event: BridgeEvent::Signed {
+                wallet: Wallet(wallet),
+                action_id,
+            },
+        },
     }
 }
 
@@ -165,9 +228,11 @@ async fn msg(State(state): State<PassThrough>, Json(msg): Json<Msg>) -> impl Int
             payload: _,
         } => todo!(),
     };
+
     state.notify.send(message).unwrap();
     let bridge_event_id = *guard;
     *guard = guard.next();
+
     Json(MsgResponse { bridge_event_id })
 }
 

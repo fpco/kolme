@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 borsh = { workspace = true, features = ["derive"] }
 shared = { workspace = true, features = ["realcryptography", "solana"] }
+solana-compute-budget-interface = { workspace = true }
 solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }

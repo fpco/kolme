@@ -129,7 +129,7 @@ impl SixSigmaApp {
         let submitter = Arc::new(submitter.to_bytes());
         let make_submitter = Arc::new(move |kolme: Kolme<SixSigmaApp>| {
             let submitter = SolanaKeypair::from_bytes(submitter.deref()).unwrap();
-            Submitter::new_solana(kolme, submitter)
+            Submitter::new_solana(kolme, submitter, None)
         });
 
         Self::new(chains, ExternalChain::SolanaLocal, make_submitter)
@@ -572,8 +572,7 @@ mod tests {
     use backon::{ExponentialBuilder, Retryable};
     use cosmos::{AddressHrp, HasAddress};
     use futures_util::StreamExt;
-    use pass_through::{MsgResponse, PassThrough};
-    use shared::cosmos::ExecuteMsg;
+    use pass_through::{ExecuteMsg, MsgResponse, PassThrough};
     use tempfile::NamedTempFile;
     use tokio::time::{Duration, Instant};
     use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -861,7 +860,7 @@ mod tests {
             .post("http://localhost:12345/msg")
             .json(&kolme::pass_through::Msg {
                 wallet,
-                coins: vec![std_coin(to_send)],
+                coins: vec![asset_amount(to_send)],
                 msg: ExecuteMsg::Regular {
                     keys: vec![registration],
                 },
@@ -893,9 +892,9 @@ mod tests {
         Ok(())
     }
 
-    fn std_coin(amount: Decimal) -> cosmwasm_std::Coin {
-        cosmwasm_std::Coin {
-            amount: cosmwasm_std::Uint128::new(u128::try_from(amount * dec!(1_000_000)).unwrap()),
+    fn asset_amount(amount: Decimal) -> BridgedAssetAmount {
+        BridgedAssetAmount {
+            amount: u128::try_from(amount * dec!(1_000_000)).unwrap(),
             denom: "uosmo".to_string(),
         }
     }
