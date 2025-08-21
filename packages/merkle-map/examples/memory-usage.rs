@@ -21,6 +21,11 @@ fn main() {
 }
 
 fn single<T: Maplike<K = String, V = u64>>() {
+    let pid = Pid::from(std::process::id() as usize);
+    let mut system = System::new_all();
+    system.refresh_all();
+    let initial_memory = system.process(pid).unwrap().memory();
+
     let mut m = T::default();
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -30,11 +35,9 @@ fn single<T: Maplike<K = String, V = u64>>() {
         m.insert(k, v);
     }
 
-    let pid = Pid::from(std::process::id() as usize);
-    let mut system = System::new_all();
     system.refresh_all();
     let process = system.process(pid).unwrap();
-    println!("{}", process.memory());
+    println!("{}", process.memory() - initial_memory);
 }
 
 trait Maplike: Default {
