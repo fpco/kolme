@@ -1,5 +1,7 @@
 use std::{collections::BTreeSet, fmt::Display, num::TryFromIntError};
 
+use get_size2::GetSize;
+
 use crate::cryptography::{PublicKey, SignatureWithRecovery};
 #[cfg(feature = "realcryptography")]
 use crate::cryptography::{SecretKey, SecretKeyError};
@@ -90,7 +92,7 @@ mod cw_impls {
 }
 
 /// A binary value representing a SHA256 hash.
-#[derive(PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord, GetSize)]
 pub struct Sha256Hash([u8; 32]);
 
 #[derive(thiserror::Error, Debug)]

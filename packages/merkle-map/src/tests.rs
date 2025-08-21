@@ -81,6 +81,49 @@ impl<K, V> TreeContents<K, V> {
     }
 }
 
+use tikv_jemallocator::Jemalloc;
+use tikv_jemalloc_ctl::{epoch, stats};
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+#[test]
+fn compare_allocations() {
+    use get_size2::GetSize;
+
+    let start = stats::allocated::read().unwrap();
+
+    let pairs1 = (0..15000).map(|i|(format!("k{i}"),i)).collect::<Vec<_>>();
+    let pairs2 = pairs1.clone();
+    let mut merkle_map = MerkleMap::new();
+    let mut btree_map = BTreeMap::new();
+
+    epoch::advance().unwrap();
+    let mid1 = stats::allocated::read().unwrap();
+    println!("Alloc 1 (map data twice + empty maps): {}", mid1 - start);
+    println!("input data size per get-size2: {}", pairs1.get_size());
+
+    for (k, v) in pairs1 {
+        merkle_map.insert(k, v);
+    }
+
+    epoch::advance().unwrap();
+    let mid2 = stats::allocated::read().unwrap();
+    println!("Alloc 2 (merkle map): {}", mid2 - mid1);
+    println!("merkle map size per get-size2: {}", merkle_map.get_size());
+
+    for (k, v) in pairs2 {
+        btree_map.insert(k, v);
+    }
+
+    epoch::advance().unwrap();
+    let end = stats::allocated::read().unwrap();
+    println!("Alloc 3 (btree map): {}", end - mid2);
+    println!("btree map size per get-size2: {}", btree_map.get_size());
+
+    panic!("no luck");
+}
+
 #[test]
 fn insert_get() {
     let mut tree = MerkleMap::<String, String>::new();

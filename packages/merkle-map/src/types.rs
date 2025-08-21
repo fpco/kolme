@@ -4,6 +4,7 @@ mod key_bytes;
 pub mod quickcheck_newtypes;
 
 use std::collections::HashSet;
+use get_size2::GetSize;
 
 use crate::*;
 pub use cached_bytes::CachedBytes;
@@ -19,17 +20,17 @@ pub(crate) use crate::impls::MerkleLockable;
 /// its serialized format in separate database entries. The goal is to
 /// allow for aggressive sharing in both the on-disk and in-memory
 /// representation of the data.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, GetSize)]
 pub struct MerkleMap<K, V>(pub(crate) Node<K, V>);
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, GetSize)]
 pub(crate) struct LeafEntry<K, V> {
     pub(crate) key_bytes: MerkleKey,
     pub(crate) key: K,
     pub(crate) value: V,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, GetSize)]
 pub(crate) enum Node<K, V> {
     Leaf(MerkleLockable<LeafContents<K, V>>),
     Tree(MerkleLockable<TreeContents<K, V>>),
@@ -41,7 +42,13 @@ pub(crate) struct LeafContents<K, V> {
     pub(crate) values: arrayvec::ArrayVec<LeafEntry<K, V>, 16>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+impl<K: GetSize, V: GetSize> GetSize for LeafContents<K, V> {
+    fn get_stack_size() -> usize {
+        LeafEntry::<K, V>::get_stack_size() * 16 + 8
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, GetSize)]
 pub(crate) struct TreeContents<K, V> {
     pub(crate) len: usize,
     pub(crate) leaf: Option<LeafEntry<K, V>>,
@@ -53,7 +60,7 @@ pub(crate) struct TreeContents<K, V> {
 /// This includes the hash and payload which will be stored in the database.
 /// It also includes all direct children nodes encountered during serialization,
 /// so that they can be checked as present in the database and added if missing.
-#[derive(Clone)]
+#[derive(Clone, GetSize)]
 pub struct MerkleContents {
     pub payload: CachedBytes,
     pub children: Arc<[Arc<MerkleContents>]>,

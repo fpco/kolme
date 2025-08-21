@@ -59,11 +59,11 @@ impl Store {
             .context("Could not connect to the database")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
 
-        sqlx::migrate!()
-            .run(&pool)
-            .await
-            .context("Unable to execute migrations")
-            .inspect_err(|err| tracing::error!("{err:?}"))?;
+//        sqlx::migrate!()
+//            .run(&pool)
+//            .await
+//            .context("Unable to execute migrations")
+//            .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         Ok(Self {
             pool,
@@ -386,6 +386,7 @@ impl KolmeBackingStore for Store {
         self.consume_stores(&self.pool, [store]).await?;
         Ok(contents)
     }
+
     async fn load<T: MerkleDeserializeRaw>(
         &self,
         hash: Sha256Hash,

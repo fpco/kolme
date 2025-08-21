@@ -2,11 +2,14 @@ mod locked;
 
 use std::{fmt::Debug, sync::OnceLock};
 
+use get_size2::GetSize;
+
 use locked::{LockKey, Locked};
 
 use crate::*;
 
 /// Allows a value to be locked with a pre-computed Merkle hash.
+#[derive(GetSize)]
 pub struct MerkleLockable<T> {
     pub(super) locked: Arc<OnceLock<Locked<T>>>,
     inner: Arc<T>,

@@ -1,6 +1,11 @@
+use get_size2::GetSize;
+
 /// A key used in a [MerkleMap].
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
-pub struct MerkleKey(tinyvec::TinyVec<[u8; 32]>);
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, GetSize)]
+pub struct MerkleKey(
+    #[get_size(size = 32)]
+    tinyvec::TinyVec<[u8; 32]>
+);
 
 impl MerkleKey {
     pub fn from_slice(slice: &[u8]) -> Self {

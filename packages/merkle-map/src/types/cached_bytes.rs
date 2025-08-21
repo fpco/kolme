@@ -3,13 +3,14 @@ use std::{
     sync::{Arc, LazyLock, Weak},
 };
 
+use get_size2::GetSize;
 use parking_lot::RwLock;
 use shared::types::Sha256Hash;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, GetSize)]
 pub struct CachedBytes(Arc<CachedBytesInner>);
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, GetSize)]
 struct CachedBytesInner {
     hash: Sha256Hash,
     bytes: Arc<[u8]>,

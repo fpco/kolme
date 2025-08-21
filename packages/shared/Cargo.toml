@@ -14,6 +14,7 @@ k256 = { workspace = true, features = ["ecdsa", "serde", "sha256"], optional = t
 rand = { workspace = true, optional = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+get-size2 = { workspace = true }
 
 [features]
 chaincryptography = []

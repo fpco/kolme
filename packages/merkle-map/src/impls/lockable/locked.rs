@@ -5,12 +5,14 @@ use std::{
     sync::{Arc, LazyLock, Weak},
 };
 
+use get_size2::GetSize;
 use parking_lot::RwLock;
 use shared::types::Sha256Hash;
 
 /// A lookup key for a cached merkle deserialized value.
-#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+#[derive(Hash, PartialEq, Eq, Clone, Debug, GetSize)]
 pub(super) struct LockKey {
+    #[get_size(size = 16)]
     pub(super) type_id: TypeId,
     pub(super) hash: Sha256Hash,
 }
@@ -21,6 +23,7 @@ pub(super) struct LockKey {
 struct LockValue(Box<dyn Any + Send + Sync + 'static>);
 
 /// A newtype wrapper a LockKey that handles dropping.
+#[derive(GetSize)]
 struct CleanupLockKey(LockKey);
 
 /// An entry in the value cache.
@@ -46,6 +49,7 @@ impl Drop for CleanupLockKey {
 }
 
 /// A locked value, containing the [CleanupLockKey] for keeping the cache alive and the raw value.
+#[derive(GetSize)]
 pub(crate) struct Locked<T> {
     key: Arc<CleanupLockKey>,
     value: Arc<T>,

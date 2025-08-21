@@ -18,10 +18,14 @@ smallvec = { workspace = true }
 thiserror = { workspace = true }
 tinyvec = { workspace = true, features = ["alloc"] }
 
+get-size2 = { workspace = true }
+
 [dev-dependencies]
 paste = { workspace = true }
 quickcheck = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tikv-jemallocator = "*"
+tikv-jemalloc-ctl = { version = "*", features = ["stats"] }
 
 [lints]
 workspace = true
