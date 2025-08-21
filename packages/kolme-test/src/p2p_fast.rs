@@ -47,7 +47,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
 
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
-    let discovery = testtasks.launch_kademlia_discovery(kolme1, "kolme1");
+    let discovery = testtasks.launch_websockets_discovery(kolme1, "kolme1");
 
     const FAKE_CODE_VERSION: &str = "fake code version";
 
@@ -61,7 +61,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     testtasks
-        .launch_kademlia_client_with(
+        .launch_websockets_client_with(
             kolme_block_transfer.clone(),
             "kolme_block_transfer",
             &discovery,
@@ -84,7 +84,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     testtasks
-        .launch_kademlia_client_with(
+        .launch_websockets_client_with(
             kolme_state_transfer.clone(),
             "kolme_state_transfer",
             &discovery,

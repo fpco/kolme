@@ -1,5 +1,3 @@
-mod hub;
-
 use anyhow::{Context, Result};
 use clap::Parser;
 use kolme::*;
@@ -22,9 +20,6 @@ enum Cmd {
     },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
-    /// Kolme Hub functionality
-    #[clap(subcommand)]
-    Hub(hub::Cmd),
 }
 
 #[derive(clap::Parser)]
@@ -44,7 +39,6 @@ async fn main_inner() -> Result<()> {
     match Cmd::parse() {
         Cmd::GenKeypair {} => gen_keypair(),
         Cmd::SendTx(opt) => send_tx(opt).await?,
-        Cmd::Hub(cmd) => hub::run(cmd).await?,
         Cmd::PubKey { secret } => {
             let public = secret.public_key();
             eprintln!("Public key: {public}");

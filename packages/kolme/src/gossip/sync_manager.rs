@@ -9,7 +9,7 @@ use std::{
     time::Instant,
 };
 
-use gossip::{PeerOrWs, ReportBlockHeight, Trigger};
+use gossip::{websockets::WebsocketsPrivateSender, ReportBlockHeight, Trigger};
 use smallvec::SmallVec;
 use utils::trigger::TriggerSubscriber;
 
@@ -31,7 +31,7 @@ enum WaitingBlock<App: KolmeApp> {
     /// We have the raw block, but haven't processed it yet.
     Received {
         block: Arc<SignedBlock<App::Message>>,
-        peer: Option<PeerOrWs<App>>,
+        peer: Option<WebsocketsPrivateSender<App>>,
     },
     /// We've received the block info, but now need to download the state layers.
     Pending(PendingBlock<App>),
@@ -56,7 +56,7 @@ struct PendingBlock<App: KolmeApp> {
 #[derive(Debug)]
 pub(super) struct DataRequest<App: KolmeApp> {
     pub(super) data: DataLabel,
-    pub(super) current_peers: SmallVec<[PeerOrWs<App>; DEFAULT_PEER_COUNT]>,
+    pub(super) current_peers: SmallVec<[WebsocketsPrivateSender<App>; DEFAULT_PEER_COUNT]>,
     pub(super) request_new_peers: bool,
 }
 
@@ -75,7 +75,7 @@ struct RequestStatus<App: KolmeApp> {
     /// This starts off as [None]. The first time we make a request, we use the original peer only. Thereafter, we always request new peers as well.
     last_sent: Option<Instant>,
     /// Peers we can query for the data.
-    peers: SmallVec<[PeerOrWs<App>; DEFAULT_PEER_COUNT]>,
+    peers: SmallVec<[WebsocketsPrivateSender<App>; DEFAULT_PEER_COUNT]>,
     /// Last time we updated the warning state.
     ///
     /// Warning state is to track how long a request has been unanswered. We update it (1) the first time we make a request and (2) every time we print out a warning.
@@ -98,7 +98,7 @@ impl Display for DataLabel {
 }
 
 impl<App: KolmeApp> RequestStatus<App> {
-    fn new(peer: Option<PeerOrWs<App>>) -> Self {
+    fn new(peer: Option<WebsocketsPrivateSender<App>>) -> Self {
         RequestStatus {
             last_sent: None,
             peers: peer.into_iter().collect(),
@@ -106,7 +106,7 @@ impl<App: KolmeApp> RequestStatus<App> {
         }
     }
 
-    fn add_peer(&mut self, gossip: &Gossip<App>, peer: PeerOrWs<App>) {
+    fn add_peer(&mut self, gossip: &Gossip<App>, peer: WebsocketsPrivateSender<App>) {
         // Don't add a duplicate
         if self.peers.contains(&peer) {
             return;
@@ -164,7 +164,7 @@ impl<App: KolmeApp> RequestStatus<App> {
         res
     }
 
-    fn remove_peer(&mut self, peer: PeerOrWs<App>) {
+    fn remove_peer(&mut self, peer: WebsocketsPrivateSender<App>) {
         self.peers.retain(|x| x != &peer);
     }
 }
@@ -187,7 +187,7 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
         height: BlockHeight,
-        peer: Option<PeerOrWs<App>>,
+        peer: Option<WebsocketsPrivateSender<App>>,
     ) -> Result<()> {
         if gossip.kolme.has_block(height).await? || self.needed_blocks.contains_key(&height) {
             return Ok(());
@@ -203,7 +203,7 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
         height: BlockHeight,
-        peer: PeerOrWs<App>,
+        peer: WebsocketsPrivateSender<App>,
     ) {
         if let Some(WaitingBlock::Needed(status)) = self.needed_blocks.get_mut(&height) {
             status.add_peer(gossip, peer);
@@ -211,7 +211,11 @@ impl<App: KolmeApp> SyncManager<App> {
         }
     }
 
-    pub(super) fn remove_block_peer(&mut self, height: BlockHeight, peer: PeerOrWs<App>) {
+    pub(super) fn remove_block_peer(
+        &mut self,
+        height: BlockHeight,
+        peer: WebsocketsPrivateSender<App>,
+    ) {
         if let Some(WaitingBlock::Needed(status)) = self.needed_blocks.get_mut(&height) {
             status.remove_peer(peer);
             self.trigger.trigger();
@@ -222,7 +226,7 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
         block: Arc<SignedBlock<App::Message>>,
-        peer: Option<PeerOrWs<App>>,
+        peer: Option<WebsocketsPrivateSender<App>>,
     ) {
         let height = block.height();
 
@@ -261,7 +265,7 @@ impl<App: KolmeApp> SyncManager<App> {
         gossip: &Gossip<App>,
         hash: Sha256Hash,
         layer: MerkleLayerContents,
-        peer: PeerOrWs<App>,
+        peer: WebsocketsPrivateSender<App>,
     ) -> Result<()> {
         let Some(mut entry) = self.needed_blocks.first_entry() else {
             return Ok(());
@@ -563,7 +567,7 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
         hash: Sha256Hash,
-        peer: PeerOrWs<App>,
+        peer: WebsocketsPrivateSender<App>,
     ) {
         let Some(mut entry) = self.needed_blocks.first_entry() else {
             return;
@@ -576,7 +580,11 @@ impl<App: KolmeApp> SyncManager<App> {
         }
     }
 
-    pub(super) fn remove_layer_peer(&mut self, hash: Sha256Hash, peer: PeerOrWs<App>) {
+    pub(super) fn remove_layer_peer(
+        &mut self,
+        hash: Sha256Hash,
+        peer: WebsocketsPrivateSender<App>,
+    ) {
         let Some(mut entry) = self.needed_blocks.first_entry() else {
             return;
         };
@@ -606,11 +614,10 @@ impl<App: KolmeApp> SyncManager<App> {
         gossip: &Gossip<App>,
         ReportBlockHeight {
             next,
-            peer: _,
             timestamp: _,
             latest_block: _,
         }: ReportBlockHeight,
-        peer: PeerOrWs<App>,
+        peer: WebsocketsPrivateSender<App>,
     ) {
         let Some(height) = next.prev() else { return };
 

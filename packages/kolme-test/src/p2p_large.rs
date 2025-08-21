@@ -165,7 +165,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
     // And now launch a gossip node for this Kolme
-    let discovery = testtasks.launch_kademlia_discovery(kolme1, "kolme1");
+    let discovery = testtasks.launch_websockets_discovery(kolme1, "kolme1");
 
     // We'll check at the end of the run to confirm that this never received the latest block.
     // First check that StateTransfer works
@@ -177,7 +177,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     testtasks
-        .launch_kademlia_client_with(
+        .launch_websockets_client_with(
             kolme_state_transfer.clone(),
             "kolme_state_transfer",
             &discovery,
@@ -198,7 +198,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     testtasks
-        .launch_kademlia_client_with(
+        .launch_websockets_client_with(
             kolme_state_transfer2.clone(),
             "kolme_state_transfer2",
             &discovery,

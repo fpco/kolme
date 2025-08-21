@@ -40,7 +40,6 @@ kolme = { path = "packages/kolme" }
 kolme-solana-bridge-client = { path = "solana/crates/kolme-solana-bridge-client" }
 kolme-store = { path = "packages/kolme-store" }
 kolme-test = { path = "packages/kolme-test" }
-libp2p = { version = "0.56" }
 lru = "0.14.0"
 merkle-map = { path = "packages/merkle-map" }
 parameterized = "2.0.0"

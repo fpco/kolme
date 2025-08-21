@@ -37,14 +37,21 @@ enum Cmd {
         #[clap(long)]
         continous: bool,
     },
-    /// Run observer node with API at 2005 port
+    /// Run observer node with API at given port
     Observer {
         /// Address to connect to validators on
         #[clap(long)]
         validator: String,
+        /// API server port
+        #[clap(long, default_value_t = 2005)]
+        api_server_port: u16,
     },
-    /// Run node with API at 2005 port
-    NewVersionNode {},
+    /// Run node with API at given port
+    NewVersionNode {
+        /// API server port
+        #[clap(long, default_value_t = 2003)]
+        api_server_port: u16,
+    },
     /// Client proposing txs to new node
     NewVersionClient {
         /// Address to connect to validators on
@@ -80,9 +87,12 @@ async fn main_inner() -> Result<()> {
             validator,
             continous,
         } => client(&validator, SecretKey::random(), continous).await,
-        Cmd::Observer { validator } => observer_node(&validator).await,
+        Cmd::Observer {
+            validator,
+            api_server_port,
+        } => observer_node(&validator, api_server_port).await,
         Cmd::InvalidClient { validator } => invalid_client(&validator).await,
-        Cmd::NewVersionNode {} => new_version_node().await,
+        Cmd::NewVersionNode { api_server_port } => new_version_node(api_server_port).await,
         Cmd::NewVersionClient {
             validator,
             continous,

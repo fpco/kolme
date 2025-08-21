@@ -38,7 +38,7 @@ async fn archiver_inner(testtasks: TestTasks, (): ()) {
         .unwrap()
         .height();
 
-    let discovery = testtasks.launch_kademlia_discovery(kolme1.clone(), "kolme1");
+    let discovery = testtasks.launch_websockets_discovery(kolme1.clone(), "kolme1");
 
     // Launch the archiver, and make sure it archives.
     let kolme_archiver = Kolme::new(
@@ -49,7 +49,7 @@ async fn archiver_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     testtasks
-        .launch_kademlia_client_with(
+        .launch_websockets_client_with(
             kolme_archiver.clone(),
             "kolme_archiver",
             &discovery,

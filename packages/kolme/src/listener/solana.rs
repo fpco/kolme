@@ -2,8 +2,8 @@ use std::{str::FromStr, time::Duration};
 
 use base64::Engine;
 use borsh::BorshDeserialize;
+use futures_util::StreamExt;
 use kolme_solana_bridge_client::pubkey::Pubkey;
-use libp2p::futures::StreamExt;
 use shared::solana::{BridgeMessage, Message as ContractMessage, State as BridgeState};
 use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
