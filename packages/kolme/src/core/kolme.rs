@@ -236,6 +236,7 @@ impl<App: KolmeApp> Kolme<App> {
         self.propose_transaction(tx);
         loop {
             let note = recv.recv().await?;
+            tracing::info!("propose_and_wait_transaction_inner: waiting for {txhash_orig}. Received notification: {note:?}");
             match note {
                 Notification::NewBlock(block) => {
                     if block.tx().hash() == txhash_orig {
