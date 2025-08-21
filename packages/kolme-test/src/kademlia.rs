@@ -1,8 +1,8 @@
+use std::net::TcpListener;
+
 use anyhow::Result;
 use kademlia_discovery::client;
 use kolme::{testtasks::TestTasks, SecretKey};
-
-const KADEMLIA_PORT: u16 = 5400;
 
 #[tokio::test]
 async fn ensure_kademlia_discovery_works() {
@@ -10,14 +10,19 @@ async fn ensure_kademlia_discovery_works() {
 }
 
 async fn kademlia_discovery_inner(testtasks: TestTasks, (): ()) {
+    let port = TcpListener::bind("0.0.0.0:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     testtasks.spawn_persistent(async move {
-        kademlia_discovery::validators(KADEMLIA_PORT, false, false, false)
+        kademlia_discovery::validators(port, false, false, false)
             .await
             .unwrap();
     });
 
     let signing_secret = SecretKey::random();
-    testtasks.try_spawn(kademlia_discovery_client(KADEMLIA_PORT, signing_secret));
+    testtasks.try_spawn(kademlia_discovery_client(port, signing_secret));
 }
 
 async fn kademlia_discovery_client(port: u16, signing_secret: SecretKey) -> Result<()> {
