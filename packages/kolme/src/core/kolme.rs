@@ -235,7 +235,22 @@ impl<App: KolmeApp> Kolme<App> {
         let txhash_orig = tx.hash();
         self.propose_transaction(tx);
         loop {
-            let note = recv.recv().await?;
+            let note = match tokio::time::timeout(tokio::time::Duration::from_secs(1), recv.recv())
+                .await
+            {
+                Err(_elapsed) => {
+                    tracing::info!("propose_and_await_transaction_inner: no notifications for 1 second waiting for {txhash_orig}, checking...");
+                    match self.get_tx_height(txhash_orig).await? {
+                        None => {
+                            tracing::info!("propose_and_await_transaction_inner: tx {txhash_orig} has not yet landed");
+                            continue;
+                        }
+                        Some(height) => return self.wait_for_block(height).await,
+                    }
+                }
+                Ok(Err(e)) => return Err(e.into()),
+                Ok(Ok(note)) => note,
+            };
             tracing::info!("propose_and_wait_transaction_inner: waiting for {txhash_orig}. Received notification: {note:?}");
             match note {
                 Notification::NewBlock(block) => {
