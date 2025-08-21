@@ -55,7 +55,7 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     assert_eq!(latest_block_height.next(), kolme1.read().get_next_height());
 
     // And now launch a gossip node for this Kolme
-    let discovery = testtasks.launch_kademlia_discovery(kolme1.clone(), "kolme1");
+    let discovery = testtasks.launch_websockets_discovery(kolme1.clone(), "kolme1");
 
     // Launching a new Kolme with a different code version and gossip enabled.
     // We shouldn't get any older blocks.
@@ -67,7 +67,7 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     testtasks
-        .launch_kademlia_client_with(
+        .launch_websockets_client_with(
             kolme_state_transfer.clone(),
             "kolme_state_transfer",
             &discovery,

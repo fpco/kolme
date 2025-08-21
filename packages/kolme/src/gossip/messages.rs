@@ -1,11 +1,5 @@
 use std::fmt::Display;
 
-use gossip::KolmeBehaviour;
-use libp2p::{
-    gossipsub::{Message, PublishError},
-    PeerId, Swarm,
-};
-
 use crate::*;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
@@ -20,19 +14,9 @@ pub(super) enum BlockRequest {
     /// Notify a node that the given peer has the given block for transfer.
     BlockAvailable {
         height: BlockHeight,
-        #[serde(
-            serialize_with = "serialize_peer_id",
-            deserialize_with = "deserialize_peer_id"
-        )]
-        peer: PeerId,
     },
     LayerAvailable {
         hash: Sha256Hash,
-        #[serde(
-            serialize_with = "serialize_peer_id",
-            deserialize_with = "deserialize_peer_id"
-        )]
-        peer: PeerId,
     },
 }
 
@@ -43,11 +27,11 @@ impl Display for BlockRequest {
                 write!(f, "request block {height}")
             }
             BlockRequest::Merkle(hash) => write!(f, "request merkle layer {hash}"),
-            BlockRequest::BlockAvailable { height, peer } => {
-                write!(f, "notify block {height} available from {peer}")
+            BlockRequest::BlockAvailable { height } => {
+                write!(f, "notify block {height} available")
             }
-            BlockRequest::LayerAvailable { hash, peer } => {
-                write!(f, "notify merkle layer {hash} available from {peer}")
+            BlockRequest::LayerAvailable { hash } => {
+                write!(f, "notify merkle layer {hash} available")
             }
         }
     }
@@ -85,19 +69,9 @@ pub(super) enum GossipMessage<App: KolmeApp> {
     },
     RequestBlockContents {
         height: BlockHeight,
-        #[serde(
-            serialize_with = "serialize_peer_id",
-            deserialize_with = "deserialize_peer_id"
-        )]
-        peer: PeerId,
     },
     RequestLayerContents {
         hash: Sha256Hash,
-        #[serde(
-            serialize_with = "serialize_peer_id",
-            deserialize_with = "deserialize_peer_id"
-        )]
-        peer: PeerId,
     },
 }
 
@@ -116,11 +90,11 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
             GossipMessage::BroadcastTx { tx } => {
                 write!(f, "Broadcast {}", tx.hash())
             }
-            GossipMessage::RequestBlockContents { height, peer } => {
-                write!(f, "Request block contents {height} for {peer}")
+            GossipMessage::RequestBlockContents { height } => {
+                write!(f, "Request block contents {height}")
             }
-            GossipMessage::RequestLayerContents { hash, peer } => {
-                write!(f, "Request layer contents {hash} for {peer}")
+            GossipMessage::RequestLayerContents { hash } => {
+                write!(f, "Request layer contents {hash}")
             }
         }
     }
@@ -135,83 +109,18 @@ impl<App: KolmeApp> std::fmt::Debug for GossipMessage<App> {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub(super) struct ReportBlockHeight {
     pub(super) next: BlockHeight,
-    #[serde(
-        serialize_with = "serialize_peer_id",
-        deserialize_with = "deserialize_peer_id"
-    )]
-    pub(super) peer: PeerId,
     pub(super) timestamp: jiff::Timestamp,
     pub(super) latest_block: Option<Arc<SignedTaggedJson<LatestBlock>>>,
 }
-fn serialize_peer_id<S>(peer_id: &PeerId, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&peer_id.to_base58())
-}
-
-fn deserialize_peer_id<'de, D>(deserializer: D) -> Result<PeerId, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    <String as serde::Deserialize>::deserialize(deserializer)?
-        .parse()
-        .map_err(serde::de::Error::custom)
-}
 
 impl<App: KolmeApp> GossipMessage<App> {
-    pub(super) fn parse(gossip: &Gossip<App>, message: Message) -> Result<Self> {
-        anyhow::ensure!(
-            message.topic == gossip.gossip_topic.hash(),
-            "Unknown gossipsub topic"
-        );
-
-        serde_json::from_slice(&message.data).context("Unable to parse gossipsub message")
-    }
-
     /// returns true if this message was sent (including the case when it was a duplicate)
     /// returns false in the case of the muted error InsufficientPeers
-    pub(super) fn publish(
-        self,
-        gossip: &Gossip<App>,
-        swarm: &mut Swarm<KolmeBehaviour<App::Message>>,
-    ) -> Result<()> {
+    pub(super) fn publish(self, gossip: &Gossip<App>) {
         tracing::debug!(
             "{}: Publishing message to gossipsub: {self}",
             gossip.local_display_name
         );
         gossip.websockets_manager.publish(&self);
-        // TODO should we put in some retry logic to handle the "InsufficientPeers" case?
-        let msg = serde_json::to_vec(&self)?;
-        if !gossip.use_libp2p {
-            return Ok(());
-        }
-        let result = swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(gossip.gossip_topic.clone(), msg);
-        match result {
-            Ok(_id) => Ok(()),
-            Err(PublishError::Duplicate) => {
-                tracing::debug!(
-                    "{}: Skipping sending duplicate message",
-                    gossip.local_display_name
-                );
-                Ok(())
-            }
-            Err(PublishError::NoPeersSubscribedToTopic) => {
-                tracing::info!(
-                    "{}: No peers are subscribed to the topic, unable to send this message",
-                    gossip.local_display_name
-                );
-                Ok(())
-            }
-            Err(err) => Err(err).with_context(|| {
-                format!(
-                    "{}: Unable to publish a gossipsub message: {self}",
-                    gossip.local_display_name
-                )
-            }),
-        }
     }
 }
