@@ -24,7 +24,7 @@ fn single<T: Maplike<K = u64, V = u64>>() {
     let mut m = T::default();
     let mut rng = StdRng::seed_from_u64(0);
 
-    for _ in 0..20000 {
+    for _ in 0..80000 {
         let k = rng.gen();
         let v = rng.gen();
         m.insert(k, v);
