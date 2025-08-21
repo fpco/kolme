@@ -307,10 +307,18 @@ impl<App: KolmeApp> Kolme<App> {
         tx_builder: TxBuilder<App::Message>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let pubkey = secret.public_key();
-        let mut nonce = self.read().get_next_nonce(pubkey).1;
+        let mut nonce = {
+            let kolme_r = self.read();
+            let (account_id, nonce) = kolme_r.get_next_nonce(pubkey);
+            tracing::info!("sign_propose_await_transaction_inner: next height=={}, latest=={:?}, account_id=={account_id:?}, nonce=={nonce}", kolme_r.get_next_height(), self.get_latest_archived_block().await);
+            nonce
+        };
         let mut attempt = 1;
         const MAX_NONCE_ATTEMPTS: usize = 5;
         loop {
+            tracing::info!(
+                "sign_propose_await_transaction_inner: attempt=={attempt}, nonce=={nonce}"
+            );
             let tx = Arc::new(self.read().create_signed_transaction_with(
                 secret,
                 tx_builder.clone(),
