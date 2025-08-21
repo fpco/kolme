@@ -22,6 +22,9 @@ tinyvec = { workspace = true, features = ["alloc"] }
 paste = { workspace = true }
 quickcheck = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+clap = { workspace = true }
+sysinfo = "0.36"
+rand = { workspace = true }
 
 [lints]
 workspace = true
