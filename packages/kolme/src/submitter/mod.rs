@@ -153,10 +153,7 @@ impl<App: KolmeApp> Submitter<App> {
                 let cosmos = self.kolme.read().get_cosmos(chain).await?;
                 let addr = cosmos::instantiate(&cosmos, seed_phrase, code_id, args).await?;
 
-                self.kolme.notify(Notification::GenesisInstantiation {
-                    chain: chain.into(),
-                    contract: addr,
-                });
+                self.propose(chain.into(), addr)?;
 
                 self.genesis_created.insert(chain.into());
 
@@ -186,10 +183,7 @@ impl<App: KolmeApp> Submitter<App> {
                 let client = self.kolme.read().get_solana_client(chain).await;
                 solana::instantiate(&client, keypair, &program_id, args).await?;
 
-                self.kolme.notify(Notification::GenesisInstantiation {
-                    chain: chain.into(),
-                    contract: program_id,
-                });
+                self.propose(chain.into(), program_id)?;
 
                 self.genesis_created.insert(chain.into());
 
@@ -198,6 +192,28 @@ impl<App: KolmeApp> Submitter<App> {
             #[cfg(not(feature = "solana"))]
             GenesisAction::InstantiateSolana { .. } => Ok(()),
         }
+    }
+
+    fn propose(&self, chain: ExternalChain, addr: String) -> Result<()> {
+        // We broadcast our own transaction for genesis instantiation, using an
+        // arbitrary secret key. The listeners will watch for such transactions
+        // and, if they're satisfied with our generated contracts, rebroadcast
+        // with their own signature.
+        let secret = SecretKey::random();
+        let tx = Transaction {
+            pubkey: secret.public_key(),
+            nonce: AccountNonce::start(),
+            created: Timestamp::now(),
+            messages: vec![Message::Listener {
+                chain: chain.into(),
+                event_id: BridgeEventId::start(),
+                event: BridgeEvent::Instantiated { contract: addr },
+            }],
+            max_height: None,
+        };
+        let tx = Arc::new(tx.sign(&secret)?);
+        self.kolme.propose_transaction(tx)?;
+        Ok(())
     }
 
     async fn handle_bridge_action(

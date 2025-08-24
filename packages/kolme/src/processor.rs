@@ -332,8 +332,7 @@ impl<App: KolmeApp> Processor<App> {
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
         let signed = json.sign(secret)?;
-        self.kolme
-            .notify(Notification::LatestBlock(Arc::new(signed)));
+        self.kolme.update_latest_block(Arc::new(signed));
         Ok(())
     }
 }

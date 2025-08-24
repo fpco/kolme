@@ -186,95 +186,96 @@ async fn ws_handler<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
 ) -> impl IntoResponse {
     tracing::info!("New WebSocket connection established");
-    let rx = kolme.subscribe();
-    ws.on_upgrade(move |socket| handle_websocket::<App>(kolme, socket, rx))
+    todo!();
+    // let rx = kolme.subscribe();
+    // ws.on_upgrade(move |socket| handle_websocket::<App>(kolme, socket, rx))
 }
 
-async fn handle_websocket<App: KolmeApp>(
-    kolme: Kolme<App>,
-    mut socket: WebSocket,
-    mut rx: broadcast::Receiver<Notification<App::Message>>,
-) {
-    tracing::debug!("WebSocket subscribed to Kolme notifications");
-    let mut interval = tokio::time::interval(Duration::from_secs(30));
+// async fn handle_websocket<App: KolmeApp>(
+//     kolme: Kolme<App>,
+//     mut socket: WebSocket,
+//     mut rx: broadcast::Receiver<Notification<App::Message>>,
+// ) {
+//     tracing::debug!("WebSocket subscribed to Kolme notifications");
+//     let mut interval = tokio::time::interval(Duration::from_secs(30));
 
-    enum Action<AppMessage> {
-        Ping,
-        Notification(Notification<AppMessage>),
-    }
+//     enum Action<AppMessage> {
+//         Ping,
+//         Notification(Notification<AppMessage>),
+//     }
 
-    loop {
-        let action = tokio::select! {
-            _ = interval.tick() => Ok(Action::Ping),
-            res = rx.recv() => res.map(Action::Notification),
-        };
+//     loop {
+//         let action = tokio::select! {
+//             _ = interval.tick() => Ok(Action::Ping),
+//             res = rx.recv() => res.map(Action::Notification),
+//         };
 
-        let action = match action {
-            Ok(action) => action,
-            Err(e) => {
-                tracing::error!("API server websockets: error on receiving notification: {e}");
-                break;
-            }
-        };
+//         let action = match action {
+//             Ok(action) => action,
+//             Err(e) => {
+//                 tracing::error!("API server websockets: error on receiving notification: {e}");
+//                 break;
+//             }
+//         };
 
-        let msg = match action {
-            Action::Ping => {
-                tracing::debug!("Sending ping");
-                axum::extract::ws::Message::Ping(Vec::new().into())
-            }
-            Action::Notification(notification) => {
-                let api_notification = match to_api_notification(&kolme, notification).await {
-                    Ok(api_notification) => api_notification,
-                    Err(e) => {
-                        tracing::error!("API server websockets: Error converting Notification to ApiNotification: {e}");
-                        break;
-                    }
-                };
-                let msg = match serde_json::to_string(&api_notification) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        tracing::error!("API server websockets: error serializing API notification to string: {e}");
-                        break;
-                    }
-                };
-                WsMessage::Text(msg.into())
-            }
-        };
-        let res = socket.send(msg).await;
+//         let msg = match action {
+//             Action::Ping => {
+//                 tracing::debug!("Sending ping");
+//                 axum::extract::ws::Message::Ping(Vec::new().into())
+//             }
+//             Action::Notification(notification) => {
+//                 let api_notification = match to_api_notification(&kolme, notification).await {
+//                     Ok(api_notification) => api_notification,
+//                     Err(e) => {
+//                         tracing::error!("API server websockets: Error converting Notification to ApiNotification: {e}");
+//                         break;
+//                     }
+//                 };
+//                 let msg = match serde_json::to_string(&api_notification) {
+//                     Ok(msg) => msg,
+//                     Err(e) => {
+//                         tracing::error!("API server websockets: error serializing API notification to string: {e}");
+//                         break;
+//                     }
+//                 };
+//                 WsMessage::Text(msg.into())
+//             }
+//         };
+//         let res = socket.send(msg).await;
 
-        if let Err(e) = res {
-            tracing::warn!("Client connection closed, stopping pings: {e}");
-            break;
-        }
-        tracing::debug!("Notification sent to WebSocket client.");
-    }
-}
+//         if let Err(e) = res {
+//             tracing::warn!("Client connection closed, stopping pings: {e}");
+//             break;
+//         }
+//         tracing::debug!("Notification sent to WebSocket client.");
+//     }
+// }
 
-async fn to_api_notification<App: KolmeApp>(
-    kolme: &Kolme<App>,
-    notification: Notification<App::Message>,
-) -> Result<ApiNotification<App::Message>> {
-    match notification {
-        Notification::NewBlock(block) => {
-            let height = block.height();
-            // Ensure we have the block in local storage.
-            let block = tokio::time::timeout(
-                tokio::time::Duration::from_secs(20),
-                kolme.wait_for_block(height),
-            )
-            .await
-            .with_context(|| format!("Loading logs: took too long to load block {height}"))?
-            .with_context(|| format!("Failed to get block {height} in order to load logs"))?;
-            let logs = kolme.load_logs(block.as_inner().logs).await?.into();
-            Ok(ApiNotification::NewBlock { block, logs })
-        }
-        Notification::GenesisInstantiation { chain, contract } => {
-            Ok(ApiNotification::GenesisInstantiation { chain, contract })
-        }
-        Notification::FailedTransaction(failed) => Ok(ApiNotification::FailedTransaction(failed)),
-        Notification::LatestBlock(latest_block) => Ok(ApiNotification::LatestBlock(latest_block)),
-    }
-}
+// async fn to_api_notification<App: KolmeApp>(
+//     kolme: &Kolme<App>,
+//     notification: Notification<App::Message>,
+// ) -> Result<ApiNotification<App::Message>> {
+//     match notification {
+//         Notification::NewBlock(block) => {
+//             let height = block.height();
+//             // Ensure we have the block in local storage.
+//             let block = tokio::time::timeout(
+//                 tokio::time::Duration::from_secs(20),
+//                 kolme.wait_for_block(height),
+//             )
+//             .await
+//             .with_context(|| format!("Loading logs: took too long to load block {height}"))?
+//             .with_context(|| format!("Failed to get block {height} in order to load logs"))?;
+//             let logs = kolme.load_logs(block.as_inner().logs).await?.into();
+//             Ok(ApiNotification::NewBlock { block, logs })
+//         }
+//         Notification::GenesisInstantiation { chain, contract } => {
+//             Ok(ApiNotification::GenesisInstantiation { chain, contract })
+//         }
+//         Notification::FailedTransaction(failed) => Ok(ApiNotification::FailedTransaction(failed)),
+//         Notification::LatestBlock(latest_block) => Ok(ApiNotification::LatestBlock(latest_block)),
+//     }
+// }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(bound(

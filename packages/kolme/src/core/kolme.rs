@@ -53,7 +53,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     pub(super) pass_through_conn: OnceLock<reqwest::Client>,
     current_block: RwLock<Arc<MaybeBlockInfo<App>>>,
     /// Latest block reported by the processor
-    pub(super) latest_block: RwLock<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
+    pub(super) latest_block: tokio::sync::watch::Sender<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
     /// The version of the chain the current codebase represents.
     ///
     /// If this version is different from the active version running on the chain,
@@ -128,14 +128,20 @@ impl<App: KolmeApp> Kolme<App> {
     //     self.inner.notify.send(note).ok();
     // }
 
-    /// Returns true if this notification should be propagated
-    fn update_latest_block(&self, latest_block: &SignedTaggedJson<LatestBlock>) -> bool {
+    /// Subscribe for notifications of new latest block information.
+    pub fn subscribe_latest_block(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<Arc<SignedTaggedJson<LatestBlock>>>> {
+        self.inner.latest_block.subscribe()
+    }
+
+    pub(crate) fn update_latest_block(&self, latest_block: Arc<SignedTaggedJson<LatestBlock>>) {
         // Validate the signature
         let pubkey = match latest_block.verify_signature() {
             Ok(pubkey) => pubkey,
             Err(e) => {
                 tracing::warn!("Invalid signature for latest block: {e}");
-                return false;
+                return;
             }
         };
 
@@ -147,7 +153,7 @@ impl<App: KolmeApp> Kolme<App> {
             .processor;
         if pubkey != processor {
             tracing::warn!("Latest block was signed by {pubkey}, but processor is {processor}");
-            return false;
+            return;
         }
 
         // Returns Ok if we can proceed with overwriting the old latest, Err otherwise
@@ -175,23 +181,16 @@ impl<App: KolmeApp> Kolme<App> {
             }
         }
 
-        // Is it new information?
-        if let Some(old_latest) = self.inner.latest_block.read().clone() {
-            if check_height_when(&old_latest, latest_block).is_err() {
-                return false;
+        self.inner.latest_block.send_if_modified(|old_latest| {
+            if let Some(old_latest) = old_latest.as_ref() {
+                if check_height_when(old_latest, &latest_block).is_err() {
+                    return false;
+                }
             }
-        }
 
-        let latest_block_option = Some(Arc::new(latest_block.clone()));
-        let mut guard = self.inner.latest_block.write();
-        // Perform the check a second time to avoid a read/write lock race condition.
-        if let Some(old_latest) = &*guard {
-            if check_height_when(old_latest, latest_block).is_err() {
-                return false;
-            }
-        }
-        *guard = latest_block_option;
-        true
+            *old_latest = Some(latest_block);
+            true
+        });
     }
 
     /// Propose a new transaction for the processor to add to the chain.
@@ -638,7 +637,7 @@ impl<App: KolmeApp> Kolme<App> {
             current_block: RwLock::new(Arc::new(current_block)),
             #[cfg(feature = "solana")]
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
-            latest_block: parking_lot::RwLock::new(None),
+            latest_block: tokio::sync::watch::Sender::new(None),
             code_version: code_version.into(),
             block_requester: OnceLock::new(),
         };
@@ -991,7 +990,7 @@ impl<App: KolmeApp> Kolme<App> {
     /// regularly to keep the rest of the chain aware of what the latest known
     /// height is at various timestamps to avoid drift.
     pub fn get_latest_block(&self) -> Option<Arc<SignedTaggedJson<LatestBlock>>> {
-        self.inner.latest_block.read().clone()
+        self.inner.latest_block.borrow().clone()
     }
 
     pub fn get_code_version(&self) -> &String {

@@ -182,6 +182,8 @@ impl<App: KolmeApp> Gossip<App> {
 
         let mut sync_manager_subscriber = self.sync_manager.lock().await.subscribe();
 
+        let mut latest_watch = self.kolme.subscribe_latest_block();
+
         loop {
             tokio::select! {
                 // Periodically notify the p2p network of our latest block height
@@ -204,6 +206,11 @@ impl<App: KolmeApp> Gossip<App> {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
                     }
                 }
+                latest = latest_watch.changed() => {
+                    #[cfg(debug_assertions)]
+                    latest.unwrap();
+                    self.update_latest().await;
+                }
             }
         }
     }
@@ -222,6 +229,18 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
+    async fn update_latest(&self) {
+        let Some(latest) = self.kolme.get_latest_block() else {
+            return;
+        };
+        self.sync_manager
+            .lock()
+            .await
+            .add_latest_block(&self, latest.message.as_inner())
+            .await;
+        GossipMessage::ProvideLatestBlock { latest }.publish(self);
+    }
+
     async fn handle_message(
         &self,
         WebsocketsMessage {
@@ -232,15 +251,7 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::ProvideLatestBlock { latest } => {
-                // FIXME verify this came from the processor, rebroadcast across network if it's new information.
-                // FIXME modify sync manager to get latest block info from Kolme itself, not here.
-                // FIXME sync manager should get updated automatically when the latest block info updates
-                // send data to Kolme itself, verify signatures, update if necessary, and provide a trigger for "latest block info updated" so that we can rebroadcast to others
-                self.sync_manager
-                    .lock()
-                    .await
-                    .add_latest_block(self, latest.message.as_inner())
-                    .await;
+                self.kolme.update_latest_block(latest);
             }
             GossipMessage::RequestBlock { height } => {
                 let block = match self.kolme.get_block(height).await {
