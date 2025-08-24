@@ -501,7 +501,6 @@ impl TxLogger {
                 }
                 Notification::GenesisInstantiation { .. } => LogOutput::GenesisInstantiation,
                 Notification::LatestBlock(_) => continue,
-                Notification::EvictMempoolTransaction(_) => continue,
             };
             serde_json::to_writer(&file, &output)?;
             writeln!(file)?;

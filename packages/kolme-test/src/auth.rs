@@ -142,7 +142,6 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
                     Notification::GenesisInstantiation { .. } => (),
                     Notification::FailedTransaction { .. } => (),
                     Notification::LatestBlock(_) => (),
-                    Notification::EvictMempoolTransaction(_) => (),
                 }
             }
         }

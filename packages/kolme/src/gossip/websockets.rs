@@ -6,7 +6,6 @@ use axum::{
     routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
-use gossip::{BlockRequest, BlockResponse};
 use tokio::{
     net::TcpStream,
     sync::broadcast::{Receiver, Sender},
@@ -23,12 +22,12 @@ pub(super) struct WebsocketsManager<App: KolmeApp> {
 }
 
 pub(super) struct WebsocketsMessage<App: KolmeApp> {
-    pub(super) payload: WebsocketsPayload<App>,
+    pub(super) payload: GossipMessage<App>,
     pub(super) tx: WebsocketsPrivateSender<App>,
 }
 
 pub(super) struct WebsocketsPrivateSender<App: KolmeApp> {
-    pub(super) tx: tokio::sync::mpsc::Sender<WebsocketsPayload<App>>,
+    pub(super) tx: tokio::sync::mpsc::Sender<GossipMessage<App>>,
     id: u64,
 }
 
@@ -196,26 +195,6 @@ async fn ws_handler_wrapper<App: KolmeApp>(
     ws.on_upgrade(move |socket| ws_handler(server_state, socket))
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[serde(bound(serialize = "", deserialize = ""))]
-#[allow(clippy::large_enum_variant)]
-pub(super) enum WebsocketsPayload<App: KolmeApp> {
-    Gossip(GossipMessage<App>),
-    Request(BlockRequest),
-    Response(BlockResponse<App::Message>),
-}
-
-impl<App: KolmeApp> std::fmt::Debug for WebsocketsPayload<App> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            WebsocketsPayload::Gossip(gossip) => f.debug_tuple("Gossip").field(gossip).finish(),
-            WebsocketsPayload::Request(req) => f.debug_tuple("Request").field(req).finish(),
-            WebsocketsPayload::Response(res) => f.debug_tuple("Response").field(res).finish(),
-        }
-    }
-}
-
 async fn ws_handler<App: KolmeApp>(
     ServerState {
         mut rx_gossip,
@@ -230,7 +209,7 @@ async fn ws_handler<App: KolmeApp>(
 enum WebsocketsRecv<App: KolmeApp> {
     Close,
     Skip,
-    Payload(Box<WebsocketsPayload<App>>),
+    Payload(Box<GossipMessage<App>>),
     Err(anyhow::Error),
 }
 
@@ -238,7 +217,7 @@ trait WebSocketWrapper {
     async fn recv<App: KolmeApp>(&mut self, local_display_name: &str) -> WebsocketsRecv<App>;
     async fn send_payload<App: KolmeApp>(
         &mut self,
-        payload: WebsocketsPayload<App>,
+        payload: GossipMessage<App>,
         local_display_name: &str,
     ) -> Result<()>;
 }
@@ -277,7 +256,7 @@ impl WebSocketWrapper for WebSocket {
 
     async fn send_payload<App: KolmeApp>(
         &mut self,
-        payload: WebsocketsPayload<App>,
+        payload: GossipMessage<App>,
         _: &str,
     ) -> Result<()> {
         let payload = serde_json::to_string(&payload)?;
@@ -320,7 +299,7 @@ impl WebSocketWrapper for WebSocketStream<MaybeTlsStream<TcpStream>> {
 
     async fn send_payload<App: KolmeApp>(
         &mut self,
-        payload: WebsocketsPayload<App>,
+        payload: GossipMessage<App>,
         _: &str,
     ) -> Result<()> {
         let payload = serde_json::to_string(&payload)?;
@@ -347,7 +326,7 @@ async fn ws_helper<App: KolmeApp, S: WebSocketWrapper>(
     enum Triple<App: KolmeApp> {
         Peer(WebsocketsRecv<App>),
         LocalGossip(Result<GossipMessage<App>, tokio::sync::broadcast::error::RecvError>),
-        LocalPrivate(Option<WebsocketsPayload<App>>),
+        LocalPrivate(Option<GossipMessage<App>>),
     }
     loop {
         let next = tokio::select! {
@@ -378,7 +357,7 @@ async fn ws_helper<App: KolmeApp, S: WebSocketWrapper>(
                     break;
                 }
             },
-            Triple::LocalGossip(Ok(gossip)) => WebsocketsPayload::Gossip(gossip),
+            Triple::LocalGossip(Ok(gossip)) => gossip,
             Triple::LocalGossip(Err(e)) => {
                 tracing::error!(%local_display_name, "Gossip WebSockets: received error from rx_gossip: {e}");
                 break;

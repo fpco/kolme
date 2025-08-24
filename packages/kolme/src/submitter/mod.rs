@@ -116,7 +116,6 @@ impl<App: KolmeApp> Submitter<App> {
                 } => continue,
                 Notification::FailedTransaction { .. } => continue,
                 Notification::LatestBlock(_) => continue,
-                Notification::EvictMempoolTransaction(_) => continue,
             }
             self.submit_zero_or_one(&chains).await?;
         }

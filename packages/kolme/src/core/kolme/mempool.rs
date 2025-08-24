@@ -1,21 +1,40 @@
 use std::{
-    collections::VecDeque,
+    num::NonZero,
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use lru::LruCache;
 use parking_lot::RwLock;
 use utils::trigger::{Trigger, TriggerSubscriber};
 
 use crate::*;
 
 pub struct Mempool<AppMessage> {
-    txs: Arc<RwLock<Queue<AppMessage>>>,
+    state: Arc<RwLock<MempoolState<AppMessage>>>,
     notify: Trigger,
     gossip_delay_duration: Duration,
 }
 
-type Queue<AppMessage> = VecDeque<MempoolItem<AppMessage>>;
+struct MempoolState<AppMessage> {
+    txs: LruCache<TxHash, MempoolItem<AppMessage>>,
+    blocked: LruCache<TxHash, BlockReason<AppMessage>>,
+}
+
+enum BlockReason<AppMessage> {
+    InBlock(Arc<SignedBlock<AppMessage>>),
+    Failed(Arc<SignedTaggedJson<FailedTransaction>>),
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ProposeTransactionError<AppMessage> {
+    #[error("Transaction is already present in mempool")]
+    InMempool,
+    #[error("Transaction is already present in block {}", .0.height())]
+    InBlock(Arc<SignedBlock<AppMessage>>),
+    #[error("Transaction failed: {}", .0.message.as_inner())]
+    Failed(Arc<SignedTaggedJson<FailedTransaction>>),
+}
 
 struct MempoolItem<AppMessage> {
     tx: Arc<SignedTransaction<AppMessage>>,
@@ -25,7 +44,7 @@ struct MempoolItem<AppMessage> {
 impl<AppMessage> Clone for Mempool<AppMessage> {
     fn clone(&self) -> Self {
         Self {
-            txs: self.txs.clone(),
+            state: self.state.clone(),
             notify: self.notify.clone(),
             gossip_delay_duration: self.gossip_delay_duration,
         }
@@ -33,9 +52,16 @@ impl<AppMessage> Clone for Mempool<AppMessage> {
 }
 
 impl<AppMessage> Mempool<AppMessage> {
-    pub(super) fn new(gossip_delay_duration: Duration) -> Self {
+    pub(super) fn new(
+        gossip_delay_duration: Duration,
+        tx_count: NonZero<usize>,
+        blocked_tx_count: NonZero<usize>,
+    ) -> Self {
         Self {
-            txs: Default::default(),
+            state: Arc::new(RwLock::new(MempoolState {
+                txs: LruCache::new(tx_count),
+                blocked: LruCache::new(blocked_tx_count),
+            })),
             notify: Trigger::new("mempool"),
             gossip_delay_duration,
         }
@@ -44,7 +70,7 @@ impl<AppMessage> Mempool<AppMessage> {
     pub(super) async fn wait_for_pool_size(&self, size: usize) {
         let mut recv = self.notify.subscribe();
         loop {
-            if self.txs.read().len() == size {
+            if self.state.read().txs.len() == size {
                 break;
             }
             recv.listen().await;
@@ -52,40 +78,72 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     pub(super) async fn peek(&self) -> Arc<SignedTransaction<AppMessage>> {
-        if let Some(item) = self.txs.read().front() {
+        if let Some((_hash, item)) = self.state.read().txs.peek_lru() {
             return item.tx.clone();
         }
 
         let mut recv = self.notify.subscribe();
 
         loop {
-            if let Some(item) = self.txs.read().front() {
+            if let Some((_hash, item)) = self.state.read().txs.peek_lru() {
                 break item.tx.clone();
             }
             recv.listen().await;
         }
     }
 
-    pub(super) fn drop_tx(&self, hash: TxHash) {
-        let mut modified = false;
-        let mut guard = self.txs.write();
-        for idx in (0..guard.len()).rev() {
-            if guard[idx].tx.hash() == hash {
-                guard.swap_remove_back(idx);
-                modified = true;
-            }
-        }
-        if modified {
-            self.notify.trigger();
-        }
+    /// Mark a transaction as blocked by already being in the chain.
+    pub(super) fn add_signed_block(&self, block: Arc<SignedBlock<AppMessage>>) {
+        let mut guard = self.state.write();
+        let hash = block.tx().hash();
+        guard.blocked.put(hash, BlockReason::InBlock(block));
+        guard.drop_tx(hash, &self.notify);
     }
 
-    pub(super) fn add(&self, tx: Arc<SignedTransaction<AppMessage>>) {
-        self.txs.write().push_back(MempoolItem {
-            tx,
-            last_gossiped: None,
-        });
-        self.notify.trigger();
+    /// Mark a transaction as failed.
+    ///
+    /// Returns [true] if this is a newly added failed transaction.
+    pub(super) fn add_failed_transaction(
+        &self,
+        failed: Arc<SignedTaggedJson<FailedTransaction>>,
+    ) -> bool {
+        let mut guard = self.state.write();
+        let hash = failed.message.as_inner().txhash;
+        if guard.blocked.contains(&hash) {
+            return false;
+        }
+        guard.blocked.put(hash, BlockReason::Failed(failed));
+        guard.drop_tx(hash, &self.notify);
+        true
+    }
+
+    pub(super) fn add(
+        &self,
+        tx: Arc<SignedTransaction<AppMessage>>,
+    ) -> Result<(), ProposeTransactionError<AppMessage>> {
+        let mut state = self.state.write();
+        let hash = tx.hash();
+        match state.blocked.get(&hash) {
+            Some(reason) => Err(match reason {
+                BlockReason::InBlock(block) => ProposeTransactionError::InBlock(block.clone()),
+                BlockReason::Failed(failed) => ProposeTransactionError::Failed(failed.clone()),
+            }),
+            None => {
+                if state.txs.contains(&hash) {
+                    Err(ProposeTransactionError::InMempool)
+                } else {
+                    state.txs.push(
+                        hash,
+                        MempoolItem {
+                            tx,
+                            last_gossiped: None,
+                        },
+                    );
+                    self.notify.trigger();
+                    Ok(())
+                }
+            }
+        }
     }
 
     pub(super) fn subscribe_additions(&self) -> TriggerSubscriber {
@@ -95,7 +153,12 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     pub(super) fn get_entries(&self) -> Vec<Arc<SignedTransaction<AppMessage>>> {
-        self.txs.read().iter().map(|item| item.tx.clone()).collect()
+        self.state
+            .read()
+            .txs
+            .iter()
+            .map(|(_hash, item)| item.tx.clone())
+            .collect()
     }
 
     pub(crate) fn get_entries_for_gossip(&self) -> Vec<Arc<SignedTransaction<AppMessage>>> {
@@ -103,10 +166,11 @@ impl<AppMessage> Mempool<AppMessage> {
         cutoff = cutoff
             .checked_sub(self.gossip_delay_duration)
             .unwrap_or(cutoff);
-        self.txs
+        self.state
             .read()
+            .txs
             .iter()
-            .filter_map(|item| {
+            .filter_map(|(_hash, item)| {
                 let to_gossip = item
                     .last_gossiped
                     .is_none_or(|last_gossiped| last_gossiped < cutoff);
@@ -120,11 +184,17 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     pub(crate) fn mark_mempool_entry_gossiped(&self, txhash: TxHash) {
-        let mut guard = self.txs.write();
-        for idx in (0..guard.len()).rev() {
-            if guard[idx].tx.hash() == txhash {
-                guard[idx].last_gossiped = Some(Instant::now());
-            }
+        let mut guard = self.state.write();
+        if let Some(item) = guard.txs.get_mut(&txhash) {
+            item.last_gossiped = Some(Instant::now());
+        }
+    }
+}
+
+impl<AppMessage> MempoolState<AppMessage> {
+    fn drop_tx(&mut self, hash: TxHash, notify: &Trigger) {
+        if self.txs.pop(&hash).is_some() {
+            notify.trigger();
         }
     }
 }

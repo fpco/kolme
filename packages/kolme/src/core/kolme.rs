@@ -14,9 +14,9 @@ use utils::trigger::TriggerSubscriber;
 
 #[cfg(any(feature = "solana", feature = "cosmwasm"))]
 use std::collections::HashMap;
-use std::{ops::Deref, sync::OnceLock, time::Duration};
+use std::{num::NonZero, ops::Deref, sync::OnceLock, time::Duration};
 
-use mempool::Mempool;
+use mempool::{Mempool, ProposeTransactionError};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::core::*;
@@ -109,14 +109,13 @@ impl<App: KolmeApp> Kolme<App> {
             Notification::NewBlock(_) => (),
             Notification::GenesisInstantiation { .. } => (),
             Notification::FailedTransaction(failed) => {
-                self.remove_from_mempool(failed.message.as_inner().txhash);
+                self.inner.mempool.add_failed_transaction(failed.clone());
             }
             Notification::LatestBlock(latest_block) => {
                 if !self.update_latest_block(latest_block) {
                     return;
                 }
             }
-            Notification::EvictMempoolTransaction(_) => (),
         }
         // Ignore errors from notifications, it just means no one
         // is subscribed.
@@ -192,8 +191,19 @@ impl<App: KolmeApp> Kolme<App> {
     /// Propose a new transaction for the processor to add to the chain.
     ///
     /// Note that this will not detect any issues if the transaction is rejected.
-    pub fn propose_transaction(&self, tx: Arc<SignedTransaction<App::Message>>) {
-        self.inner.mempool.add(tx);
+    pub fn propose_transaction(
+        &self,
+        tx: Arc<SignedTransaction<App::Message>>,
+    ) -> Result<(), ProposeTransactionError<App::Message>> {
+        self.inner.mempool.add(tx)
+    }
+
+    /// Log a failed transaction.
+    pub fn add_failed_transaction(&self, failed: Arc<SignedTaggedJson<FailedTransaction>>) {
+        // FIXME verify signature
+        if self.inner.mempool.add_failed_transaction(failed) {
+            // FIXME rebroadcast over gossip
+        }
     }
 
     /// How long should we wait for a transaction to land before giving up?
@@ -233,7 +243,18 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut recv = self.subscribe();
         let txhash_orig = tx.hash();
-        self.propose_transaction(tx);
+        if let Err(e) = self.propose_transaction(tx) {
+            match e {
+                ProposeTransactionError::InMempool => (),
+                ProposeTransactionError::InBlock(block) => {
+                    debug_assert_eq!(block.tx().hash(), txhash_orig);
+                    return Ok(block);
+                }
+                ProposeTransactionError::Failed(failed) => {
+                    return Err(failed.message.as_inner().error.clone().into())
+                }
+            }
+        }
         loop {
             let note = recv.recv().await?;
             match note {
@@ -271,7 +292,6 @@ impl<App: KolmeApp> Kolme<App> {
                     }
                 }
                 Notification::LatestBlock(_) => continue,
-                Notification::EvictMempoolTransaction(_) => continue,
             }
 
             // Just in case we jumped some blocks, check if it landed in the interim.
@@ -496,7 +516,7 @@ impl<App: KolmeApp> Kolme<App> {
             })
             .await?;
 
-        self.inner.mempool.drop_tx(signed_block.tx().hash());
+        self.inner.mempool.add_signed_block(signed_block.clone());
 
         // Now do the write lock
         {
@@ -559,7 +579,6 @@ impl<App: KolmeApp> Kolme<App> {
             "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
         );
 
-        let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
 
@@ -589,48 +608,20 @@ impl<App: KolmeApp> Kolme<App> {
             })
             .await?;
 
-        self.inner.mempool.drop_tx(txhash);
+        self.inner.mempool.add_signed_block(signed_block.clone());
 
         self.notify(Notification::NewBlock(signed_block));
 
         Ok(())
     }
 
-    pub async fn wait_on_mempool(
-        &self,
-        secret: Option<&SecretKey>,
-    ) -> Arc<SignedTransaction<App::Message>> {
+    pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
         loop {
             let tx = self.inner.mempool.peek().await;
             let txhash = tx.hash();
-            match self.get_tx_height(txhash).await {
-                Ok(Some(_)) => {
-                    // This means our store already has the tx hash. And this
-                    // transaction should be evicted from all nodes where it
-                    // is present in the mempool.
-                    if let Some(secret) = secret {
-                        match TaggedJson::new(txhash) {
-                            Ok(json) => {
-                                let kolme = self.read();
-                                match json.sign(secret) {
-                                    Ok(signed) => {
-                                        kolme.notify(Notification::EvictMempoolTransaction(
-                                            Arc::new(signed),
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "Error during signing of evict transaction: {e}"
-                                        );
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Error during creation of tagged json: {e}");
-                            }
-                        }
-                    }
-                    self.inner.mempool.drop_tx(txhash);
+            match self.get_tx_block(txhash).await {
+                Ok(Some(block)) => {
+                    self.inner.mempool.add_signed_block(block);
                 }
                 Ok(None) => {
                     break tx;
@@ -648,16 +639,6 @@ impl<App: KolmeApp> Kolme<App> {
     /// This is mostly intended for writing tests.
     pub async fn wait_on_empty_mempool(&self) {
         self.inner.mempool.wait_for_pool_size(0).await;
-    }
-
-    /// Remove a transaction from the mempool, if present.
-    ///
-    /// If the transaction identified by `hash` is not present in the mempool,
-    /// this function will silently do nothing. This behavior is intentional
-    /// and ensures that calling this function is safe even if the transaction
-    /// has already been removed or was never added.
-    pub fn remove_from_mempool(&self, hash: TxHash) {
-        self.inner.mempool.drop_tx(hash);
     }
 
     pub async fn new(
@@ -678,7 +659,11 @@ impl<App: KolmeApp> Kolme<App> {
             notify: tokio::sync::broadcast::channel(100).0,
             // In the future, maybe have a Builder interface for configuring things like this
             // Default value chosen to exceed the libp2p default of 60 seconds
-            mempool: Mempool::new(Duration::from_secs(90)),
+            mempool: Mempool::new(
+                Duration::from_secs(90),
+                NonZero::new(1024).unwrap(),
+                NonZero::new(1024).unwrap(),
+            ),
             current_block: RwLock::new(Arc::new(current_block)),
             #[cfg(feature = "solana")]
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
@@ -802,7 +787,6 @@ impl<App: KolmeApp> Kolme<App> {
                         Notification::GenesisInstantiation { .. } => (),
                         Notification::FailedTransaction { .. } => (),
                         Notification::LatestBlock(_) => (),
-                        Notification::EvictMempoolTransaction(_) => (),
                     },
                     Err(e) => match e {
                         RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
@@ -1084,6 +1068,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
+        // TODO make this return an Arc?
         self.inner.store.get_merkle_layer(hash).await
     }
 
@@ -1176,6 +1161,14 @@ impl<App: KolmeApp> Kolme<App> {
     /// Get the block height for the given transaction, if present.
     pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>> {
         self.inner.store.get_height_for_tx(tx).await
+    }
+
+    /// Get the block containing the given transaction, if present.
+    pub async fn get_tx_block(&self, tx: TxHash) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
+        let Some(height) = self.get_tx_height(tx).await? else {
+            return Ok(None);
+        };
+        Ok(Some(self.load_block(height).await?.block))
     }
 
     /// Load the block details from the database

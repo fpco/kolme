@@ -106,18 +106,27 @@ async fn broadcast<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
     Json(tx): Json<SignedTransaction<App::Message>>,
 ) -> impl IntoResponse {
-    let txhash = tx.0.message_hash();
-    if let Err(e) = kolme
+    match broadcast_inner(kolme, tx).await {
+        Ok(txhash) => Json(serde_json::json!({"txhash": txhash})).into_response(),
+        Err(e) => {
+            let mut res = e.to_string().into_response();
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            res
+        }
+    }
+}
+
+async fn broadcast_inner<App: KolmeApp>(
+    kolme: Kolme<App>,
+    tx: SignedTransaction<App::Message>,
+) -> Result<TxHash> {
+    let txhash = tx.hash();
+    kolme
         .read()
         .execute_transaction(&tx, Timestamp::now(), BlockDataHandling::NoPriorData)
-        .await
-    {
-        let mut res = e.to_string().into_response();
-        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-        return res;
-    }
-    kolme.propose_transaction(Arc::new(tx));
-    Json(serde_json::json!({"txhash":txhash})).into_response()
+        .await?;
+    kolme.propose_transaction(Arc::new(tx))?;
+    Ok(txhash)
 }
 
 #[derive(serde::Deserialize)]
@@ -264,9 +273,6 @@ async fn to_api_notification<App: KolmeApp>(
         }
         Notification::FailedTransaction(failed) => Ok(ApiNotification::FailedTransaction(failed)),
         Notification::LatestBlock(latest_block) => Ok(ApiNotification::LatestBlock(latest_block)),
-        Notification::EvictMempoolTransaction(txhash) => {
-            Ok(ApiNotification::EvictMempoolTransaction(txhash))
-        }
     }
 }
 
@@ -288,7 +294,6 @@ pub enum ApiNotification<AppMessage> {
     /// A transaction failed in the processor.
     FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
     LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
-    EvictMempoolTransaction(Arc<SignedTaggedJson<TxHash>>),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]

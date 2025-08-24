@@ -1740,6 +1740,7 @@ pub struct AssetAmount {
     serialize = "",
     deserialize = "AppMessage: serde::de::DeserializeOwned"
 ))]
+// FIXME get rid of this
 pub enum Notification<AppMessage> {
     NewBlock(Arc<SignedBlock<AppMessage>>),
     /// A claim by a submitter that it has instantiated a bridge contract.
@@ -1755,32 +1756,6 @@ pub enum Notification<AppMessage> {
     FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
     /// Notification from the processor of the latest known block.
     LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
-    /// Instructs nodes to remove a transaction from their mempool.
-    ///
-    /// This is necessary when a node broadcasts a transaction that has already
-    /// been included in the blockchain. Other nodes, upon receiving this
-    //  notification, should evict the specified transaction from their mempool
-    /// to prevent broadcasting it again. The `TxHash` identifies the transaction
-    /// to be evicted.
-    EvictMempoolTransaction(Arc<SignedTaggedJson<TxHash>>),
-}
-
-impl<AppMessage> Notification<AppMessage> {
-    pub(crate) fn hash(&self) -> Option<Sha256Hash> {
-        match self {
-            Notification::NewBlock(signed_block) => Some(signed_block.hash().0),
-            Notification::GenesisInstantiation { .. } => None,
-            Notification::FailedTransaction(signed_tagged_json) => {
-                Some(signed_tagged_json.message_hash())
-            }
-            Notification::LatestBlock(signed_tagged_json) => {
-                Some(signed_tagged_json.message_hash())
-            }
-            Notification::EvictMempoolTransaction(signed_tagged_json) => {
-                Some(signed_tagged_json.message_hash())
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1789,6 +1764,20 @@ pub struct FailedTransaction {
     /// Block height we attempted to generate.
     pub proposed_height: BlockHeight,
     pub error: KolmeError,
+}
+
+impl Display for FailedTransaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let FailedTransaction {
+            txhash,
+            proposed_height,
+            error,
+        } = self;
+        write!(
+            f,
+            "Failed transaction {txhash} proposed at height {proposed_height}: {error}"
+        )
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
