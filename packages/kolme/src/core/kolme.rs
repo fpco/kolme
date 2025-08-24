@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::{num::NonZero, ops::Deref, sync::OnceLock, time::Duration};
 
 use mempool::{Mempool, ProposeTransactionError};
-use tokio::sync::broadcast::error::RecvError;
 
 use crate::core::*;
 
@@ -41,7 +40,6 @@ pub struct Kolme<App: KolmeApp> {
 }
 
 pub(super) struct KolmeInner<App: KolmeApp> {
-    notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
     mempool: Mempool<App::Message>,
     pub(super) store: store::KolmeStore<App>,
     pub(super) app: App,
@@ -103,24 +101,32 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    /// Send a general purpose notification.
-    pub fn notify(&self, note: Notification<App::Message>) {
-        match &note {
-            Notification::NewBlock(_) => (),
-            Notification::GenesisInstantiation { .. } => (),
-            Notification::FailedTransaction(failed) => {
-                self.inner.mempool.add_failed_transaction(failed.clone());
-            }
-            Notification::LatestBlock(latest_block) => {
-                if !self.update_latest_block(latest_block) {
-                    return;
-                }
-            }
-        }
-        // Ignore errors from notifications, it just means no one
-        // is subscribed.
-        self.inner.notify.send(note).ok();
+    /// Subscribe to wait for a new block to become available.
+    pub fn subscribe_new_block(&self) -> TriggerSubscriber {
+        // TODO confirm if this is correct, it may include any added Merkle layers too, which may be too many notifications
+        self.inner.store.subscribe()
+        // TODO need to also add some kind of listener for PostgreSQL to notify us when another node adds a block to a shared database
     }
+
+    // FIXME
+    // /// Send a general purpose notification.
+    // pub fn notify(&self, note: Notification<App::Message>) {
+    //     match &note {
+    //         Notification::NewBlock(_) => (),
+    //         Notification::GenesisInstantiation { .. } => (),
+    //         Notification::FailedTransaction(failed) => {
+    //             self.inner.mempool.add_failed_transaction(failed.clone());
+    //         }
+    //         Notification::LatestBlock(latest_block) => {
+    //             if !self.update_latest_block(latest_block) {
+    //                 return;
+    //             }
+    //         }
+    //     }
+    //     // Ignore errors from notifications, it just means no one
+    //     // is subscribed.
+    //     self.inner.notify.send(note).ok();
+    // }
 
     /// Returns true if this notification should be propagated
     fn update_latest_block(&self, latest_block: &SignedTaggedJson<LatestBlock>) -> bool {
@@ -241,63 +247,30 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
-        let mut recv = self.subscribe();
-        let txhash_orig = tx.hash();
-        if let Err(e) = self.propose_transaction(tx) {
-            match e {
-                ProposeTransactionError::InMempool => (),
-                ProposeTransactionError::InBlock(block) => {
-                    debug_assert_eq!(block.tx().hash(), txhash_orig);
-                    return Ok(block);
-                }
-                ProposeTransactionError::Failed(failed) => {
-                    return Err(failed.message.as_inner().error.clone().into())
-                }
-            }
-        }
+        let mut new_block = self.subscribe_new_block();
+        let txhash = tx.hash();
         loop {
-            let note = recv.recv().await?;
-            match note {
-                Notification::NewBlock(block) => {
-                    if block.tx().hash() == txhash_orig {
-                        self.wait_for_block(block.height()).await?;
-                        break Ok(block);
-                    }
+            match self.propose_transaction(tx.clone()) {
+                // The only way this should happen is if the transaction was
+                // booted from the LRU cache. In that case, just try again.
+                Ok(()) => (),
+                // Still in the mempool, so continue waiting
+                Err(ProposeTransactionError::InMempool) => (),
+                Err(ProposeTransactionError::InBlock(block)) => {
+                    debug_assert_eq!(block.tx().hash(), txhash);
+                    break Ok(block);
                 }
-                Notification::GenesisInstantiation { .. } => (),
-                Notification::FailedTransaction(failed) => {
-                    let pubkey = match failed.verify_signature() {
-                        Ok(pubkey) => pubkey,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Received invalid signature on a FailedTransaction notification: {e}"
-                            );
-                            continue;
-                        }
-                    };
-                    if pubkey
-                        != self
-                            .read()
-                            .get_framework_state()
-                            .get_validator_set()
-                            .processor
-                    {
-                        tracing::warn!(
-                            "Received a FailedTransaction notification from {pubkey}, which is not the processor, ignoring"
-                        );
-                        continue;
-                    }
-                    if txhash_orig == failed.message.as_inner().txhash {
-                        break Err(failed.message.as_inner().error.clone().into());
-                    }
+                Err(ProposeTransactionError::Failed(failed)) => {
+                    debug_assert_eq!(failed.message.as_inner().txhash, txhash);
+                    break Err(failed.message.as_inner().error.clone().into());
                 }
-                Notification::LatestBlock(_) => continue,
             }
 
-            // Just in case we jumped some blocks, check if it landed in the interim.
-            if let Some(height) = self.get_tx_height(txhash_orig).await? {
-                return self.wait_for_block(height).await;
-            }
+            new_block.listen().await;
+            // There's a potential race condition, the transaction could have be flushed
+            // from the LRU cache after successfully landing in a block. No worries if that
+            // occurs, we'll try proposing again and will eventually be told by another node
+            // that it landed in a block.
         }
     }
 
@@ -536,7 +509,8 @@ impl<App: KolmeApp> Kolme<App> {
             }));
         }
 
-        self.notify(Notification::NewBlock(signed_block));
+        // FIXME we probably need to broadcast over gossip... but maybe do that from the Processor instead and rebroadcast within Gossip?
+        // self.notify(Notification::NewBlock(signed_block));
 
         // Update the archive if appropriate
         if self.get_next_to_archive().await? == height {
@@ -610,8 +584,6 @@ impl<App: KolmeApp> Kolme<App> {
 
         self.inner.mempool.add_signed_block(signed_block.clone());
 
-        self.notify(Notification::NewBlock(signed_block));
-
         Ok(())
     }
 
@@ -656,7 +628,6 @@ impl<App: KolmeApp> Kolme<App> {
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "pass_through")]
             pass_through_conn: OnceLock::new(),
-            notify: tokio::sync::broadcast::channel(100).0,
             // In the future, maybe have a Builder interface for configuring things like this
             // Default value chosen to exceed the libp2p default of 60 seconds
             mempool: Mempool::new(
@@ -684,10 +655,6 @@ impl<App: KolmeApp> Kolme<App> {
             .await?;
 
         Ok(kolme)
-    }
-
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App::Message>> {
-        self.inner.notify.subscribe()
     }
 
     /// Subscribe to get a notification each time an entry is added to the mempool.
@@ -768,32 +735,12 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Wait until the given transaction is published
     pub async fn wait_for_tx(&self, tx: TxHash) -> Result<BlockHeight> {
-        // Start an outer loop so that we can keep processing if we end up Lagged
+        let mut new_block = self.subscribe_new_block();
         loop {
-            // First subscribe to avoid a race condition...
-            let mut recv = self.subscribe();
-            // And then check if we have that transaction.
-            if let Some(height) = self.read().get_tx_height(tx).await? {
-                break Ok(height);
+            if let Some(height) = self.get_tx_height(tx).await? {
+                return Ok(height);
             }
-            loop {
-                match recv.recv().await {
-                    Ok(note) => match note {
-                        Notification::NewBlock(block) => {
-                            if block.0.message.as_inner().tx.hash() == tx {
-                                return Ok(block.0.message.as_inner().height);
-                            }
-                        }
-                        Notification::GenesisInstantiation { .. } => (),
-                        Notification::FailedTransaction { .. } => (),
-                        Notification::LatestBlock(_) => (),
-                    },
-                    Err(e) => match e {
-                        RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
-                        RecvError::Lagged(_) => break,
-                    },
-                }
-            }
+            new_block.listen().await;
         }
     }
 
@@ -801,32 +748,20 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn wait_for_active_version(&self) {
         // FIXME didn't we want some kind of advertisement of new versions or something like that?
 
-        // Start an outer loop so that we can keep processing if we end up Lagged
+        // First subscribe to avoid a race condition...
+        let mut new_block = self.subscribe_new_block();
         loop {
-            // First subscribe to avoid a race condition...
-            let mut recv = self.subscribe();
-            loop {
-                // TODO: Consider if we need a better mechanism overall here.
-                // We resync here because it's possible that we added a new block via state sync but haven't loaded it yet. The fact that this bug could exist indicates we should have a better notification and block loading system.
-                if let Err(e) = self.resync().await {
-                    tracing::error!("Error resyncing in wait_for_active_version: {e}");
-                }
-
-                // And then check if we are at the desired version.
-                if self.read().get_chain_version() == self.get_code_version() {
-                    return;
-                }
-                match recv.recv().await {
-                    Ok(_) => {
-                        // Doesn't matter what the notification was, go ahead and check the
-                        // version again
-                    }
-                    Err(e) => match e {
-                        RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
-                        RecvError::Lagged(_) => break,
-                    },
-                }
+            // TODO: Consider if we need a better mechanism overall here.
+            // We resync here because it's possible that we added a new block via state sync but haven't loaded it yet. The fact that this bug could exist indicates we should have a better notification and block loading system.
+            if let Err(e) = self.resync().await {
+                tracing::error!("Error resyncing in wait_for_active_version: {e}");
             }
+
+            // And then check if we are at the desired version.
+            if self.read().get_chain_version() == self.get_code_version() {
+                return;
+            }
+            new_block.listen().await;
         }
     }
 

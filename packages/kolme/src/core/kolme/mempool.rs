@@ -96,8 +96,12 @@ impl<AppMessage> Mempool<AppMessage> {
     pub(super) fn add_signed_block(&self, block: Arc<SignedBlock<AppMessage>>) {
         let mut guard = self.state.write();
         let hash = block.tx().hash();
+        if guard.blocked.contains(&hash) {
+            return;
+        }
         guard.blocked.put(hash, BlockReason::InBlock(block));
         guard.drop_tx(hash, &self.notify);
+        self.notify.trigger();
     }
 
     /// Mark a transaction as failed.
@@ -114,6 +118,7 @@ impl<AppMessage> Mempool<AppMessage> {
         }
         guard.blocked.put(hash, BlockReason::Failed(failed));
         guard.drop_tx(hash, &self.notify);
+        self.notify.trigger();
         true
     }
 

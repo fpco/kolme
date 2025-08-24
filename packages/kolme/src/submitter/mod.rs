@@ -103,20 +103,12 @@ impl<App: KolmeApp> Submitter<App> {
             return Ok(());
         }
 
-        let mut receiver = self.kolme.subscribe();
+        let mut new_block = self.kolme.subscribe_new_block();
         self.submit_zero_or_one(&chains).await?;
         tracing::info!("Submitter has caught up, waiting for new events.");
 
         loop {
-            match receiver.recv().await? {
-                Notification::NewBlock(_) => (),
-                Notification::GenesisInstantiation {
-                    chain: _,
-                    contract: _,
-                } => continue,
-                Notification::FailedTransaction { .. } => continue,
-                Notification::LatestBlock(_) => continue,
-            }
+            new_block.listen().await;
             self.submit_zero_or_one(&chains).await?;
         }
     }

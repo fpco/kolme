@@ -1732,32 +1732,6 @@ pub struct AssetAmount {
     pub amount: u128, // FIXME use a Decimal representation
 }
 
-/// Notifications that can come from the Kolme framework to components.
-///
-/// TODO this will ultimately be incorporated into a p2p network of events.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(bound(
-    serialize = "",
-    deserialize = "AppMessage: serde::de::DeserializeOwned"
-))]
-// FIXME get rid of this
-pub enum Notification<AppMessage> {
-    NewBlock(Arc<SignedBlock<AppMessage>>),
-    /// A claim by a submitter that it has instantiated a bridge contract.
-    GenesisInstantiation {
-        chain: ExternalChain,
-        contract: String,
-    },
-    /// A transaction failed in the processor.
-    ///
-    /// The message is signed by the processor. Only failed transactions
-    /// signed by the real processor should be respected for dropping
-    /// transactions from the mempool.
-    FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
-    /// Notification from the processor of the latest known block.
-    LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FailedTransaction {
     pub txhash: TxHash,
