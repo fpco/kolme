@@ -29,8 +29,6 @@ pub struct Gossip<App: KolmeApp> {
     local_display_name: String,
     /// Trigger a broadcast of our latest block height.
     trigger_broadcast_height: Trigger,
-    /// Switches to true once we have our first success received message
-    watch_network_ready: tokio::sync::watch::Sender<bool>,
     /// The block sync manager.
     sync_manager: Mutex<SyncManager<App>>,
     /// LRU cache for notifications received via P2p layer
@@ -160,7 +158,6 @@ impl GossipBuilder {
 
         let local_display_name = self.local_display_name.unwrap_or(String::from("gossip"));
 
-        let (watch_network_ready, _) = tokio::sync::watch::channel(false);
         let sync_manager = Mutex::new(SyncManager::default());
         let mut set = JoinSet::new();
         let websockets_manager = WebsocketsManager::new(
@@ -175,7 +172,6 @@ impl GossipBuilder {
             sync_mode: self.sync_mode,
             data_load_validation: self.data_load_validation,
             trigger_broadcast_height: Trigger::new("broadcast_height"),
-            watch_network_ready,
             local_display_name,
             sync_manager,
             lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
@@ -189,11 +185,6 @@ impl GossipBuilder {
 }
 
 impl<App: KolmeApp> Gossip<App> {
-    // FIXME remove the network ready stuff entirely?
-    pub fn subscribe_network_ready(&self) -> tokio::sync::watch::Receiver<bool> {
-        self.watch_network_ready.subscribe()
-    }
-
     pub async fn run(mut self) -> Result<()> {
         let mut set = self.set.take().unwrap();
         set.spawn(self.run_inner());
@@ -253,28 +244,9 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn on_interval(&self) {
-        self.request_block_heights();
         self.process_sync_manager().await;
         self.broadcast_latest_block();
         self.broadcast_mempool_entries();
-    }
-
-    fn mark_network_ready(&self) {
-        if !*self.watch_network_ready.borrow() {
-            tracing::info!(
-                "{}: Successfully received message from network, gossip network is ready",
-                self.local_display_name
-            );
-            self.watch_network_ready.send_replace(true);
-        }
-    }
-
-    fn request_block_heights(&self) {
-        if *self.watch_network_ready.borrow() {
-            // We already sent this request successfully, no need to repeat.
-            return;
-        }
-        GossipMessage::RequestBlockHeights(jiff::Timestamp::now()).publish(self);
     }
 
     fn broadcast_latest_block(&self) {
@@ -321,7 +293,6 @@ impl<App: KolmeApp> Gossip<App> {
         message: GossipMessage<App>,
         ws_sender: WebsocketsPrivateSender<App>,
     ) {
-        self.mark_network_ready();
         let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::Notification(msg) => {
@@ -440,7 +411,6 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn handle_websockets_message(&self, msg: WebsocketsMessage<App>) {
-        self.mark_network_ready();
         match msg.payload {
             websockets::WebsocketsPayload::Gossip(message) => {
                 self.handle_message(message, msg.tx).await
