@@ -38,9 +38,7 @@ async fn ws_sanity_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks
-        .launch_websockets_client(kolme_client.clone(), "sanity-client", &discovery)
-        .await;
+    testtasks.launch_websockets_client(kolme_client.clone(), "sanity-client", &discovery);
 
     let secret = SecretKey::random();
     timeout(

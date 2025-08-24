@@ -38,7 +38,7 @@ impl TestTasks {
         WebsocketsDiscovery { port }
     }
 
-    pub async fn launch_websockets_client<App: KolmeApp>(
+    pub fn launch_websockets_client<App: KolmeApp>(
         &self,
         kolme: Kolme<App>,
         display_name: &str,
@@ -49,11 +49,10 @@ impl TestTasks {
                 SyncMode::BlockTransfer,
                 DataLoadValidation::ValidateDataLoads,
             )
-        })
-        .await;
+        });
     }
 
-    pub async fn launch_websockets_client_with<App: KolmeApp, F>(
+    pub fn launch_websockets_client_with<App: KolmeApp, F>(
         &self,
         kolme: Kolme<App>,
         display_name: &str,
@@ -67,12 +66,7 @@ impl TestTasks {
             .add_websockets_server(format!("ws://127.0.0.1:{}", discovery.port));
         let builder = f(builder);
         let gossip = builder.build(kolme.clone()).unwrap();
-        let mut ready = gossip.subscribe_network_ready();
         self.try_spawn_persistent(gossip.run());
-        tokio::time::timeout(tokio::time::Duration::from_secs(30), ready.changed())
-            .await
-            .expect("Timed out waiting for network to be ready")
-            .unwrap();
     }
 }
 

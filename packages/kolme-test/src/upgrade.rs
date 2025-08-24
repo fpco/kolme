@@ -153,14 +153,12 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
         .await
         .unwrap();
     testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), processor.clone()).run());
-    testtasks
-        .launch_websockets_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
-            builder.set_sync_mode(
-                SyncMode::StateTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-        })
-        .await;
+    testtasks.launch_websockets_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
+        builder.set_sync_mode(
+            SyncMode::StateTransfer,
+            DataLoadValidation::ValidateDataLoads,
+        )
+    });
 
     let client = SecretKey::random();
     const HI_COUNT1: u64 = 10;

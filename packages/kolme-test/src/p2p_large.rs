@@ -176,19 +176,17 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks
-        .launch_websockets_client_with(
-            kolme_state_transfer.clone(),
-            "kolme_state_transfer",
-            &discovery,
-            |builder| {
-                builder.set_sync_mode(
-                    SyncMode::StateTransfer,
-                    DataLoadValidation::ValidateDataLoads,
-                )
-            },
-        )
-        .await;
+    testtasks.launch_websockets_client_with(
+        kolme_state_transfer.clone(),
+        "kolme_state_transfer",
+        &discovery,
+        |builder| {
+            builder.set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        },
+    );
 
     let kolme_state_transfer2 = Kolme::new(
         SampleKolmeApp::new(IDENT),
@@ -197,19 +195,17 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks
-        .launch_websockets_client_with(
-            kolme_state_transfer2.clone(),
-            "kolme_state_transfer2",
-            &discovery,
-            |builder| {
-                builder.set_sync_mode(
-                    SyncMode::StateTransfer,
-                    DataLoadValidation::ValidateDataLoads,
-                )
-            },
-        )
-        .await;
+    testtasks.launch_websockets_client_with(
+        kolme_state_transfer2.clone(),
+        "kolme_state_transfer2",
+        &discovery,
+        |builder| {
+            builder.set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        },
+    );
 
     // Due to data size, it can take a bit to transfer the entire state
     let latest_from_gossip = tokio::time::timeout(

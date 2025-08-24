@@ -60,19 +60,17 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks
-        .launch_websockets_client_with(
-            kolme_block_transfer.clone(),
-            "kolme_block_transfer",
-            &discovery,
-            |gossip| {
-                gossip.set_sync_mode(
-                    SyncMode::BlockTransfer,
-                    DataLoadValidation::ValidateDataLoads,
-                )
-            },
-        )
-        .await;
+    testtasks.launch_websockets_client_with(
+        kolme_block_transfer.clone(),
+        "kolme_block_transfer",
+        &discovery,
+        |gossip| {
+            gossip.set_sync_mode(
+                SyncMode::BlockTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        },
+    );
 
     // We'll check at the end of the run to confirm that this never received the latest block.
     // First check that StateTransfer works
@@ -83,19 +81,17 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks
-        .launch_websockets_client_with(
-            kolme_state_transfer.clone(),
-            "kolme_state_transfer",
-            &discovery,
-            |gossip| {
-                gossip.set_sync_mode(
-                    SyncMode::StateTransfer,
-                    DataLoadValidation::ValidateDataLoads,
-                )
-            },
-        )
-        .await;
+    testtasks.launch_websockets_client_with(
+        kolme_state_transfer.clone(),
+        "kolme_state_transfer",
+        &discovery,
+        |gossip| {
+            gossip.set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        },
+    );
 
     // We should be able to sync the latest block within a few seconds
     let latest_from_gossip = tokio::time::timeout(
