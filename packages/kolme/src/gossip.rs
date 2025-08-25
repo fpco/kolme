@@ -328,10 +328,11 @@ impl<App: KolmeApp> Gossip<App> {
             GossipMessage::BroadcastTx { tx } => {
                 let txhash = tx.hash();
                 match self.kolme.propose_transaction(tx) {
-                    Ok(()) => {}
-                    Err(_) => todo!(),
+                    Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
+                    Err(e) => {
+                        tracing::warn!(%local_display_name, "Error proposing transaction {txhash}: {e}")
+                    }
                 }
-                self.kolme.mark_mempool_entry_gossiped(txhash);
             }
             GossipMessage::FailedTransaction { failed } => {
                 self.kolme.add_failed_transaction(failed);
