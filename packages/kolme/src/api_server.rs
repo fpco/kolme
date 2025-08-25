@@ -11,7 +11,6 @@ use axum::{
     Json, Router,
 };
 use reqwest::{Method, StatusCode};
-use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::*;
@@ -186,96 +185,113 @@ async fn ws_handler<App: KolmeApp>(
     State(kolme): State<Kolme<App>>,
 ) -> impl IntoResponse {
     tracing::info!("New WebSocket connection established");
-    todo!();
-    // let rx = kolme.subscribe();
-    // ws.on_upgrade(move |socket| handle_websocket::<App>(kolme, socket, rx))
+    ws.on_upgrade(move |socket| handle_websocket::<App>(kolme, socket))
 }
 
-// async fn handle_websocket<App: KolmeApp>(
-//     kolme: Kolme<App>,
-//     mut socket: WebSocket,
-//     mut rx: broadcast::Receiver<Notification<App::Message>>,
-// ) {
-//     tracing::debug!("WebSocket subscribed to Kolme notifications");
-//     let mut interval = tokio::time::interval(Duration::from_secs(30));
+enum RawMessage<AppMessage> {
+    Block(Arc<SignedBlock<AppMessage>>),
+    Failed(Arc<SignedTaggedJson<FailedTransaction>>),
+    Latest(Arc<SignedTaggedJson<LatestBlock>>),
+}
 
-//     enum Action<AppMessage> {
-//         Ping,
-//         Notification(Notification<AppMessage>),
-//     }
+async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocket) {
+    tracing::debug!("WebSocket subscribed to Kolme notifications");
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
 
-//     loop {
-//         let action = tokio::select! {
-//             _ = interval.tick() => Ok(Action::Ping),
-//             res = rx.recv() => res.map(Action::Notification),
-//         };
+    let mut next_height = kolme.read().get_next_height();
+    let mut failed_txs = kolme.subscribe_failed_txs();
+    let mut latest = kolme.subscribe_latest_block();
 
-//         let action = match action {
-//             Ok(action) => action,
-//             Err(e) => {
-//                 tracing::error!("API server websockets: error on receiving notification: {e}");
-//                 break;
-//             }
-//         };
+    async fn get_next_latest(
+        latest: &mut tokio::sync::watch::Receiver<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
+    ) -> Result<Arc<SignedTaggedJson<LatestBlock>>> {
+        loop {
+            latest.changed().await?;
+            if let Some(latest) = latest.borrow().clone().as_ref() {
+                break Ok(latest.clone());
+            }
+        }
+    }
 
-//         let msg = match action {
-//             Action::Ping => {
-//                 tracing::debug!("Sending ping");
-//                 axum::extract::ws::Message::Ping(Vec::new().into())
-//             }
-//             Action::Notification(notification) => {
-//                 let api_notification = match to_api_notification(&kolme, notification).await {
-//                     Ok(api_notification) => api_notification,
-//                     Err(e) => {
-//                         tracing::error!("API server websockets: Error converting Notification to ApiNotification: {e}");
-//                         break;
-//                     }
-//                 };
-//                 let msg = match serde_json::to_string(&api_notification) {
-//                     Ok(msg) => msg,
-//                     Err(e) => {
-//                         tracing::error!("API server websockets: error serializing API notification to string: {e}");
-//                         break;
-//                     }
-//                 };
-//                 WsMessage::Text(msg.into())
-//             }
-//         };
-//         let res = socket.send(msg).await;
+    enum Action<AppMessage> {
+        Ping,
+        Raw(RawMessage<AppMessage>),
+    }
 
-//         if let Err(e) = res {
-//             tracing::warn!("Client connection closed, stopping pings: {e}");
-//             break;
-//         }
-//         tracing::debug!("Notification sent to WebSocket client.");
-//     }
-// }
+    loop {
+        let action = tokio::select! {
+            _ = interval.tick() => Ok(Action::Ping),
+            block = kolme.wait_for_block(next_height) => {
+                next_height = next_height.next();
+                block.map(|block| Action::Raw(RawMessage::Block(block)))
+            }
+            failed = failed_txs.recv() => failed.map(|failed| Action::Raw(RawMessage::Failed(failed))).map_err(anyhow::Error::from),
+            latest = get_next_latest(&mut latest) => latest.map(|latest| Action::Raw(RawMessage::Latest(latest))),
+        };
 
-// async fn to_api_notification<App: KolmeApp>(
-//     kolme: &Kolme<App>,
-//     notification: Notification<App::Message>,
-// ) -> Result<ApiNotification<App::Message>> {
-//     match notification {
-//         Notification::NewBlock(block) => {
-//             let height = block.height();
-//             // Ensure we have the block in local storage.
-//             let block = tokio::time::timeout(
-//                 tokio::time::Duration::from_secs(20),
-//                 kolme.wait_for_block(height),
-//             )
-//             .await
-//             .with_context(|| format!("Loading logs: took too long to load block {height}"))?
-//             .with_context(|| format!("Failed to get block {height} in order to load logs"))?;
-//             let logs = kolme.load_logs(block.as_inner().logs).await?.into();
-//             Ok(ApiNotification::NewBlock { block, logs })
-//         }
-//         Notification::GenesisInstantiation { chain, contract } => {
-//             Ok(ApiNotification::GenesisInstantiation { chain, contract })
-//         }
-//         Notification::FailedTransaction(failed) => Ok(ApiNotification::FailedTransaction(failed)),
-//         Notification::LatestBlock(latest_block) => Ok(ApiNotification::LatestBlock(latest_block)),
-//     }
-// }
+        let action = match action {
+            Ok(action) => action,
+            Err(e) => {
+                tracing::error!("API server websockets: error on receiving notification: {e}");
+                break;
+            }
+        };
+
+        let msg = match action {
+            Action::Ping => {
+                tracing::debug!("Sending ping");
+                axum::extract::ws::Message::Ping(Vec::new().into())
+            }
+            Action::Raw(raw) => {
+                let api_notification = match to_api_notification(&kolme, raw).await {
+                    Ok(api_notification) => api_notification,
+                    Err(e) => {
+                        tracing::error!("API server websockets: Error converting RawMessage to ApiNotification: {e}");
+                        break;
+                    }
+                };
+                let msg = match serde_json::to_string(&api_notification) {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        tracing::error!("API server websockets: error serializing API notification to string: {e}");
+                        break;
+                    }
+                };
+                WsMessage::Text(msg.into())
+            }
+        };
+        let res = socket.send(msg).await;
+
+        if let Err(e) = res {
+            tracing::warn!("Client connection closed, stopping pings: {e}");
+            break;
+        }
+        tracing::debug!("Notification sent to WebSocket client.");
+    }
+}
+
+async fn to_api_notification<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    raw: RawMessage<App::Message>,
+) -> Result<ApiNotification<App::Message>> {
+    match raw {
+        RawMessage::Block(block) => {
+            let height = block.height();
+            // Ensure we have the block in local storage.
+            let block = tokio::time::timeout(
+                tokio::time::Duration::from_secs(20),
+                kolme.wait_for_block(height),
+            )
+            .await
+            .with_context(|| format!("Loading logs: took too long to load block {height}"))?
+            .with_context(|| format!("Failed to get block {height} in order to load logs"))?;
+            let logs = kolme.load_logs(block.as_inner().logs).await?.into();
+            Ok(ApiNotification::NewBlock { block, logs })
+        }
+        RawMessage::Failed(failed) => Ok(ApiNotification::FailedTransaction(failed)),
+        RawMessage::Latest(latest_block) => Ok(ApiNotification::LatestBlock(latest_block)),
+    }
+}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(bound(
@@ -286,11 +302,6 @@ pub enum ApiNotification<AppMessage> {
     NewBlock {
         block: Arc<SignedBlock<AppMessage>>,
         logs: Arc<[Vec<String>]>,
-    },
-    /// A claim by a submitter that it has instantiated a bridge contract.
-    GenesisInstantiation {
-        chain: ExternalChain,
-        contract: String,
     },
     /// A transaction failed in the processor.
     FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
