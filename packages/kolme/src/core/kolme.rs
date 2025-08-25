@@ -230,6 +230,11 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
+    /// Remove an entry from the mempool.
+    pub fn remove_mempool_entry(&self, txhash: TxHash) {
+        self.inner.mempool.remove(txhash);
+    }
+
     /// How long should we wait for a transaction to land before giving up?
     ///
     /// This affects [Self::propose_and_await_transaction] and [Self::sign_propose_await_transaction].

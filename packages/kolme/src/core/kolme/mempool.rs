@@ -194,6 +194,11 @@ impl<AppMessage> Mempool<AppMessage> {
             item.last_gossiped = Some(Instant::now());
         }
     }
+
+    pub(crate) fn remove(&self, hash: TxHash) {
+        let mut guard = self.state.write();
+        guard.drop_tx(hash, &self.notify);
+    }
 }
 
 impl<AppMessage> MempoolState<AppMessage> {

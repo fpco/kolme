@@ -115,8 +115,9 @@ impl<App: KolmeApp> Processor<App> {
     fn get_correct_secret(&self, kolme: &KolmeRead<App>) -> Result<&SecretKey> {
         let pubkey = &kolme.get_framework_state().get_validator_set().processor;
         self.secrets.get(pubkey).with_context(|| {
+            let pubkeys = self.secrets.keys().collect::<Vec<_>>();
             format!(
-                "Current processor pubkey is {pubkey}, but we don't have the matching secret key"
+                "Current processor pubkey is {pubkey}, but we don't have the matching secret key, we have: {pubkeys:?}"
             )
         })
     }
@@ -191,7 +192,8 @@ impl<App: KolmeApp> Processor<App> {
                 match failed {
                     Ok(failed) => self.kolme.add_failed_transaction(Arc::new(failed)),
                     Err(e) => {
-                        tracing::error!("Unable to generate failed transaction notification: {e}")
+                        tracing::error!("Unable to generate failed transaction notification: {e}");
+                        self.kolme.remove_mempool_entry(txhash);
                     }
                 }
             }

@@ -7,6 +7,7 @@ use crate::kolme_app::*;
 
 #[tokio::test]
 pub async fn test_self_replace() {
+    init_logger(true, None);
     TestTasks::start(test_self_replace_inner, ()).await;
 }
 
