@@ -337,35 +337,6 @@ impl<App: KolmeApp> Gossip<App> {
                 self.kolme.add_failed_transaction(failed);
             }
         }
-        // match message {
-        //     GossipMessage::Notification(msg) => {
-        //         match &msg {
-        //             Notification::EvictMempoolTransaction(signed_json) => {
-        //                 let pubkey = signed_json.verify_signature();
-        //                 match pubkey {
-        //                     Ok(pubkey) => {
-        //                         let processor = self
-        //                             .kolme
-        //                             .read()
-        //                             .get_framework_state()
-        //                             .get_validator_set()
-        //                             .processor;
-        //                         if pubkey != processor {
-        //                             tracing::warn!("Evict transaction was signed by {pubkey}, but processor is {processor}");
-        //                         } else {
-        //                             let txhash = signed_json.message.as_inner();
-        //                             tracing::debug!("Transaction {txhash} evicted from mempool");
-        //                             self.kolme.remove_from_mempool(*txhash);
-        //                         }
-        //                     }
-        //                     Err(e) => {
-        //                         tracing::warn!("Error verifying evict mempool signature: {e}")
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //         self.kolme.notify(msg);
-        //     }
     }
 
     async fn process_sync_manager(&self) {
