@@ -205,7 +205,7 @@ impl<App: KolmeApp> Submitter<App> {
             nonce: AccountNonce::start(),
             created: Timestamp::now(),
             messages: vec![Message::Listener {
-                chain: chain.into(),
+                chain,
                 event_id: BridgeEventId::start(),
                 event: BridgeEvent::Instantiated { contract: addr },
             }],

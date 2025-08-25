@@ -157,7 +157,7 @@ impl<App: KolmeApp> Listener<App> {
 
                 cosmos::sanity_check_contract(
                     &cosmos,
-                    &contract,
+                    contract,
                     expected_code_id,
                     self.kolme.get_app().genesis_info(),
                 )
@@ -171,7 +171,7 @@ impl<App: KolmeApp> Listener<App> {
 
                 solana::sanity_check_contract(
                     &client,
-                    &contract,
+                    contract,
                     self.kolme.get_app().genesis_info(),
                 )
                 .await
