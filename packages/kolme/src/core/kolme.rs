@@ -265,6 +265,7 @@ impl<App: KolmeApp> Kolme<App> {
         tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut new_block = self.subscribe_new_block();
+        let mut failed_tx = self.subscribe_failed_txs();
         let txhash = tx.hash();
         loop {
             match self.propose_transaction(tx.clone()) {
@@ -283,7 +284,12 @@ impl<App: KolmeApp> Kolme<App> {
                 }
             }
 
-            new_block.listen().await;
+            // Wait until we either get a new block or a new failed notification comes in.
+            tokio::select! {
+                _ = new_block.listen() => (),
+                _ = failed_tx.recv() => (),
+            };
+
             // There's a potential race condition, the transaction could have be flushed
             // from the LRU cache after successfully landing in a block. No worries if that
             // occurs, we'll try proposing again and will eventually be told by another node

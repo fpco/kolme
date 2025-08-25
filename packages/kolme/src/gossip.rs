@@ -8,7 +8,10 @@ use crate::*;
 use messages::*;
 
 use sync_manager::{DataRequest, SyncManager};
-use tokio::{sync::Mutex, task::JoinSet};
+use tokio::{
+    sync::{broadcast::error::RecvError, Mutex},
+    task::JoinSet,
+};
 
 use utils::trigger::Trigger;
 use websockets::{WebsocketsManager, WebsocketsMessage};
@@ -213,6 +216,9 @@ impl<App: KolmeApp> Gossip<App> {
                     latest.unwrap();
                     self.update_latest().await;
                 }
+                failed = failed_rx.recv() => {
+                    self.share_failed_tx(failed);
+                }
             }
         }
     }
@@ -238,7 +244,7 @@ impl<App: KolmeApp> Gossip<App> {
         self.sync_manager
             .lock()
             .await
-            .add_latest_block(&self, latest.message.as_inner())
+            .add_latest_block(self, latest.message.as_inner())
             .await;
         GossipMessage::ProvideLatestBlock { latest }.publish(self);
     }
@@ -375,6 +381,26 @@ impl<App: KolmeApp> Gossip<App> {
                 DataRequest::Merkle(hash) => GossipMessage::RequestLayer { hash },
             };
             msg.publish(self);
+        }
+    }
+
+    fn share_failed_tx(
+        &self,
+        failed: Result<
+            Arc<SignedTaggedJson<FailedTransaction>>,
+            tokio::sync::broadcast::error::RecvError,
+        >,
+    ) {
+        match failed {
+            Ok(failed) => GossipMessage::FailedTransaction { failed }.publish(self),
+            Err(e) => match e {
+                RecvError::Closed => {
+                    tracing::error!(%self.local_display_name, "Failed transaction channel was closed")
+                }
+                RecvError::Lagged(x) => {
+                    tracing::warn!(%self.local_display_name, "Failed transaction channel was lagged: {x}")
+                }
+            },
         }
     }
 }
