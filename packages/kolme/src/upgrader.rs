@@ -28,18 +28,14 @@ impl<App: KolmeApp> Upgrader<App> {
     }
 
     async fn run_inner(&self) -> Result<()> {
-        let mut subscribe = self.kolme.subscribe();
+        let mut new_block = self.kolme.subscribe_new_block();
         loop {
             if let Err(e) = self.run_single().await {
                 tracing::error!("Error in Upgrader::run_single, pausing and trying again: {e}");
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             }
 
-            let notification = subscribe.recv().await?;
-            match notification {
-                Notification::NewBlock(_) => (),
-                _ => continue,
-            }
+            new_block.listen().await;
         }
     }
 

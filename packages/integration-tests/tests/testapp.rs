@@ -236,7 +236,7 @@ async fn test_websocket_notifications_inner(
             .unwrap(),
     );
 
-    kolme.propose_transaction(tx.clone());
+    kolme.propose_transaction(tx.clone()).unwrap();
 
     // Note we previously tested for a Broadcast notification, but those are no
     // longer emited via websockets.
@@ -293,7 +293,7 @@ async fn test_validate_tx_valid_signature_inner(
             .unwrap(),
     );
 
-    kolme.propose_transaction(tx.clone());
+    kolme.propose_transaction(tx.clone()).unwrap();
 
     // Note we previously tested for a Broadcast notification, but those are no
     // longer emited via websockets.
@@ -422,7 +422,7 @@ async fn test_validate_tx_invalid_nonce_inner(
     };
     let signed_tx = Arc::new(tx.sign(&secret).unwrap());
 
-    kolme.propose_transaction(signed_tx.clone());
+    kolme.propose_transaction(signed_tx.clone()).unwrap();
 
     let read = kolme.read();
     let state = read.get_app_state();
@@ -484,7 +484,7 @@ async fn test_rejected_transaction_insufficient_balance_inner(
             .unwrap(),
     );
 
-    kolme.propose_transaction(tx_withdraw.clone());
+    kolme.propose_transaction(tx_withdraw.clone()).unwrap();
 
     let read = kolme.read();
     let state = read.get_app_state();
@@ -568,7 +568,7 @@ async fn test_many_transactions_inner(
                 .unwrap(),
         );
 
-        kolme.propose_transaction(tx.clone());
+        kolme.propose_transaction(tx.clone()).unwrap();
 
         // Note we previously tested for a Broadcast notification, but those are no
         // longer emited via websockets.

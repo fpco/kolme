@@ -14,10 +14,10 @@ use utils::trigger::TriggerSubscriber;
 
 #[cfg(any(feature = "solana", feature = "cosmwasm"))]
 use std::collections::HashMap;
-use std::{ops::Deref, sync::OnceLock, time::Duration};
+use std::{num::NonZero, ops::Deref, sync::OnceLock, time::Duration};
 
 use mempool::Mempool;
-use tokio::sync::broadcast::error::RecvError;
+pub use mempool::ProposeTransactionError;
 
 use crate::core::*;
 
@@ -41,7 +41,6 @@ pub struct Kolme<App: KolmeApp> {
 }
 
 pub(super) struct KolmeInner<App: KolmeApp> {
-    notify: tokio::sync::broadcast::Sender<Notification<App::Message>>,
     mempool: Mempool<App::Message>,
     pub(super) store: store::KolmeStore<App>,
     pub(super) app: App,
@@ -55,7 +54,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     pub(super) pass_through_conn: OnceLock<reqwest::Client>,
     current_block: RwLock<Arc<MaybeBlockInfo<App>>>,
     /// Latest block reported by the processor
-    pub(super) latest_block: RwLock<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
+    pub(super) latest_block: tokio::sync::watch::Sender<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
     /// The version of the chain the current codebase represents.
     ///
     /// If this version is different from the active version running on the chain,
@@ -63,6 +62,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     code_version: String,
     /// A channel for requesting new blocks to be synced from the network.
     block_requester: OnceLock<tokio::sync::mpsc::Sender<BlockHeight>>,
+    failed_txs: tokio::sync::broadcast::Sender<Arc<SignedTaggedJson<FailedTransaction>>>,
 }
 
 /// Access to a specific block height.
@@ -103,46 +103,30 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    /// Send a general purpose notification.
-    pub fn notify(&self, note: Notification<App::Message>) {
-        match &note {
-            Notification::NewBlock(_) => (),
-            Notification::GenesisInstantiation { .. } => (),
-            Notification::FailedTransaction(failed) => {
-                self.remove_from_mempool(failed.message.as_inner().txhash);
-            }
-            Notification::LatestBlock(latest_block) => {
-                if !self.update_latest_block(latest_block) {
-                    return;
-                }
-            }
-            Notification::EvictMempoolTransaction(_) => (),
-        }
-        // Ignore errors from notifications, it just means no one
-        // is subscribed.
-        self.inner.notify.send(note).ok();
+    /// Subscribe to wait for a new block to become available.
+    pub fn subscribe_new_block(&self) -> TriggerSubscriber {
+        // TODO confirm if this is correct, it may include any added Merkle layers too, which may be too many notifications
+        self.inner.store.subscribe()
+        // TODO need to also add some kind of listener for PostgreSQL to notify us when another node adds a block to a shared database
     }
 
-    /// Returns true if this notification should be propagated
-    fn update_latest_block(&self, latest_block: &SignedTaggedJson<LatestBlock>) -> bool {
-        // Validate the signature
-        let pubkey = match latest_block.verify_signature() {
-            Ok(pubkey) => pubkey,
-            Err(e) => {
-                tracing::warn!("Invalid signature for latest block: {e}");
-                return false;
-            }
-        };
+    /// Subscribe to failed transaction notifications from the processor.
+    pub fn subscribe_failed_txs(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<Arc<SignedTaggedJson<FailedTransaction>>> {
+        self.inner.failed_txs.subscribe()
+    }
 
-        let processor = self
-            .read()
-            .get_framework_state()
-            .validator_set
-            .as_ref()
-            .processor;
-        if pubkey != processor {
-            tracing::warn!("Latest block was signed by {pubkey}, but processor is {processor}");
-            return false;
+    /// Subscribe for notifications of new latest block information.
+    pub fn subscribe_latest_block(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<Arc<SignedTaggedJson<LatestBlock>>>> {
+        self.inner.latest_block.subscribe()
+    }
+
+    pub(crate) fn update_latest_block(&self, latest_block: Arc<SignedTaggedJson<LatestBlock>>) {
+        if let Err(e) = self.verify_processor_signature(&latest_block) {
+            tracing::warn!("Invalid processor signature on signed latest block: {e}");
         }
 
         // Returns Ok if we can proceed with overwriting the old latest, Err otherwise
@@ -170,30 +154,65 @@ impl<App: KolmeApp> Kolme<App> {
             }
         }
 
-        // Is it new information?
-        if let Some(old_latest) = self.inner.latest_block.read().clone() {
-            if check_height_when(&old_latest, latest_block).is_err() {
-                return false;
+        self.inner.latest_block.send_if_modified(|old_latest| {
+            if let Some(old_latest) = old_latest.as_ref() {
+                if check_height_when(old_latest, &latest_block).is_err() {
+                    return false;
+                }
             }
-        }
 
-        let latest_block_option = Some(Arc::new(latest_block.clone()));
-        let mut guard = self.inner.latest_block.write();
-        // Perform the check a second time to avoid a read/write lock race condition.
-        if let Some(old_latest) = &*guard {
-            if check_height_when(old_latest, latest_block).is_err() {
-                return false;
-            }
-        }
-        *guard = latest_block_option;
-        true
+            *old_latest = Some(latest_block);
+            true
+        });
     }
 
     /// Propose a new transaction for the processor to add to the chain.
     ///
     /// Note that this will not detect any issues if the transaction is rejected.
-    pub fn propose_transaction(&self, tx: Arc<SignedTransaction<App::Message>>) {
-        self.inner.mempool.add(tx);
+    pub fn propose_transaction(
+        &self,
+        tx: Arc<SignedTransaction<App::Message>>,
+    ) -> Result<(), ProposeTransactionError<App::Message>> {
+        self.inner.mempool.add(tx)
+    }
+
+    fn verify_processor_signature<T>(&self, signed: &SignedTaggedJson<T>) -> Result<()> {
+        // Note that during a key rotation, we will have a switch in the
+        // processor, and during that period some signatures will be
+        // incorrectly excluded. That's acceptable, we expect the new block data
+        // to come in quickly.
+
+        // Validate the signature
+        let pubkey = signed.verify_signature()?;
+
+        let processor = self
+            .read()
+            .get_framework_state()
+            .validator_set
+            .as_ref()
+            .processor;
+        if pubkey == processor {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "Latest block was signed by {pubkey}, but processor is {processor}"
+            ))
+        }
+    }
+
+    /// Log a failed transaction.
+    pub fn add_failed_transaction(&self, failed: Arc<SignedTaggedJson<FailedTransaction>>) {
+        if let Err(e) = self.verify_processor_signature(&failed) {
+            tracing::warn!("Invalid processor signature on signed failed transaction: {e}");
+        }
+        if self.inner.mempool.add_failed_transaction(failed.clone()) {
+            self.inner.failed_txs.send(failed).ok();
+        }
+    }
+
+    /// Remove an entry from the mempool.
+    pub fn remove_mempool_entry(&self, txhash: TxHash) {
+        self.inner.mempool.remove(txhash);
     }
 
     /// How long should we wait for a transaction to land before giving up?
@@ -231,53 +250,36 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
-        let mut recv = self.subscribe();
-        let txhash_orig = tx.hash();
-        self.propose_transaction(tx);
+        let mut new_block = self.subscribe_new_block();
+        let mut failed_tx = self.subscribe_failed_txs();
+        let txhash = tx.hash();
         loop {
-            let note = recv.recv().await?;
-            match note {
-                Notification::NewBlock(block) => {
-                    if block.tx().hash() == txhash_orig {
-                        self.wait_for_block(block.height()).await?;
-                        break Ok(block);
-                    }
+            match self.propose_transaction(tx.clone()) {
+                // The only way this should happen is if the transaction was
+                // booted from the LRU cache. In that case, just try again.
+                Ok(()) => (),
+                // Still in the mempool, so continue waiting
+                Err(ProposeTransactionError::InMempool) => (),
+                Err(ProposeTransactionError::InBlock(block)) => {
+                    debug_assert_eq!(block.tx().hash(), txhash);
+                    break Ok(block);
                 }
-                Notification::GenesisInstantiation { .. } => (),
-                Notification::FailedTransaction(failed) => {
-                    let pubkey = match failed.verify_signature() {
-                        Ok(pubkey) => pubkey,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Received invalid signature on a FailedTransaction notification: {e}"
-                            );
-                            continue;
-                        }
-                    };
-                    if pubkey
-                        != self
-                            .read()
-                            .get_framework_state()
-                            .get_validator_set()
-                            .processor
-                    {
-                        tracing::warn!(
-                            "Received a FailedTransaction notification from {pubkey}, which is not the processor, ignoring"
-                        );
-                        continue;
-                    }
-                    if txhash_orig == failed.message.as_inner().txhash {
-                        break Err(failed.message.as_inner().error.clone().into());
-                    }
+                Err(ProposeTransactionError::Failed(failed)) => {
+                    debug_assert_eq!(failed.message.as_inner().txhash, txhash);
+                    break Err(failed.message.as_inner().error.clone().into());
                 }
-                Notification::LatestBlock(_) => continue,
-                Notification::EvictMempoolTransaction(_) => continue,
             }
 
-            // Just in case we jumped some blocks, check if it landed in the interim.
-            if let Some(height) = self.get_tx_height(txhash_orig).await? {
-                return self.wait_for_block(height).await;
-            }
+            // Wait until we either get a new block or a new failed notification comes in.
+            tokio::select! {
+                _ = new_block.listen() => (),
+                _ = failed_tx.recv() => (),
+            };
+
+            // There's a potential race condition, the transaction could have be flushed
+            // from the LRU cache after successfully landing in a block. No worries if that
+            // occurs, we'll try proposing again and will eventually be told by another node
+            // that it landed in a block.
         }
     }
 
@@ -496,7 +498,7 @@ impl<App: KolmeApp> Kolme<App> {
             })
             .await?;
 
-        self.inner.mempool.drop_tx(signed_block.tx().hash());
+        self.inner.mempool.add_signed_block(signed_block.clone());
 
         // Now do the write lock
         {
@@ -515,8 +517,6 @@ impl<App: KolmeApp> Kolme<App> {
                 },
             }));
         }
-
-        self.notify(Notification::NewBlock(signed_block));
 
         // Update the archive if appropriate
         if self.get_next_to_archive().await? == height {
@@ -559,7 +559,6 @@ impl<App: KolmeApp> Kolme<App> {
             "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
         );
 
-        let txhash = signed_block.tx().hash();
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
 
@@ -589,48 +588,18 @@ impl<App: KolmeApp> Kolme<App> {
             })
             .await?;
 
-        self.inner.mempool.drop_tx(txhash);
-
-        self.notify(Notification::NewBlock(signed_block));
+        self.inner.mempool.add_signed_block(signed_block.clone());
 
         Ok(())
     }
 
-    pub async fn wait_on_mempool(
-        &self,
-        secret: Option<&SecretKey>,
-    ) -> Arc<SignedTransaction<App::Message>> {
+    pub async fn wait_on_mempool(&self) -> Arc<SignedTransaction<App::Message>> {
         loop {
             let tx = self.inner.mempool.peek().await;
             let txhash = tx.hash();
-            match self.get_tx_height(txhash).await {
-                Ok(Some(_)) => {
-                    // This means our store already has the tx hash. And this
-                    // transaction should be evicted from all nodes where it
-                    // is present in the mempool.
-                    if let Some(secret) = secret {
-                        match TaggedJson::new(txhash) {
-                            Ok(json) => {
-                                let kolme = self.read();
-                                match json.sign(secret) {
-                                    Ok(signed) => {
-                                        kolme.notify(Notification::EvictMempoolTransaction(
-                                            Arc::new(signed),
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "Error during signing of evict transaction: {e}"
-                                        );
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Error during creation of tagged json: {e}");
-                            }
-                        }
-                    }
-                    self.inner.mempool.drop_tx(txhash);
+            match self.get_tx_block(txhash).await {
+                Ok(Some(block)) => {
+                    self.inner.mempool.add_signed_block(block);
                 }
                 Ok(None) => {
                     break tx;
@@ -650,16 +619,6 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.wait_for_pool_size(0).await;
     }
 
-    /// Remove a transaction from the mempool, if present.
-    ///
-    /// If the transaction identified by `hash` is not present in the mempool,
-    /// this function will silently do nothing. This behavior is intentional
-    /// and ensures that calling this function is safe even if the transaction
-    /// has already been removed or was never added.
-    pub fn remove_from_mempool(&self, hash: TxHash) {
-        self.inner.mempool.drop_tx(hash);
-    }
-
     pub async fn new(
         app: App,
         code_version: impl Into<String>,
@@ -675,16 +634,20 @@ impl<App: KolmeApp> Kolme<App> {
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "pass_through")]
             pass_through_conn: OnceLock::new(),
-            notify: tokio::sync::broadcast::channel(100).0,
             // In the future, maybe have a Builder interface for configuring things like this
             // Default value chosen to exceed the libp2p default of 60 seconds
-            mempool: Mempool::new(Duration::from_secs(90)),
+            mempool: Mempool::new(
+                Duration::from_secs(90),
+                NonZero::new(1024).unwrap(),
+                NonZero::new(1024).unwrap(),
+            ),
             current_block: RwLock::new(Arc::new(current_block)),
             #[cfg(feature = "solana")]
             solana_endpoints: parking_lot::RwLock::new(SolanaEndpoints::default()),
-            latest_block: parking_lot::RwLock::new(None),
+            latest_block: tokio::sync::watch::Sender::new(None),
             code_version: code_version.into(),
             block_requester: OnceLock::new(),
+            failed_txs: tokio::sync::broadcast::Sender::new(100),
         };
 
         let kolme = Kolme {
@@ -699,10 +662,6 @@ impl<App: KolmeApp> Kolme<App> {
             .await?;
 
         Ok(kolme)
-    }
-
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Notification<App::Message>> {
-        self.inner.notify.subscribe()
     }
 
     /// Subscribe to get a notification each time an entry is added to the mempool.
@@ -730,7 +689,6 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given block is published
-    /// **Warning** this founction could block if fast sync gets involved as the given height could be skipped
     pub async fn wait_for_block(
         &self,
         height: BlockHeight,
@@ -783,33 +741,12 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Wait until the given transaction is published
     pub async fn wait_for_tx(&self, tx: TxHash) -> Result<BlockHeight> {
-        // Start an outer loop so that we can keep processing if we end up Lagged
+        let mut new_block = self.subscribe_new_block();
         loop {
-            // First subscribe to avoid a race condition...
-            let mut recv = self.subscribe();
-            // And then check if we have that transaction.
-            if let Some(height) = self.read().get_tx_height(tx).await? {
-                break Ok(height);
+            if let Some(height) = self.get_tx_height(tx).await? {
+                return Ok(height);
             }
-            loop {
-                match recv.recv().await {
-                    Ok(note) => match note {
-                        Notification::NewBlock(block) => {
-                            if block.0.message.as_inner().tx.hash() == tx {
-                                return Ok(block.0.message.as_inner().height);
-                            }
-                        }
-                        Notification::GenesisInstantiation { .. } => (),
-                        Notification::FailedTransaction { .. } => (),
-                        Notification::LatestBlock(_) => (),
-                        Notification::EvictMempoolTransaction(_) => (),
-                    },
-                    Err(e) => match e {
-                        RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
-                        RecvError::Lagged(_) => break,
-                    },
-                }
-            }
+            new_block.listen().await;
         }
     }
 
@@ -817,32 +754,20 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn wait_for_active_version(&self) {
         // FIXME didn't we want some kind of advertisement of new versions or something like that?
 
-        // Start an outer loop so that we can keep processing if we end up Lagged
+        // First subscribe to avoid a race condition...
+        let mut new_block = self.subscribe_new_block();
         loop {
-            // First subscribe to avoid a race condition...
-            let mut recv = self.subscribe();
-            loop {
-                // TODO: Consider if we need a better mechanism overall here.
-                // We resync here because it's possible that we added a new block via state sync but haven't loaded it yet. The fact that this bug could exist indicates we should have a better notification and block loading system.
-                if let Err(e) = self.resync().await {
-                    tracing::error!("Error resyncing in wait_for_active_version: {e}");
-                }
-
-                // And then check if we are at the desired version.
-                if self.read().get_chain_version() == self.get_code_version() {
-                    return;
-                }
-                match recv.recv().await {
-                    Ok(_) => {
-                        // Doesn't matter what the notification was, go ahead and check the
-                        // version again
-                    }
-                    Err(e) => match e {
-                        RecvError::Closed => panic!("wait_for_tx: unexpected Closed"),
-                        RecvError::Lagged(_) => break,
-                    },
-                }
+            // TODO: Consider if we need a better mechanism overall here.
+            // We resync here because it's possible that we added a new block via state sync but haven't loaded it yet. The fact that this bug could exist indicates we should have a better notification and block loading system.
+            if let Err(e) = self.resync().await {
+                tracing::error!("Error resyncing in wait_for_active_version: {e}");
             }
+
+            // And then check if we are at the desired version.
+            if self.read().get_chain_version() == self.get_code_version() {
+                return;
+            }
+            new_block.listen().await;
         }
     }
 
@@ -1072,7 +997,7 @@ impl<App: KolmeApp> Kolme<App> {
     /// regularly to keep the rest of the chain aware of what the latest known
     /// height is at various timestamps to avoid drift.
     pub fn get_latest_block(&self) -> Option<Arc<SignedTaggedJson<LatestBlock>>> {
-        self.inner.latest_block.read().clone()
+        self.inner.latest_block.borrow().clone()
     }
 
     pub fn get_code_version(&self) -> &String {
@@ -1084,6 +1009,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
+        // TODO make this return an Arc?
         self.inner.store.get_merkle_layer(hash).await
     }
 
@@ -1176,6 +1102,14 @@ impl<App: KolmeApp> Kolme<App> {
     /// Get the block height for the given transaction, if present.
     pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>> {
         self.inner.store.get_height_for_tx(tx).await
+    }
+
+    /// Get the block containing the given transaction, if present.
+    pub async fn get_tx_block(&self, tx: TxHash) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
+        let Some(height) = self.get_tx_height(tx).await? else {
+            return Ok(None);
+        };
+        Ok(Some(self.load_block(height).await?.block))
     }
 
     /// Load the block details from the database

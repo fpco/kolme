@@ -15,6 +15,12 @@ struct CachedBytesInner {
     bytes: Arc<[u8]>,
 }
 
+impl AsRef<[u8]> for CachedBytes {
+    fn as_ref(&self) -> &[u8] {
+        &self.0.bytes
+    }
+}
+
 impl CachedBytes {
     pub fn hash(&self) -> Sha256Hash {
         self.0.hash

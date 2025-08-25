@@ -68,27 +68,12 @@ async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
         .propose_and_await_transaction(tx.clone())
         .await
         .unwrap();
-    let mut subscription = kolme.subscribe();
 
     tracing::info!("Going to propose tx: {}", tx.hash());
-    kolme.propose_transaction(tx);
-    assert!(
-        !kolme.get_mempool_entries().is_empty(),
-        "Mempool should not be empty"
-    );
-    loop {
-        match subscription.recv().await {
-            Ok(note) => match note {
-                Notification::NewBlock(_) => (),
-                Notification::GenesisInstantiation { .. } => (),
-                Notification::FailedTransaction(_) => (),
-                Notification::LatestBlock(_) => (),
-                Notification::EvictMempoolTransaction(_) => {
-                    break;
-                }
-            },
-            Err(_) => panic!("Error from subscription"),
-        }
+    let err = kolme.propose_transaction(tx).unwrap_err();
+    match err {
+        ProposeTransactionError::InBlock(_) => (),
+        _ => panic!("{err:?}"),
     }
     assert!(
         kolme.get_mempool_entries().is_empty(),

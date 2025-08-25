@@ -1732,63 +1732,26 @@ pub struct AssetAmount {
     pub amount: u128, // FIXME use a Decimal representation
 }
 
-/// Notifications that can come from the Kolme framework to components.
-///
-/// TODO this will ultimately be incorporated into a p2p network of events.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(bound(
-    serialize = "",
-    deserialize = "AppMessage: serde::de::DeserializeOwned"
-))]
-pub enum Notification<AppMessage> {
-    NewBlock(Arc<SignedBlock<AppMessage>>),
-    /// A claim by a submitter that it has instantiated a bridge contract.
-    GenesisInstantiation {
-        chain: ExternalChain,
-        contract: String,
-    },
-    /// A transaction failed in the processor.
-    ///
-    /// The message is signed by the processor. Only failed transactions
-    /// signed by the real processor should be respected for dropping
-    /// transactions from the mempool.
-    FailedTransaction(Arc<SignedTaggedJson<FailedTransaction>>),
-    /// Notification from the processor of the latest known block.
-    LatestBlock(Arc<SignedTaggedJson<LatestBlock>>),
-    /// Instructs nodes to remove a transaction from their mempool.
-    ///
-    /// This is necessary when a node broadcasts a transaction that has already
-    /// been included in the blockchain. Other nodes, upon receiving this
-    //  notification, should evict the specified transaction from their mempool
-    /// to prevent broadcasting it again. The `TxHash` identifies the transaction
-    /// to be evicted.
-    EvictMempoolTransaction(Arc<SignedTaggedJson<TxHash>>),
-}
-
-impl<AppMessage> Notification<AppMessage> {
-    pub(crate) fn hash(&self) -> Option<Sha256Hash> {
-        match self {
-            Notification::NewBlock(signed_block) => Some(signed_block.hash().0),
-            Notification::GenesisInstantiation { .. } => None,
-            Notification::FailedTransaction(signed_tagged_json) => {
-                Some(signed_tagged_json.message_hash())
-            }
-            Notification::LatestBlock(signed_tagged_json) => {
-                Some(signed_tagged_json.message_hash())
-            }
-            Notification::EvictMempoolTransaction(signed_tagged_json) => {
-                Some(signed_tagged_json.message_hash())
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FailedTransaction {
     pub txhash: TxHash,
     /// Block height we attempted to generate.
     pub proposed_height: BlockHeight,
     pub error: KolmeError,
+}
+
+impl Display for FailedTransaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let FailedTransaction {
+            txhash,
+            proposed_height,
+            error,
+        } = self;
+        write!(
+            f,
+            "Failed transaction {txhash} proposed at height {proposed_height}: {error}"
+        )
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

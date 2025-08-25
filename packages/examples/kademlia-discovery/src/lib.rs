@@ -202,7 +202,7 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
         // Adds tx to mempool.
         time::sleep(Duration::from_secs(5)).await;
         tracing::info!("Proposing duplicate tx: {}", tx.hash());
-        kolme.propose_transaction(tx.clone());
+        kolme.propose_transaction(tx.clone()).unwrap();
     }
 }
 

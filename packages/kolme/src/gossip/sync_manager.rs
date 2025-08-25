@@ -9,7 +9,7 @@ use std::{
     time::Instant,
 };
 
-use gossip::{websockets::WebsocketsPrivateSender, ReportBlockHeight, Trigger};
+use gossip::Trigger;
 use smallvec::SmallVec;
 use utils::trigger::TriggerSubscriber;
 
@@ -27,12 +27,9 @@ pub(super) struct SyncManager<App: KolmeApp> {
 #[derive(Debug)]
 enum WaitingBlock<App: KolmeApp> {
     /// We haven't received the basic block info yet.
-    Needed(RequestStatus<App>),
+    Needed(RequestStatus),
     /// We have the raw block, but haven't processed it yet.
-    Received {
-        block: Arc<SignedBlock<App::Message>>,
-        peer: Option<WebsocketsPrivateSender<App>>,
-    },
+    Received(Arc<SignedBlock<App::Message>>),
     /// We've received the block info, but now need to download the state layers.
     Pending(PendingBlock<App>),
 }
@@ -41,9 +38,9 @@ enum WaitingBlock<App: KolmeApp> {
 struct PendingBlock<App: KolmeApp> {
     block: Arc<SignedBlock<App::Message>>,
     /// Layers we're interested in but haven't received any info on yet.
-    needed_layers: BTreeMap<Sha256Hash, RequestStatus<App>>,
+    needed_layers: BTreeMap<Sha256Hash, RequestStatus>,
     /// Merkle layers that don't yet have the full content for the children.
-    pending_layers: HashMap<Sha256Hash, MerkleLayerContents>,
+    pending_layers: HashMap<Sha256Hash, Arc<MerkleLayerContents>>,
     /// A reverse map for pending layers: parents waiting on children.
     ///
     /// Every time we discover a layer with unknown children, we fill in
@@ -53,29 +50,13 @@ struct PendingBlock<App: KolmeApp> {
     reverse_layers: HashMap<Sha256Hash, HashSet<Sha256Hash>>,
 }
 
-#[derive(Debug)]
-pub(super) struct DataRequest<App: KolmeApp> {
-    pub(super) data: DataLabel,
-    pub(super) current_peers: SmallVec<[WebsocketsPrivateSender<App>; DEFAULT_PEER_COUNT]>,
-    pub(super) request_new_peers: bool,
-}
-
-#[derive(Debug)]
-enum ShouldRequest {
-    DontRequest,
-    RequestNoPeers,
-    RequestWithPeers,
-}
-
 /// Status of a request for data.
 #[derive(Debug)]
-struct RequestStatus<App: KolmeApp> {
+struct RequestStatus {
     /// When was the last time we made a request?
     ///
     /// This starts off as [None]. The first time we make a request, we use the original peer only. Thereafter, we always request new peers as well.
     last_sent: Option<Instant>,
-    /// Peers we can query for the data.
-    peers: SmallVec<[WebsocketsPrivateSender<App>; DEFAULT_PEER_COUNT]>,
     /// Last time we updated the warning state.
     ///
     /// Warning state is to track how long a request has been unanswered. We update it (1) the first time we make a request and (2) every time we print out a warning.
@@ -83,46 +64,26 @@ struct RequestStatus<App: KolmeApp> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DataLabel {
+pub(super) enum DataRequest {
     Block(BlockHeight),
     Merkle(Sha256Hash),
 }
 
-impl Display for DataLabel {
+impl Display for DataRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            DataLabel::Block(height) => write!(f, "block {height}"),
-            DataLabel::Merkle(hash) => write!(f, "merkle layer {hash}"),
+            DataRequest::Block(height) => write!(f, "block {height}"),
+            DataRequest::Merkle(hash) => write!(f, "merkle layer {hash}"),
         }
     }
 }
 
-impl<App: KolmeApp> RequestStatus<App> {
-    fn new(peer: Option<WebsocketsPrivateSender<App>>) -> Self {
+impl RequestStatus {
+    fn new() -> Self {
         RequestStatus {
             last_sent: None,
-            peers: peer.into_iter().collect(),
             warning_updated: None,
         }
-    }
-
-    fn add_peer(&mut self, gossip: &Gossip<App>, peer: WebsocketsPrivateSender<App>) {
-        // Don't add a duplicate
-        if self.peers.contains(&peer) {
-            return;
-        }
-
-        // If we had no peers previously, reset the last_sent so
-        // that we'll immediately make a request.
-        if self.peers.is_empty() {
-            self.last_sent = None;
-        }
-
-        if self.peers.len() >= gossip.max_peer_count {
-            debug_assert!(self.peers.len() == gossip.max_peer_count);
-            self.peers.remove(0);
-        }
-        self.peers.push(peer);
     }
 
     /// Check if we should try this request again.
@@ -130,16 +91,10 @@ impl<App: KolmeApp> RequestStatus<App> {
     /// This will automatically update the [last_sent] field if a request
     /// should be made. It's also responsible for printing warnings for
     /// requests that are taking too long.
-    fn should_request(&mut self, gossip: &Gossip<App>, label: DataLabel) -> ShouldRequest {
+    fn should_request<App: KolmeApp>(&mut self, gossip: &Gossip<App>, label: DataRequest) -> bool {
         let res = match self.last_sent {
-            None => ShouldRequest::RequestNoPeers,
-            Some(last_sent) => {
-                if last_sent.elapsed().as_secs() < 2 {
-                    ShouldRequest::DontRequest
-                } else {
-                    ShouldRequest::RequestWithPeers
-                }
-            }
+            None => true,
+            Some(last_sent) => last_sent.elapsed().as_secs() >= 2,
         };
 
         let now = Instant::now();
@@ -155,17 +110,11 @@ impl<App: KolmeApp> RequestStatus<App> {
                 }
             }
         }
-        match res {
-            ShouldRequest::DontRequest => (),
-            ShouldRequest::RequestNoPeers | ShouldRequest::RequestWithPeers => {
-                self.last_sent = Some(Instant::now())
-            }
+
+        if res {
+            self.last_sent = Some(Instant::now())
         }
         res
-    }
-
-    fn remove_peer(&mut self, peer: WebsocketsPrivateSender<App>) {
-        self.peers.retain(|x| x != &peer);
     }
 }
 
@@ -187,46 +136,21 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
         height: BlockHeight,
-        peer: Option<WebsocketsPrivateSender<App>>,
     ) -> Result<()> {
         if gossip.kolme.has_block(height).await? || self.needed_blocks.contains_key(&height) {
             return Ok(());
         }
 
         self.needed_blocks
-            .insert(height, WaitingBlock::Needed(RequestStatus::new(peer)));
+            .insert(height, WaitingBlock::Needed(RequestStatus::new()));
         self.trigger.trigger();
         Ok(())
-    }
-
-    pub(super) fn add_block_peer(
-        &mut self,
-        gossip: &Gossip<App>,
-        height: BlockHeight,
-        peer: WebsocketsPrivateSender<App>,
-    ) {
-        if let Some(WaitingBlock::Needed(status)) = self.needed_blocks.get_mut(&height) {
-            status.add_peer(gossip, peer);
-            self.trigger.trigger();
-        }
-    }
-
-    pub(super) fn remove_block_peer(
-        &mut self,
-        height: BlockHeight,
-        peer: WebsocketsPrivateSender<App>,
-    ) {
-        if let Some(WaitingBlock::Needed(status)) = self.needed_blocks.get_mut(&height) {
-            status.remove_peer(peer);
-            self.trigger.trigger();
-        }
     }
 
     pub(super) async fn add_pending_block(
         &mut self,
         gossip: &Gossip<App>,
         block: Arc<SignedBlock<App::Message>>,
-        peer: Option<WebsocketsPrivateSender<App>>,
     ) {
         let height = block.height();
 
@@ -252,7 +176,7 @@ impl<App: KolmeApp> SyncManager<App> {
         match waiting {
             // We needed this block, so let's do it.
             WaitingBlock::Needed(_) => {
-                *waiting = WaitingBlock::Received { block, peer };
+                *waiting = WaitingBlock::Received(block);
                 self.trigger.trigger();
             }
             // We already got it, nothing to do.
@@ -264,8 +188,7 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
         hash: Sha256Hash,
-        layer: MerkleLayerContents,
-        peer: WebsocketsPrivateSender<App>,
+        layer: Arc<MerkleLayerContents>,
     ) -> Result<()> {
         let Some(mut entry) = self.needed_blocks.first_entry() else {
             return Ok(());
@@ -294,7 +217,7 @@ impl<App: KolmeApp> SyncManager<App> {
                     pending
                         .needed_layers
                         .entry(*child)
-                        .or_insert(RequestStatus::new(Some(peer.clone())));
+                        .or_insert(RequestStatus::new());
                 }
             }
 
@@ -315,7 +238,7 @@ impl<App: KolmeApp> SyncManager<App> {
     pub(super) async fn get_data_requests(
         &mut self,
         gossip: &Gossip<App>,
-    ) -> Result<SmallVec<[DataRequest<App>; DEFAULT_REQUEST_COUNT]>> {
+    ) -> Result<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>> {
         // We need to make sure that we are correctly performing
         // requests in order. That means that, in some cases, we'll
         // need to insert earlier block requests so that we fill in
@@ -355,7 +278,7 @@ impl<App: KolmeApp> SyncManager<App> {
                 if let Some((next_needed, _)) = self.needed_blocks.first_key_value() {
                     let next_to_archive = gossip.kolme.get_next_to_archive().await?;
                     if next_to_archive < *next_needed {
-                        self.add_needed_block(gossip, next_to_archive, None).await?;
+                        self.add_needed_block(gossip, next_to_archive).await?;
                     }
                 }
             }
@@ -366,7 +289,7 @@ impl<App: KolmeApp> SyncManager<App> {
                     let next_needed = *next_needed;
                     let next_chain = gossip.kolme.read().get_next_height();
                     if next_needed != next_chain {
-                        self.add_needed_block(gossip, next_chain, None).await?;
+                        self.add_needed_block(gossip, next_chain).await?;
                     }
                 }
             }
@@ -379,8 +302,8 @@ impl<App: KolmeApp> SyncManager<App> {
         gossip: &Gossip<App>,
         height: BlockHeight,
         waiting: &mut WaitingBlock<App>,
-    ) -> Result<Option<SmallVec<[DataRequest<App>; DEFAULT_REQUEST_COUNT]>>> {
-        let label = DataLabel::Block(height);
+    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>> {
+        let label = DataRequest::Block(height);
         // Check if it got added to our store in the meanwhile
         if gossip.kolme.has_block(height).await? {
             return Ok(None);
@@ -388,24 +311,13 @@ impl<App: KolmeApp> SyncManager<App> {
 
         match waiting {
             WaitingBlock::Needed(status) => {
-                let request_new_peers = match status.should_request(gossip, label) {
-                    ShouldRequest::DontRequest => {
-                        return Ok(Some(SmallVec::new()));
-                    }
-                    ShouldRequest::RequestNoPeers => false,
-                    ShouldRequest::RequestWithPeers => true,
-                };
-
-                Ok(Some(
-                    std::iter::once(DataRequest {
-                        data: label,
-                        current_peers: status.peers.clone(),
-                        request_new_peers,
-                    })
-                    .collect(),
-                ))
+                if status.should_request(gossip, label) {
+                    Ok(Some(std::iter::once(label).collect()))
+                } else {
+                    Ok(Some(SmallVec::new()))
+                }
             }
-            WaitingBlock::Received { block, peer } => {
+            WaitingBlock::Received(block) => {
                 // Determine if we're going to use block or state sync.
                 let do_block = match gossip.sync_mode {
                     SyncMode::BlockTransfer => true,
@@ -444,9 +356,7 @@ impl<App: KolmeApp> SyncManager<App> {
                     let inner = pending.block.0.message.as_inner();
                     for hash in [inner.framework_state, inner.app_state, inner.logs] {
                         if !gossip.kolme.has_merkle_hash(hash).await? {
-                            pending
-                                .needed_layers
-                                .insert(hash, RequestStatus::new(peer.clone()));
+                            pending.needed_layers.insert(hash, RequestStatus::new());
                         }
                     }
 
@@ -462,7 +372,7 @@ impl<App: KolmeApp> SyncManager<App> {
     async fn get_block_data_requests(
         gossip: &Gossip<App>,
         pending: &mut PendingBlock<App>,
-    ) -> Result<Option<SmallVec<[DataRequest<App>; DEFAULT_REQUEST_COUNT]>>> {
+    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>> {
         let mut active_count = 0;
         let mut layers_to_drop = SmallVec::<[Sha256Hash; DEFAULT_REQUEST_COUNT]>::new();
         let mut res = SmallVec::new();
@@ -471,7 +381,7 @@ impl<App: KolmeApp> SyncManager<App> {
                 break;
             }
             let hash = *hash;
-            let label = DataLabel::Merkle(hash);
+            let label = DataRequest::Merkle(hash);
             // Check if it got added to our store in the meanwhile
             if gossip.kolme.has_merkle_hash(hash).await? {
                 layers_to_drop.push(hash);
@@ -480,19 +390,9 @@ impl<App: KolmeApp> SyncManager<App> {
 
             active_count += 1;
 
-            let request_new_peers = match status.should_request(gossip, label) {
-                ShouldRequest::DontRequest => {
-                    continue;
-                }
-                ShouldRequest::RequestNoPeers => false,
-                ShouldRequest::RequestWithPeers => true,
-            };
-
-            res.push(DataRequest {
-                data: label,
-                current_peers: status.peers.clone(),
-                request_new_peers,
-            });
+            if status.should_request(gossip, label) {
+                res.push(label);
+            }
         }
 
         for hash in layers_to_drop {
@@ -563,67 +463,14 @@ impl<App: KolmeApp> SyncManager<App> {
         Ok(())
     }
 
-    pub(super) fn add_layer_peer(
+    pub(super) async fn add_latest_block(
         &mut self,
         gossip: &Gossip<App>,
-        hash: Sha256Hash,
-        peer: WebsocketsPrivateSender<App>,
+        latest_block: &LatestBlock,
     ) {
-        let Some(mut entry) = self.needed_blocks.first_entry() else {
-            return;
-        };
-        if let WaitingBlock::Pending(pending) = entry.get_mut() {
-            if let Some(status) = pending.needed_layers.get_mut(&hash) {
-                status.add_peer(gossip, peer);
-                self.trigger.trigger();
-            }
-        }
-    }
-
-    pub(super) fn remove_layer_peer(
-        &mut self,
-        hash: Sha256Hash,
-        peer: WebsocketsPrivateSender<App>,
-    ) {
-        let Some(mut entry) = self.needed_blocks.first_entry() else {
-            return;
-        };
-        if let WaitingBlock::Pending(pending) = entry.get_mut() {
-            if let Some(status) = pending.needed_layers.get_mut(&hash) {
-                status.remove_peer(peer);
-                self.trigger.trigger();
-            }
-        }
-    }
-
-    pub(super) async fn add_new_block(
-        &mut self,
-        gossip: &Gossip<App>,
-        block: &Arc<SignedBlock<App::Message>>,
-    ) {
-        match self.add_needed_block(gossip, block.height(), None).await {
-            Ok(()) => self.add_pending_block(gossip, block.clone(), None).await,
-            Err(e) => {
-                tracing::warn!("{}: add_new_block error: {e}", gossip.local_display_name);
-            }
-        }
-    }
-
-    pub(super) async fn add_report_block_height(
-        &mut self,
-        gossip: &Gossip<App>,
-        ReportBlockHeight {
-            next,
-            timestamp: _,
-            latest_block: _,
-        }: ReportBlockHeight,
-        peer: WebsocketsPrivateSender<App>,
-    ) {
-        let Some(height) = next.prev() else { return };
-
         // All sync preferences currently want to download latest blocks.
         // So add this to the needed blocks.
-        if let Err(e) = self.add_needed_block(gossip, height, Some(peer)).await {
+        if let Err(e) = self.add_needed_block(gossip, latest_block.height).await {
             tracing::warn!(
                 "{}: got error while adding needed block from a block height report: {e}",
                 gossip.local_display_name
@@ -632,6 +479,5 @@ impl<App: KolmeApp> SyncManager<App> {
     }
 }
 
-pub(super) const DEFAULT_PEER_COUNT: usize = 4;
 pub(super) const DEFAULT_REQUEST_COUNT: usize = 8;
 pub(super) const DEFAULT_WARNING_PERIOD_SECS: u64 = 5;

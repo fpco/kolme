@@ -7,6 +7,7 @@ use crate::kolme_app::*;
 
 #[tokio::test]
 pub async fn test_self_replace() {
+    init_logger(true, None);
     TestTasks::start(test_self_replace_inner, ()).await;
 }
 
@@ -103,7 +104,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
             .unwrap(),
     );
     let txhash = tx.hash();
-    kolme.propose_transaction(tx.clone());
+    kolme.propose_transaction(tx.clone()).unwrap();
 
     // Wait for the mempool to clear out, meaning the processor tried to process
     kolme.wait_on_empty_mempool().await;
@@ -126,7 +127,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     assert_eq!(kolme.get_tx_height(txhash).await.unwrap(), None);
 
     // And try broadcasting the transaction again, it should work this time.
-    kolme2.propose_transaction(tx);
+    kolme2.propose_transaction(tx).unwrap();
     kolme2.wait_on_empty_mempool().await;
     assert_ne!(kolme2.get_tx_height(txhash).await.unwrap(), None);
 }

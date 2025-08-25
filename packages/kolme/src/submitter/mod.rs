@@ -3,7 +3,10 @@ mod cosmos;
 #[cfg(feature = "solana")]
 mod solana;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+
+use tokio::sync::RwLock;
+use utils::trigger::Trigger;
 
 use crate::*;
 
@@ -20,7 +23,9 @@ pub struct Submitter<App: KolmeApp> {
     ///
     /// Simple solution: only instantiate once per chain.
     #[allow(dead_code)] // Unused when only the "pass_through" feature is enabled.
-    genesis_created: HashSet<ExternalChain>,
+    genesis_created: Arc<RwLock<HashMap<ExternalChain, String>>>,
+    #[allow(dead_code)] // Unused when only the "pass_through" feature is enabled.
+    trigger_genesis_available: Trigger,
     last_submitted: HashMap<ExternalChain, BridgeActionId>,
 }
 
@@ -57,7 +62,8 @@ impl<App: KolmeApp> Submitter<App> {
             kolme,
             args: ChainArgs::Cosmos { seed_phrase },
             last_submitted: HashMap::new(),
-            genesis_created: HashSet::new(),
+            genesis_created: Default::default(),
+            trigger_genesis_available: Trigger::new("submitter-genesis-available"),
         }
     }
 
@@ -74,7 +80,8 @@ impl<App: KolmeApp> Submitter<App> {
                 fee_per_cu,
             },
             last_submitted: HashMap::new(),
-            genesis_created: HashSet::new(),
+            genesis_created: Default::default(),
+            trigger_genesis_available: Trigger::new("submitter-genesis-available"),
         }
     }
 
@@ -84,7 +91,8 @@ impl<App: KolmeApp> Submitter<App> {
             kolme,
             args: ChainArgs::PassThrough { port },
             last_submitted: HashMap::new(),
-            genesis_created: HashSet::new(),
+            genesis_created: Default::default(),
+            trigger_genesis_available: Trigger::new("submitter-genesis-available"),
         }
     }
 
@@ -103,23 +111,61 @@ impl<App: KolmeApp> Submitter<App> {
             return Ok(());
         }
 
-        let mut receiver = self.kolme.subscribe();
+        let mut new_block = self.kolme.subscribe_new_block();
         self.submit_zero_or_one(&chains).await?;
         tracing::info!("Submitter has caught up, waiting for new events.");
 
-        loop {
-            match receiver.recv().await? {
-                Notification::NewBlock(_) => (),
-                Notification::GenesisInstantiation {
-                    chain: _,
-                    contract: _,
-                } => continue,
-                Notification::FailedTransaction { .. } => continue,
-                Notification::LatestBlock(_) => continue,
-                Notification::EvictMempoolTransaction(_) => continue,
+        let mut listen_genesis_available = self.trigger_genesis_available.subscribe();
+
+        // This somewhat complex setup is to allow for retrying submission of
+        // proposed genesis contracts. Without it, we have potential race conditions
+        // (especially in test cases) of the submitter sending the proposal before the listener
+        // is ready to receive the events. With this in place, we retry automatically.
+        //
+        // MSS 2025-08-25: it's possible that we should really be adding a broadcast channel
+        // to the Kolme type for all incoming mempool actions to avoid the processor rejecting
+        // a transaction before the listener sees it. For now, I'm considering this enough of
+        // a corner case that relying on the retry logic is Good Enough, especially since
+        // this entire code path only occurs once per application.
+        let genesis_kolme = self.kolme.clone();
+        let genesis_created = self.genesis_created.clone();
+        let genesis = async {
+            while let Some(action) = genesis_kolme.read().get_next_genesis_action() {
+                let chain: ExternalChain = match action {
+                    GenesisAction::InstantiateCosmos { chain, .. } => chain.into(),
+                    GenesisAction::InstantiateSolana { chain, .. } => chain.into(),
+                };
+                if let Some(contract) = genesis_created.read().await.get(&chain).cloned() {
+                    if let Err(e) = Self::propose(&genesis_kolme, chain, contract) {
+                        tracing::warn!(
+                            "Submitter: error proposing bridge genesis for {chain}: {e}"
+                        );
+                    }
+                }
+
+                // Wait for 1 second to retry any pending genesis actions, or
+                // go ahead immediately if we were triggered by the ongoing loop.
+                tokio::select! {
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => (),
+                    _ = listen_genesis_available.listen() => (),
+                }
             }
-            self.submit_zero_or_one(&chains).await?;
-        }
+            anyhow::Ok(())
+        };
+
+        let ongoing = async {
+            loop {
+                new_block.listen().await;
+                // Fix some type inference annoyances
+                if let Err(e) = self.submit_zero_or_one(&chains).await {
+                    break Err::<(), _>(e);
+                }
+            }
+        };
+
+        tokio::try_join!(genesis, ongoing)?;
+
+        Ok(())
     }
 
     /// Submit 0 transactions (if nothing is needed) or the next event's transactions.
@@ -155,19 +201,16 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 };
 
-                if self.genesis_created.contains(&chain.into()) {
+                let mut guard = self.genesis_created.write().await;
+                if guard.contains_key(&chain.into()) {
                     return Ok(());
                 }
 
                 let cosmos = self.kolme.read().get_cosmos(chain).await?;
                 let addr = cosmos::instantiate(&cosmos, seed_phrase, code_id, args).await?;
 
-                self.kolme.notify(Notification::GenesisInstantiation {
-                    chain: chain.into(),
-                    contract: addr,
-                });
-
-                self.genesis_created.insert(chain.into());
+                guard.insert(chain.into(), addr);
+                self.trigger_genesis_available.trigger();
 
                 Ok(())
             }
@@ -188,25 +231,44 @@ impl<App: KolmeApp> Submitter<App> {
                     return Ok(());
                 };
 
-                if self.genesis_created.contains(&chain.into()) {
+                let mut guard = self.genesis_created.write().await;
+                if guard.contains_key(&chain.into()) {
                     return Ok(());
                 }
 
                 let client = self.kolme.read().get_solana_client(chain).await;
                 solana::instantiate(&client, keypair, &program_id, args).await?;
 
-                self.kolme.notify(Notification::GenesisInstantiation {
-                    chain: chain.into(),
-                    contract: program_id,
-                });
-
-                self.genesis_created.insert(chain.into());
+                guard.insert(chain.into(), program_id);
+                self.trigger_genesis_available.trigger();
 
                 Ok(())
             }
             #[cfg(not(feature = "solana"))]
             GenesisAction::InstantiateSolana { .. } => Ok(()),
         }
+    }
+
+    fn propose(kolme: &Kolme<App>, chain: ExternalChain, addr: String) -> Result<()> {
+        // We broadcast our own transaction for genesis instantiation, using an
+        // arbitrary secret key. The listeners will watch for such transactions
+        // and, if they're satisfied with our generated contracts, rebroadcast
+        // with their own signature.
+        let secret = SecretKey::random();
+        let tx = Transaction {
+            pubkey: secret.public_key(),
+            nonce: AccountNonce::start(),
+            created: Timestamp::now(),
+            messages: vec![Message::Listener {
+                chain,
+                event_id: BridgeEventId::start(),
+                event: BridgeEvent::Instantiated { contract: addr },
+            }],
+            max_height: None,
+        };
+        let tx = Arc::new(tx.sign(&secret)?);
+        kolme.propose_transaction(tx)?;
+        Ok(())
     }
 
     async fn handle_bridge_action(

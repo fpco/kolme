@@ -11,12 +11,11 @@ impl<App: KolmeApp> Approver<App> {
     }
 
     pub async fn run(self) -> Result<()> {
-        let mut receiver = self.kolme.subscribe();
+        let mut new_block = self.kolme.subscribe_new_block();
         self.catch_up_approvals_all().await?;
         loop {
-            if let Notification::NewBlock(_) = receiver.recv().await? {
-                self.catch_up_approvals_all().await?;
-            }
+            new_block.listen().await;
+            self.catch_up_approvals_all().await?;
         }
     }
 

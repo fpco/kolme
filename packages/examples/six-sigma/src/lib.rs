@@ -479,34 +479,24 @@ impl TxLogger {
 
     async fn run(self) -> Result<()> {
         let mut file = File::create(self.path)?;
-        let mut receiver = self.kolme.subscribe();
+        let mut height = BlockHeight::start();
         loop {
-            let notification = receiver.recv().await?;
-            let output = match notification.clone() {
-                Notification::FailedTransaction(_) => continue,
-                Notification::NewBlock(msg) => {
-                    let block = msg.0.message.as_inner();
-                    let height = block.height;
-                    let messages = block
-                        .tx
-                        .0
-                        .message
-                        .as_inner()
-                        .messages
-                        .iter()
-                        .cloned()
-                        .map(LoggedMessage::from)
-                        .collect();
-                    LogOutput::NewBlock { height, messages }
-                }
-                Notification::GenesisInstantiation { .. } => LogOutput::GenesisInstantiation,
-                Notification::LatestBlock(_) => continue,
-                Notification::EvictMempoolTransaction(_) => continue,
-            };
+            let block = self.kolme.wait_for_block(height).await?;
+            let messages = block
+                .tx()
+                .0
+                .message
+                .as_inner()
+                .messages
+                .iter()
+                .cloned()
+                .map(LoggedMessage::from)
+                .collect::<Vec<_>>();
+            let output = LogOutput::NewBlock { height, messages };
             serde_json::to_writer(&file, &output)?;
             writeln!(file)?;
             file.flush()?;
-            tracing::info!("Log output: {notification:?}");
+            height = height.next();
         }
     }
 }
