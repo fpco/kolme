@@ -184,6 +184,8 @@ impl<App: KolmeApp> Gossip<App> {
 
         let mut latest_watch = self.kolme.subscribe_latest_block();
 
+        let mut failed_rx = self.kolme.subscribe_failed_txs();
+
         loop {
             tokio::select! {
                 // Periodically notify the p2p network of our latest block height

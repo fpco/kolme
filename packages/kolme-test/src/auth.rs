@@ -107,11 +107,9 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    let mut subscription = kolme.subscribe();
-
     testtasks
         .try_spawn_persistent(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
-    subscription.recv().await.unwrap();
+    kolme.wait_for_block(BlockHeight::start()).await.unwrap();
 
     let secret1 = SecretKey::random();
     let secret2 = SecretKey::random();
@@ -129,21 +127,10 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
                 .read()
                 .execute_transaction(&tx, Timestamp::now(), BlockDataHandling::NoPriorData)
                 .await?;
-            let mut subscribe = kolme.subscribe();
             let next_height = kolme.read().get_next_height();
             kolme.propose_and_await_transaction(tx).await?;
-            loop {
-                match subscribe.recv().await? {
-                    Notification::NewBlock(block) => {
-                        if block.0.message.as_inner().height == next_height {
-                            break anyhow::Ok(());
-                        }
-                    }
-                    Notification::GenesisInstantiation { .. } => (),
-                    Notification::FailedTransaction { .. } => (),
-                    Notification::LatestBlock(_) => (),
-                }
-            }
+            kolme.wait_for_block(next_height).await?;
+            anyhow::Ok(())
         }
     };
 

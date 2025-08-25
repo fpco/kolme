@@ -136,24 +136,16 @@ async fn multiple_processors_inner(
 }
 
 async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
-    let mut recv = kolme.subscribe();
-    loop {
-        match recv.recv().await? {
-            Notification::NewBlock(_) => (),
-            Notification::GenesisInstantiation { .. } => (),
-            Notification::FailedTransaction(failed) => {
-                let FailedTransaction {
-                    txhash,
-                    error,
-                    proposed_height,
-                } = failed.message.as_inner();
-                anyhow::bail!(
-                    "Error with transaction {txhash} for block {proposed_height}: {error}"
-                )
-            }
-            Notification::LatestBlock(_) => (),
-        }
-    }
+    let mut failed_txs = kolme.subscribe_failed_txs();
+    let failed = failed_txs.recv().await?;
+    let FailedTransaction {
+        txhash,
+        proposed_height,
+        error,
+    } = failed.message.as_inner();
+    Err(anyhow::anyhow!(
+        "Error with transaction {txhash} for block {proposed_height}: {error}"
+    ))
 }
 
 async fn client(

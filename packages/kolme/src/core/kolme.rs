@@ -61,6 +61,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     code_version: String,
     /// A channel for requesting new blocks to be synced from the network.
     block_requester: OnceLock<tokio::sync::mpsc::Sender<BlockHeight>>,
+    failed_txs: tokio::sync::broadcast::Sender<Arc<SignedTaggedJson<FailedTransaction>>>,
 }
 
 /// Access to a specific block height.
@@ -108,6 +109,13 @@ impl<App: KolmeApp> Kolme<App> {
         // TODO need to also add some kind of listener for PostgreSQL to notify us when another node adds a block to a shared database
     }
 
+    /// Subscribe to failed transaction notifications from the processor.
+    pub fn subscribe_failed_txs(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<Arc<SignedTaggedJson<FailedTransaction>>> {
+        self.inner.failed_txs.subscribe()
+    }
+
     // FIXME
     // /// Send a general purpose notification.
     // pub fn notify(&self, note: Notification<App::Message>) {
@@ -136,24 +144,8 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     pub(crate) fn update_latest_block(&self, latest_block: Arc<SignedTaggedJson<LatestBlock>>) {
-        // Validate the signature
-        let pubkey = match latest_block.verify_signature() {
-            Ok(pubkey) => pubkey,
-            Err(e) => {
-                tracing::warn!("Invalid signature for latest block: {e}");
-                return;
-            }
-        };
-
-        let processor = self
-            .read()
-            .get_framework_state()
-            .validator_set
-            .as_ref()
-            .processor;
-        if pubkey != processor {
-            tracing::warn!("Latest block was signed by {pubkey}, but processor is {processor}");
-            return;
+        if let Err(e) = self.verify_processor_signature(&latest_block) {
+            tracing::warn!("Invalid processor signature on signed latest block: {e}");
         }
 
         // Returns Ok if we can proceed with overwriting the old latest, Err otherwise
@@ -203,11 +195,37 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.add(tx)
     }
 
+    fn verify_processor_signature<T>(&self, signed: &SignedTaggedJson<T>) -> Result<()> {
+        // Note that during a key rotation, we will have a switch in the
+        // processor, and during that period some signatures will be
+        // incorrectly excluded. That's acceptable, we expect the new block data
+        // to come in quickly.
+
+        // Validate the signature
+        let pubkey = signed.verify_signature()?;
+
+        let processor = self
+            .read()
+            .get_framework_state()
+            .validator_set
+            .as_ref()
+            .processor;
+        if pubkey == processor {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "Latest block was signed by {pubkey}, but processor is {processor}"
+            ))
+        }
+    }
+
     /// Log a failed transaction.
     pub fn add_failed_transaction(&self, failed: Arc<SignedTaggedJson<FailedTransaction>>) {
-        // FIXME verify signature
-        if self.inner.mempool.add_failed_transaction(failed) {
-            // FIXME rebroadcast over gossip
+        if let Err(e) = self.verify_processor_signature(&failed) {
+            tracing::warn!("Invalid processor signature on signed failed transaction: {e}");
+        }
+        if self.inner.mempool.add_failed_transaction(failed.clone()) {
+            self.inner.failed_txs.send(failed).ok();
         }
     }
 
@@ -640,6 +658,7 @@ impl<App: KolmeApp> Kolme<App> {
             latest_block: tokio::sync::watch::Sender::new(None),
             code_version: code_version.into(),
             block_requester: OnceLock::new(),
+            failed_txs: tokio::sync::broadcast::Sender::new(100),
         };
 
         let kolme = Kolme {

@@ -76,10 +76,7 @@ async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<Sam
         .await
         .unwrap();
 
-    let mut subscription = kolme.subscribe();
-
     testtasks.try_spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
-    subscription.recv().await.unwrap();
 
     let genesis = kolme.wait_for_block(BlockHeight(0)).await.unwrap();
     let secret = SecretKey::random();
