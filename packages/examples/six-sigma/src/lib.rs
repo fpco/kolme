@@ -482,7 +482,7 @@ impl TxLogger {
         let mut height = BlockHeight::start();
         loop {
             let block = self.kolme.wait_for_block(height).await?;
-            let output = block
+            let messages = block
                 .tx()
                 .0
                 .message
@@ -492,6 +492,7 @@ impl TxLogger {
                 .cloned()
                 .map(LoggedMessage::from)
                 .collect::<Vec<_>>();
+            let output = LogOutput::NewBlock { height, messages };
             serde_json::to_writer(&file, &output)?;
             writeln!(file)?;
             file.flush()?;
