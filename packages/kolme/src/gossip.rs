@@ -308,16 +308,19 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             GossipMessage::ProvideLayer { hash, contents } => {
-                // FIXME verify hash?
                 if let Some(contents) = contents {
-                    if let Err(e) = self
-                        .sync_manager
-                        .lock()
-                        .await
-                        .add_merkle_layer(self, hash, contents)
-                        .await
-                    {
-                        tracing::error!(%local_display_name, "Unable to add Merkle layer {hash}: {e}");
+                    if Sha256Hash::hash(&contents.payload) == hash {
+                        if let Err(e) = self
+                            .sync_manager
+                            .lock()
+                            .await
+                            .add_merkle_layer(self, hash, contents)
+                            .await
+                        {
+                            tracing::error!(%local_display_name, "Unable to add Merkle layer {hash}: {e}");
+                        }
+                    } else {
+                        tracing::warn!(%local_display_name, "Received a ProvideLayer where hash and contents did not match");
                     }
                 }
             }
