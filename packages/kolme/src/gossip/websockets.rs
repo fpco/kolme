@@ -64,6 +64,7 @@ impl<App: KolmeApp> WebsocketsManager<App> {
         websockets_binds: Vec<std::net::SocketAddr>,
         websockets_servers: Vec<String>,
         local_display_name: &str,
+        kolme: Kolme<App>,
     ) -> Result<Self> {
         let tx_gossip = Sender::new(100);
         let (tx_message, rx_message) = tokio::sync::mpsc::channel(100);
@@ -74,6 +75,7 @@ impl<App: KolmeApp> WebsocketsManager<App> {
                     rx_gossip: tx_gossip.subscribe(),
                     tx_message: tx_message.clone(),
                     local_display_name: local_display_name.clone(),
+                    kolme: kolme.clone(),
                 },
                 bind,
             ));
@@ -84,6 +86,7 @@ impl<App: KolmeApp> WebsocketsManager<App> {
                 tx_gossip.subscribe(),
                 tx_message.clone(),
                 server,
+                kolme.clone(),
             ));
         }
         Ok(WebsocketsManager {
@@ -105,6 +108,7 @@ async fn launch_client<App: KolmeApp>(
     mut rx_gossip: Receiver<GossipMessage<App>>,
     mut tx_message: tokio::sync::mpsc::Sender<WebsocketsMessage<App>>,
     server: String,
+    kolme: Kolme<App>,
 ) {
     loop {
         match launch_client_inner(
@@ -112,6 +116,7 @@ async fn launch_client<App: KolmeApp>(
             &mut rx_gossip,
             &mut tx_message,
             &server,
+            kolme.get_latest_block(),
         )
         .await
         {
@@ -133,10 +138,11 @@ async fn launch_client_inner<App: KolmeApp>(
     rx_gossip: &mut Receiver<GossipMessage<App>>,
     tx_message: &mut tokio::sync::mpsc::Sender<WebsocketsMessage<App>>,
     server: &str,
+    latest: Option<Arc<SignedTaggedJson<LatestBlock>>>,
 ) -> Result<()> {
     let (stream, res) = tokio_tungstenite::connect_async(server).await?;
     tracing::debug!(%local_display_name,"launch_client_inner on {server}: got res {res:?}");
-    ws_helper(rx_gossip, tx_message, stream, &local_display_name).await;
+    ws_helper(rx_gossip, tx_message, stream, &local_display_name, latest).await;
     Ok(())
 }
 
@@ -144,6 +150,7 @@ struct ServerState<App: KolmeApp> {
     rx_gossip: Receiver<GossipMessage<App>>,
     tx_message: tokio::sync::mpsc::Sender<WebsocketsMessage<App>>,
     local_display_name: Arc<str>,
+    kolme: Kolme<App>,
 }
 
 impl<App: KolmeApp> Clone for ServerState<App> {
@@ -152,6 +159,7 @@ impl<App: KolmeApp> Clone for ServerState<App> {
             rx_gossip: self.rx_gossip.resubscribe(),
             tx_message: self.tx_message.clone(),
             local_display_name: self.local_display_name.clone(),
+            kolme: self.kolme.clone(),
         }
     }
 }
@@ -200,10 +208,18 @@ async fn ws_handler<App: KolmeApp>(
         mut rx_gossip,
         mut tx_message,
         local_display_name,
+        kolme,
     }: ServerState<App>,
     socket: WebSocket,
 ) {
-    ws_helper(&mut rx_gossip, &mut tx_message, socket, &local_display_name).await;
+    ws_helper(
+        &mut rx_gossip,
+        &mut tx_message,
+        socket,
+        &local_display_name,
+        kolme.get_latest_block(),
+    )
+    .await;
 }
 
 enum WebsocketsRecv<App: KolmeApp> {
@@ -314,8 +330,16 @@ async fn ws_helper<App: KolmeApp, S: WebSocketWrapper>(
     tx_message: &mut tokio::sync::mpsc::Sender<WebsocketsMessage<App>>,
     mut socket: S,
     local_display_name: &str,
+    latest: Option<Arc<SignedTaggedJson<LatestBlock>>>,
 ) {
     let (tx_private, mut rx_private) = tokio::sync::mpsc::channel(16);
+
+    if let Some(latest) = latest {
+        let msg = GossipMessage::ProvideLatestBlock { latest };
+        if let Err(e) = tx_private.send(msg).await {
+            tracing::warn!(%local_display_name, "Error sending initial latest block information: {e}");
+        }
+    }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let tx_private = WebsocketsPrivateSender {

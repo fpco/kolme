@@ -148,6 +148,7 @@ impl GossipBuilder {
             self.websockets_binds,
             self.websockets_servers,
             &local_display_name,
+            kolme.clone(),
         )?;
 
         Ok(Gossip {
