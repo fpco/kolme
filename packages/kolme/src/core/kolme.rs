@@ -117,26 +117,6 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.failed_txs.subscribe()
     }
 
-    // FIXME
-    // /// Send a general purpose notification.
-    // pub fn notify(&self, note: Notification<App::Message>) {
-    //     match &note {
-    //         Notification::NewBlock(_) => (),
-    //         Notification::GenesisInstantiation { .. } => (),
-    //         Notification::FailedTransaction(failed) => {
-    //             self.inner.mempool.add_failed_transaction(failed.clone());
-    //         }
-    //         Notification::LatestBlock(latest_block) => {
-    //             if !self.update_latest_block(latest_block) {
-    //                 return;
-    //             }
-    //         }
-    //     }
-    //     // Ignore errors from notifications, it just means no one
-    //     // is subscribed.
-    //     self.inner.notify.send(note).ok();
-    // }
-
     /// Subscribe for notifications of new latest block information.
     pub fn subscribe_latest_block(
         &self,
@@ -537,9 +517,6 @@ impl<App: KolmeApp> Kolme<App> {
                 },
             }));
         }
-
-        // FIXME we probably need to broadcast over gossip... but maybe do that from the Processor instead and rebroadcast within Gossip?
-        // self.notify(Notification::NewBlock(signed_block));
 
         // Update the archive if appropriate
         if self.get_next_to_archive().await? == height {
