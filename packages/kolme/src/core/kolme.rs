@@ -16,7 +16,8 @@ use utils::trigger::TriggerSubscriber;
 use std::collections::HashMap;
 use std::{num::NonZero, ops::Deref, sync::OnceLock, time::Duration};
 
-use mempool::{Mempool, ProposeTransactionError};
+use mempool::Mempool;
+pub use mempool::ProposeTransactionError;
 
 use crate::core::*;
 
