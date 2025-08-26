@@ -1,6 +1,8 @@
+mod api_server;
 mod hub;
 
 use anyhow::{Context, Result};
+use api_server::ApiServerClient;
 use clap::Parser;
 use kolme::*;
 use reqwest::{RequestBuilder, Url};
@@ -19,6 +21,14 @@ enum Cmd {
     PubKey {
         #[clap(long, env = "KOLME_CLI_SECRET_KEY")]
         secret: SecretKey,
+    },
+    /// Find Block height where admin proposal happened
+    AdminProposalBlockHeight {
+        /// Block height from where we should start checking
+        #[clap(long, env = "KOLME_CLI_BLOCK_HEIGHT")]
+        start: u64,
+        #[clap(long, env = "KOLME_CLI_API_SERVER")]
+        api_server: Url,
     },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
@@ -48,6 +58,22 @@ async fn main_inner() -> Result<()> {
         Cmd::PubKey { secret } => {
             let public = secret.public_key();
             eprintln!("Public key: {public}");
+        }
+        Cmd::AdminProposalBlockHeight { start, api_server } => {
+            let mut client = ApiServerClient::new(api_server);
+            let mut start_height = start;
+            loop {
+                client.set_path(&format!("/block/{start_height}"));
+                let logs = client.get_logs().await?;
+                if let Some(log) = logs.iter().next() {
+                    if log == r#"{"new_admin_proposal":1}"# {
+                        println!("Admin Proposal happened on {start_height}");
+                        break;
+                    }
+                }
+                eprintln!("Moving past {start_height}");
+                start_height += 1;
+            }
         }
     }
     Ok(())

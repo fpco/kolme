@@ -7,3 +7,7 @@ default:
 # Show public key
 public:
     cargo run -- pub-key
+
+# Find admin proposal block
+admin-proposal-block:
+    cargo run -- admin-proposal-block-height
