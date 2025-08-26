@@ -65,7 +65,7 @@ async fn main_inner() -> Result<()> {
             loop {
                 client.set_path(&format!("/block/{start_height}"));
                 let logs = client.get_logs().await?;
-                if let Some(log) = logs.iter().next() {
+                if let Some(log) = logs.first() {
                     if log == r#"{"new_admin_proposal":1}"# {
                         println!("Admin Proposal happened on {start_height}");
                         break;
