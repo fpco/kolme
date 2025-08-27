@@ -1,10 +1,9 @@
-use std::{collections::BTreeMap, str::FromStr};
+use std::{collections::BTreeMap, net::TcpListener, str::FromStr};
 
 use cosmos::{
     proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
     SeedPhrase, TxBuilder,
 };
-use gossip::GossipListener;
 use integration_tests::{get_cosmos_connection, prepare_local_contract};
 use kolme::*;
 use rust_decimal::dec;
@@ -161,7 +160,11 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
     );
     testtasks.try_spawn_persistent(Approver::new(kolme.clone(), validator).run());
 
-    let api_server_port = GossipListener::random().unwrap().port;
+    let api_server_port = TcpListener::bind("0.0.0.0:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(("::", api_server_port)));
 
     kolme

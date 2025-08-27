@@ -6,8 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
-kolme = { workspace = true }
-libp2p = { workspace = true, features = ["dns", "rsa"] }
+kolme = { workspace = true, features = ["cosmwasm"] }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true }

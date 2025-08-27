@@ -16,7 +16,6 @@ base64 = { workspace = true }
 clap = { workspace = true }
 jiff = { workspace = true }
 kolme = { workspace = true }
-libp2p = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

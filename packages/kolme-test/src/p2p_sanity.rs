@@ -28,7 +28,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     testtasks.try_spawn_persistent(
         Processor::new(kolme_processor.clone(), my_secret_key().clone()).run(),
     );
-    let discovery = testtasks.launch_kademlia_discovery(kolme_processor, "sanity-processor");
+    let discovery = testtasks.launch_websockets_discovery(kolme_processor, "sanity-processor");
 
     let tempfile_client = tempfile::tempdir().unwrap();
     let kolme_client = Kolme::new(
@@ -39,7 +39,7 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     testtasks
-        .launch_kademlia_client(kolme_client.clone(), "sanity-client", &discovery)
+        .launch_websockets_client(kolme_client.clone(), "sanity-client", &discovery)
         .await;
 
     let secret = SecretKey::random();
