@@ -3,9 +3,7 @@ use crate::*;
 impl<K: Clone, V: Clone> From<TreeContents<K, V>> for LeafContents<K, V> {
     fn from(tree: TreeContents<K, V>) -> Self {
         assert!(tree.len() <= 16);
-        let mut leaf = LeafContents {
-            values: arrayvec::ArrayVec::new(),
-        };
+        let mut leaf = LeafContents { values: Vec::new() };
         tree.drain_entries_to(&mut leaf.values);
         leaf
     }
@@ -96,19 +94,14 @@ impl<K, V> LeafContents<K, V> {
         self.values.len()
     }
 
-    pub(crate) fn drain_entries_to(
-        mut self,
-        entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>,
-    ) {
+    pub(crate) fn drain_entries_to(mut self, entries: &mut Vec<LeafEntry<K, V>>) {
         entries.extend(&mut self.values.drain(..));
     }
 }
 
 impl<K, V> Default for LeafContents<K, V> {
     fn default() -> Self {
-        Self {
-            values: arrayvec::ArrayVec::new(),
-        }
+        Self { values: Vec::new() }
     }
 }
 
@@ -142,7 +135,7 @@ impl<K: FromMerkleKey, V: MerkleDeserializeRaw> MerkleDeserializeRaw for LeafCon
                 actual: len,
             });
         }
-        let mut values = arrayvec::ArrayVec::new();
+        let mut values = Vec::new();
         for _ in 0..len {
             values.push(LeafEntry::merkle_deserialize_raw(deserializer)?);
         }
