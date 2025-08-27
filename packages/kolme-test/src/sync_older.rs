@@ -66,19 +66,17 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks
-        .launch_websockets_client_with(
-            kolme_state_transfer.clone(),
-            "kolme_state_transfer",
-            &discovery,
-            |builder| {
-                builder.set_sync_mode(
-                    SyncMode::StateTransfer,
-                    DataLoadValidation::ValidateDataLoads,
-                )
-            },
-        )
-        .await;
+    testtasks.launch_websockets_client_with(
+        kolme_state_transfer.clone(),
+        "kolme_state_transfer",
+        &discovery,
+        |builder| {
+            builder.set_sync_mode(
+                SyncMode::StateTransfer,
+                DataLoadValidation::ValidateDataLoads,
+            )
+        },
+    );
 
     // We should be able to sync the latest block within a few seconds
     let latest_from_gossip = tokio::time::timeout(

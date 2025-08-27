@@ -48,14 +48,12 @@ async fn archiver_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks
-        .launch_websockets_client_with(
-            kolme_archiver.clone(),
-            "kolme_archiver",
-            &discovery,
-            |gossip| gossip.set_sync_mode(SyncMode::Archive, DataLoadValidation::ValidateDataLoads),
-        )
-        .await;
+    testtasks.launch_websockets_client_with(
+        kolme_archiver.clone(),
+        "kolme_archiver",
+        &discovery,
+        |gossip| gossip.set_sync_mode(SyncMode::Archive, DataLoadValidation::ValidateDataLoads),
+    );
 
     assert!(latest_block_height.0 > 0);
 

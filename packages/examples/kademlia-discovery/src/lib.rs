@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use kolme::*;
 use tokio::task::JoinSet;
-use tokio::time::{self, timeout, Duration};
+use tokio::time::{self, Duration};
 
 const VERSION1: &str = "dummy code version v1";
 const VERSION2: &str = "dummy code version v2";
@@ -184,20 +184,7 @@ pub async fn invalid_client(validator_addr: &str) -> Result<()> {
         .add_websockets_server(validator_addr)
         .build(kolme.clone())?;
 
-    let mut peers_connected = gossip.subscribe_network_ready();
     set.spawn(gossip.run());
-
-    loop {
-        if *peers_connected.borrow() {
-            break;
-        }
-
-        timeout(Duration::from_secs(30), peers_connected.changed())
-            .await
-            .map_err(|_| "hit timeout while waiting for validators")
-            .unwrap()
-            .unwrap();
-    }
 
     let tx =
         Arc::new(kolme.read().create_signed_transaction(
@@ -379,20 +366,8 @@ async fn client_inner(
         .add_websockets_server(validator_addr)
         .build(kolme.clone())?;
 
-    let mut peers_connected = gossip.subscribe_network_ready();
     set.spawn(gossip.run());
 
-    loop {
-        if *peers_connected.borrow() {
-            break;
-        }
-
-        timeout(Duration::from_secs(30), peers_connected.changed())
-            .await
-            .map_err(|_| "hit timeout while waiting for validators")
-            .unwrap()
-            .unwrap();
-    }
     kolme.resync().await?;
     loop {
         let orig_next_height = kolme.read().get_next_height();
