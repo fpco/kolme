@@ -327,10 +327,23 @@ impl<App: KolmeApp> Gossip<App> {
             }
             GossipMessage::BroadcastTx { tx } => {
                 let txhash = tx.hash();
-                match self.kolme.propose_transaction(tx) {
-                    Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
-                    Err(e) => {
-                        tracing::warn!(%local_display_name, "Error proposing transaction {txhash}: {e}")
+                if let Ok(Some(block)) = self.kolme.get_tx_block(txhash).await {
+                    if let Err(e) = ws_sender
+                        .tx
+                        .send(GossipMessage::ProvideBlock {
+                            height: block.height(),
+                            block: Some(block),
+                        })
+                        .await
+                    {
+                        tracing::warn!(%local_display_name, "Received an already-landed transaction {txhash}, but couldn't tell the broadcaster: {e}");
+                    }
+                } else {
+                    match self.kolme.propose_transaction(tx) {
+                        Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
+                        Err(e) => {
+                            tracing::warn!(%local_display_name, "Error proposing transaction {txhash}: {e}")
+                        }
                     }
                 }
             }
