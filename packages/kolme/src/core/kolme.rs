@@ -55,6 +55,14 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     current_block: RwLock<Arc<MaybeBlockInfo<App>>>,
     /// Latest block reported by the processor
     pub(super) latest_block: tokio::sync::watch::Sender<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
+    /// A broadcast channel for latest blocks.
+    ///
+    /// Motivation: there's a potential race condition with the watch channel
+    /// above. If enough new blocks come in quickly enough, the processor won't
+    /// broadcast all the blocks to the network. Therefore, we also set up a
+    /// mpsc channel for the gossip component to subscribe for updates.
+    latest_block_sender: OnceLock<tokio::sync::mpsc::Sender<Arc<SignedTaggedJson<LatestBlock>>>>,
+
     /// The version of the chain the current codebase represents.
     ///
     /// If this version is different from the active version running on the chain,
@@ -164,6 +172,26 @@ impl<App: KolmeApp> Kolme<App> {
             *old_latest = Some(latest_block);
             true
         });
+    }
+
+    pub(crate) async fn broadcast_latest_block(
+        &self,
+        latest_block: Arc<SignedTaggedJson<LatestBlock>>,
+    ) {
+        if let Some(sender) = self.inner.latest_block_sender.get() {
+            if let Err(e) = sender.send(latest_block).await {
+                tracing::error!("Unexpected channel error for broadcast_latest_block: {e}");
+            }
+        }
+    }
+
+    pub(crate) fn set_latest_block_sender(
+        &self,
+        sender: tokio::sync::mpsc::Sender<Arc<SignedTaggedJson<LatestBlock>>>,
+    ) {
+        if self.inner.latest_block_sender.set(sender).is_err() {
+            tracing::warn!("set_latest_block_sender: already set, do you have two Gossip components for one Kolme?")
+        }
     }
 
     /// Propose a new transaction for the processor to add to the chain.
@@ -650,6 +678,7 @@ impl<App: KolmeApp> Kolme<App> {
             code_version: code_version.into(),
             block_requester: OnceLock::new(),
             failed_txs: tokio::sync::broadcast::Sender::new(100),
+            latest_block_sender: OnceLock::new(),
         };
 
         let kolme = Kolme {
