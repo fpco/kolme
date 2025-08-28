@@ -2,23 +2,19 @@ mod messages;
 mod sync_manager;
 mod websockets;
 
-use std::{
-    net::SocketAddr,
-    num::NonZeroUsize,
-    time::{Duration, Instant},
-};
+use std::{net::SocketAddr, time::Duration};
 
 use crate::*;
 use messages::*;
 
-use sync_manager::{DataLabel, DataRequest, SyncManager};
+use sync_manager::{DataRequest, SyncManager};
 use tokio::{
     sync::{broadcast::error::RecvError, Mutex},
     task::JoinSet,
 };
 
 use utils::trigger::Trigger;
-use websockets::{WebsocketsManager, WebsocketsMessage, WebsocketsPrivateSender};
+use websockets::{WebsocketsManager, WebsocketsMessage};
 
 /// A component that retrieves notifications from the network and broadcasts our own notifications back out.
 pub struct Gossip<App: KolmeApp> {
@@ -27,14 +23,9 @@ pub struct Gossip<App: KolmeApp> {
     data_load_validation: DataLoadValidation,
     // human-readable name for an instance
     local_display_name: String,
-    /// Trigger a broadcast of our latest block height.
-    trigger_broadcast_height: Trigger,
     /// The block sync manager.
     sync_manager: Mutex<SyncManager<App>>,
-    /// LRU cache for notifications received via P2p layer
-    lru_notifications: parking_lot::RwLock<lru::LruCache<Sha256Hash, Instant>>,
     concurrent_request_limit: usize,
-    max_peer_count: usize,
     warning_period: Duration,
     websockets_manager: WebsocketsManager<App>,
     set: Option<JoinSet<()>>,
@@ -46,7 +37,6 @@ pub struct GossipBuilder {
     local_display_name: Option<String>,
     duplicate_cache_time: Duration,
     concurrent_request_limit: usize,
-    max_peer_count: usize,
     warning_period: Duration,
     websockets_binds: Vec<SocketAddr>,
     websockets_servers: Vec<String>,
@@ -61,7 +51,6 @@ impl Default for GossipBuilder {
             // Same default as libp2p_gossip
             duplicate_cache_time: Duration::from_secs(60),
             concurrent_request_limit: sync_manager::DEFAULT_REQUEST_COUNT,
-            max_peer_count: sync_manager::DEFAULT_PEER_COUNT,
             warning_period: Duration::from_secs(sync_manager::DEFAULT_WARNING_PERIOD_SECS),
             websockets_binds: vec![],
             websockets_servers: vec![],
@@ -137,12 +126,6 @@ impl GossipBuilder {
         self
     }
 
-    /// Set the maximum number of peers to query simultaneously for data.
-    pub fn set_max_peer_count(mut self, count: usize) -> Self {
-        self.max_peer_count = count;
-        self
-    }
-
     /// Set the duration to wait before printing a warning about block/layer data not being downloaded.
     pub fn set_data_warning_period(mut self, period: Duration) -> Self {
         self.warning_period = period;
@@ -165,18 +148,16 @@ impl GossipBuilder {
             self.websockets_binds,
             self.websockets_servers,
             &local_display_name,
+            kolme.clone(),
         )?;
 
         Ok(Gossip {
             kolme,
             sync_mode: self.sync_mode,
             data_load_validation: self.data_load_validation,
-            trigger_broadcast_height: Trigger::new("broadcast_height"),
             local_display_name,
             sync_manager,
-            lru_notifications: lru::LruCache::new(NonZeroUsize::new(100).unwrap()).into(),
             concurrent_request_limit: self.concurrent_request_limit,
-            max_peer_count: self.max_peer_count,
             warning_period: self.warning_period,
             websockets_manager,
             set: Some(set),
@@ -193,13 +174,10 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn run_inner(mut self) {
-        let mut subscription = self.kolme.subscribe();
-
         // Interval for broadcasting our block height
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         interval.reset_immediately();
-        let mut trigger_broadcast_height = self.trigger_broadcast_height.subscribe();
 
         let mut mempool_additions = self.kolme.subscribe_mempool_additions();
 
@@ -208,13 +186,12 @@ impl<App: KolmeApp> Gossip<App> {
 
         let mut sync_manager_subscriber = self.sync_manager.lock().await.subscribe();
 
+        let mut latest_watch = self.kolme.subscribe_latest_block();
+
+        let mut failed_rx = self.kolme.subscribe_failed_txs();
+
         loop {
             tokio::select! {
-                // Our local Kolme generated a notification to be sent through the
-                // rest of the p2p network
-                notification = subscription.recv() => {
-                    self.handle_notification(notification);
-                }
                 // Periodically notify the p2p network of our latest block height
                 // Also use this time to broadcast any transactions from the mempool.
                 _ = interval.tick() => {
@@ -223,21 +200,25 @@ impl<App: KolmeApp> Gossip<App> {
                 _ = sync_manager_subscriber.listen() => {
                     self.process_sync_manager().await;
                 }
-                // When we're specifically triggered for it, also notify for latest block height
-                _ = trigger_broadcast_height.listen() => {
-                    self.broadcast_latest_block();
-                }
                 // And any time we add something new to the mempool, broadcast all items.
                 _ = mempool_additions.listen() => {
                     self.broadcast_mempool_entries();
                 }
                 msg = self.websockets_manager.get_incoming() => {
-                    self.handle_websockets_message(msg).await;
+                    self.handle_message(msg).await;
                 }
                 Some(height) = block_requester_rx.recv() => {
-                    if let Err(e) = self.sync_manager.lock().await.add_needed_block(&self, height, None).await {
+                    if let Err(e) = self.sync_manager.lock().await.add_needed_block(&self, height).await {
                         tracing::warn!("{}: error when adding requested block {height}: {e}", self.local_display_name)
                     }
+                }
+                latest = latest_watch.changed() => {
+                    #[cfg(debug_assertions)]
+                    latest.unwrap();
+                    self.update_latest().await;
+                }
+                failed = failed_rx.recv() => {
+                    self.share_failed_tx(failed);
                 }
             }
         }
@@ -245,17 +226,7 @@ impl<App: KolmeApp> Gossip<App> {
 
     async fn on_interval(&self) {
         self.process_sync_manager().await;
-        self.broadcast_latest_block();
         self.broadcast_mempool_entries();
-    }
-
-    fn broadcast_latest_block(&self) {
-        GossipMessage::ReportBlockHeight(ReportBlockHeight {
-            next: self.kolme.read().get_next_height(),
-            timestamp: jiff::Timestamp::now(),
-            latest_block: self.kolme.get_latest_block(),
-        })
-        .publish(self);
     }
 
     fn broadcast_mempool_entries(&self) {
@@ -267,284 +238,105 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
-    fn handle_notification(&self, notification: Result<Notification<App::Message>, RecvError>) {
-        let notification = match notification {
-            Ok(notification) => notification,
-            Err(e) => {
-                tracing::warn!(
-                    "{}: Gossip::handle_notification: received an error: {e}",
-                    self.local_display_name
-                );
-                return;
-            }
+    async fn update_latest(&self) {
+        let Some(latest) = self.kolme.get_latest_block() else {
+            return;
         };
-
-        if let Some(hash) = notification.hash() {
-            if self.notification_hash_exists(&hash) {
-                tracing::debug!("Skipping publish to p2p layer");
-                return;
-            }
-        }
-        GossipMessage::Notification(notification).publish(self);
+        self.sync_manager
+            .lock()
+            .await
+            .add_latest_block(self, latest.message.as_inner())
+            .await;
+        GossipMessage::ProvideLatestBlock { latest }.publish(self);
     }
 
     async fn handle_message(
         &self,
-        message: GossipMessage<App>,
-        ws_sender: WebsocketsPrivateSender<App>,
+        WebsocketsMessage {
+            payload: message,
+            tx: ws_sender,
+        }: WebsocketsMessage<App>,
     ) {
         let local_display_name = self.local_display_name.clone();
         match message {
-            GossipMessage::Notification(msg) => {
-                tracing::debug!("{local_display_name}: got notification message");
-                if let Some(hash) = &msg.hash() {
-                    self.check_and_update_notification_lru(hash);
-                }
-                match &msg {
-                    Notification::NewBlock(block) => {
-                        self.sync_manager
-                            .lock()
-                            .await
-                            .add_new_block(self, block)
-                            .await;
-
-                        if let Err(e) = self.kolme.resync().await {
-                            tracing::error!(%self.local_display_name, "Error while resyncing after a NewBlock notification: {e}");
-                        }
-                    }
-                    Notification::GenesisInstantiation { .. } => (),
-                    // TODO should we validate that this has a proper signature from
-                    // the processor before accepting it?
-                    //
-                    // See propose_and_await_transaction for an example.
-                    Notification::FailedTransaction(_) => (),
-                    Notification::LatestBlock(_) => {
-                        if let Err(e) = self.kolme.resync().await {
-                            tracing::error!(%self.local_display_name, "Error while resyncing after a LatestBlock notification: {e}");
-                        }
-                    }
-                    Notification::EvictMempoolTransaction(signed_json) => {
-                        let pubkey = signed_json.verify_signature();
-                        match pubkey {
-                            Ok(pubkey) => {
-                                let processor = self
-                                    .kolme
-                                    .read()
-                                    .get_framework_state()
-                                    .get_validator_set()
-                                    .processor;
-                                if pubkey != processor {
-                                    tracing::warn!("Evict transaction was signed by {pubkey}, but processor is {processor}");
-                                } else {
-                                    let txhash = signed_json.message.as_inner();
-                                    tracing::debug!("Transaction {txhash} evicted from mempool");
-                                    self.kolme.remove_from_mempool(*txhash);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Error verifying evict mempool signature: {e}")
-                            }
-                        }
-                    }
-                }
-                self.kolme.notify(msg);
+            GossipMessage::ProvideLatestBlock { latest } => {
+                self.kolme.update_latest_block(latest);
             }
-            GossipMessage::RequestBlockHeights(_) => {
-                tracing::debug!("{local_display_name}: got block heights request message");
-                self.trigger_broadcast_height.trigger();
-            }
-            GossipMessage::ReportBlockHeight(report) => {
-                self.sync_manager
-                    .lock()
-                    .await
-                    .add_report_block_height(self, report, ws_sender)
-                    .await;
-            }
-            GossipMessage::BroadcastTx { tx } => {
-                let txhash = tx.hash();
-                self.kolme.propose_transaction(tx);
-                self.kolme.mark_mempool_entry_gossiped(txhash);
-            }
-            GossipMessage::RequestBlockContents { height } => {
-                match self.kolme.has_block(height).await {
+            GossipMessage::RequestBlock { height } => {
+                let block = match self.kolme.get_block(height).await {
                     Err(e) => {
                         tracing::warn!(
                             "{local_display_name}: RequestBlockContents error on {height}: {e}"
                         );
+                        return;
                     }
-                    Ok(false) => (),
-                    Ok(true) => {
-                        let req = BlockRequest::BlockAvailable { height };
-                        if let Err(e) = ws_sender
-                            .tx
-                            .send(websockets::WebsocketsPayload::Request(req))
-                            .await
-                        {
-                            tracing::error!(
-                                "Unexpected error on ws_sender.send BlockAvailable: {e}"
-                            );
-                        }
-                    }
+                    Ok(block) => block,
+                };
+                let msg = GossipMessage::ProvideBlock {
+                    height,
+                    block: block.map(|s| s.block),
+                };
+                if let Err(e) = ws_sender.tx.send(msg).await {
+                    tracing::error!("Unexpected error on ws_sender.send ProvideBlock: {e}");
                 }
             }
-            GossipMessage::RequestLayerContents { hash } => {
-                match self.kolme.has_merkle_hash(hash).await {
-                    Err(e) => tracing::warn!(
-                        "{local_display_name}: RequestLayerContents error on {hash}: {e}"
-                    ),
-                    Ok(false) => (),
-                    Ok(true) => {
-                        let req = BlockRequest::LayerAvailable { hash };
-                        if let Err(e) = ws_sender
-                            .tx
-                            .send(websockets::WebsocketsPayload::Request(req))
-                            .await
-                        {
-                            tracing::error!(
-                                "Unexpected error on ws_sender.send LayerAvailable: {e}"
-                            );
-                        }
-                    }
+            GossipMessage::ProvideBlock { height: _, block } => {
+                // FIXME verify signature?
+                if let Some(block) = block {
+                    self.sync_manager
+                        .lock()
+                        .await
+                        .add_pending_block(self, block)
+                        .await;
                 }
             }
-        }
-    }
-
-    async fn handle_websockets_message(&self, msg: WebsocketsMessage<App>) {
-        match msg.payload {
-            websockets::WebsocketsPayload::Gossip(message) => {
-                self.handle_message(message, msg.tx).await
-            }
-            websockets::WebsocketsPayload::Request(request) => {
-                let res = self.handle_request_helper(request, msg.tx.clone()).await;
-                if let Err(e) = msg
-                    .tx
-                    .tx
-                    .send(websockets::WebsocketsPayload::Response(res))
-                    .await
-                {
-                    tracing::error!(
-                        "handle_websockets_message: unexpected error sending response: {e}"
-                    );
-                }
-            }
-            websockets::WebsocketsPayload::Response(response) => {
-                self.handle_response(response, msg.tx).await;
-            }
-        }
-    }
-
-    async fn handle_request_helper(
-        &self,
-        request: BlockRequest,
-        ws_sender: WebsocketsPrivateSender<App>,
-    ) -> BlockResponse<App::Message> {
-        let local_display_name = self.local_display_name.clone();
-        match &request {
-            BlockRequest::BlockAtHeight(height) | BlockRequest::BlockWithStateAtHeight(height) => {
-                let height = *height;
-                match self.kolme.read().get_block(height).await {
-                    Err(e) => {
-                        tracing::warn!("{local_display_name}: Error querying block in gossip: {e}");
-                        BlockResponse::HeightNotFound(height)
-                    }
-                    Ok(None) => {
-                        tracing::warn!("{local_display_name}: Received a request for block {height}, but didn't have it.");
-                        BlockResponse::HeightNotFound(height)
-                    }
-                    Ok(Some(storable_block)) => {
-                        #[cfg(debug_assertions)]
-                        {
-                            // Sanity testing
-                            let block = storable_block.block.0.message.as_inner();
-                            for hash in [block.framework_state, block.app_state, block.logs] {
-                                if self.kolme.get_merkle_layer(hash).await.unwrap().is_none() {
-                                    panic!("{local_display_name}: has block with hash {hash}, but that hash isn't in the store: {block:?}");
-                                }
-                            }
-                        }
-                        BlockResponse::Block(storable_block.block)
-                    }
-                }
-            }
-            BlockRequest::Merkle(hash) => {
-                let hash = *hash;
-                match self.kolme.get_merkle_layer(hash).await {
-                    // We didn't have it, in theory we could send a message back about this, but
-                    // skipping for now
-                    Ok(None) => {
-                        tracing::warn!("{local_display_name}: Received a request for merkle layer {hash}, but didn't have it.");
-                        BlockResponse::MerkleNotFound(hash)
-                    }
-                    Ok(Some(contents)) => BlockResponse::Merkle { hash, contents },
+            GossipMessage::RequestLayer { hash } => {
+                let contents = match self.kolme.get_merkle_layer(hash).await {
                     Err(e) => {
                         tracing::warn!(
-                            "{local_display_name}: Error when loading Merkle layer for {hash}: {e}"
+                            "{local_display_name}: RequestLayerContents error on {hash}: {e}"
                         );
-                        BlockResponse::MerkleNotFound(hash)
+                        return;
+                    }
+                    Ok(contents) => contents,
+                };
+                let msg = GossipMessage::ProvideLayer {
+                    hash,
+                    contents: contents.map(Arc::new),
+                };
+                if let Err(e) = ws_sender.tx.send(msg).await {
+                    tracing::error!("Unexpected error on ws_sender.send ProvideLayer: {e}");
+                }
+            }
+            GossipMessage::ProvideLayer { hash, contents } => {
+                if let Some(contents) = contents {
+                    if Sha256Hash::hash(&contents.payload) == hash {
+                        if let Err(e) = self
+                            .sync_manager
+                            .lock()
+                            .await
+                            .add_merkle_layer(self, hash, contents)
+                            .await
+                        {
+                            tracing::error!(%local_display_name, "Unable to add Merkle layer {hash}: {e}");
+                        }
+                    } else {
+                        tracing::warn!(%local_display_name, "Received a ProvideLayer where hash and contents did not match");
                     }
                 }
             }
-            BlockRequest::BlockAvailable { height } => {
-                self.sync_manager
-                    .lock()
-                    .await
-                    .add_block_peer(self, *height, ws_sender);
-                BlockResponse::Ack
-            }
-            BlockRequest::LayerAvailable { hash } => {
-                self.sync_manager
-                    .lock()
-                    .await
-                    .add_layer_peer(self, *hash, ws_sender);
-                BlockResponse::Ack
-            }
-        }
-    }
-
-    async fn handle_response(
-        &self,
-        response: BlockResponse<App::Message>,
-        peer: WebsocketsPrivateSender<App>,
-    ) {
-        let local_display_name = self.local_display_name.clone();
-        match response {
-            BlockResponse::Block(block) | BlockResponse::BlockWithState { block } => {
-                self.sync_manager
-                    .lock()
-                    .await
-                    .add_pending_block(self, block, Some(peer))
-                    .await;
-            }
-            BlockResponse::HeightNotFound(height) => {
-                tracing::warn!(
-                    "{local_display_name}: Tried to find block height {height}, but peer {peer:?} didn't find it"
-                );
-                self.sync_manager
-                    .lock()
-                    .await
-                    .remove_block_peer(height, peer);
-            }
-            BlockResponse::MerkleNotFound(hash) => {
-                tracing::warn!(
-                    "{local_display_name}: Tried to find merkle layer {hash}, but peer {peer:?} didn't find it"
-                );
-                self.sync_manager.lock().await.remove_layer_peer(hash, peer);
-            }
-            BlockResponse::Merkle { hash, contents } => {
-                if let Err(e) = self
-                    .sync_manager
-                    .lock()
-                    .await
-                    .add_merkle_layer(self, hash, contents, peer)
-                    .await
-                {
-                    tracing::error!(
-                        "{local_display_name}: error adding Merkle layer contents for {hash}: {e}"
-                    )
+            GossipMessage::BroadcastTx { tx } => {
+                let txhash = tx.hash();
+                match self.kolme.propose_transaction(tx) {
+                    Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
+                    Err(e) => {
+                        tracing::warn!(%local_display_name, "Error proposing transaction {txhash}: {e}")
+                    }
                 }
             }
-            BlockResponse::Ack => (),
+            GossipMessage::FailedTransaction { failed } => {
+                self.kolme.add_failed_transaction(failed);
+            }
         }
     }
 
@@ -559,62 +351,32 @@ impl<App: KolmeApp> Gossip<App> {
                 return;
             }
         };
-        for DataRequest {
-            data,
-            current_peers,
-            request_new_peers,
-        } in requests
-        {
-            if request_new_peers || current_peers.is_empty() {
-                let msg = match data {
-                    DataLabel::Block(height) => GossipMessage::RequestBlockContents { height },
-                    DataLabel::Merkle(hash) => GossipMessage::RequestLayerContents { hash },
-                };
-                msg.publish(self);
-            }
-            for ws in current_peers {
-                let req = match data {
-                    DataLabel::Block(height) => BlockRequest::BlockAtHeight(height),
-                    DataLabel::Merkle(hash) => BlockRequest::Merkle(hash),
-                };
-                if let Err(e) = ws
-                    .tx
-                    .send(websockets::WebsocketsPayload::Request(req))
-                    .await
-                {
-                    tracing::warn!("{}: unable to send {req:?}: {e}", self.local_display_name);
+        for request in requests {
+            let msg = match request {
+                DataRequest::Block(height) => GossipMessage::RequestBlock { height },
+                DataRequest::Merkle(hash) => GossipMessage::RequestLayer { hash },
+            };
+            msg.publish(self);
+        }
+    }
+
+    fn share_failed_tx(
+        &self,
+        failed: Result<
+            Arc<SignedTaggedJson<FailedTransaction>>,
+            tokio::sync::broadcast::error::RecvError,
+        >,
+    ) {
+        match failed {
+            Ok(failed) => GossipMessage::FailedTransaction { failed }.publish(self),
+            Err(e) => match e {
+                RecvError::Closed => {
+                    tracing::error!(%self.local_display_name, "Failed transaction channel was closed")
                 }
-            }
-        }
-    }
-
-    // Returns true if the notfication should be skipped publishing to the p2p network
-    fn notification_hash_exists(&self, hash: &Sha256Hash) -> bool {
-        let expiry = { self.lru_notifications.read().peek(hash).cloned() };
-        match expiry {
-            Some(instant) => {
-                let elapsed = instant.elapsed();
-                if elapsed > Duration::from_secs(60) {
-                    // Let's allow it to be submitted to the gossip network again
-                    false
-                } else {
-                    true
+                RecvError::Lagged(x) => {
+                    tracing::warn!(%self.local_display_name, "Failed transaction channel was lagged: {x}")
                 }
-            }
-            None => false,
+            },
         }
-    }
-
-    fn update_notification_lru(&self, hash: Sha256Hash) {
-        let mut lru = self.lru_notifications.write();
-        lru.push(hash, Instant::now());
-    }
-
-    fn check_and_update_notification_lru(&self, hash: &Sha256Hash) -> bool {
-        let exists = self.notification_hash_exists(hash);
-        if !exists {
-            self.update_notification_lru(*hash);
-        }
-        exists
     }
 }

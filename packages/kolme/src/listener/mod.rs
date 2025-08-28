@@ -94,86 +94,113 @@ impl<App: KolmeApp> Listener<App> {
     }
 
     async fn wait_for_contracts(&self, name: ChainName) -> Result<BTreeMap<ExternalChain, String>> {
-        let mut receiver = self.kolme.subscribe();
+        let mut new_block = self.kolme.subscribe_new_block();
+        let mut mempool = self.kolme.subscribe_mempool_additions();
         loop {
+            // Did the contracts land on-chain?
             if let Some(contracts) = self.get_contracts(name) {
                 return Ok(contracts);
             }
 
-            if let Notification::GenesisInstantiation { chain, contract } = receiver.recv().await? {
-                if chain.name() != name {
-                    continue;
-                }
+            // Wait for any changes in the mempool or new blocks
+            tokio::select! {
+                _ = new_block.listen() => (),
+                _ = mempool.listen() => (),
+            }
 
-                let kolme = self.kolme.read();
-                let next = get_next_bridge_event_id(&kolme, self.secret.public_key(), chain);
-                if next == BridgeEventId::start() {
-                    let config = &kolme.get_bridge_contracts().get(chain)?.config;
-
-                    if let BridgeContract::Deployed(_) = config.bridge {
-                        anyhow::bail!("Already have a deployed contract on {chain:?}")
-                    };
-
-                    let res: Result<()> = match ChainKind::from(chain) {
-                        #[cfg(feature = "cosmwasm")]
-                        ChainKind::Cosmos(chain) => {
-                            let cosmos = kolme.get_cosmos(chain).await?;
-                            let expected_code_id = match config.bridge {
-                                BridgeContract::NeededCosmosBridge { code_id } => code_id,
-                                BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
-                                BridgeContract::Deployed(_) => {
-                                    anyhow::bail!("Already have a deployed contract on {chain:?}")
-                                }
-                            };
-
-                            cosmos::sanity_check_contract(
-                                &cosmos,
-                                &contract,
-                                expected_code_id,
-                                self.kolme.get_app().genesis_info(),
-                            )
-                            .await
-                        }
-                        #[cfg(not(feature = "cosmwasm"))]
-                        ChainKind::Cosmos(_) => Ok(()),
-                        #[cfg(feature = "solana")]
-                        ChainKind::Solana(chain) => {
-                            let client = kolme.get_solana_client(chain).await;
-
-                            solana::sanity_check_contract(
-                                &client,
-                                &contract,
-                                self.kolme.get_app().genesis_info(),
-                            )
-                            .await
-                        }
-                        #[cfg(not(feature = "solana"))]
-                        ChainKind::Solana(_) => Ok(()),
-                        #[cfg(feature = "pass_through")]
-                        ChainKind::PassThrough => {
-                            anyhow::bail!("No wait for pass-through contract is expected")
-                        }
-                    };
-
-                    if let Err(e) = res {
-                        tracing::error!(
-                            "Invalid genesis contract {contract} on {chain:?} found: {e}"
-                        );
+            // Then look for any contract instantiation messages.
+            for msg in self
+                .kolme
+                .get_mempool_entries()
+                .iter()
+                .flat_map(|tx| tx.0.message.as_inner().messages.iter())
+            {
+                if let Message::Listener {
+                    chain,
+                    event_id,
+                    event: BridgeEvent::Instantiated { contract },
+                } = msg
+                {
+                    if chain.name() != name || *event_id != BridgeEventId::start() {
+                        continue;
                     }
 
-                    kolme
-                        .sign_propose_await_transaction(
-                            &self.secret,
-                            vec![Message::Listener {
-                                chain,
-                                event: BridgeEvent::Instantiated { contract },
-                                event_id: BridgeEventId::start(),
-                            }],
-                        )
-                        .await?;
+                    self.try_new_contract(*chain, contract).await?;
                 }
             }
         }
+    }
+
+    async fn try_new_contract(&self, chain: ExternalChain, contract: &str) -> Result<()> {
+        let kolme = self.kolme.read();
+        let next = get_next_bridge_event_id(&kolme, self.secret.public_key(), chain);
+        if next != BridgeEventId::start() {
+            return Ok(());
+        }
+        let config = &kolme.get_bridge_contracts().get(chain)?.config;
+
+        if let BridgeContract::Deployed(_) = config.bridge {
+            anyhow::bail!("Already have a deployed contract on {chain:?}")
+        };
+
+        let res: Result<()> = match ChainKind::from(chain) {
+            #[cfg(feature = "cosmwasm")]
+            ChainKind::Cosmos(chain) => {
+                let cosmos = kolme.get_cosmos(chain).await?;
+                let expected_code_id = match config.bridge {
+                    BridgeContract::NeededCosmosBridge { code_id } => code_id,
+                    BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
+                    BridgeContract::Deployed(_) => {
+                        anyhow::bail!("Already have a deployed contract on {chain:?}")
+                    }
+                };
+
+                cosmos::sanity_check_contract(
+                    &cosmos,
+                    contract,
+                    expected_code_id,
+                    self.kolme.get_app().genesis_info(),
+                )
+                .await
+            }
+            #[cfg(not(feature = "cosmwasm"))]
+            ChainKind::Cosmos(_) => Ok(()),
+            #[cfg(feature = "solana")]
+            ChainKind::Solana(chain) => {
+                let client = kolme.get_solana_client(chain).await;
+
+                solana::sanity_check_contract(
+                    &client,
+                    contract,
+                    self.kolme.get_app().genesis_info(),
+                )
+                .await
+            }
+            #[cfg(not(feature = "solana"))]
+            ChainKind::Solana(_) => Ok(()),
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => {
+                anyhow::bail!("No wait for pass-through contract is expected")
+            }
+        };
+
+        if let Err(e) = res {
+            tracing::error!("Invalid genesis contract {contract} on {chain:?} found: {e}");
+        }
+
+        kolme
+            .sign_propose_await_transaction(
+                &self.secret,
+                vec![Message::Listener {
+                    chain,
+                    event: BridgeEvent::Instantiated {
+                        contract: contract.to_owned(),
+                    },
+                    event_id: BridgeEventId::start(),
+                }],
+            )
+            .await?;
+        Ok(())
     }
 
     fn get_contracts(&self, name: ChainName) -> Option<BTreeMap<ExternalChain, String>> {
