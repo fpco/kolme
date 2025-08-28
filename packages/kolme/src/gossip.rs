@@ -184,6 +184,9 @@ impl<App: KolmeApp> Gossip<App> {
         let (block_requester, mut block_requester_rx) = tokio::sync::mpsc::channel(8);
         self.kolme.set_block_requester(block_requester);
 
+        let (latest_block_tx, mut latest_block_rx) = tokio::sync::mpsc::channel(8);
+        self.kolme.set_latest_block_sender(latest_block_tx);
+
         let mut sync_manager_subscriber = self.sync_manager.lock().await.subscribe();
 
         let mut latest_watch = self.kolme.subscribe_latest_block();
@@ -217,6 +220,9 @@ impl<App: KolmeApp> Gossip<App> {
                     latest.unwrap();
                     self.update_latest().await;
                 }
+                Some(latest) = latest_block_rx.recv() => {
+                    self.update_latest_with(latest).await;
+                }
                 failed = failed_rx.recv() => {
                     self.share_failed_tx(failed);
                 }
@@ -239,9 +245,15 @@ impl<App: KolmeApp> Gossip<App> {
     }
 
     async fn update_latest(&self) {
-        let Some(latest) = self.kolme.get_latest_block() else {
-            return;
-        };
+        match self.kolme.get_latest_block() {
+            Some(latest) => self.update_latest_with(latest).await,
+            None => {
+                tracing::error!(%self.local_display_name, "Gossip::update_latest, unexpected None for get_latest_block")
+            }
+        }
+    }
+
+    async fn update_latest_with(&self, latest: Arc<SignedTaggedJson<LatestBlock>>) {
         self.sync_manager
             .lock()
             .await

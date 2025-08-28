@@ -77,7 +77,7 @@ impl<App: KolmeApp> Processor<App> {
 
         let latest_loop = async {
             loop {
-                if let Err(e) = self.emit_latest() {
+                if let Err(e) = self.emit_latest().await {
                     tracing::error!("Error emitting latest block: {e}");
                 }
 
@@ -141,7 +141,7 @@ impl<App: KolmeApp> Processor<App> {
             }
             Err(e)
         } else {
-            self.emit_latest().ok();
+            self.emit_latest().await.ok();
             Ok(())
         }
     }
@@ -198,7 +198,7 @@ impl<App: KolmeApp> Processor<App> {
                 }
             }
         }
-        self.emit_latest().ok();
+        self.emit_latest().await.ok();
         res
     }
 
@@ -319,7 +319,7 @@ impl<App: KolmeApp> Processor<App> {
         Ok(())
     }
 
-    fn emit_latest(&self) -> Result<()> {
+    async fn emit_latest(&self) -> Result<()> {
         let height = self
             .kolme
             .read()
@@ -334,7 +334,9 @@ impl<App: KolmeApp> Processor<App> {
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
         let signed = json.sign(secret)?;
-        self.kolme.update_latest_block(Arc::new(signed));
+        let signed = Arc::new(signed);
+        self.kolme.update_latest_block(signed.clone());
+        self.kolme.broadcast_latest_block(signed).await;
         Ok(())
     }
 }
