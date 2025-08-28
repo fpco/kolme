@@ -274,6 +274,8 @@ impl<App: KolmeApp> Kolme<App> {
             tokio::select! {
                 _ = new_block.listen() => (),
                 _ = failed_tx.recv() => (),
+                // And retry broadcasting every few seconds.
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => (),
             };
 
             // There's a potential race condition, the transaction could have be flushed
