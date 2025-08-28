@@ -73,7 +73,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
             self.len -= 1;
         }
         let node = if self.len <= 16 {
-            let mut values = arrayvec::ArrayVec::new();
+            let mut values = Vec::new();
             self.drain_entries_to(&mut values);
             Node::Leaf(MerkleLockable::new(LeafContents { values }))
         } else {
@@ -82,7 +82,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         (node, v)
     }
 
-    pub(crate) fn drain_entries_to(self, entries: &mut arrayvec::ArrayVec<LeafEntry<K, V>, 16>) {
+    pub(crate) fn drain_entries_to(self, entries: &mut Vec<LeafEntry<K, V>>) {
         if let Some(entry) = self.leaf {
             entries.push(entry);
         }

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arrayvec = { workspace = true }
 base64 = { workspace = true }
 jiff = { workspace = true }
 lru.workspace = true
@@ -22,6 +21,9 @@ tinyvec = { workspace = true, features = ["alloc"] }
 paste = { workspace = true }
 quickcheck = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+clap = { workspace = true }
+sysinfo = "0.36"
+rand = { workspace = true }
 
 [lints]
 workspace = true

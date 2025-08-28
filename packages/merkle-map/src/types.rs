@@ -38,7 +38,7 @@ pub(crate) enum Node<K, V> {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct LeafContents<K, V> {
     /// Invariant: must be sored by key_bytes
-    pub(crate) values: arrayvec::ArrayVec<LeafEntry<K, V>, 16>,
+    pub(crate) values: Vec<LeafEntry<K, V>>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]

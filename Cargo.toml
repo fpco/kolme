@@ -15,7 +15,6 @@ members = [
 
 [workspace.dependencies]
 anyhow = "1.0.97"
-arrayvec = "0.7.6"
 axum = "0.8.3"
 backon = "1.4.1"
 base64 = "0.22.1"
