@@ -28,12 +28,13 @@ where
     V: Send + Sync + 'static,
 {
     pub fn assert_locked_status(&self, expected: bool) {
-        match self {
-            Node::Leaf(leaf) => leaf.assert_locked_status(expected),
-            Node::Tree(tree) => {
-                tree.assert_locked_status(expected);
-                for branch in &tree.as_ref().branches {
-                    branch.assert_locked_status(expected);
+        self.0.assert_locked_status(expected);
+        match self.0.as_ref() {
+            NodeContents::Empty | NodeContents::Leaf(_) => (),
+            NodeContents::TreeWithLeaf { branches, .. }
+            | NodeContents::TreeWithoutLeaf { branches, .. } => {
+                for node in branches {
+                    node.node.assert_locked_status(expected);
                 }
             }
         }
@@ -43,42 +44,57 @@ where
 impl<K, V> Node<K, V> {
     #[cfg(test)]
     pub(crate) fn sanity_checks(&self) {
-        match self {
-            Node::Leaf(leaf) => {
-                leaf.as_ref().sanity_checks();
-            }
-            Node::Tree(tree) => {
-                tree.as_ref().sanity_checks();
-            }
-        }
+        self.0.as_ref().sanity_checks();
     }
 }
 
-impl<K, V> LeafContents<K, V> {
+impl<K, V> NodeContents<K, V> {
     pub(crate) fn sanity_checks(&self) {
-        assert!(self.values.len() <= 16);
-        let mut prev = None;
-        for entry in &self.values {
-            if let Some(prev) = prev {
-                assert!(
-                    prev < &entry.key_bytes,
-                    "prev ({prev:?}) >= entry.key_bytes ({:?})",
-                    entry.key_bytes
-                );
+        match self {
+            NodeContents::Empty => (),
+            NodeContents::Leaf(entries) => {
+                assert!(!entries.is_empty());
+                assert!(entries.len() <= 16);
+                let mut prev = None;
+                for entry in entries {
+                    if let Some(prev) = prev {
+                        assert!(
+                            prev < &entry.key_bytes,
+                            "prev ({prev:?}) >= entry.key_bytes ({:?})",
+                            entry.key_bytes
+                        );
+                    }
+                    prev = Some(&entry.key_bytes);
+                }
             }
-            prev = Some(&entry.key_bytes);
+            NodeContents::TreeWithLeaf {
+                len,
+                leaf,
+                branches,
+            } => sanity_check_tree(*len, Some(leaf), branches),
+            NodeContents::TreeWithoutLeaf { len, branches } => {
+                sanity_check_tree(*len, None, branches)
+            }
         }
     }
 }
 
-impl<K, V> TreeContents<K, V> {
-    fn sanity_checks(&self) {
-        assert!(self.branches.iter().any(|branch| !branch.is_empty()));
-        let expected = self.branches.iter().map(|node| node.len()).sum::<usize>()
-            + if self.leaf.is_some() { 1 } else { 0 };
-        assert_eq!(self.len(), expected);
-        self.branches.iter().for_each(Node::sanity_checks);
-    }
+fn sanity_check_tree<K, V>(
+    len: usize,
+    leaf: Option<&LeafEntry<K, V>>,
+    branches: &[NodeWithU4<K, V>],
+) {
+    assert!(branches.iter().all(|branch| !branch.node.is_empty()));
+    let expected = branches.iter().map(|node| node.node.len()).sum::<usize>()
+        + if leaf.is_some() { 1 } else { 0 };
+    assert_eq!(
+        len,
+        expected,
+        "Provided len: {len}. Expected: {expected}. Leaf? {}",
+        leaf.is_some()
+    );
+    assert!(branches.is_sorted_by(|x, y| x.halfbyte < y.halfbyte));
+    branches.iter().for_each(|node| node.node.sanity_checks());
 }
 
 #[test]

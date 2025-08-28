@@ -4,72 +4,55 @@ use crate::*;
 
 impl<K, V> Clone for Node<K, V> {
     fn clone(&self) -> Self {
-        match self {
-            Node::Leaf(leaf) => Node::Leaf(leaf.clone()),
-            Node::Tree(tree) => Node::Tree(tree.clone()),
-        }
+        Node(self.0.clone())
     }
 }
 
 impl<K, V> Default for Node<K, V> {
     fn default() -> Self {
-        Node::Leaf(MerkleLockable::new(LeafContents::default()))
+        Node(MerkleLockable::new(NodeContents::Empty))
     }
 }
 
 impl<K, V> Node<K, V> {
     pub(crate) fn is_empty(&self) -> bool {
-        match self {
-            Node::Leaf(leaf) => leaf.as_ref().is_empty(),
-            Node::Tree(tree) => {
-                debug_assert_ne!(tree.as_ref().len(), 0);
-                false
-            }
-        }
+        let res = self.0.as_ref().is_empty();
+        #[cfg(debug_assertions)]
+        assert_eq!(res, self.len() == 0);
+        res
     }
 
     pub(crate) fn len(&self) -> usize {
-        match self {
-            Node::Leaf(leaf) => leaf.as_ref().len(),
-            Node::Tree(tree) => tree.as_ref().len(),
-        }
+        self.0.as_ref().len()
     }
 }
 
 impl<K, V> Node<K, V> {
-    pub(crate) fn get(&self, depth: u16, key_bytes: &MerkleKey) -> Option<&LeafEntry<K, V>> {
-        match self {
-            Node::Leaf(leaf) => leaf.as_ref().get(key_bytes),
-            Node::Tree(tree) => tree.as_ref().get(depth, key_bytes),
-        }
+    pub(crate) fn get(&self, key_bytes: &MerkleKey) -> Option<&LeafEntry<K, V>> {
+        self.0.as_ref().get(key_bytes)
     }
 }
 
 impl<K: Clone, V: Clone> Node<K, V> {
     pub(crate) fn get_mut(&mut self, depth: u16, key_bytes: &MerkleKey) -> Option<&mut V> {
-        match self {
-            Node::Leaf(leaf) => leaf.as_mut().get_mut(key_bytes),
-            Node::Tree(tree) => tree.as_mut().get_mut(depth, key_bytes),
-        }
+        self.0.as_mut().get_mut(depth, key_bytes)
     }
 }
 
 impl<K: Clone, V: Clone> Node<K, V> {
     pub(crate) fn insert(self, depth: u16, entry: LeafEntry<K, V>) -> (Node<K, V>, Option<(K, V)>) {
-        match self {
-            Node::Leaf(leaf) => leaf.into_inner().insert(depth, entry),
-            Node::Tree(mut tree) => {
-                let v = tree.as_mut().insert(depth, entry);
-                (Node::Tree(tree), v)
-            }
-        }
+        let contents = self.0.into_inner();
+        let (contents, old) = contents.insert(depth, entry);
+        (
+            Node(MerkleLockable::new(contents)),
+            old.map(|entry| (entry.key, entry.value)),
+        )
     }
 
     pub(crate) fn remove(self, depth: u16, key_bytes: MerkleKey) -> (Node<K, V>, Option<(K, V)>) {
-        match self {
-            Node::Leaf(leaf) => leaf.into_inner().remove(key_bytes),
-            Node::Tree(tree) => tree.into_inner().remove(depth, key_bytes),
-        }
+        let contents = self.0.into_inner();
+        let (contents, old) = contents.remove(depth, &key_bytes);
+        (Node(MerkleLockable::new(contents)), old)
     }
 }
 
@@ -79,27 +62,18 @@ where
     V: MerkleSerializeRaw + Send + Sync + 'static,
 {
     fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
-        match self {
-            Node::Leaf(leaf) => leaf.get_merkle_hash_raw(),
-            Node::Tree(tree) => tree.get_merkle_hash_raw(),
-        }
+        self.0.get_merkle_hash_raw()
     }
 
     fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
-        match self {
-            Node::Leaf(leaf) => leaf.set_merkle_hash_raw(hash),
-            Node::Tree(tree) => tree.set_merkle_hash_raw(hash),
-        }
+        self.0.set_merkle_hash_raw(hash);
     }
 
     fn merkle_serialize_raw(
         &self,
-        manager: &mut MerkleSerializer,
+        serializer: &mut MerkleSerializer,
     ) -> Result<(), MerkleSerialError> {
-        match self {
-            Node::Leaf(leaf) => leaf.merkle_serialize_raw(manager),
-            Node::Tree(tree) => tree.merkle_serialize_raw(manager),
-        }
+        self.0.merkle_serialize_raw(serializer)
     }
 }
 
@@ -111,22 +85,12 @@ where
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        match deserializer.peek_byte()? {
-            42 => MerkleLockable::<LeafContents<K, V>>::merkle_deserialize_raw(deserializer)
-                .map(Node::Leaf),
-            43 => MerkleLockable::<TreeContents<K, V>>::merkle_deserialize_raw(deserializer)
-                .map(Node::Tree),
-            byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
-        }
+        Ok(Node(MerkleLockable::new(
+            NodeContents::merkle_deserialize_raw(deserializer)?,
+        )))
     }
 
-    fn load_merkle_by_hash(hash: Sha256Hash) -> Option<Self> {
-        if let Some(leaf) = MerkleDeserializeRaw::load_merkle_by_hash(hash) {
-            Some(Node::Leaf(leaf))
-        } else {
-            MerkleDeserializeRaw::load_merkle_by_hash(hash).map(Node::Tree)
-        }
-    }
+    // FIXME do we need to implement load_merkle_by_hash?
 }
 
 impl<K: Debug, V: Debug> Debug for Node<K, V> {

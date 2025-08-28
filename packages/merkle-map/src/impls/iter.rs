@@ -75,7 +75,7 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
         };
 
         let entry = if included {
-            if let Some(entry) = self.node.get(0, key) {
+            if let Some(entry) = self.node.get(key) {
                 entry
             } else {
                 self.node.find_entry_after(0, key)?
@@ -107,7 +107,7 @@ impl<K, V> DoubleEndedIterator for Iter<'_, K, V> {
             return None;
         }
         let (key, entry) = match &self.end {
-            Bound::Included(end) => (Some(end), self.node.get(0, end)),
+            Bound::Included(end) => (Some(end), self.node.get(end)),
             Bound::Excluded(end) => (Some(end), None),
             Bound::Unbounded => (None, self.node.find_last_entry()),
         };
@@ -141,107 +141,111 @@ impl<K, V> DoubleEndedIterator for Iter<'_, K, V> {
 
 impl<K, V> Node<K, V> {
     fn find_entry_after(&self, depth: u16, key: &MerkleKey) -> Option<&LeafEntry<K, V>> {
-        match self {
-            Node::Leaf(lockable) => lockable
-                .as_ref()
-                .values
-                .iter()
-                .find(|entry| entry.key_bytes > *key),
-            Node::Tree(lockable) => {
-                let tree = lockable.as_ref();
-                if let Some(leaf) = &tree.leaf {
-                    if leaf.key_bytes > *key {
-                        return Some(leaf);
-                    }
-                }
-                let branch = key.get_index_for_depth(depth).unwrap_or_default();
+        todo!()
+        // match self {
+        //     Node::Leaf(lockable) => lockable
+        //         .as_ref()
+        //         .values
+        //         .iter()
+        //         .find(|entry| entry.key_bytes > *key),
+        //     Node::Tree(lockable) => {
+        //         let tree = lockable.as_ref();
+        //         if let Some(leaf) = &tree.leaf {
+        //             if leaf.key_bytes > *key {
+        //                 return Some(leaf);
+        //             }
+        //         }
+        //         let branch = key.get_index_for_depth(depth).unwrap_or_default();
 
-                // For an exact match, continue checking the key's branches
-                if let Some(entry) =
-                    tree.branches[usize::from(branch)].find_entry_after(depth + 1, key)
-                {
-                    return Some(entry);
-                }
+        //         // For an exact match, continue checking the key's branches
+        //         if let Some(entry) =
+        //             tree.branches[usize::from(branch)].find_entry_after(depth + 1, key)
+        //         {
+        //             return Some(entry);
+        //         }
 
-                // And for all the other branches, simply try and find the first entry
-                for branch in tree.branches[usize::from(branch)..].iter().skip(1) {
-                    if let Some(entry) = branch.find_first_entry() {
-                        return Some(entry);
-                    }
-                }
-                None
-            }
-        }
+        //         // And for all the other branches, simply try and find the first entry
+        //         for branch in tree.branches[usize::from(branch)..].iter().skip(1) {
+        //             if let Some(entry) = branch.find_first_entry() {
+        //                 return Some(entry);
+        //             }
+        //         }
+        //         None
+        //     }
+        // }
     }
 
     fn find_entry_before(&self, depth: u16, key: &MerkleKey) -> Option<&LeafEntry<K, V>> {
-        match self {
-            Node::Leaf(lockable) => lockable
-                .as_ref()
-                .values
-                .iter()
-                .rev()
-                .find(|entry| entry.key_bytes < *key),
-            Node::Tree(lockable) => {
-                let tree = lockable.as_ref();
-                let branch = key.get_index_for_depth(depth).unwrap_or_default();
+        todo!()
+        // match self {
+        //     Node::Leaf(lockable) => lockable
+        //         .as_ref()
+        //         .values
+        //         .iter()
+        //         .rev()
+        //         .find(|entry| entry.key_bytes < *key),
+        //     Node::Tree(lockable) => {
+        //         let tree = lockable.as_ref();
+        //         let branch = key.get_index_for_depth(depth).unwrap_or_default();
 
-                // Check the specified branch first and continue finding entries before...
-                if let Some(entry) =
-                    tree.branches[usize::from(branch)].find_entry_before(depth + 1, key)
-                {
-                    return Some(entry);
-                }
+        //         // Check the specified branch first and continue finding entries before...
+        //         if let Some(entry) =
+        //             tree.branches[usize::from(branch)].find_entry_before(depth + 1, key)
+        //         {
+        //             return Some(entry);
+        //         }
 
-                // Otherwise, take any entry from the previous branches
-                for branch in tree.branches[0..usize::from(branch)].iter().rev() {
-                    if let Some(entry) = branch.find_last_entry() {
-                        return Some(entry);
-                    }
-                }
+        //         // Otherwise, take any entry from the previous branches
+        //         for branch in tree.branches[0..usize::from(branch)].iter().rev() {
+        //             if let Some(entry) = branch.find_last_entry() {
+        //                 return Some(entry);
+        //             }
+        //         }
 
-                // And if none of the branches have any entries, take our leaf
-                if let Some(leaf) = &tree.leaf {
-                    if leaf.key_bytes < *key {
-                        return Some(leaf);
-                    }
-                }
-                None
-            }
-        }
+        //         // And if none of the branches have any entries, take our leaf
+        //         if let Some(leaf) = &tree.leaf {
+        //             if leaf.key_bytes < *key {
+        //                 return Some(leaf);
+        //             }
+        //         }
+        //         None
+        //     }
+        // }
     }
 
     fn find_first_entry(&self) -> Option<&LeafEntry<K, V>> {
-        match self {
-            Node::Leaf(leaf) => leaf.as_ref().values.first(),
-            Node::Tree(tree) => {
-                let tree = tree.as_ref();
-                if let Some(leaf) = &tree.leaf {
-                    return Some(leaf);
-                }
-                for branch in tree.branches.iter() {
-                    if let Some(entry) = branch.find_first_entry() {
-                        return Some(entry);
-                    }
-                }
-                None
-            }
-        }
+        todo!()
+        // match self {
+        //     Node::Leaf(leaf) => leaf.as_ref().values.first(),
+        //     Node::Tree(tree) => {
+        //         let tree = tree.as_ref();
+        //         if let Some(leaf) = &tree.leaf {
+        //             return Some(leaf);
+        //         }
+        //         for branch in tree.branches.iter() {
+        //             if let Some(entry) = branch.find_first_entry() {
+        //                 return Some(entry);
+        //             }
+        //         }
+        //         None
+        //     }
+        // }
     }
 
     fn find_last_entry(&self) -> Option<&LeafEntry<K, V>> {
-        match self {
-            Node::Leaf(leaf) => leaf.as_ref().values.last(),
-            Node::Tree(tree) => {
-                let tree = tree.as_ref();
-                for branch in tree.branches.iter().rev() {
-                    if let Some(entry) = branch.find_last_entry() {
-                        return Some(entry);
-                    }
-                }
-                tree.leaf.as_ref()
-            }
-        }
+        todo!()
+        // match self {
+        //     Node::Leaf(leaf) => leaf.as_ref().values.last(),
+        //     Node::Tree(tree) => {
+        //         let tree = tree.as_ref();
+        //         for branch in tree.branches.iter().rev() {
+        //             if let Some(entry) = branch.find_last_entry() {
+        //                 return Some(entry);
+        //             }
+        //         }
+        //         tree.leaf.as_ref()
+        //     }
+        // }
     }
 }
 
@@ -271,30 +275,31 @@ where
     V: Clone,
 {
     fn pop_first(&mut self) -> Option<(K, V)> {
-        match self {
-            Node::Leaf(leaf) => {
-                let leaf = leaf.as_mut();
-                if leaf.values.is_empty() {
-                    None
-                } else {
-                    let entry = leaf.values.remove(0);
-                    Some((entry.key, entry.value))
-                }
-            }
-            Node::Tree(tree) => {
-                let tree = tree.as_mut();
-                if let Some(entry) = tree.leaf.take() {
-                    return Some((entry.key, entry.value));
-                }
+        todo!()
+        // match self {
+        //     Node::Leaf(leaf) => {
+        //         let leaf = leaf.as_mut();
+        //         if leaf.values.is_empty() {
+        //             None
+        //         } else {
+        //             let entry = leaf.values.remove(0);
+        //             Some((entry.key, entry.value))
+        //         }
+        //     }
+        //     Node::Tree(tree) => {
+        //         let tree = tree.as_mut();
+        //         if let Some(entry) = tree.leaf.take() {
+        //             return Some((entry.key, entry.value));
+        //         }
 
-                for branch in &mut tree.branches {
-                    if let Some(pair) = branch.pop_first() {
-                        return Some(pair);
-                    }
-                }
-                None
-            }
-        }
+        //         for branch in &mut tree.branches {
+        //             if let Some(pair) = branch.pop_first() {
+        //                 return Some(pair);
+        //             }
+        //         }
+        //         None
+        //     }
+        // }
     }
 }
 

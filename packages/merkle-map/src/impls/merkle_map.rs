@@ -62,9 +62,7 @@ where
         Q: ToMerkleKey + ?Sized,
     {
         self.sanity_checks();
-        self.0
-            .get(0, &key.to_merkle_key())
-            .map(|entry| &entry.value)
+        self.0.get(&key.to_merkle_key()).map(|entry| &entry.value)
     }
 
     pub fn contains_key<Q>(&self, key: &Q) -> bool
@@ -94,7 +92,7 @@ where
         self.sanity_checks();
         // TODO could optimize this
         let key_bytes = key.to_merkle_key();
-        if self.0.get(0, &key_bytes).is_some() {
+        if self.0.get(&key_bytes).is_some() {
             return self.0.get_mut(0, &key_bytes).unwrap();
         }
         self.insert(key, def());

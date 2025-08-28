@@ -23,29 +23,35 @@ pub(crate) use crate::impls::MerkleLockable;
 pub struct MerkleMap<K, V>(pub(crate) Node<K, V>);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct LeafEntry<K, V> {
+pub struct LeafEntry<K, V> {
     pub(crate) key_bytes: MerkleKey,
     pub(crate) key: K,
     pub(crate) value: V,
 }
 
 #[derive(PartialEq, Eq)]
-pub(crate) enum Node<K, V> {
-    Leaf(MerkleLockable<LeafContents<K, V>>),
-    Tree(MerkleLockable<TreeContents<K, V>>),
+pub(crate) struct Node<K, V>(pub(crate) MerkleLockable<NodeContents<K, V>>);
+
+#[derive(PartialEq, Eq)]
+pub(crate) enum NodeContents<K, V> {
+    Empty,
+    Leaf(Vec<LeafEntry<K, V>>),
+    TreeWithLeaf {
+        len: usize,
+        leaf: LeafEntry<K, V>,
+        branches: Vec<NodeWithU4<K, V>>,
+    },
+    TreeWithoutLeaf {
+        len: usize,
+        branches: Vec<NodeWithU4<K, V>>,
+    },
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct LeafContents<K, V> {
-    /// Invariant: must be sored by key_bytes
-    pub(crate) values: Vec<LeafEntry<K, V>>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct TreeContents<K, V> {
-    pub(crate) len: usize,
-    pub(crate) leaf: Option<LeafEntry<K, V>>,
-    pub(crate) branches: [Node<K, V>; 16],
+#[derive(PartialEq, Eq)]
+pub(crate) struct NodeWithU4<K, V> {
+    /// Only uses the lower bits
+    pub(crate) halfbyte: u8,
+    pub(crate) node: Node<K, V>,
 }
 
 /// The serialized contents of a value.
