@@ -336,7 +336,22 @@ impl<App: KolmeApp> Gossip<App> {
                 match self.kolme.propose_transaction(tx) {
                     Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
                     Err(e) => {
-                        tracing::warn!(%local_display_name, "Error proposing transaction {txhash}: {e}")
+                        let msg = match e {
+                            // Nothing to be done, we have the tx in our mempool,
+                            // we'll rebroadcast on our own timer
+                            ProposeTransactionError::InMempool => None,
+                            ProposeTransactionError::InBlock(block) => {
+                                Some((GossipMessage::LandedTransaction { block }, "landed"))
+                            }
+                            ProposeTransactionError::Failed(failed) => {
+                                Some((GossipMessage::FailedTransaction { failed }, "failed"))
+                            }
+                        };
+                        if let Some((msg, desc)) = msg {
+                            if let Err(e) = ws_sender.tx.send(msg).await {
+                                tracing::warn!(%local_display_name, "Peer broadcast a transaction that already {desc}, but could not send back notification: {e}");
+                            }
+                        }
                     }
                 }
             }
