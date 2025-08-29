@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, },
+    collections::BTreeMap,
     net::{SocketAddr, TcpListener},
     str::FromStr,
     time::Duration,
@@ -95,17 +95,15 @@ fn withdraw_seed() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .enable_io()
-        // Pausing the clock is crucial here to ensure both tasks become ready 
+        // Pausing the clock is crucial here to ensure both tasks become ready
         // at the *exact same logical time* after we call `tokio::time::advance`.
         // This makes the seed's role in tie-breaking very clear.
         .start_paused(true)
-        .rng_seed(seed)     // Apply the seed for deterministic polling order
+        .rng_seed(seed) // Apply the seed for deterministic polling order
         .build_local(&mut Default::default())
         .unwrap();
 
-    rt.block_on(async {
-        TestTasks::start(withdraw_inner, ()).await
-    });
+    rt.block_on(TestTasks::start(withdraw_inner, ()));
 }
 
 async fn withdraw_inner(testtasks: TestTasks, (): ()) {
@@ -148,7 +146,6 @@ async fn withdraw_inner(testtasks: TestTasks, (): ()) {
         Listener::new(kolme1.clone(), listener.clone()).run(ChainName::PassThrough),
     );
     testtasks.try_spawn_persistent(Approver::new(kolme1.clone(), approver.clone()).run());
-//    testtasks.try_spawn_persistent(Submitter::new_pass_through(kolme1.clone(), port).run());
 
     let store2 = KolmeStore::new_in_memory();
     let kolme2 = Kolme::new(
@@ -161,12 +158,12 @@ async fn withdraw_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.launch_websockets_client_with(kolme2.clone(), "kolme2", &discovery,|builder| {
-            builder.set_sync_mode(
-                SyncMode::StateTransfer,
-                DataLoadValidation::ValidateDataLoads,
-            )
-        });
+    testtasks.launch_websockets_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
+        builder.set_sync_mode(
+            SyncMode::StateTransfer,
+            DataLoadValidation::ValidateDataLoads,
+        )
+    });
 
     tracing::info!("Waiting start");
 
