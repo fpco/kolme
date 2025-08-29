@@ -306,16 +306,8 @@ impl<App: KolmeApp> Kolme<App> {
         secret: &SecretKey,
         tx_builder: T,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
-        match tokio::time::timeout(
-            self.tx_await_duration,
-            self.sign_propose_await_transaction_inner(secret, tx_builder.into()),
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(e) => Err(anyhow::Error::from(e)
-                .context("Timed out while signing/proposing/awaiting a transaction")),
-        }
+        self.sign_propose_await_transaction_inner(secret, tx_builder.into())
+            .await
     }
 
     async fn sign_propose_await_transaction_inner(
