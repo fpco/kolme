@@ -220,8 +220,8 @@ impl<App: KolmeApp> Gossip<App> {
                     latest.unwrap();
                     self.update_latest().await;
                 }
-                Some(latest) = latest_block_rx.recv() => {
-                    self.update_latest_with(latest).await;
+                Some(block) = latest_block_rx.recv() => {
+                    self.share_block(block);
                 }
                 failed = failed_rx.recv() => {
                     self.share_failed_tx(failed);
@@ -272,6 +272,10 @@ impl<App: KolmeApp> Gossip<App> {
         let local_display_name = self.local_display_name.clone();
         match message {
             GossipMessage::ProvideLatestBlock { latest } => {
+                println!(
+                    "{local_display_name}: received latest block {}",
+                    latest.message.as_inner().height
+                );
                 self.kolme.update_latest_block(latest);
             }
             GossipMessage::RequestBlock { height } => {
@@ -293,6 +297,12 @@ impl<App: KolmeApp> Gossip<App> {
                 }
             }
             GossipMessage::ProvideBlock { height: _, block } => {
+                if let Some(block) = &block {
+                    println!(
+                        "{local_display_name}: ProvideBlock with tx {}",
+                        block.tx().hash()
+                    )
+                }
                 // FIXME verify signature?
                 if let Some(block) = block {
                     self.sync_manager
@@ -339,13 +349,11 @@ impl<App: KolmeApp> Gossip<App> {
             }
             GossipMessage::BroadcastTx { tx } => {
                 let txhash = tx.hash();
+                println!("{local_display_name}: BroadcastTx: received {txhash}");
                 if let Ok(Some(block)) = self.kolme.get_tx_block(txhash).await {
                     if let Err(e) = ws_sender
                         .tx
-                        .send(GossipMessage::ProvideBlock {
-                            height: block.height(),
-                            block: Some(block),
-                        })
+                        .send(GossipMessage::TransactionLanded { block })
                         .await
                     {
                         tracing::warn!(%local_display_name, "Received an already-landed transaction {txhash}, but couldn't tell the broadcaster: {e}");
@@ -353,14 +361,49 @@ impl<App: KolmeApp> Gossip<App> {
                 } else {
                     match self.kolme.propose_transaction(tx) {
                         Ok(()) => self.kolme.mark_mempool_entry_gossiped(txhash),
-                        Err(e) => {
-                            tracing::warn!(%local_display_name, "Error proposing transaction {txhash}: {e}")
-                        }
+                        Err(e) => match e {
+                            ProposeTransactionError::InMempool => (),
+                            ProposeTransactionError::InBlock(block) => {
+                                println!("InBlock: {block:?}");
+                                if let Err(e) = ws_sender
+                                    .tx
+                                    .send(GossipMessage::TransactionLanded { block })
+                                    .await
+                                {
+                                    tracing::warn!(%local_display_name, "Requested to broadcast a transaction but it already landed, and couldn't report to the peer: {e}");
+                                }
+                            }
+                            ProposeTransactionError::Failed(failed) => {
+                                println!("Failed: {failed:?}");
+                                if let Err(e) = ws_sender
+                                    .tx
+                                    .send(GossipMessage::FailedTransaction { failed })
+                                    .await
+                                {
+                                    tracing::warn!(%local_display_name, "Requested to broadcast a transaction but it already failed, and couldn't report to the peer: {e}");
+                                }
+                            }
+                        },
                     }
                 }
             }
             GossipMessage::FailedTransaction { failed } => {
+                println!(
+                    "{}: FailedTransaction received: {failed:?}",
+                    self.local_display_name
+                );
                 self.kolme.add_failed_transaction(failed);
+            }
+            GossipMessage::TransactionLanded { block } => {
+                println!(
+                    "{}: received TransactionLanded: {}: {}",
+                    local_display_name,
+                    block.height(),
+                    block.tx().hash()
+                );
+                if self.kolme.add_landed_transaction(block.clone()) {
+                    GossipMessage::TransactionLanded { block }.publish(self);
+                }
             }
         }
     }
@@ -385,6 +428,16 @@ impl<App: KolmeApp> Gossip<App> {
         }
     }
 
+    fn share_block(&self, block: Arc<SignedBlock<App::Message>>) {
+        println!(
+            "{}: Sharing block: {}: {}",
+            self.local_display_name,
+            block.height(),
+            block.tx().hash()
+        );
+        GossipMessage::TransactionLanded { block }.publish(self);
+    }
+
     fn share_failed_tx(
         &self,
         failed: Result<
@@ -392,6 +445,7 @@ impl<App: KolmeApp> Gossip<App> {
             tokio::sync::broadcast::error::RecvError,
         >,
     ) {
+        println!("{}: shared_failed_tx: {failed:?}", self.local_display_name);
         match failed {
             Ok(failed) => GossipMessage::FailedTransaction { failed }.publish(self),
             Err(e) => match e {

@@ -67,6 +67,7 @@ solana = [
   "dep:solana-transaction-status-client-types", "dep:kolme-solana-bridge-client",
   "shared/solana"
 ]
+default = ["pass_through"]
 
 [lints]
 workspace = true

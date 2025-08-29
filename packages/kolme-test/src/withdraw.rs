@@ -82,14 +82,14 @@ const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 #[tokio::test]
 async fn withdraw() {
-    kolme::init_logger(true, None);
+    // kolme::init_logger(false, None);
     TestTasks::start(withdraw_inner, ()).await
 }
 
 #[cfg(tokio_unstable)]
 #[test]
 fn withdraw_seed() {
-    kolme::init_logger(true, None);
+    // kolme::init_logger(true, None);
     let seed = tokio::runtime::RngSeed::from_bytes(b"2");
 
     let rt = tokio::runtime::Builder::new_current_thread()

@@ -61,7 +61,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     /// above. If enough new blocks come in quickly enough, the processor won't
     /// broadcast all the blocks to the network. Therefore, we also set up a
     /// mpsc channel for the gossip component to subscribe for updates.
-    latest_block_sender: OnceLock<tokio::sync::mpsc::Sender<Arc<SignedTaggedJson<LatestBlock>>>>,
+    latest_block_sender: OnceLock<tokio::sync::mpsc::Sender<Arc<SignedBlock<App::Message>>>>,
 
     /// The version of the chain the current codebase represents.
     ///
@@ -176,7 +176,7 @@ impl<App: KolmeApp> Kolme<App> {
 
     pub(crate) async fn broadcast_latest_block(
         &self,
-        latest_block: Arc<SignedTaggedJson<LatestBlock>>,
+        latest_block: Arc<SignedBlock<App::Message>>,
     ) {
         if let Some(sender) = self.inner.latest_block_sender.get() {
             if let Err(e) = sender.send(latest_block).await {
@@ -187,7 +187,7 @@ impl<App: KolmeApp> Kolme<App> {
 
     pub(crate) fn set_latest_block_sender(
         &self,
-        sender: tokio::sync::mpsc::Sender<Arc<SignedTaggedJson<LatestBlock>>>,
+        sender: tokio::sync::mpsc::Sender<Arc<SignedBlock<App::Message>>>,
     ) {
         if self.inner.latest_block_sender.set(sender).is_err() {
             tracing::warn!("set_latest_block_sender: already set, do you have two Gossip components for one Kolme?")
@@ -201,7 +201,9 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<(), ProposeTransactionError<App::Message>> {
-        self.inner.mempool.add(tx)
+        let res = self.inner.mempool.add(tx);
+        println!("Propose transaction result: {res:?}");
+        res
     }
 
     fn verify_processor_signature<T>(&self, signed: &SignedTaggedJson<T>) -> Result<()> {
@@ -234,8 +236,20 @@ impl<App: KolmeApp> Kolme<App> {
             tracing::warn!("Invalid processor signature on signed failed transaction: {e}");
         }
         if self.inner.mempool.add_failed_transaction(failed.clone()) {
-            self.inner.failed_txs.send(failed).ok();
+            println!("Newly added failed: {failed:?}");
+            if let Err(e) = self.inner.failed_txs.send(failed) {
+                println!("Error adding failed tx: {e}");
+            }
+        } else {
+            println!("Failed already present: {failed:?}")
         }
+    }
+
+    /// Tell the mempool about a transaction that's already landed.
+    ///
+    /// Returns [true] if this is a newly added block to the mempool.
+    pub(crate) fn add_landed_transaction(&self, block: Arc<SignedBlock<App::Message>>) -> bool {
+        self.inner.mempool.add_signed_block(block)
     }
 
     /// Remove an entry from the mempool.
@@ -260,18 +274,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
-        let txhash = tx.hash();
-        match tokio::time::timeout(
-            self.tx_await_duration,
-            self.propose_and_await_transaction_inner(tx),
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(e) => Err(anyhow::Error::from(e).context(format!(
-                "Timed out proposing and awaiting transaction {txhash}"
-            ))),
-        }
+        self.propose_and_await_transaction_inner(tx).await
     }
 
     async fn propose_and_await_transaction_inner(
@@ -280,34 +283,49 @@ impl<App: KolmeApp> Kolme<App> {
     ) -> Result<Arc<SignedBlock<App::Message>>> {
         let mut new_block = self.subscribe_new_block();
         let mut failed_tx = self.subscribe_failed_txs();
+        let mut mempool = self.subscribe_mempool_additions();
         let txhash = tx.hash();
-        loop {
-            match self.propose_transaction(tx.clone()) {
-                // The only way this should happen is if the transaction was
-                // booted from the LRU cache. In that case, just try again.
-                Ok(()) => (),
-                // Still in the mempool, so continue waiting
-                Err(ProposeTransactionError::InMempool) => (),
-                Err(ProposeTransactionError::InBlock(block)) => {
-                    debug_assert_eq!(block.tx().hash(), txhash);
-                    break Ok(block);
+        let wait_loop = async move {
+            loop {
+                println!("Proposing transaction: {txhash}");
+                match self.propose_transaction(tx.clone()) {
+                    // The only way this should happen is if the transaction was
+                    // booted from the LRU cache. In that case, just try again.
+                    Ok(()) => (),
+                    // Still in the mempool, so continue waiting
+                    Err(ProposeTransactionError::InMempool) => (),
+                    Err(ProposeTransactionError::InBlock(block)) => {
+                        debug_assert_eq!(block.tx().hash(), txhash);
+                        break Ok(block);
+                    }
+                    Err(ProposeTransactionError::Failed(failed)) => {
+                        debug_assert_eq!(failed.message.as_inner().txhash, txhash);
+                        break Err(failed.message.as_inner().error.clone().into());
+                    }
                 }
-                Err(ProposeTransactionError::Failed(failed)) => {
-                    debug_assert_eq!(failed.message.as_inner().txhash, txhash);
-                    break Err(failed.message.as_inner().error.clone().into());
-                }
+
+                // Wait until we either get a new block, a new failed notification comes in,
+                // or the mempool updates.
+                tokio::select! {
+                    _ = new_block.listen() => (),
+                    _ = failed_tx.recv() => (),
+                    _ = mempool.listen() => {
+                        println!("mempool.listen returned");
+                    },
+                };
+
+                // There's a potential race condition, the transaction could have be flushed
+                // from the LRU cache after successfully landing in a block. No worries if that
+                // occurs, we'll try proposing again and will eventually be told by another node
+                // that it landed in a block.
             }
-
-            // Wait until we either get a new block or a new failed notification comes in.
-            tokio::select! {
-                _ = new_block.listen() => (),
-                _ = failed_tx.recv() => (),
-            };
-
-            // There's a potential race condition, the transaction could have be flushed
-            // from the LRU cache after successfully landing in a block. No worries if that
-            // occurs, we'll try proposing again and will eventually be told by another node
-            // that it landed in a block.
+        };
+        match tokio::time::timeout(self.tx_await_duration, wait_loop).await {
+            Ok(res) => res,
+            Err(e) => Err(anyhow::Error::from(e).context(format!(
+                "Timed out proposing and awaiting transaction {txhash}, duration: {:?}",
+                self.tx_await_duration
+            ))),
         }
     }
 
@@ -319,16 +337,8 @@ impl<App: KolmeApp> Kolme<App> {
         secret: &SecretKey,
         tx_builder: T,
     ) -> Result<Arc<SignedBlock<App::Message>>> {
-        match tokio::time::timeout(
-            self.tx_await_duration,
-            self.sign_propose_await_transaction_inner(secret, tx_builder.into()),
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(e) => Err(anyhow::Error::from(e)
-                .context("Timed out while signing/proposing/awaiting a transaction")),
-        }
+        self.sign_propose_await_transaction_inner(secret, tx_builder.into())
+            .await
     }
 
     async fn sign_propose_await_transaction_inner(
@@ -352,8 +362,12 @@ impl<App: KolmeApp> Kolme<App> {
                 pubkey,
                 nonce,
             )?);
+            println!("Created txhash {}", tx.hash());
             match self.propose_and_await_transaction_inner(tx).await {
-                Ok(block) => break Ok(block),
+                Ok(block) => {
+                    println!("Landed txhash {} in {}", block.tx().hash(), block.height());
+                    break Ok(block);
+                }
                 Err(e) => {
                     if let Some(KolmeError::InvalidNonce {
                         pubkey: _,
@@ -363,7 +377,7 @@ impl<App: KolmeApp> Kolme<App> {
                     }) = e.downcast_ref()
                     {
                         if actual < expected && attempt < MAX_NONCE_ATTEMPTS {
-                            tracing::warn!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}. Retrieved attempted nonce from framework state with next_block_height {next_block_height}. Error: {e}");
+                            println!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}. Retrieved attempted nonce from framework state with next_block_height {next_block_height}. Error: {e}");
                             attempt += 1;
                             nonce = *expected;
                             continue;

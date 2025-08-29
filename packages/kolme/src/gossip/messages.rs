@@ -36,6 +36,10 @@ pub(super) enum GossipMessage<App: KolmeApp> {
     FailedTransaction {
         failed: Arc<SignedTaggedJson<FailedTransaction>>,
     },
+    /// Notification that a transaction has already landed.
+    TransactionLanded {
+        block: Arc<SignedBlock<App::Message>>,
+    },
 }
 
 impl<App: KolmeApp> Display for GossipMessage<App> {
@@ -62,6 +66,12 @@ impl<App: KolmeApp> Display for GossipMessage<App> {
                     failed.message.as_inner()
                 )
             }
+            GossipMessage::TransactionLanded { block } => write!(
+                f,
+                "Transaction {} already landed in block {}",
+                block.tx().hash(),
+                block.height()
+            ),
         }
     }
 }

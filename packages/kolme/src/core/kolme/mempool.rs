@@ -26,6 +26,19 @@ enum BlockReason<AppMessage> {
     Failed(Arc<SignedTaggedJson<FailedTransaction>>),
 }
 
+impl<AppMessage> std::fmt::Debug for BlockReason<AppMessage> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BlockReason::InBlock(block) => write!(f, "already in block {}", block.height()),
+            BlockReason::Failed(failed) => write!(
+                f,
+                "transaction already failed: {}",
+                failed.message.as_inner().error
+            ),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ProposeTransactionError<AppMessage> {
     #[error("Transaction is already present in mempool")]
@@ -93,15 +106,20 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     /// Mark a transaction as blocked by already being in the chain.
-    pub(super) fn add_signed_block(&self, block: Arc<SignedBlock<AppMessage>>) {
+    ///
+    /// Returns [true] if this is a newly added block to the mempool.
+    pub(super) fn add_signed_block(&self, block: Arc<SignedBlock<AppMessage>>) -> bool {
         let mut guard = self.state.write();
         let hash = block.tx().hash();
         if guard.blocked.contains(&hash) {
-            return;
+            println!("add_signed_block: already contains {hash}");
+            return false;
         }
+        println!("add_signed_block: adding {hash}");
         guard.blocked.put(hash, BlockReason::InBlock(block));
         guard.drop_tx(hash, &self.notify);
         self.notify.trigger();
+        true
     }
 
     /// Mark a transaction as failed.
@@ -128,7 +146,9 @@ impl<AppMessage> Mempool<AppMessage> {
     ) -> Result<(), ProposeTransactionError<AppMessage>> {
         let mut state = self.state.write();
         let hash = tx.hash();
-        match state.blocked.get(&hash) {
+        let res = state.blocked.get(&hash);
+        println!("mempool::add: adding {hash}, got {res:?}");
+        match res {
             Some(reason) => Err(match reason {
                 BlockReason::InBlock(block) => ProposeTransactionError::InBlock(block.clone()),
                 BlockReason::Failed(failed) => ProposeTransactionError::Failed(failed.clone()),

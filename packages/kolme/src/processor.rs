@@ -61,14 +61,17 @@ impl<App: KolmeApp> Processor<App> {
 
                 let tx = self.kolme.wait_on_mempool().await;
                 let txhash = tx.hash();
+                println!("Processor: got {txhash} from mempool");
                 let tx = Arc::unwrap_or_clone(tx);
 
                 match self.add_transaction(tx).await {
                     Ok(()) => {
+                        println!("Added transaction {txhash}");
                         // TODO See https://github.com/fpco/kolme/issues/122
                         self.approve_actions_all(&chains).await;
                     }
                     Err(e) => {
+                        println!("Unable to add transaction {txhash}: {e}");
                         tracing::error!("Unable to add transaction {txhash} from mempool: {e}");
                     }
                 }
@@ -77,7 +80,7 @@ impl<App: KolmeApp> Processor<App> {
 
         let latest_loop = async {
             loop {
-                if let Err(e) = self.emit_latest().await {
+                if let Err(e) = self.emit_latest() {
                     tracing::error!("Error emitting latest block: {e}");
                 }
 
@@ -141,7 +144,7 @@ impl<App: KolmeApp> Processor<App> {
             }
             Err(e)
         } else {
-            self.emit_latest().await.ok();
+            self.emit_latest().ok();
             Ok(())
         }
     }
@@ -174,7 +177,7 @@ impl<App: KolmeApp> Processor<App> {
                     "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this. Height: {height}. Adding: {adding}. Existing: {existing}."
                 );
             } else {
-                tracing::warn!("Giving up on adding transaction {txhash}: {e}");
+                println!("Giving up on adding transaction {txhash}: {e}");
                 let failed = (|| {
                     let failed = FailedTransaction {
                         txhash,
@@ -198,7 +201,10 @@ impl<App: KolmeApp> Processor<App> {
                 }
             }
         }
-        self.emit_latest().await.ok();
+        self.emit_latest().ok();
+        if let Ok(Some(block)) = self.kolme.get_block(proposed_height).await {
+            self.kolme.broadcast_latest_block(block.block).await;
+        }
         res
     }
 
@@ -319,7 +325,7 @@ impl<App: KolmeApp> Processor<App> {
         Ok(())
     }
 
-    async fn emit_latest(&self) -> Result<()> {
+    fn emit_latest(&self) -> Result<()> {
         let height = self
             .kolme
             .read()
@@ -335,8 +341,7 @@ impl<App: KolmeApp> Processor<App> {
         let secret = self.get_correct_secret(&kolme)?;
         let signed = json.sign(secret)?;
         let signed = Arc::new(signed);
-        self.kolme.update_latest_block(signed.clone());
-        self.kolme.broadcast_latest_block(signed).await;
+        self.kolme.update_latest_block(signed);
         Ok(())
     }
 }

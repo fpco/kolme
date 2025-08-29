@@ -169,6 +169,8 @@ impl<App: KolmeApp> SyncManager<App> {
             Ok(false) => (),
         }
 
+        gossip.kolme.add_landed_transaction(block.clone());
+
         let Some(waiting) = self.needed_blocks.get_mut(&height) else {
             return;
         };
