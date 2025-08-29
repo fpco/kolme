@@ -184,6 +184,9 @@ impl<App: KolmeApp> Gossip<App> {
         let (block_requester, mut block_requester_rx) = tokio::sync::mpsc::channel(8);
         self.kolme.set_block_requester(block_requester);
 
+        let (landed_tx, mut landed_tx_rx) = tokio::sync::mpsc::channel(8);
+        self.kolme.set_landed_tx(landed_tx);
+
         let mut sync_manager_subscriber = self.sync_manager.lock().await.subscribe();
 
         let mut latest_watch = self.kolme.subscribe_latest_block();
@@ -216,6 +219,9 @@ impl<App: KolmeApp> Gossip<App> {
                     #[cfg(debug_assertions)]
                     latest.unwrap();
                     self.update_latest().await;
+                }
+                Some(landed) = landed_tx_rx.recv() => {
+                    self.share_landed_tx(landed);
                 }
                 failed = failed_rx.recv() => {
                     self.share_failed_tx(failed);
@@ -337,6 +343,9 @@ impl<App: KolmeApp> Gossip<App> {
             GossipMessage::FailedTransaction { failed } => {
                 self.kolme.add_failed_transaction(failed);
             }
+            GossipMessage::LandedTransaction { block } => {
+                self.kolme.add_landed_transaction(block).await;
+            }
         }
     }
 
@@ -358,6 +367,10 @@ impl<App: KolmeApp> Gossip<App> {
             };
             msg.publish(self);
         }
+    }
+
+    fn share_landed_tx(&self, block: Arc<SignedBlock<App::Message>>) {
+        GossipMessage::LandedTransaction { block }.publish(self)
     }
 
     fn share_failed_tx(
