@@ -62,6 +62,7 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     code_version: String,
     /// A channel for requesting new blocks to be synced from the network.
     block_requester: OnceLock<tokio::sync::mpsc::Sender<BlockHeight>>,
+    landed_txs: OnceLock<tokio::sync::mpsc::Sender<Arc<SignedBlock<App::Message>>>>,
     failed_txs: tokio::sync::broadcast::Sender<Arc<SignedTaggedJson<FailedTransaction>>>,
 }
 
@@ -207,6 +208,20 @@ impl<App: KolmeApp> Kolme<App> {
         }
         if self.inner.mempool.add_failed_transaction(failed.clone()) {
             self.inner.failed_txs.send(failed).ok();
+        }
+    }
+
+    /// Log a landed transaction.
+    pub(crate) async fn add_landed_transaction(&self, block: Arc<SignedBlock<App::Message>>) {
+        if let Err(e) = self.verify_processor_signature(&block.0) {
+            tracing::warn!("Invalid processor signature on landed transaction: {e}");
+        }
+        if self.inner.mempool.add_signed_block(block.clone()) {
+            if let Some(tx) = self.inner.landed_txs.get() {
+                if let Err(e) = tx.send(block).await {
+                    tracing::error!("add_landed_transaction: failure on send: {e}");
+                }
+            }
         }
     }
 
@@ -499,6 +514,11 @@ impl<App: KolmeApp> Kolme<App> {
             .await?;
 
         self.inner.mempool.add_signed_block(signed_block.clone());
+        if let Some(tx) = self.inner.landed_txs.get() {
+            if let Err(e) = tx.send(signed_block.clone()).await {
+                tracing::error!("add_landed_transaction: failure on send: {e}");
+            }
+        }
 
         // Now do the write lock
         {
@@ -508,10 +528,11 @@ impl<App: KolmeApp> Kolme<App> {
                 return Ok(());
             }
 
+            let blockhash = signed_block.hash();
             *guard = Arc::new(MaybeBlockInfo::Some(BlockInfo {
-                block: signed_block.clone(),
+                block: signed_block,
                 state: BlockState {
-                    blockhash: signed_block.hash(),
+                    blockhash,
                     framework_state,
                     app_state,
                 },
@@ -647,6 +668,7 @@ impl<App: KolmeApp> Kolme<App> {
             latest_block: tokio::sync::watch::Sender::new(None),
             code_version: code_version.into(),
             block_requester: OnceLock::new(),
+            landed_txs: OnceLock::new(),
             failed_txs: tokio::sync::broadcast::Sender::new(100),
         };
 
@@ -737,6 +759,13 @@ impl<App: KolmeApp> Kolme<App> {
     /// If there's already a block requester set, this is a no-op.
     pub(crate) fn set_block_requester(&self, requester: tokio::sync::mpsc::Sender<BlockHeight>) {
         self.inner.block_requester.set(requester).ok();
+    }
+
+    pub(crate) fn set_landed_tx(
+        &self,
+        landed_tx: tokio::sync::mpsc::Sender<Arc<SignedBlock<App::Message>>>,
+    ) {
+        self.inner.landed_txs.set(landed_tx).ok();
     }
 
     /// Wait until the given transaction is published

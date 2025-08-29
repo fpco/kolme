@@ -93,15 +93,18 @@ impl<AppMessage> Mempool<AppMessage> {
     }
 
     /// Mark a transaction as blocked by already being in the chain.
-    pub(super) fn add_signed_block(&self, block: Arc<SignedBlock<AppMessage>>) {
+    ///
+    /// Returns [true] if this is a newly added block.
+    pub(super) fn add_signed_block(&self, block: Arc<SignedBlock<AppMessage>>) -> bool {
         let mut guard = self.state.write();
         let hash = block.tx().hash();
         if guard.blocked.contains(&hash) {
-            return;
+            return false;
         }
         guard.blocked.put(hash, BlockReason::InBlock(block));
         guard.drop_tx(hash, &self.notify);
         self.notify.trigger();
+        true
     }
 
     /// Mark a transaction as failed.
