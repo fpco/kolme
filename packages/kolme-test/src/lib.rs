@@ -36,3 +36,6 @@ mod tx_evicted_mempool;
 mod upgrade;
 #[cfg(test)]
 mod validations;
+#[cfg(feature = "pass_through")]
+#[cfg(test)]
+mod withdraw;
