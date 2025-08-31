@@ -26,6 +26,19 @@ enum BlockReason<AppMessage> {
     Failed(Arc<SignedTaggedJson<FailedTransaction>>),
 }
 
+impl<AppMessage> std::fmt::Debug for BlockReason<AppMessage> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BlockReason::InBlock(block) => write!(f, "already in block {}", block.height()),
+            BlockReason::Failed(failed) => write!(
+                f,
+                "transaction already failed: {}",
+                failed.message.as_inner().error
+            ),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ProposeTransactionError<AppMessage> {
     #[error("Transaction is already present in mempool")]
