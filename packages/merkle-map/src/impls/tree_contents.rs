@@ -41,7 +41,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         };
         let index = usize::from(index);
         let branch_slot = &mut self.branches[index];
-        let current = branch_slot.take().unwrap_or_else(Node::default);
+        let current = branch_slot.take().unwrap_or_default();
         let (branch, v) = current.insert(depth + 1, entry);
         *branch_slot = Some(branch);
         if v.is_none() {

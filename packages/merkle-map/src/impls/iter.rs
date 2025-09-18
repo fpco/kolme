@@ -297,7 +297,7 @@ where
                     } else {
                         None
                     };
-                    let should_clear = branch.as_ref().map_or(false, Node::is_empty);
+                    let should_clear = branch.as_ref().is_some_and(Node::is_empty);
                     if should_clear {
                         *branch = None;
                     }
