@@ -45,7 +45,7 @@ pub(crate) struct LeafContents<K, V> {
 pub(crate) struct TreeContents<K, V> {
     pub(crate) len: usize,
     pub(crate) leaf: Option<LeafEntry<K, V>>,
-    pub(crate) branches: [Node<K, V>; 16],
+    pub(crate) branches: [Option<Node<K, V>>; 16],
 }
 
 /// The serialized contents of a value.

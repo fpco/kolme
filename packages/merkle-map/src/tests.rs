@@ -32,7 +32,12 @@ where
             Node::Leaf(leaf) => leaf.assert_locked_status(expected),
             Node::Tree(tree) => {
                 tree.assert_locked_status(expected);
-                for branch in &tree.as_ref().branches {
+                for branch in tree
+                    .as_ref()
+                    .branches
+                    .iter()
+                    .filter_map(|branch| branch.as_ref())
+                {
                     branch.assert_locked_status(expected);
                 }
             }
@@ -73,11 +78,22 @@ impl<K, V> LeafContents<K, V> {
 
 impl<K, V> TreeContents<K, V> {
     fn sanity_checks(&self) {
-        assert!(self.branches.iter().any(|branch| !branch.is_empty()));
-        let expected = self.branches.iter().map(|node| node.len()).sum::<usize>()
-            + if self.leaf.is_some() { 1 } else { 0 };
+        assert!(self
+            .branches
+            .iter()
+            .all(|branch| branch.as_ref().map_or(true, |node| !node.is_empty())));
+        let expected = self
+            .branches
+            .iter()
+            .filter_map(|branch| branch.as_ref())
+            .map(Node::len)
+            .sum::<usize>()
+            + usize::from(self.leaf.is_some());
         assert_eq!(self.len(), expected);
-        self.branches.iter().for_each(Node::sanity_checks);
+        self.branches
+            .iter()
+            .filter_map(|branch| branch.as_ref())
+            .for_each(Node::sanity_checks);
     }
 }
 

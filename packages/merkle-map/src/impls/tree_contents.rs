@@ -1,11 +1,26 @@
 use crate::*;
 
+struct EmptyBranchSerialize;
+
+impl MerkleSerializeRaw for EmptyBranchSerialize {
+    fn merkle_serialize_raw(
+        &self,
+        serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        serializer.store_byte(42);
+        serializer.store_usize(0);
+        Ok(())
+    }
+}
+
+const EMPTY_BRANCH_SERIALIZE: EmptyBranchSerialize = EmptyBranchSerialize;
+
 impl<K, V> TreeContents<K, V> {
     pub(crate) fn new() -> Self {
         Self {
             len: 0,
             leaf: None,
-            branches: std::array::from_fn(|_| Node::default()),
+            branches: std::array::from_fn(|_| None),
         }
     }
 
@@ -25,8 +40,10 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
             return v.map(|entry| (entry.key, entry.value));
         };
         let index = usize::from(index);
-        let (branch, v) = std::mem::take(&mut self.branches[index]).insert(depth + 1, entry);
-        self.branches[index] = branch;
+        let branch_slot = &mut self.branches[index];
+        let current = branch_slot.take().unwrap_or_else(Node::default);
+        let (branch, v) = current.insert(depth + 1, entry);
+        *branch_slot = Some(branch);
         if v.is_none() {
             self.len += 1;
         }
@@ -42,7 +59,9 @@ impl<K, V> TreeContents<K, V> {
         };
         debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
-        self.branches[index].get(depth + 1, key_bytes)
+        self.branches[index]
+            .as_ref()
+            .and_then(|branch| branch.get(depth + 1, key_bytes))
     }
 }
 
@@ -54,7 +73,9 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         };
         debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
         let index = usize::from(index);
-        self.branches[index].get_mut(depth + 1, key_bytes)
+        self.branches[index]
+            .as_mut()
+            .and_then(|branch| branch.get_mut(depth + 1, key_bytes))
     }
 
     pub(crate) fn remove(
@@ -66,9 +87,13 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
             .get_index_for_depth(depth)
             .expect("Impossible: TreeContents::remove without sufficient bytes");
         let index = usize::from(index);
-        let branch = std::mem::take(&mut self.branches[index]);
+        let branch = self.branches[index]
+            .take()
+            .expect("Impossible: TreeContents::remove missing branch");
         let (branch, v) = branch.remove(depth + 1, key_bytes);
-        self.branches[index] = branch;
+        if !branch.is_empty() {
+            self.branches[index] = Some(branch);
+        }
         if v.is_some() {
             self.len -= 1;
         }
@@ -86,7 +111,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         if let Some(entry) = self.leaf {
             entries.push(entry);
         }
-        for branch in self.branches {
+        for branch in self.branches.into_iter().flatten() {
             match branch {
                 Node::Leaf(leaf) => leaf.into_inner().drain_entries_to(entries),
                 Node::Tree(tree) => tree.into_inner().drain_entries_to(entries),
@@ -114,7 +139,10 @@ where
             None => serializer.store_byte(0),
         }
         for branch in &self.branches {
-            serializer.store_by_hash(branch)?;
+            match branch {
+                Some(branch) => serializer.store_by_hash(branch)?,
+                None => serializer.store_by_hash(&EMPTY_BRANCH_SERIALIZE)?,
+            }
         }
         Ok(())
     }
@@ -138,10 +166,13 @@ where
             1 => Some(LeafEntry::merkle_deserialize_raw(deserializer)?),
             byte => return Err(MerkleSerialError::InvalidTreeStart { byte }),
         };
-        let mut branches = std::array::from_fn(|_| Node::default());
+        let mut branches = std::array::from_fn(|_| None);
         for branch in &mut branches {
             let hash = Sha256Hash::merkle_deserialize_raw(deserializer)?;
-            *branch = deserializer.load_by_given_hash(hash)?;
+            let node: Node<K, V> = deserializer.load_by_given_hash(hash)?;
+            if !node.is_empty() {
+                *branch = Some(node);
+            }
         }
         let tree = TreeContents {
             len,
