@@ -18,11 +18,11 @@ node-v2:
 
 # Run client
 client:
-    cargo run -- client --validator /ip4/127.0.0.1/tcp/2001 --continous
+    cargo run -- client --validator ws://127.0.0.1:2001 --continous
 
 # Run client with v2
 client-v2:
-    cargo run -- new-version-client --validator /ip4/127.0.0.1/tcp/3003 --continous
+    cargo run -- new-version-client --validator 127.0.0.1:2001 --continous
 
 # Run observer node
 observer:

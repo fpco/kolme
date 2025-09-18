@@ -234,6 +234,7 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
 
     let gossip = GossipBuilder::new()
         .set_duplicate_cache_time(Duration::from_secs(1))
+        .add_websockets_server("ws://127.0.0.1:2006")
         .build(kolme.clone())?;
     set.spawn(gossip.run());
 

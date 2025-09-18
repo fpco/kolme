@@ -84,8 +84,8 @@ async fn main_inner() -> Result<()> {
             use_fjall_storage,
         } => validators(port, enable_api_server, start_upgrade, use_fjall_storage).await,
         Cmd::Client {
-            validator,
             continous,
+            validator,
         } => client(&validator, SecretKey::random(), continous).await,
         Cmd::Observer {
             validator,
