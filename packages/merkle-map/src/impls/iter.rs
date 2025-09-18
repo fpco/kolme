@@ -157,15 +157,17 @@ impl<K, V> Node<K, V> {
                 let branch = key.get_index_for_depth(depth).unwrap_or_default();
 
                 // For an exact match, continue checking the key's branches
-                if let Some(entry) =
-                    tree.branches[usize::from(branch)].find_entry_after(depth + 1, key)
+                if let Some(entry) = tree.branches[usize::from(branch)]
+                    .as_ref()
+                    .and_then(|child| child.find_entry_after(depth + 1, key))
                 {
                     return Some(entry);
                 }
 
                 // And for all the other branches, simply try and find the first entry
                 for branch in tree.branches[usize::from(branch)..].iter().skip(1) {
-                    if let Some(entry) = branch.find_first_entry() {
+                    if let Some(entry) = branch.as_ref().and_then(|child| child.find_first_entry())
+                    {
                         return Some(entry);
                     }
                 }
@@ -187,15 +189,16 @@ impl<K, V> Node<K, V> {
                 let branch = key.get_index_for_depth(depth).unwrap_or_default();
 
                 // Check the specified branch first and continue finding entries before...
-                if let Some(entry) =
-                    tree.branches[usize::from(branch)].find_entry_before(depth + 1, key)
+                if let Some(entry) = tree.branches[usize::from(branch)]
+                    .as_ref()
+                    .and_then(|child| child.find_entry_before(depth + 1, key))
                 {
                     return Some(entry);
                 }
 
                 // Otherwise, take any entry from the previous branches
                 for branch in tree.branches[0..usize::from(branch)].iter().rev() {
-                    if let Some(entry) = branch.find_last_entry() {
+                    if let Some(entry) = branch.as_ref().and_then(|child| child.find_last_entry()) {
                         return Some(entry);
                     }
                 }
@@ -220,7 +223,8 @@ impl<K, V> Node<K, V> {
                     return Some(leaf);
                 }
                 for branch in tree.branches.iter() {
-                    if let Some(entry) = branch.find_first_entry() {
+                    if let Some(entry) = branch.as_ref().and_then(|child| child.find_first_entry())
+                    {
                         return Some(entry);
                     }
                 }
@@ -235,7 +239,7 @@ impl<K, V> Node<K, V> {
             Node::Tree(tree) => {
                 let tree = tree.as_ref();
                 for branch in tree.branches.iter().rev() {
-                    if let Some(entry) = branch.find_last_entry() {
+                    if let Some(entry) = branch.as_ref().and_then(|child| child.find_last_entry()) {
                         return Some(entry);
                     }
                 }
@@ -288,7 +292,16 @@ where
                 }
 
                 for branch in &mut tree.branches {
-                    if let Some(pair) = branch.pop_first() {
+                    let popped = if let Some(node) = branch.as_mut() {
+                        node.pop_first()
+                    } else {
+                        None
+                    };
+                    let should_clear = branch.as_ref().is_some_and(Node::is_empty);
+                    if should_clear {
+                        *branch = None;
+                    }
+                    if let Some(pair) = popped {
                         return Some(pair);
                     }
                 }
