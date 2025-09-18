@@ -1110,6 +1110,11 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.store.load_block(height).await
     }
 
+    pub async fn get_framework(&self, hash: Sha256Hash) -> Result<FrameworkState> {
+        let result = self.inner.store.load(hash).await?;
+        Ok(result)
+    }
+
     /// Check if the given block is available in storage.
     pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
         self.inner.store.has_block(height).await

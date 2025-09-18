@@ -158,6 +158,8 @@ async fn get_block_inner<App: KolmeApp>(
 ) -> Result<Response, anyhow::Error> {
     #[derive(serde::Serialize)]
     struct Response<'a, App: KolmeApp> {
+        code_version: &'a String,
+        chain_version: &'a String,
         blockhash: Sha256Hash,
         txhash: Sha256Hash,
         block: &'a SignedBlock<App::Message>,
@@ -167,10 +169,18 @@ async fn get_block_inner<App: KolmeApp>(
     let Some(block) = kolme.get_block(height).await? else {
         return Ok(Json(serde_json::json!(null)).into_response());
     };
+
+    let framework_hash = block.block.as_inner().framework_state;
+    let state = kolme.get_framework(framework_hash).await?;
+    let code_version = kolme.get_code_version();
+    let chain_version = state.get_chain_version();
+
     let logs = kolme
         .get_merkle_by_hash::<Vec<_>>(block.block.0.message.as_inner().logs)
         .await?;
     let resp: Response<'_, App> = Response {
+        code_version,
+        chain_version,
         blockhash: block.blockhash,
         txhash: block.txhash,
         block: &block.block,
