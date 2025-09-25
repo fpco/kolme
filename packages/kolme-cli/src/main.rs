@@ -1,5 +1,9 @@
+pub(crate) mod chain_query;
+
 use anyhow::{Context, Result};
+use chain_query::ChainApi;
 use clap::Parser;
+use comfy_table::{presets, Cell, Table};
 use kolme::*;
 use reqwest::{RequestBuilder, Url};
 
@@ -20,6 +24,19 @@ enum Cmd {
     },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
+    /// Fork height information
+    ForkHeight {
+        /// Chain version tag that you want to query
+        #[clap(long, env = "KOLME_CLI_CHAIN_VERSION")]
+        version: String,
+        /// API server root
+        #[clap(
+            long,
+            env = "KOLME_CLI_API_SERVER",
+            default_value = "http://localhost:3000"
+        )]
+        api_server: Url,
+    },
 }
 
 #[derive(clap::Parser)]
@@ -42,6 +59,27 @@ async fn main_inner() -> Result<()> {
         Cmd::PubKey { secret } => {
             let public = secret.public_key();
             eprintln!("Public key: {public}");
+        }
+        Cmd::ForkHeight {
+            version,
+            api_server,
+        } => {
+            let app = ChainApi::new(api_server)?;
+            let root = app.root_info().await?;
+
+            let mut table = Table::new();
+            table.load_preset(presets::NOTHING);
+            table
+                .add_row(vec![
+                    Cell::new("Chain version"),
+                    Cell::new(root.chain_version),
+                ])
+                .add_row(vec![
+                    Cell::new("Code version"),
+                    Cell::new(root.code_version),
+                ]);
+
+            println!("{table}");
         }
     }
     Ok(())
