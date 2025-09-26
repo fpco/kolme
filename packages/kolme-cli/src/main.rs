@@ -65,18 +65,18 @@ async fn main_inner() -> Result<()> {
             api_server,
         } => {
             let app = ChainApi::new(api_server)?;
-            let root = app.root_info().await?;
+            let fork_info = app.fork_info(version).await?;
 
             let mut table = Table::new();
             table.load_preset(presets::NOTHING);
             table
                 .add_row(vec![
-                    Cell::new("Chain version"),
-                    Cell::new(root.chain_version),
+                    Cell::new("First block"),
+                    Cell::new(fork_info.first_block.0),
                 ])
                 .add_row(vec![
-                    Cell::new("Code version"),
-                    Cell::new(root.code_version),
+                    Cell::new("Last block"),
+                    Cell::new(fork_info.last_block.0),
                 ]);
 
             println!("{table}");
