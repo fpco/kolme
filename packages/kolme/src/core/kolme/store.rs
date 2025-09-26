@@ -40,7 +40,6 @@ impl<App: KolmeApp> KolmeStore<App> {
         KolmeStoreInner::new_postgres(url)
             .await
             .map(KolmeStore::from)
-            .map_err(anyhow::Error::from)
     }
 
     pub async fn new_postgres_with_options(
@@ -50,7 +49,6 @@ impl<App: KolmeApp> KolmeStore<App> {
         KolmeStoreInner::new_postgres_with_options(connect, options)
             .await
             .map(KolmeStore::from)
-            .map_err(anyhow::Error::from)
     }
 
     pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
