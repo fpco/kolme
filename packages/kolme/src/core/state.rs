@@ -108,6 +108,13 @@ pub struct PendingProposal {
 impl PendingProposal {
     /// Do we have enough approvals to meet the current validator set rules?
     pub(crate) fn has_sufficient_approvals(&self, validator_set: &ValidatorSet) -> bool {
+        if matches!(self.payload, ProposalPayload::Upgrade(_))
+            && !self.approvals.contains_key(&validator_set.processor)
+        {
+            // Keep the processor in sync with the chain version before applying an upgrade.
+            return false;
+        }
+
         let mut group_approvals = 0;
         if self.approvals.contains_key(&validator_set.processor) {
             group_approvals += 1;
@@ -263,5 +270,78 @@ impl FrameworkState {
 
     pub fn get_chain_version(&self) -> &String {
         &self.version
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{SecretKey, TaggedJson, Upgrade, ValidatorSet};
+    use std::collections::BTreeMap;
+
+    fn secret(index: u8) -> SecretKey {
+        let mut bytes = [0u8; 32];
+        bytes[31] = index.saturating_add(1);
+        let hex = hex::encode(bytes);
+        SecretKey::from_hex(&hex).unwrap()
+    }
+
+    #[test]
+    fn upgrade_proposals_require_processor_vote() {
+        let processor = secret(1);
+        let listener = secret(2);
+        let approver = secret(3);
+
+        let validator_set = ValidatorSet {
+            processor: processor.public_key(),
+            listeners: std::iter::once(listener.public_key()).collect(),
+            needed_listeners: 1,
+            approvers: std::iter::once(approver.public_key()).collect(),
+            needed_approvers: 1,
+        };
+
+        let payload = ProposalPayload::Upgrade(
+            TaggedJson::new(Upgrade {
+                desired_version: "v2".to_owned(),
+            })
+            .unwrap(),
+        );
+        let payload_bytes = payload.as_bytes().to_vec();
+
+        let mut approvals_without_processor = BTreeMap::new();
+        approvals_without_processor.insert(
+            listener.public_key(),
+            listener
+                .sign_recoverable(&payload_bytes)
+                .expect("listener can sign payload"),
+        );
+        approvals_without_processor.insert(
+            approver.public_key(),
+            approver
+                .sign_recoverable(&payload_bytes)
+                .expect("approver can sign payload"),
+        );
+
+        let pending_without_processor = PendingProposal {
+            payload: payload.clone(),
+            approvals: approvals_without_processor,
+        };
+
+        assert!(!pending_without_processor.has_sufficient_approvals(&validator_set));
+
+        let mut approvals_with_processor = pending_without_processor.approvals.clone();
+        approvals_with_processor.insert(
+            processor.public_key(),
+            processor
+                .sign_recoverable(&payload_bytes)
+                .expect("processor can sign payload"),
+        );
+
+        let pending_with_processor = PendingProposal {
+            payload,
+            approvals: approvals_with_processor,
+        };
+
+        assert!(pending_with_processor.has_sufficient_approvals(&validator_set));
     }
 }
