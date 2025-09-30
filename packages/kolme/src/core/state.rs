@@ -216,6 +216,63 @@ impl MerkleDeserialize for ProposalPayload {
     }
 }
 
+impl FrameworkState {
+    pub(super) fn new(
+        GenesisInfo {
+            kolme_ident: _,
+            validator_set,
+            chains,
+            version,
+        }: &GenesisInfo,
+    ) -> Self {
+        FrameworkState {
+            validator_set: MerkleLockable::new(validator_set.clone()),
+            chains: ChainStates::from(chains.clone()),
+            accounts: Accounts::default(),
+            admin_proposal_state: MerkleLockable::new(AdminProposalState::default()),
+            version: version.clone(),
+        }
+    }
+
+    pub fn get_validator_set(&self) -> &ValidatorSet {
+        self.validator_set.as_ref()
+    }
+
+    pub fn get_admin_proposal_state(&self) -> &AdminProposalState {
+        self.admin_proposal_state.as_ref()
+    }
+
+    pub fn get_chain_states(&self) -> &ChainStates {
+        &self.chains
+    }
+
+    pub fn get_accounts(&self) -> &Accounts {
+        &self.accounts
+    }
+
+    pub(super) fn validate(&self) -> Result<(), ValidatorSetError> {
+        self.get_validator_set().validate()
+    }
+
+    pub(super) fn get_asset_config(
+        &self,
+        chain: ExternalChain,
+        asset_id: AssetId,
+    ) -> Result<&AssetConfig, CoreStateError> {
+        self.chains
+            .get(chain)?
+            .config
+            .assets
+            .values()
+            .find(|config| config.asset_id == asset_id)
+            .ok_or(CoreStateError::AssetNotSupported { chain, asset_id })
+    }
+
+    pub fn get_chain_version(&self) -> &String {
+        &self.version
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,62 +343,5 @@ mod tests {
         };
 
         assert!(pending_with_processor.has_sufficient_approvals(&validator_set));
-    }
-}
-
-impl FrameworkState {
-    pub(super) fn new(
-        GenesisInfo {
-            kolme_ident: _,
-            validator_set,
-            chains,
-            version,
-        }: &GenesisInfo,
-    ) -> Self {
-        FrameworkState {
-            validator_set: MerkleLockable::new(validator_set.clone()),
-            chains: ChainStates::from(chains.clone()),
-            accounts: Accounts::default(),
-            admin_proposal_state: MerkleLockable::new(AdminProposalState::default()),
-            version: version.clone(),
-        }
-    }
-
-    pub fn get_validator_set(&self) -> &ValidatorSet {
-        self.validator_set.as_ref()
-    }
-
-    pub fn get_admin_proposal_state(&self) -> &AdminProposalState {
-        self.admin_proposal_state.as_ref()
-    }
-
-    pub fn get_chain_states(&self) -> &ChainStates {
-        &self.chains
-    }
-
-    pub fn get_accounts(&self) -> &Accounts {
-        &self.accounts
-    }
-
-    pub(super) fn validate(&self) -> Result<(), ValidatorSetError> {
-        self.get_validator_set().validate()
-    }
-
-    pub(super) fn get_asset_config(
-        &self,
-        chain: ExternalChain,
-        asset_id: AssetId,
-    ) -> Result<&AssetConfig, CoreStateError> {
-        self.chains
-            .get(chain)?
-            .config
-            .assets
-            .values()
-            .find(|config| config.asset_id == asset_id)
-            .ok_or(CoreStateError::AssetNotSupported { chain, asset_id })
-    }
-
-    pub fn get_chain_version(&self) -> &String {
-        &self.version
     }
 }
