@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use kolme_store::KolmeStoreError;
 
@@ -151,9 +152,25 @@ impl<App: KolmeApp> Processor<App> {
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
         let txhash = tx.hash();
+        let (tx_pubkey, message_labels) = transaction_log_metadata(&tx);
+        let incoming_at = Timestamp::now();
+        let processing_started = Instant::now();
+        tracing::info!(
+            %txhash,
+            pubkey = %tx_pubkey,
+            messages = %message_labels,
+            incoming_timestamp = %incoming_at,
+            "Incoming transaction"
+        );
         let _construct_lock = self.kolme.take_construct_lock().await?;
         self.kolme.resync().await?;
         if self.kolme.read().get_tx_height(txhash).await?.is_some() {
+            tracing::info!(
+                %txhash,
+                pubkey = %tx_pubkey,
+                messages = %message_labels,
+                "Transaction already processed, skipping"
+            );
             return Ok(());
         }
         let proposed_height = self.kolme.read().get_next_height();
@@ -197,6 +214,18 @@ impl<App: KolmeApp> Processor<App> {
                     }
                 }
             }
+        }
+        if res.is_ok() {
+            let finished_at = Timestamp::now();
+            let duration_ms = processing_started.elapsed().as_millis() as u64;
+            tracing::info!(
+                %txhash,
+                pubkey = %tx_pubkey,
+                messages = %message_labels,
+                finished_timestamp = %finished_at,
+                duration_ms,
+                "Finished transaction"
+            );
         }
         self.emit_latest().ok();
         res
@@ -336,5 +365,29 @@ impl<App: KolmeApp> Processor<App> {
         let signed = json.sign(secret)?;
         self.kolme.update_latest_block(Arc::new(signed));
         Ok(())
+    }
+}
+
+fn transaction_log_metadata<AppMessage>(tx: &SignedTransaction<AppMessage>) -> (PublicKey, String) {
+    let inner = tx.0.message.as_inner();
+    let message_labels = inner
+        .messages
+        .iter()
+        .map(message_variant_name)
+        .collect::<Vec<_>>()
+        .join(",");
+    (inner.pubkey, message_labels)
+}
+
+fn message_variant_name<AppMessage>(message: &Message<AppMessage>) -> &'static str {
+    match message {
+        Message::Genesis(_) => "Genesis",
+        Message::App(_) => "App",
+        Message::Listener { .. } => "Listener",
+        Message::Approve { .. } => "Approve",
+        Message::ProcessorApprove { .. } => "ProcessorApprove",
+        Message::Auth(_) => "Auth",
+        Message::Bank(_) => "Bank",
+        Message::Admin(_) => "Admin",
     }
 }
