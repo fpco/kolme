@@ -368,7 +368,10 @@ impl<App: KolmeApp> Processor<App> {
     }
 }
 
-fn transaction_log_metadata<AppMessage>(tx: &SignedTransaction<AppMessage>) -> (PublicKey, String) {
+fn transaction_log_metadata<AppMessage>(tx: &SignedTransaction<AppMessage>) -> (PublicKey, String)
+where
+    AppMessage: serde::Serialize,
+{
     let inner = tx.0.message.as_inner();
     let message_labels = inner
         .messages
@@ -379,15 +382,17 @@ fn transaction_log_metadata<AppMessage>(tx: &SignedTransaction<AppMessage>) -> (
     (inner.pubkey, message_labels)
 }
 
-fn message_variant_name<AppMessage>(message: &Message<AppMessage>) -> &'static str {
-    match message {
-        Message::Genesis(_) => "Genesis",
-        Message::App(_) => "App",
-        Message::Listener { .. } => "Listener",
-        Message::Approve { .. } => "Approve",
-        Message::ProcessorApprove { .. } => "ProcessorApprove",
-        Message::Auth(_) => "Auth",
-        Message::Bank(_) => "Bank",
-        Message::Admin(_) => "Admin",
-    }
+fn message_variant_name<AppMessage>(message: &Message<AppMessage>) -> String
+where
+    AppMessage: serde::Serialize,
+{
+    let serialized = match serde_json::to_string(message) {
+        Ok(json) => json,
+        Err(err) => {
+            tracing::warn!("Failed to serialize message for logging: {err}");
+            "<unserializable message>".to_owned()
+        }
+    };
+
+    serialized.chars().take(50).collect()
 }
