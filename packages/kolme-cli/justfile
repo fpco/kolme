@@ -7,3 +7,7 @@ default:
 # Show public key
 public:
     cargo run -- pub-key
+
+# Fork height information
+fork-height:
+    cargo run -- fork-height
