@@ -293,6 +293,11 @@ impl<App: KolmeApp> SyncManager<App> {
                     }
                 }
             }
+            SyncMode::ValidateFrom { state_sync_height } => {
+                if gossip.kolme.read().get_next_height() <= state_sync_height {
+                    self.add_needed_block(gossip, state_sync_height).await?;
+                }
+            }
         }
 
         Ok(())
@@ -325,6 +330,9 @@ impl<App: KolmeApp> SyncManager<App> {
                         let kolme = gossip.kolme.read();
                         kolme.get_next_height() == block.height()
                             && kolme.get_chain_version() == kolme.get_code_version()
+                    }
+                    SyncMode::ValidateFrom { state_sync_height } => {
+                        block.height() > state_sync_height
                     }
                 };
                 if do_block {
