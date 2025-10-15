@@ -209,7 +209,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .framework_state
             .get_validator_set()
             .listeners
-            .contains(&self.pubkey));
+            .contains(&self.pubkey),
+            "Received a listener message for bridge event ID {event_id} on {chain}, but provided pubkey {} is not part of the listener set {:?}",
+            self.pubkey,
+            self.framework_state.get_validator_set().listeners
+        );
 
         let state = self.framework_state.chains.get_mut(chain)?;
 
