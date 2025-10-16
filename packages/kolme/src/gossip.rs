@@ -82,6 +82,18 @@ pub enum SyncMode {
     /// This will fail to work if the chain has different code versions. At the point of a version
     /// upgrade, you would need to switch to a new code version.
     BlockTransfer,
+    /// Allow a state sync initially, then use block transfer afterwards.
+    ///
+    /// This mode is intended for bootstrapping new validator nodes. Validators should not simply
+    /// trust what the processor has produced, and therefore [SyncMode::StateTransfer] is not
+    /// appropriate. However, [SyncMode::BlockTransfer] may require revalidating a large number
+    /// of old blocks, including from previous app code versions.
+    ///
+    /// Instead, with this option, we will state sync the first block, trusting the processor's
+    /// signature, followed by using block sync.
+    ///
+    /// Note that this mode will not allow state syncs to be used for code upgrades.
+    ValidateFrom { state_sync_height: BlockHeight },
 }
 
 impl GossipBuilder {
