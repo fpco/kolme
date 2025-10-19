@@ -54,8 +54,12 @@ impl Drop for CleanupLockKey {
 
 /// A locked value, containing the [CleanupLockKey] for keeping the cache alive, the raw value, and the serialized [MerkleContents] version.
 pub(crate) struct Locked<T> {
+    /// This field is used for drops only, it's never read directly.
+    #[allow(dead_code)]
     key: Arc<CleanupLockKey>,
     value: Arc<T>,
+    // TODO: for better sharing, would it make sense to have a top-level
+    // cache for the MerkleContents?
     contents: Arc<MerkleContents>,
 }
 
@@ -73,10 +77,6 @@ impl Cache {
 }
 
 impl<T> Locked<T> {
-    pub(super) fn hash(&self) -> Sha256Hash {
-        self.key.0.hash
-    }
-
     pub(super) fn value(&self) -> &Arc<T> {
         &self.value
     }
