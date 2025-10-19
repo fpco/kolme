@@ -5,17 +5,15 @@ use shared::types::Sha256Hash;
 use crate::*;
 
 #[derive(Clone, Default)]
-pub struct MerkleMemoryStore {
-    store: Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>,
-}
+pub struct MerkleMemoryStore(Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>);
 
 impl MerkleMemoryStore {
     pub fn get_map_snapshot(&self) -> HashMap<Sha256Hash, MerkleLayerContents> {
-        self.store.read().unwrap().clone()
+        self.0.read().unwrap().clone()
     }
 
     pub fn load_by_hash(&self, hash: Sha256Hash) -> Option<MerkleLayerContents> {
-        self.store.read().unwrap().get(&hash).cloned()
+        self.0.read().unwrap().get(&hash).cloned()
     }
 }
 
@@ -25,7 +23,7 @@ impl MerkleStore for MerkleMemoryStore {
         hashes: &[Sha256Hash],
         dest: &mut HashMap<Sha256Hash, MerkleLayerContents>,
     ) -> Result<(), MerkleSerialError> {
-        let guard = self.store.read().unwrap();
+        let guard = self.0.read().unwrap();
         for hash in hashes {
             if let Some(layer) = guard.get(hash).cloned() {
                 dest.insert(*hash, layer);
@@ -39,18 +37,18 @@ impl MerkleStore for MerkleMemoryStore {
         payload: &MerkleLayerContents,
     ) -> Result<(), MerkleSerialError> {
         let hash = payload.payload.hash();
-        if let Some(value) = self.store.read().unwrap().get(&hash) {
+        if let Some(value) = self.0.read().unwrap().get(&hash) {
             assert_eq!(value, payload);
             #[cfg(test)]
             panic!("Duplicate hash ({hash}) attempted to be saved in a no-dupe in-memory store");
             #[cfg(not(test))]
             return Ok(());
         }
-        self.store.write().unwrap().insert(hash, payload.clone());
+        self.0.write().unwrap().insert(hash, payload.clone());
         Ok(())
     }
 
     async fn contains_hash(&mut self, hash: Sha256Hash) -> Result<bool, MerkleSerialError> {
-        Ok(self.store.read().unwrap().contains_key(&hash))
+        Ok(self.0.read().unwrap().contains_key(&hash))
     }
 }
