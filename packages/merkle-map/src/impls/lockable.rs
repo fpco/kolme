@@ -55,13 +55,18 @@ impl<T: MerkleSerializeRaw + Send + Sync + 'static> MerkleSerializeRaw for Merkl
         self.inner.merkle_serialize_raw(serializer)
     }
 
-    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
-        self.locked.get().map(Locked::hash)
+    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
+        self.locked.get().map(Locked::contents).cloned()
     }
 
-    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
-        self.locked
-            .get_or_init(|| Locked::new(Self::lock_key_for(hash), self.inner.clone()));
+    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+        self.locked.get_or_init(|| {
+            Locked::new(
+                Self::lock_key_for(contents.hash()),
+                self.inner.clone(),
+                contents,
+            )
+        });
     }
 }
 

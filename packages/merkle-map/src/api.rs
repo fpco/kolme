@@ -25,10 +25,13 @@ impl std::fmt::Debug for MerkleContents {
 pub fn serialize<T: MerkleSerializeRaw + ?Sized>(
     value: &T,
 ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
+    if let Some(contents) = value.get_merkle_contents_raw() {
+        return Ok(contents);
+    }
     let mut serializer = MerkleSerializer::new();
     value.merkle_serialize_raw(&mut serializer)?;
     let contents = Arc::new(serializer.finish());
-    value.set_merkle_hash_raw(contents.hash());
+    value.set_merkle_contents_raw(contents.clone());
     Ok(contents)
 }
 
@@ -98,9 +101,9 @@ pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
     store: &mut Store,
     value: &T,
 ) -> Result<Sha256Hash, MerkleSerialError> {
-    if let Some(hash) = value.get_merkle_hash_raw() {
-        if store.contains_hash(hash).await? {
-            return Ok(hash);
+    if let Some(contents) = value.get_merkle_contents_raw() {
+        if store.contains_hash(contents.hash()).await? {
+            return Ok(contents.hash());
         }
     }
     let contents = serialize(value)?;

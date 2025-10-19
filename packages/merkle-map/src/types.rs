@@ -53,7 +53,7 @@ pub(crate) struct TreeContents<K, V> {
 /// This includes the hash and payload which will be stored in the database.
 /// It also includes all direct children nodes encountered during serialization,
 /// so that they can be checked as present in the database and added if missing.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MerkleContents {
     pub payload: CachedBytes,
     pub children: Arc<[Arc<MerkleContents>]>,

@@ -78,17 +78,17 @@ where
     K: ToMerkleKey + Send + Sync + 'static,
     V: MerkleSerializeRaw + Send + Sync + 'static,
 {
-    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
+    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
         match self {
-            Node::Leaf(leaf) => leaf.get_merkle_hash_raw(),
-            Node::Tree(tree) => tree.get_merkle_hash_raw(),
+            Node::Leaf(leaf) => leaf.get_merkle_contents_raw(),
+            Node::Tree(tree) => tree.get_merkle_contents_raw(),
         }
     }
 
-    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
+    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
         match self {
-            Node::Leaf(leaf) => leaf.set_merkle_hash_raw(hash),
-            Node::Tree(tree) => tree.set_merkle_hash_raw(hash),
+            Node::Leaf(leaf) => leaf.set_merkle_contents_raw(contents),
+            Node::Tree(tree) => tree.set_merkle_contents_raw(contents),
         }
     }
 

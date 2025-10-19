@@ -8,6 +8,8 @@ use std::{
 use parking_lot::RwLock;
 use shared::types::Sha256Hash;
 
+use super::MerkleContents;
+
 /// A lookup key for a cached merkle deserialized value.
 #[derive(Hash, PartialEq, Eq, Clone, Debug)]
 pub(super) struct LockKey {
@@ -18,7 +20,12 @@ pub(super) struct LockKey {
 /// The type-erased lock value.
 ///
 /// This is a type-erased version of an Arc<T>.
-struct LockValue(Box<dyn Any + Send + Sync + 'static>);
+///
+/// Contains the serialized [MerkleContents] as well.
+struct LockValue {
+    inner: Box<dyn Any + Send + Sync + 'static>,
+    contents: Arc<MerkleContents>,
+}
 
 /// A newtype wrapper a LockKey that handles dropping.
 struct CleanupLockKey(LockKey);
@@ -45,18 +52,23 @@ impl Drop for CleanupLockKey {
     }
 }
 
-/// A locked value, containing the [CleanupLockKey] for keeping the cache alive and the raw value.
+/// A locked value, containing the [CleanupLockKey] for keeping the cache alive, the raw value, and the serialized [MerkleContents] version.
 pub(crate) struct Locked<T> {
     key: Arc<CleanupLockKey>,
     value: Arc<T>,
+    contents: Arc<MerkleContents>,
 }
 
 impl Cache {
     fn get<T: Send + Sync + 'static>(&self, lock_key: &LockKey) -> Option<Locked<T>> {
         let cache_entry = self.0.get(lock_key)?;
         let key = cache_entry.key.upgrade()?;
-        let value = cache_entry.value.to_inner()?;
-        Some(Locked { key, value })
+        let (value, contents) = cache_entry.value.to_inner()?;
+        Some(Locked {
+            key,
+            value,
+            contents,
+        })
     }
 }
 
@@ -68,10 +80,14 @@ impl<T> Locked<T> {
     pub(super) fn value(&self) -> &Arc<T> {
         &self.value
     }
+
+    pub(super) fn contents(&self) -> &Arc<MerkleContents> {
+        &self.contents
+    }
 }
 
 impl<T: Send + Sync + 'static> Locked<T> {
-    pub(super) fn new(lock_key: LockKey, inner: Arc<T>) -> Self {
+    pub(super) fn new(lock_key: LockKey, inner: Arc<T>, contents: Arc<MerkleContents>) -> Self {
         if let Some(locked) = CACHE.read().get(&lock_key) {
             return locked;
         }
@@ -84,12 +100,13 @@ impl<T: Send + Sync + 'static> Locked<T> {
         let cleanup_lock_key = Arc::new(CleanupLockKey(lock_key.clone()));
         let cache_entry = CacheEntry {
             key: Arc::downgrade(&cleanup_lock_key),
-            value: LockValue::from_inner(inner.clone()),
+            value: LockValue::from_inner(inner.clone(), contents.clone()),
         };
         guard.0.insert(lock_key, cache_entry);
         Locked {
             key: cleanup_lock_key,
             value: inner,
+            contents,
         }
     }
 
@@ -99,11 +116,14 @@ impl<T: Send + Sync + 'static> Locked<T> {
 }
 
 impl LockValue {
-    fn from_inner<T: Send + Sync + 'static>(inner: Arc<T>) -> Self {
-        LockValue(Box::new(inner))
+    fn from_inner<T: Send + Sync + 'static>(inner: Arc<T>, contents: Arc<MerkleContents>) -> Self {
+        LockValue {
+            inner: Box::new(inner),
+            contents,
+        }
     }
 
-    fn to_inner<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
-        self.0.downcast_ref().cloned()
+    fn to_inner<T: Send + Sync + 'static>(&self) -> Option<(Arc<T>, Arc<MerkleContents>)> {
+        Some((self.inner.downcast_ref().cloned()?, self.contents.clone()))
     }
 }
