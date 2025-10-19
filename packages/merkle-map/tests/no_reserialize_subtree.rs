@@ -55,7 +55,7 @@ impl MerkleSerialize for OnlySerializeOnce {
 async fn no_reserialize_subtree() {
     let state = MyAppState::default();
 
-    let mut store = MerkleMemoryStore::default().disallow_dupes();
+    let mut store = MerkleMemoryStore::default();
     save(&mut store, &state).await.unwrap();
     save(&mut store, &state).await.unwrap();
 }

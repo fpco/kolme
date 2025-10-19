@@ -7,7 +7,6 @@ use crate::*;
 #[derive(Clone, Default)]
 pub struct MerkleMemoryStore {
     store: Arc<RwLock<HashMap<Sha256Hash, MerkleLayerContents>>>,
-    no_dupes: bool,
 }
 
 impl MerkleMemoryStore {
@@ -17,11 +16,6 @@ impl MerkleMemoryStore {
 
     pub fn load_by_hash(&self, hash: Sha256Hash) -> Option<MerkleLayerContents> {
         self.store.read().unwrap().get(&hash).cloned()
-    }
-
-    pub fn disallow_dupes(mut self) -> Self {
-        self.no_dupes = true;
-        self
     }
 }
 
@@ -47,11 +41,9 @@ impl MerkleStore for MerkleMemoryStore {
         let hash = payload.payload.hash();
         if let Some(value) = self.store.read().unwrap().get(&hash) {
             assert_eq!(value, payload);
-            if self.no_dupes {
-                panic!(
-                    "Duplicate hash ({hash}) attempted to be saved in a no-dupe in-memory store"
-                );
-            }
+            #[cfg(test)]
+            panic!("Duplicate hash ({hash}) attempted to be saved in a no-dupe in-memory store");
+            #[cfg(not(test))]
             return Ok(());
         }
         self.store.write().unwrap().insert(hash, payload.clone());

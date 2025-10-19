@@ -64,6 +64,8 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
         check_children: true,
     }];
 
+    let mut saved = HashSet::new();
+
     while let Some(Work {
         contents,
         check_children,
@@ -84,6 +86,13 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
                 }
             }
         } else {
+            let hash = contents.hash();
+            if !saved.insert(hash) {
+                // Was already saved
+                continue;
+            }
+            // Optimization: avoid resaving something that was already
+            // written during this execution.
             store
                 .save_by_hash(&MerkleLayerContents {
                     payload: contents.payload.clone(),
