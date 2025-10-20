@@ -39,6 +39,9 @@ impl MerkleStore for MerkleMemoryStore {
         let hash = payload.payload.hash();
         if let Some(value) = self.0.read().unwrap().get(&hash) {
             assert_eq!(value, payload);
+            #[cfg(test)]
+            panic!("Duplicate hash ({hash}) attempted to be saved in an in-memory store");
+            #[cfg(not(test))]
             return Ok(());
         }
         self.0.write().unwrap().insert(hash, payload.clone());

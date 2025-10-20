@@ -25,10 +25,13 @@ impl std::fmt::Debug for MerkleContents {
 pub fn serialize<T: MerkleSerializeRaw + ?Sized>(
     value: &T,
 ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
+    if let Some(contents) = value.get_merkle_contents_raw() {
+        return Ok(contents);
+    }
     let mut serializer = MerkleSerializer::new();
     value.merkle_serialize_raw(&mut serializer)?;
     let contents = Arc::new(serializer.finish());
-    value.set_merkle_hash_raw(contents.hash());
+    value.set_merkle_contents_raw(contents.clone());
     Ok(contents)
 }
 
@@ -61,6 +64,8 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
         check_children: true,
     }];
 
+    let mut saved = HashSet::new();
+
     while let Some(Work {
         contents,
         check_children,
@@ -81,6 +86,13 @@ pub async fn save_merkle_contents<Store: MerkleStore>(
                 }
             }
         } else {
+            let hash = contents.hash();
+            if !saved.insert(hash) {
+                // Was already saved
+                continue;
+            }
+            // Optimization: avoid resaving something that was already
+            // written during this execution.
             store
                 .save_by_hash(&MerkleLayerContents {
                     payload: contents.payload.clone(),
@@ -98,9 +110,9 @@ pub async fn save<T: MerkleSerializeRaw, Store: MerkleStore>(
     store: &mut Store,
     value: &T,
 ) -> Result<Sha256Hash, MerkleSerialError> {
-    if let Some(hash) = value.get_merkle_hash_raw() {
-        if store.contains_hash(hash).await? {
-            return Ok(hash);
+    if let Some(contents) = value.get_merkle_contents_raw() {
+        if store.contains_hash(contents.hash()).await? {
+            return Ok(contents.hash());
         }
     }
     let contents = serialize(value)?;

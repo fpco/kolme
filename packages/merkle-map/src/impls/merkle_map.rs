@@ -177,12 +177,12 @@ where
         self.0.merkle_serialize_raw(serializer)
     }
 
-    fn get_merkle_hash_raw(&self) -> Option<Sha256Hash> {
-        self.0.get_merkle_hash_raw()
+    fn get_merkle_contents_raw(&self) -> Option<Arc<MerkleContents>> {
+        self.0.get_merkle_contents_raw()
     }
 
-    fn set_merkle_hash_raw(&self, hash: Sha256Hash) {
-        self.0.set_merkle_hash_raw(hash);
+    fn set_merkle_contents_raw(&self, contents: Arc<MerkleContents>) {
+        self.0.set_merkle_contents_raw(contents);
     }
 }
 
