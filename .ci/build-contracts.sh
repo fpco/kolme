@@ -25,7 +25,10 @@ docker  run --rm --tty \
 -v "$ARTIFACTS":/code/artifacts \
 -v "$REGISTRY_CACHE":/usr/local/cargo/registry \
 -v "$CARGO_GIT_CACHE":/usr/local/cargo/git \
-ghcr.io/fpco/cosmos-images/cosmwasm-optimizer:3703be0654109bd04d6e4e1f7d2707ea905a28eb
+docker.io/cosmwasm/optimizer:0.17.0
+
+# Our own custom build if different rust version is required
+# ghcr.io/fpco/cosmos-images/cosmwasm-optimizer:3703be0654109bd04d6e4e1f7d2707ea905a28eb
 
 # not sure how this was created since we mapped the tool's /code/artifacts
 # but it's empty (the real artifacts are in wasm/artifacts)
