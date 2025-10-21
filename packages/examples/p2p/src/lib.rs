@@ -124,7 +124,7 @@ pub async fn processor() -> Result<()> {
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }
@@ -148,7 +148,7 @@ pub async fn api_server(bind: SocketAddr) -> Result<()> {
     let gossip = GossipBuilder::new().build(kolme.clone())?;
     set.spawn(gossip.run());
     let api_server = ApiServer::new(kolme);
-    set.spawn(api_server.run(bind));
+    set.spawn(async move { api_server.run(bind).await.map_err(Into::into) });
 
     while let Some(res) = set.join_next().await {
         match res {
@@ -158,7 +158,7 @@ pub async fn api_server(bind: SocketAddr) -> Result<()> {
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }

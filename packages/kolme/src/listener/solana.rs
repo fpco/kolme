@@ -20,7 +20,7 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     chain: SolanaChain,
     contract: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     loop {
         match listen_internal(kolme.clone(), &secret, chain, &contract).await {
             Ok(_) => tracing::error!("Inner listener loop exited unexpectedly!"),
@@ -31,31 +31,57 @@ pub async fn listen<App: KolmeApp>(
     }
 }
 
+macro_rules! ensure_kolme {
+    ($cond:expr, $($arg:tt)*) => {
+        if !$cond {
+            return Err(KolmeError::Other(format!($($arg)*)));
+        }
+    };
+}
+
 pub async fn sanity_check_contract(
     client: &SolanaClient,
     program: &str,
     info: &GenesisInfo,
-) -> Result<()> {
+) -> std::result::Result<(), KolmeError> {
     let program_id = Pubkey::from_str(program)?;
     let state_acc = kolme_solana_bridge_client::derive_state_pda(&program_id);
 
     let acc = client.get_account(&state_acc).await?;
 
     if acc.owner != program_id || acc.data.len() < 2 {
-        return Err(anyhow::anyhow!(
-            "Bridge program {program} hasn't been initialized yet."
-        ));
+        return Err(KolmeError::UninitializedSolanaBridge {
+            program: program.to_string(),
+        });
     }
 
     // Skip the first two bytes which are the discriminator byte and the bump seed respectively.
-    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..])
-        .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
+    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..]).map_err(|x| {
+        KolmeError::InvalidSolanaBridgeState {
+            details: format!("{x:?}"),
+        }
+    })?;
 
-    anyhow::ensure!(info.validator_set.processor == state.set.processor);
-    anyhow::ensure!(info.validator_set.listeners == state.set.listeners);
-    anyhow::ensure!(info.validator_set.approvers == state.set.approvers);
-    anyhow::ensure!(info.validator_set.needed_listeners == state.set.needed_listeners);
-    anyhow::ensure!(info.validator_set.needed_approvers == state.set.needed_approvers);
+    ensure_kolme!(
+        info.validator_set.processor == state.set.processor,
+        "Processor mismatch"
+    );
+    ensure_kolme!(
+        info.validator_set.listeners == state.set.listeners,
+        "Listeners mismatch"
+    );
+    ensure_kolme!(
+        info.validator_set.approvers == state.set.approvers,
+        "Approvers mismatch"
+    );
+    ensure_kolme!(
+        info.validator_set.needed_listeners == state.set.needed_listeners,
+        "Approvers mismatch"
+    );
+    ensure_kolme!(
+        info.validator_set.needed_approvers == state.set.needed_approvers,
+        "Approvers mismatch"
+    );
 
     Ok(())
 }
@@ -233,7 +259,9 @@ async fn catch_up<App: KolmeApp>(
     Ok(Some(BridgeEventId(latest_id)))
 }
 
-fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMessage>> {
+fn extract_bridge_message_from_logs(
+    logs: &[String],
+) -> std::result::Result<Option<BridgeMessage>, KolmeError> {
     const PROGRAM_DATA_LOG: &str = "Program data: ";
 
     // Our program data should always be the last "Program data:" entry even if CPI was invoked.
@@ -245,11 +273,10 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
         let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
         let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
 
-        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|x| {
-            anyhow::anyhow!(
-                "Error deserializing Solana bridge message from logs: {:?}",
-                x
-            )
+        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|e| {
+            KolmeError::InvalidSolanaBridgeLogMessage {
+                details: format!("{e:?}"),
+            }
         });
 
         match result {
@@ -261,7 +288,6 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
                     );
                     return Ok(None);
                 }
-
                 return Err(e);
             }
         }
