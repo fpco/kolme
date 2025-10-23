@@ -52,6 +52,9 @@ pub enum KolmeStoreError {
         reason: String,
     },
 
+    #[error("Fjall error: {0}")]
+    Fjall(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -64,7 +67,7 @@ impl KolmeStoreError {
 
 impl From<fjall::Error> for KolmeStoreError {
     fn from(e: fjall::Error) -> Self {
-        KolmeStoreError::Other(format!("Fjall error: {e}"))
+        KolmeStoreError::Fjall(e.to_string())
     }
 }
 

@@ -87,7 +87,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         }
         match messages.first().unwrap() {
             Message::Genesis(genesis_info) => Ok(Some(genesis_info.clone())),
-            _ => Err(KolmeError::InvalidGenesisMessageType),
+            _ => Err(KolmeError::InvalidFirstBlockMessageType),
         }
     }
 

@@ -43,15 +43,6 @@ pub enum KolmeError {
         proposed_height: BlockHeight,
     },
 
-    #[error("Unsupported wallet address: {address}")]
-    UnsupportedWalletAddress { address: String },
-
-    #[error("Invalid category name {name}")]
-    InvalidCategoryName { name: String },
-
-    #[error("Error broadcasting:\n{error}\n{trace}")]
-    BroadcastError { error: String, trace: String },
-
     #[error("Already have a bridge contract for {chain:?}, just received another from a listener")]
     BridgeAlreadyDeployed { chain: ExternalChain },
 
@@ -75,9 +66,6 @@ pub enum KolmeError {
         expected: BlockHeight,
     },
 
-    #[error("Height mismatch: expected {expected}, got {actual}")]
-    HeightMismatch { expected: u64, actual: u64 },
-
     #[error("Tried to add block with height {height}, but it's already present in the store")]
     BlockAlreadyExists { height: BlockHeight },
 
@@ -96,13 +84,6 @@ pub enum KolmeError {
     #[cfg(feature = "pass_through")]
     #[error("No wait for pass-through contract is expected")]
     UnexpectedPassThroughContract,
-
-    #[error("Error with transaction {txhash} for block {proposed_height}: {error}")]
-    TransactionFailed {
-        txhash: TxHash,
-        proposed_height: BlockHeight,
-        error: String,
-    },
 
     #[error("Persistent task exited unexpectedly")]
     PersistentTaskExited,
@@ -130,8 +111,8 @@ pub enum KolmeError {
     #[error("Expected exactly one message in the first block, but found a different number")]
     InvalidGenesisMessageCount,
 
-    #[error("Invalid message type in the first block; expected `Genesis`")]
-    InvalidGenesisMessageType,
+    #[error("Invalid messages in first block")]
+    InvalidFirstBlockMessageType,
 
     #[error("Listener panicked: {details}")]
     ListenerPanicked { details: String },
@@ -141,18 +122,6 @@ pub enum KolmeError {
         actual: Box<BlockHash>,
         expected: Box<BlockHash>,
     },
-
-    #[error("Block loads mismatch")]
-    BlockLoadsMismatch,
-
-    #[error("Serialized framework state hash mismatch")]
-    FrameworkStateHashMismatch,
-
-    #[error("Serialized app state hash mismatch")]
-    AppStateHashMismatch,
-
-    #[error("Serialized logs hash mismatch")]
-    LogsHashMismatch,
 
     #[error("Action ID mismatch: expected {expected}, found {found}")]
     ActionIdMismatch {
@@ -172,9 +141,6 @@ pub enum KolmeError {
     #[error("Failed to execute signed Cosmos bridge transaction: {details}")]
     CosmosExecutionFailed { details: String },
 
-    #[error("Timed out while signing/proposing/awaiting a transaction")]
-    TimeoutOnTransaction { details: String },
-
     #[error("Timed out proposing and awaiting transaction {txhash}: {details}")]
     TimeoutProposingTx { txhash: TxHash, details: String },
 
@@ -187,23 +153,11 @@ pub enum KolmeError {
     #[error("Store error: {0}")]
     StoreError(#[from] KolmeStoreError),
 
-    #[error("Error serializing Solana bridge payload (length): {details}")]
-    SolanaPayloadLengthSerializationError { details: String },
-
-    #[error("Error serializing Solana bridge payload (content): {details}")]
-    SolanaPayloadContentSerializationError { details: String },
-
-    #[error("Failed to calculate Borsh object length for Solana payload: {details}")]
-    SolanaPayloadLengthError { details: String },
-
     #[error("Failed to serialize Solana payload to Borsh: {details}")]
     SolanaPayloadSerializationError { details: String },
 
     #[error("Failed to build Solana initialization transaction: {details}")]
     SolanaInitTxBuildFailed { details: String },
-
-    #[error("Failed to build signed Solana transaction: {details}")]
-    SolanaSignedTxBuildFailed { details: String },
 
     #[error("Solana submitter failed to execute signed transaction: {details}")]
     SolanaSignedTxExecutionFailed { details: String },
@@ -219,9 +173,6 @@ pub enum KolmeError {
 
     #[error("Error deserializing Solana bridge message from logs: {details}")]
     InvalidSolanaBridgeLogMessage { details: String },
-
-    #[error("Error deserializing Solana bridge payload: {details}")]
-    InvalidSolanaPayloadDeserialization { details: String },
 
     #[error("{0}")]
     Other(String),
