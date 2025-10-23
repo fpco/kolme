@@ -107,28 +107,36 @@ where
 }
 
 /// Errors that can occur during serialization of data.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MerkleSerialError {
     #[error("Insufficient input when parsing buffer")]
     InsufficientInput,
+
     #[error("A usize value would be larger than the machine representation")]
     UsizeOverflow,
+
     #[error(
         "Unexpected magic byte to distinguish Tree from Leaf, expected 0 or 1, but got {byte}"
     )]
     UnexpectedMagicByte { byte: u8 },
+
     #[error("Invalid byte at start of tree, expected 0 or 1, but got {byte}")]
     InvalidTreeStart { byte: u8 },
+
     #[error("Leftover input was unconsumed")]
     TooMuchInput,
+
     #[error("Serialized content was invalid")]
     InvalidSerializedContent,
+
     #[error("Hashes not found in store: {hashes:?}")]
     HashesNotFound {
         hashes: HashSet<shared::types::Sha256Hash>,
     },
+
     #[error("Leaf content limit exceeded: limit {limit}, actual {actual}")]
     LeafContentLimitExceeded { limit: usize, actual: usize },
+
     #[error("Unexpected version number during deserialization of {type_name}, received {actual}, but highest supported is {highest_supported} at position {offset}")]
     UnexpectedVersion {
         highest_supported: usize,
@@ -136,8 +144,8 @@ pub enum MerkleSerialError {
         type_name: &'static str,
         offset: usize,
     },
-    #[error(transparent)]
-    Custom(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Merkle error: {0}")]
+    Custom(String),
     #[error("{0}")]
     Other(String),
 }
