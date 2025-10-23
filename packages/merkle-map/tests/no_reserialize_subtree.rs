@@ -6,9 +6,13 @@
 //! Additionally, we have a debug assert within the in-memory store
 //! to error out if we save the same hash twice.
 
-use std::sync::OnceLock;
+use std::{collections::HashMap, sync::OnceLock};
 
-use merkle_map::{save, MerkleMap, MerkleMemoryStore, MerkleSerialize};
+use merkle_map::{
+    api::{self, save_merkle_contents},
+    save, MerkleDeserialize, MerkleLayerContents, MerkleMap, MerkleMemoryStore, MerkleSerialError,
+    MerkleSerialize, MerkleStore, Sha256Hash,
+};
 
 struct MyAppState {
     big_map: MerkleMap<u64, OnlySerializeOnce>,
@@ -58,6 +62,101 @@ async fn no_reserialize_subtree() {
     let mut store = MerkleMemoryStore::default();
     save(&mut store, &state).await.unwrap();
     save(&mut store, &state).await.unwrap();
+}
+
+struct SampleState {
+    pub big_map: MerkleMap<u64, u64>,
+}
+
+impl Default for SampleState {
+    fn default() -> Self {
+        Self {
+            big_map: (0..20).map(|i| (i, i)).collect(),
+        }
+    }
+}
+
+impl MerkleSerialize for SampleState {
+    fn merkle_serialize(
+        &self,
+        serializer: &mut merkle_map::MerkleSerializer,
+    ) -> Result<(), merkle_map::MerkleSerialError> {
+        let Self { big_map } = self;
+        serializer.store_by_hash(big_map)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for SampleState {
+    fn merkle_deserialize(
+        deserializer: &mut merkle_map::MerkleDeserializer,
+        _version: usize,
+    ) -> Result<Self, MerkleSerialError> {
+        let big_map = deserializer.load_by_hash()?;
+        Ok(Self { big_map })
+    }
+}
+
+#[tokio::test]
+async fn save_externally_loaded_state() {
+    let state = SampleState::default();
+    let mut store = TracingMerkleMemoryStore::default();
+
+    // with this we simulate state loaded into DB on another node
+    // as a result checking its hash should return that we have it already
+    let contents = api::serialize(&state).unwrap();
+    let hash = contents.hash();
+    save_merkle_contents(&mut store, contents).await.unwrap();
+
+    // when we try to load it there's
+    api::load::<SampleState, _>(&mut store, hash).await.unwrap();
+    assert_eq!(33, store.hash_loads.len());
+
+    store.reset_loads();
+
+    // on a save the code is expected to save contents and load
+    // should pick it up instead of going to the store
+    api::save(&mut store, &state).await.unwrap();
+    api::load::<SampleState, _>(&mut store, hash).await.unwrap();
+    assert_eq!(1, store.hash_loads.len());
+
+    store.reset_loads();
+
+    // another interation should shouldn't change anything
+    api::save(&mut store, &state).await.unwrap();
+    api::load::<SampleState, _>(&mut store, hash).await.unwrap();
+    assert_eq!(1, store.hash_loads.len());
+}
+
+#[derive(Default)]
+struct TracingMerkleMemoryStore {
+    pub hash_loads: Vec<Sha256Hash>,
+    memory_store: MerkleMemoryStore,
+}
+
+impl TracingMerkleMemoryStore {
+    fn reset_loads(&mut self) {
+        self.hash_loads.clear();
+    }
+}
+
+impl MerkleStore for TracingMerkleMemoryStore {
+    async fn load_by_hashes(
+        &mut self,
+        hashes: &[Sha256Hash],
+        dest: &mut HashMap<Sha256Hash, MerkleLayerContents>,
+    ) -> Result<(), MerkleSerialError> {
+        self.hash_loads.extend(hashes);
+        self.memory_store.load_by_hashes(hashes, dest).await
+    }
+
+    async fn save_by_hash(&mut self, layer: &MerkleLayerContents) -> Result<(), MerkleSerialError> {
+        self.memory_store.save_by_hash(layer).await
+    }
+
+    async fn contains_hash(&mut self, hash: Sha256Hash) -> Result<bool, MerkleSerialError> {
+        self.memory_store.contains_hash(hash).await
+    }
 }
 
 // FIXME: should we ensure that store and store_by_hash have the
