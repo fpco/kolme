@@ -111,7 +111,7 @@ impl<T: serde::de::DeserializeOwned> MerkleDeserialize for SignedTaggedJson<T> {
 }
 
 impl<T> SignedTaggedJson<T> {
-    pub fn verify_signature(&self) -> std::result::Result<PublicKey, KolmeError> {
+    pub fn verify_signature(&self) -> Result<PublicKey, KolmeError> {
         PublicKey::recover_from_msg(self.message.as_bytes(), &self.signature, self.recovery_id)
             .map_err(KolmeError::from)
     }

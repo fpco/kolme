@@ -45,7 +45,7 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload: &str,
-) -> std::result::Result<String, KolmeError> {
+) -> Result<String, KolmeError> {
     tracing::info!("Executing signed message on bridge: {contract}");
 
     let msg = ExecuteMsg::Signed {

@@ -199,10 +199,7 @@ impl KolmeBackingStore for Store {
         merkle.load_by_hashes(&[hash], &mut dest).await?;
         Ok(dest.remove(&hash))
     }
-    async fn get_height_for_tx(
-        &self,
-        txhash: Sha256Hash,
-    ) -> std::result::Result<Option<u64>, KolmeStoreError> {
+    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> Result<Option<u64>, KolmeStoreError> {
         let txhash = txhash.as_array().as_slice();
         let height =
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)

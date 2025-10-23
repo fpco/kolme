@@ -43,7 +43,7 @@ pub async fn sanity_check_contract(
     client: &SolanaClient,
     program: &str,
     info: &GenesisInfo,
-) -> std::result::Result<(), KolmeError> {
+) -> Result<(), KolmeError> {
     let program_id = Pubkey::from_str(program)?;
     let state_acc = kolme_solana_bridge_client::derive_state_pda(&program_id);
 
@@ -259,9 +259,7 @@ async fn catch_up<App: KolmeApp>(
     Ok(Some(BridgeEventId(latest_id)))
 }
 
-fn extract_bridge_message_from_logs(
-    logs: &[String],
-) -> std::result::Result<Option<BridgeMessage>, KolmeError> {
+fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMessage>, KolmeError> {
     const PROGRAM_DATA_LOG: &str = "Program data: ";
 
     // Our program data should always be the last "Program data:" entry even if CPI was invoked.

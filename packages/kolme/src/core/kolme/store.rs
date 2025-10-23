@@ -36,7 +36,7 @@ impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
-    pub async fn new_postgres(url: &str) -> std::result::Result<Self, KolmeError> {
+    pub async fn new_postgres(url: &str) -> Result<Self, KolmeError> {
         KolmeStoreInner::new_postgres(url)
             .await
             .map(KolmeStore::from)
@@ -168,7 +168,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(super) async fn get_height_for_tx(
         &self,
         txhash: TxHash,
-    ) -> std::result::Result<Option<BlockHeight>, KolmeStoreError> {
+    ) -> Result<Option<BlockHeight>, KolmeStoreError> {
         Ok(self
             .inner
             .get_height_for_tx(txhash.0)

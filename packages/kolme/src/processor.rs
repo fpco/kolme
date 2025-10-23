@@ -92,7 +92,7 @@ impl<App: KolmeApp> Processor<App> {
         Ok(())
     }
 
-    async fn ensure_genesis_event(&self) -> std::result::Result<(), KolmeError> {
+    async fn ensure_genesis_event(&self) -> Result<(), KolmeError> {
         if self.kolme.read().get_next_height().is_start() {
             let code_version = self.kolme.get_code_version();
             let kolme = self.kolme.read();
@@ -123,7 +123,7 @@ impl<App: KolmeApp> Processor<App> {
         })
     }
 
-    pub async fn create_genesis_event(&self) -> std::result::Result<(), KolmeError> {
+    pub async fn create_genesis_event(&self) -> Result<(), KolmeError> {
         let info = self.kolme.get_app().genesis_info().clone();
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
@@ -147,10 +147,7 @@ impl<App: KolmeApp> Processor<App> {
         }
     }
 
-    async fn add_transaction(
-        &self,
-        tx: SignedTransaction<App::Message>,
-    ) -> std::result::Result<(), KolmeError> {
+    async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<(), KolmeError> {
         // We'll retry adding a transaction multiple times before giving up.
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
@@ -238,7 +235,7 @@ impl<App: KolmeApp> Processor<App> {
         &self,
         tx: SignedTransaction<App::Message>,
         proposed_height: BlockHeight,
-    ) -> std::result::Result<ExecutedBlock<App>, KolmeError> {
+    ) -> Result<ExecutedBlock<App>, KolmeError> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;

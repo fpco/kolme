@@ -5,7 +5,6 @@ pub enum StorageBackend {
     Fjall,
     Postgres,
     InMemory,
-    Unknown,
 }
 
 impl std::fmt::Display for StorageBackend {
@@ -14,7 +13,6 @@ impl std::fmt::Display for StorageBackend {
             StorageBackend::Fjall => write!(f, "Fjall"),
             StorageBackend::Postgres => write!(f, "Postgres"),
             StorageBackend::InMemory => write!(f, "InMemory"),
-            StorageBackend::Unknown => write!(f, "Unknown"),
         }
     }
 }

@@ -193,7 +193,7 @@ impl SolanaClientEndpoint {
         })
     }
 
-    pub async fn make_pubsub_client(self) -> std::result::Result<SolanaPubsubClient, KolmeError> {
+    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient, KolmeError> {
         match self {
             SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
             SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
@@ -342,11 +342,7 @@ pub struct ChainState {
 }
 
 impl ChainState {
-    pub(crate) fn deposit(
-        &mut self,
-        asset_id: AssetId,
-        amount: Decimal,
-    ) -> std::result::Result<(), KolmeError> {
+    pub(crate) fn deposit(&mut self, asset_id: AssetId, amount: Decimal) -> Result<(), KolmeError> {
         let old = self.assets.entry(asset_id).or_default();
         *old = old.checked_add(amount).with_context(|| {
             format!("Overflow while depositing asset {asset_id}, amount == {amount}")
@@ -783,7 +779,7 @@ impl MerkleDeserializeRaw for AccountNonce {
 impl TryFrom<i64> for AccountNonce {
     type Error = KolmeError;
 
-    fn try_from(value: i64) -> std::result::Result<Self, KolmeError> {
+    fn try_from(value: i64) -> Result<Self, KolmeError> {
         Ok(AccountNonce(value.try_into()?))
     }
 }
@@ -1452,10 +1448,7 @@ impl ConfiguredChains {
     }
 
     #[cfg(feature = "pass_through")]
-    pub fn insert_pass_through(
-        &mut self,
-        config: ChainConfig,
-    ) -> std::result::Result<(), KolmeError> {
+    pub fn insert_pass_through(&mut self, config: ChainConfig) -> Result<(), KolmeError> {
         if let BridgeContract::Deployed(_) = config.bridge {
             if self
                 .0

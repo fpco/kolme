@@ -204,7 +204,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         chain: ExternalChain,
         event: &BridgeEvent,
         event_id: BridgeEventId,
-    ) -> std::result::Result<(), KolmeError> {
+    ) -> Result<(), KolmeError> {
         kolme_ensure!(self
             .framework_state
             .get_validator_set()
@@ -262,10 +262,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.process_ready_events(chain)
     }
 
-    fn process_ready_events(
-        &mut self,
-        chain: ExternalChain,
-    ) -> std::result::Result<(), KolmeError> {
+    fn process_ready_events(&mut self, chain: ExternalChain) -> Result<(), KolmeError> {
         fn get_next_ready_event(
             framework_state: &FrameworkState,
             chain: ExternalChain,
@@ -731,7 +728,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    fn admin(&mut self, admin: &AdminMessage) -> std::result::Result<(), KolmeError> {
+    fn admin(&mut self, admin: &AdminMessage) -> Result<(), KolmeError> {
         match admin {
             AdminMessage::SelfReplace(self_replace) => {
                 let signer = self_replace.verify_signature()?;
@@ -743,7 +740,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     is_approver: bool,
                     sender: PublicKey,
                     replacement: PublicKey,
-                ) -> std::result::Result<(), KolmeError> {
+                ) -> Result<(), KolmeError> {
                     let set = if is_approver {
                         &mut validator_set.approvers
                     } else {

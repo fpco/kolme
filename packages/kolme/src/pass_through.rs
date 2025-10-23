@@ -117,10 +117,7 @@ impl PassThrough {
         }
     }
 
-    pub async fn run<A: tokio::net::ToSocketAddrs>(
-        self,
-        addr: A,
-    ) -> std::result::Result<(), KolmeError> {
+    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<(), KolmeError> {
         let cors = CorsLayer::new()
             .allow_methods([Method::GET, Method::POST, Method::PUT])
             .allow_origin(Any)
