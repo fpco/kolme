@@ -26,7 +26,7 @@ psql:
 
 postgres $DATABASE_URL="postgres://postgres:postgres@localhost:45921/postgres":
     -just stop-postgres
-    docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine
+    docker run --name kolme_pg -d -it --cpus="0.5" --memory="512m" -e POSTGRES_PASSWORD=postgres -p 45921:5432 postgres:15.3-alpine postgres -c shared_preload_libraries='pg_stat_statements'
     sleep 3	# To resolve issue in CI
     cd packages/kolme-store && sqlx database reset -y
 
