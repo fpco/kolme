@@ -46,9 +46,8 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-        cache_size: usize,
     ) -> Result<Self> {
-        KolmeStoreInner::new_postgres_with_options(connect, options, cache_size)
+        KolmeStoreInner::new_postgres_with_options(connect, options)
             .await
             .map(KolmeStore::from)
             .map_err(anyhow::Error::from)
@@ -56,10 +55,6 @@ impl<App: KolmeApp> KolmeStore<App> {
 
     pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
         KolmeStoreInner::new_fjall(dir).map(KolmeStore::from)
-    }
-
-    pub fn new_fjall_with(dir: impl AsRef<Path>, cache_size: usize) -> Result<Self> {
-        KolmeStoreInner::new_fjall_with(dir, cache_size).map(KolmeStore::from)
     }
 
     pub fn new_in_memory() -> Self {
