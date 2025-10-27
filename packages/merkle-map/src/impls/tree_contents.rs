@@ -150,8 +150,8 @@ where
 
 impl<K, V> MerkleDeserializeRaw for TreeContents<K, V>
 where
-    K: FromMerkleKey + ToMerkleKey + Send + Sync + 'static,
-    V: MerkleDeserializeRaw + MerkleSerializeRaw + Send + Sync + 'static,
+    K: FromMerkleKey + Send + Sync + 'static,
+    V: MerkleDeserializeRaw + Send + Sync + 'static,
 {
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
