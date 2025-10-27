@@ -1,20 +1,18 @@
 use crate::{
     r#trait::KolmeBackingStore, BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError,
-    StorableBlock, DEFAULT_CACHE_SIZE,
+    StorableBlock,
 };
 use anyhow::Context as _;
-use lru::LruCache;
 use merkle_map::{
     MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerializeRaw,
     MerkleStore as _, Sha256Hash,
 };
-use parking_lot::Mutex;
 use sqlx::{
     pool::PoolOptions,
     postgres::{PgAdvisoryLock, PgConnectOptions},
     Executor, Postgres,
 };
-use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 pub mod merkle;
 
 pub struct ConstructLock {
@@ -29,29 +27,20 @@ impl Drop for ConstructLock {
     }
 }
 
-type MerkleCache = Arc<Mutex<LruCache<Sha256Hash, MerkleLayerContents>>>;
-
 #[derive(Clone)]
 pub struct Store {
     pool: sqlx::PgPool,
-    merkle_cache: MerkleCache,
 }
 
 impl Store {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
         let connect_options = url.parse()?;
-        Self::new_with_options(
-            connect_options,
-            PoolOptions::new().max_connections(5),
-            DEFAULT_CACHE_SIZE,
-        )
-        .await
+        Self::new_with_options(connect_options, PoolOptions::new().max_connections(5)).await
     }
 
     pub async fn new_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-        cache_size: usize,
     ) -> anyhow::Result<Self> {
         let pool = options
             .connect_with(connect)
@@ -65,18 +54,12 @@ impl Store {
             .context("Unable to execute migrations")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
 
-        Ok(Self {
-            pool,
-            merkle_cache: Arc::new(Mutex::new(LruCache::new(
-                NonZeroUsize::new(cache_size).context("new_with_options: cache size of 0")?,
-            ))),
-        })
+        Ok(Self { pool })
     }
 
     pub fn new_store(&self) -> merkle::MerklePostgresStore<'_> {
         merkle::MerklePostgresStore {
             pool: &self.pool,
-            merkle_cache: &self.merkle_cache,
             payloads_to_insert: Vec::new(),
             childrens_to_insert: Vec::new(),
             hashes_to_insert: Vec::new(),

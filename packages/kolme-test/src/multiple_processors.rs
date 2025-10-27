@@ -99,7 +99,6 @@ async fn multiple_processors_inner(
                     KolmeStore::<SampleKolmeApp>::new_postgres_with_options(
                         options,
                         pool.options().clone(),
-                        1024,
                     )
                     .await
                     .unwrap()
