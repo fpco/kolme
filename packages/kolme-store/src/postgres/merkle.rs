@@ -120,6 +120,9 @@ impl MerkleStore for MerklePostgresStore<'_> {
             }
         }
 
+        if to_request.is_empty() {
+            return Ok(());
+        }
         let query = sqlx::query!(
             r#"
             SELECT
@@ -145,13 +148,13 @@ impl MerkleStore for MerklePostgresStore<'_> {
                 .into_iter()
                 .map(|hash| Sha256Hash::from_hash(&hash).map_err(MerkleSerialError::custom))
                 .collect::<Result<Vec<_>, _>>()?;
-            dest.insert(
-                hash,
-                merkle_map::MerkleLayerContents {
-                    payload: CachedBytes::new_hash(hash, row.payload),
-                    children: children.into(),
-                },
-            );
+            let layer = merkle_map::MerkleLayerContents {
+                payload: CachedBytes::new_hash(hash, row.payload),
+                children: children.into(),
+            };
+
+            self.merkle_cache.lock().put(hash, layer.clone());
+            dest.insert(hash, layer);
         }
         Ok(())
     }
