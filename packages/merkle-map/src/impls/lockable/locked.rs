@@ -171,4 +171,71 @@ mod tests {
             assert_eq!(m, m2);
         }
     }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct SampleState {
+        pub big_map: MerkleMap<u64, u64>,
+    }
+
+    impl Default for SampleState {
+        fn default() -> Self {
+            Self {
+                big_map: (0..20).map(|i| (i, i)).collect(),
+            }
+        }
+    }
+
+    impl crate::MerkleSerialize for SampleState {
+        fn merkle_serialize(
+            &self,
+            serializer: &mut crate::MerkleSerializer,
+        ) -> Result<(), crate::MerkleSerialError> {
+            let Self { big_map } = self;
+            serializer.store(big_map)?;
+            Ok(())
+        }
+    }
+
+    impl crate::MerkleDeserialize for SampleState {
+        fn merkle_deserialize(
+            deserializer: &mut crate::MerkleDeserializer,
+            _version: usize,
+        ) -> Result<Self, crate::MerkleSerialError> {
+            let big_map = deserializer.load()?;
+            Ok(Self { big_map })
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_on_load_state() {
+        let s = SampleState::default();
+
+        let mut store1 = MerkleMemoryStore::default();
+        let hash = save(&mut store1, &s).await.unwrap();
+
+        // Confirm that the cache works on save.
+        {
+            let mut store2 = MerkleMemoryStore::default();
+            let s2 = load(&mut store2, hash).await.unwrap();
+            assert_eq!(s, s2);
+        }
+
+        // Clear the cache and ensure loading fails.
+        clear_cache();
+        {
+            let mut store2 = MerkleMemoryStore::default();
+            load::<MerkleMap<u32, u32>, _>(&mut store2, hash)
+                .await
+                .unwrap_err();
+        }
+
+        // Loading from store1 should populate the cache.
+        {
+            let s1 = load(&mut store1, hash).await.unwrap();
+            assert_eq!(s, s1);
+            let mut store2 = MerkleMemoryStore::default();
+            let s2 = load(&mut store2, hash).await.unwrap();
+            assert_eq!(s, s2);
+        }
+    }
 }
