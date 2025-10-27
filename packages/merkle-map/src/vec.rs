@@ -20,7 +20,7 @@ where
 
 impl<T> MerkleDeserializeRaw for MerkleVec<T>
 where
-    T: MerkleDeserializeRaw + Send + Sync + 'static,
+    T: MerkleDeserializeRaw + MerkleSerializeRaw + Send + Sync + 'static,
 {
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,

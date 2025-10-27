@@ -2,6 +2,7 @@ mod locked;
 
 use std::{fmt::Debug, sync::OnceLock};
 
+use api::serialize;
 use locked::{LockKey, Locked};
 
 use crate::*;
@@ -70,11 +71,29 @@ impl<T: MerkleSerializeRaw + Send + Sync + 'static> MerkleSerializeRaw for Merkl
     }
 }
 
-impl<T: MerkleDeserializeRaw + Send + Sync + 'static> MerkleDeserializeRaw for MerkleLockable<T> {
+impl<T: MerkleDeserializeRaw + MerkleSerializeRaw + Send + Sync + 'static> MerkleDeserializeRaw
+    for MerkleLockable<T>
+{
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        T::merkle_deserialize_raw(deserializer).map(MerkleLockable::new)
+        let inner = Arc::new(T::merkle_deserialize_raw(deserializer)?);
+        let locked = Arc::new(OnceLock::new());
+
+        // Can we bypass the reserialization step and instead get the MerkleContents
+        // directly from the MerkleDeserializer?
+        if let Ok(contents) = serialize(&inner) {
+            locked
+                .set(Locked::new(
+                    Self::lock_key_for(contents.hash()),
+                    inner.clone(),
+                    contents,
+                ))
+                .ok()
+                .expect("Impossible set on empty OnceLock failed");
+        }
+
+        Ok(MerkleLockable { locked, inner })
     }
 
     fn load_merkle_by_hash(hash: Sha256Hash) -> Option<Self> {

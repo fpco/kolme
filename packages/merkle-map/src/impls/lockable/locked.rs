@@ -127,3 +127,48 @@ impl LockValue {
         Some((self.inner.downcast_ref().cloned()?, self.contents.clone()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{load, save, MerkleMap, MerkleMemoryStore};
+
+    fn clear_cache() {
+        super::CACHE.write().0.clear();
+    }
+
+    #[tokio::test]
+    async fn cache_on_load() {
+        let mut m = MerkleMap::new();
+        for i in 0u32..20 {
+            m.insert(i, i);
+        }
+
+        let mut store1 = MerkleMemoryStore::default();
+        let hash = save(&mut store1, &m).await.unwrap();
+
+        // Confirm that the cache works on save.
+        {
+            let mut store2 = MerkleMemoryStore::default();
+            let m2 = load(&mut store2, hash).await.unwrap();
+            assert_eq!(m, m2);
+        }
+
+        // Clear the cache and ensure loading fails.
+        clear_cache();
+        {
+            let mut store2 = MerkleMemoryStore::default();
+            load::<MerkleMap<u32, u32>, _>(&mut store2, hash)
+                .await
+                .unwrap_err();
+        }
+
+        // Loading from store1 should populate the cache.
+        {
+            let m1 = load(&mut store1, hash).await.unwrap();
+            assert_eq!(m, m1);
+            let mut store2 = MerkleMemoryStore::default();
+            let m2 = load(&mut store2, hash).await.unwrap();
+            assert_eq!(m, m2);
+        }
+    }
+}
