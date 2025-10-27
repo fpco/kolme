@@ -18,7 +18,6 @@ kolme-store.workspace = true
 lru.workspace = true
 merkle-map = { workspace = true }
 parking_lot = { workspace = true }
-rand = { workspace = true }
 reqwest = { workspace = true, features = [
   "brotli",
   "deflate",
@@ -35,7 +34,6 @@ smallvec = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tower-http = { workspace = true, features = ["cors"] }
 tracing = { workspace = true }
