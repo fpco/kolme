@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use contents_cache::get_cached_contents;
 use shared::types::Sha256Hash;
 
 use crate::*;
@@ -150,6 +151,11 @@ pub async fn load_merkle_contents<Store: MerkleStore>(
     store: &mut Store,
     orig_hash: Sha256Hash,
 ) -> Result<Arc<MerkleContents>, MerkleSerialError> {
+    // Check if it's available in the cache.
+    if let Some(contents) = contents_cache::get_cached_contents(&orig_hash) {
+        return Ok(contents);
+    }
+
     // We want this code to be as parallelized as possible. That means
     // discovering as many needed layers as possible in each iteration.
     // This is a fairly complex algorithm, the basic idea is:
@@ -212,6 +218,11 @@ pub async fn load_merkle_contents<Store: MerkleStore>(
             // Check if all the children are fully loaded.
             let mut children = vec![];
             for child in &layer.children {
+                // Check the cache first
+                if let Some(contents) = get_cached_contents(child) {
+                    children.push(contents);
+                    continue;
+                }
                 match all_contents.get(child) {
                     // This child is fully loaded, add it
                     Some(child) => children.push(child.clone()),

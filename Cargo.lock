@@ -793,7 +793,6 @@ dependencies = [
  "sqlx",
  "tempdir",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2475,7 +2474,6 @@ dependencies = [
  "clap 4.5.38",
  "jiff",
  "kolme",
- "rand 0.8.5",
  "reqwest 0.12.15",
  "serde",
  "serde_json",
@@ -2494,7 +2492,6 @@ dependencies = [
  "futures-util",
  "jiff",
  "kolme",
- "rand 0.8.5",
  "reqwest 0.12.15",
  "rust_decimal",
  "serde",
@@ -3943,10 +3940,8 @@ dependencies = [
  "merkle-map",
  "parking_lot",
  "quickcheck",
- "rand 0.8.5",
  "reqwest 0.12.15",
  "rust_decimal",
- "rustls 0.23.31",
  "serde",
  "serde_json",
  "shared",
@@ -3971,16 +3966,13 @@ name = "kolme-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "clap 4.5.38",
  "jiff",
  "kolme",
- "rand 0.8.5",
  "reqwest 0.12.15",
  "serde",
  "serde_json",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -4023,9 +4015,7 @@ dependencies = [
  "anyhow",
  "enum_dispatch",
  "fjall",
- "lru",
  "merkle-map",
- "parking_lot",
  "quickcheck",
  "serde",
  "serde_json",
@@ -4049,8 +4039,6 @@ dependencies = [
  "parking_lot",
  "rand 0.8.5",
  "serde",
- "serde_json",
- "shared",
  "sqlx",
  "tempfile",
  "tokio",
@@ -4334,7 +4322,6 @@ dependencies = [
  "base64 0.22.1",
  "clap 4.5.38",
  "jiff",
- "lru",
  "parameterized",
  "parking_lot",
  "paste",

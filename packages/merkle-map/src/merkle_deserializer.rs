@@ -21,6 +21,10 @@ impl MerkleDeserializer {
         self.contents.payload.hash()
     }
 
+    pub(crate) fn get_merkle_contents(&self) -> &Arc<MerkleContents> {
+        &self.contents
+    }
+
     /// Look at the next byte without consuming it from the stream.
     pub fn peek_byte(&self) -> Result<u8, MerkleSerialError> {
         let byte = *self

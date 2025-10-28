@@ -46,9 +46,8 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-        cache_size: usize,
     ) -> Result<Self> {
-        KolmeStoreInner::new_postgres_with_options(connect, options, cache_size)
+        KolmeStoreInner::new_postgres_with_options(connect, options)
             .await
             .map(KolmeStore::from)
             .map_err(anyhow::Error::from)
@@ -56,10 +55,6 @@ impl<App: KolmeApp> KolmeStore<App> {
 
     pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
         KolmeStoreInner::new_fjall(dir).map(KolmeStore::from)
-    }
-
-    pub fn new_fjall_with(dir: impl AsRef<Path>, cache_size: usize) -> Result<Self> {
-        KolmeStoreInner::new_fjall_with(dir, cache_size).map(KolmeStore::from)
     }
 
     pub fn new_in_memory() -> Self {
@@ -191,12 +186,12 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Save data to the merkle store.
-    pub(super) async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> Result<Sha256Hash> {
+    pub async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> Result<Sha256Hash> {
         self.inner.save(value).await
     }
 
     /// Load data from the merkle store.
-    pub(super) async fn load<T: MerkleDeserializeRaw>(
+    pub async fn load<T: MerkleDeserializeRaw>(
         &self,
         hash: Sha256Hash,
     ) -> Result<T, MerkleSerialError> {
