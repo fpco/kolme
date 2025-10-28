@@ -4322,6 +4322,7 @@ dependencies = [
  "base64 0.22.1",
  "clap 4.5.38",
  "jiff",
+ "lru",
  "parameterized",
  "parking_lot",
  "paste",

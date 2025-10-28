@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use contents_cache::get_cached_contents;
+use contents_cache::{get_cached_contents, set_cached_contents};
 use shared::types::Sha256Hash;
 
 use crate::*;
@@ -33,6 +33,7 @@ pub fn serialize<T: MerkleSerializeRaw + ?Sized>(
     value.merkle_serialize_raw(&mut serializer)?;
     let contents = Arc::new(serializer.finish());
     value.set_merkle_contents_raw(contents.clone());
+    set_cached_contents(contents.clone());
     Ok(contents)
 }
 
@@ -256,6 +257,7 @@ pub async fn load_merkle_contents<Store: MerkleStore>(
 
             // If this is the original hash, we're done with our work!
             if hash == orig_hash {
+                set_cached_contents(contents.clone());
                 return Ok(contents);
             }
 

@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    num::NonZero,
     sync::{Arc, LazyLock, Weak},
 };
 
@@ -64,6 +65,10 @@ fn new_contents_cache() -> ContentsCache {
 #[derive(Default)]
 struct ContentsCache(HashMap<Sha256Hash, ContentsCacheValue>);
 
+/// LRU cache to keep contents in memory even after they're no longer being held.
+static KEY_LRU_CACHE: LazyLock<RwLock<lru::LruCache<Sha256Hash, Arc<ContentsCacheKey>>>> =
+    LazyLock::new(|| RwLock::new(lru::LruCache::new(NonZero::new(1024).unwrap())));
+
 pub(crate) fn get_cached_contents(hash: &Sha256Hash) -> Option<Arc<MerkleContents>> {
     CONTENTS_CACHE
         .read()
@@ -73,8 +78,7 @@ pub(crate) fn get_cached_contents(hash: &Sha256Hash) -> Option<Arc<MerkleContent
 }
 
 pub(crate) fn set_cached_contents(contents: Arc<MerkleContents>) -> Arc<ContentsCacheKey> {
-    let mut guard = CONTENTS_CACHE.write();
-    if let Some(value) = guard.0.get(&contents.hash()) {
+    if let Some(value) = CONTENTS_CACHE.read().0.get(&contents.hash()) {
         debug_assert_eq!(contents, value.contents);
         return value
             .key
@@ -84,7 +88,13 @@ pub(crate) fn set_cached_contents(contents: Arc<MerkleContents>) -> Arc<Contents
 
     let key = Arc::new(ContentsCacheKey(contents.hash()));
     let weak = Arc::downgrade(&key);
-    guard.0.insert(
+    {
+        let mut guard = KEY_LRU_CACHE.write();
+        let old = guard.push(contents.hash(), key.clone());
+        std::mem::drop(guard);
+        std::mem::drop(old);
+    }
+    CONTENTS_CACHE.write().0.insert(
         contents.hash(),
         ContentsCacheValue {
             contents,

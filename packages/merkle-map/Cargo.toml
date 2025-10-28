@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 base64 = { workspace = true }
 jiff = { workspace = true }
+lru = { workspace = true }
 parameterized = { workspace = true }
 parking_lot = { workspace = true }
 rust_decimal = { workspace = true }
