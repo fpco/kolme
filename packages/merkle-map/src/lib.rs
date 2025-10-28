@@ -2,6 +2,7 @@
 mod tests;
 
 pub mod api;
+mod contents_cache;
 mod impls;
 mod memory_store;
 mod merkle_deserializer;

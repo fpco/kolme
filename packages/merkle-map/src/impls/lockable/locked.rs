@@ -8,7 +8,7 @@ use std::{
 use parking_lot::RwLock;
 use shared::types::Sha256Hash;
 
-use super::MerkleContents;
+use super::{contents_cache::ContentsCacheKey, MerkleContents};
 
 /// A lookup key for a cached merkle deserialized value.
 #[derive(Hash, PartialEq, Eq, Clone, Debug)]
@@ -25,6 +25,9 @@ pub(super) struct LockKey {
 struct LockValue {
     inner: Box<dyn Any + Send + Sync + 'static>,
     contents: Arc<MerkleContents>,
+    /// Just used for drops
+    #[allow(dead_code)]
+    contents_cache_key: Arc<ContentsCacheKey>,
 }
 
 /// A newtype wrapper a LockKey that handles dropping.
@@ -117,9 +120,11 @@ impl<T: Send + Sync + 'static> Locked<T> {
 
 impl LockValue {
     fn from_inner<T: Send + Sync + 'static>(inner: Arc<T>, contents: Arc<MerkleContents>) -> Self {
+        let contents_cache_key = crate::contents_cache::set_cached_contents(contents.clone());
         LockValue {
             inner: Box::new(inner),
             contents,
+            contents_cache_key,
         }
     }
 
