@@ -342,3 +342,12 @@ impl<A: Array<Item: MerkleSerializeRaw>> MerkleSerializeRaw for SmallVec<A> {
         Ok(())
     }
 }
+
+impl MerkleSerializeRaw for () {
+    fn merkle_serialize_raw(
+        &self,
+        _serializer: &mut MerkleSerializer,
+    ) -> Result<(), MerkleSerialError> {
+        Ok(())
+    }
+}
