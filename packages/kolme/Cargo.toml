@@ -18,6 +18,7 @@ kolme-store.workspace = true
 lru.workspace = true
 merkle-map = { workspace = true }
 parking_lot = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true, features = [
   "brotli",
   "deflate",

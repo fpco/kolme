@@ -25,9 +25,22 @@ pub fn init_logger(verbose: bool, local_crate_name: Option<&str>) {
             EnvFilter::from_default_env().add_directive(Level::INFO.into())
         };
 
+        let api_key_re = regex::Regex::new(r"([?&]api-key=)[a-zA-Z0-9-_]+").unwrap();
+        let fmt_fields = fmt::format::debug_fn(move |writer, field, value| {
+            let value = format!("{:?}", value);
+            let value = api_key_re.replace_all(value.as_str(), "$1<REDACTED>");
+            if field.name() == "message" {
+                write!(writer, "{}", value)
+            } else {
+                write!(writer, "{}: {}", field, value)
+            }
+        })
+        .delimited(", ");
+
         tracing_subscriber::registry()
             .with(
                 fmt::Layer::default()
+                    .fmt_fields(fmt_fields)
                     .log_internal_errors(true)
                     .and_then(env_filter),
             )
