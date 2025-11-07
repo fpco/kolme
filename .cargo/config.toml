@@ -3,3 +3,6 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "link-arg=-fuse-ld=ld"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-fuse-ld=ld"]
