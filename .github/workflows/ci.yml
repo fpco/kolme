@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -130,3 +131,57 @@ jobs:
       - name: Test
         working-directory: solana
         run: just test
+
+  solana-bridge-tests:
+    name: Solana Bridge Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: solana_listener_catchup
+            localosmosis: false
+          - name: bridge_transfer
+            localosmosis: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libudev-dev libusb-1.0-0-dev libhidapi-dev mold
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.40.0
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-solana-bridge-tests"
+          cache-workspace-crates: true
+          # https://github.com/Swatinem/rust-cache/issues/237
+          cache-bin: false
+          workspaces: |
+            .
+      - name: Cache solana binaries
+        uses: actions/cache@v4
+        id: solana-cache
+        with:
+          key: solana-${{ hashFiles('solana/justfile') }}
+          restore-keys: |
+            solana
+          path: |
+            ~/.cargo/bin
+      - name: Setup solana
+        if: steps.solana-cache.outputs.cache-hit == 'false' || steps.solana-cache.outputs.cache-hit == ''
+        working-directory: solana
+        run: just download-solana
+      - name: Start localosmosis
+        if: ${{ matrix.test.localosmosis }}
+        run: just localosmosis
+      - name: Start solana-test-validator
+        working-directory: solana
+        run: just solana-test-validator
+      - name: Run ${{ matrix.test.name }} test
+        working-directory: packages/integration-tests
+        run: RUST_LOG=info,kolme=debug,six_sigma=debug cargo t ${{ matrix.test.name }} -- --ignored --nocapture
