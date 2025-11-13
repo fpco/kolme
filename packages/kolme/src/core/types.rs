@@ -1811,7 +1811,7 @@ impl SolanaClient {
         self.0
             .get_account(pubkey)
             .await
-            .map_err(redact_solana_error)
+            .map_err(strip_query_from_solana_error)
     }
 
     pub async fn get_signatures_for_address(
@@ -1822,7 +1822,7 @@ impl SolanaClient {
         self.0
             .get_signatures_for_address(address)
             .await
-            .map_err(redact_solana_error)
+            .map_err(strip_query_from_solana_error)
     }
 
     pub async fn get_transaction(
@@ -1834,14 +1834,14 @@ impl SolanaClient {
         self.0
             .get_transaction(signature, encoding)
             .await
-            .map_err(redact_solana_error)
+            .map_err(strip_query_from_solana_error)
     }
 
     pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash> {
         self.0
             .get_latest_blockhash()
             .await
-            .map_err(redact_solana_error)
+            .map_err(strip_query_from_solana_error)
     }
 
     pub async fn send_and_confirm_transaction(
@@ -1851,13 +1851,13 @@ impl SolanaClient {
         self.0
             .send_and_confirm_transaction(transaction)
             .await
-            .map_err(redact_solana_error)
+            .map_err(strip_query_from_solana_error)
     }
 }
 
 #[cfg(feature = "solana")]
 /// Helper function to redact and wrap Solana RPC errors to hide sensitive information
-fn redact_solana_error(mut error: SolanaError) -> anyhow::Error {
+pub fn strip_query_from_solana_error(mut error: SolanaError) -> anyhow::Error {
     if let SolanaErrorKind::Reqwest(mut reqwest_error) = error.kind {
         let url = reqwest_error.url_mut();
         if let Some(url) = url {
@@ -1985,7 +1985,7 @@ mod tests {
 
     #[cfg(feature = "solana")]
     #[test]
-    fn test_redact_solana_error_function_exists() {
+    fn test_strip_query_from_solana_error_function_exists() {
         // Create an IO error wrapped in a Solana client error
         let io_error =
             std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "Connection refused");
@@ -1996,7 +1996,7 @@ mod tests {
         let solana_error = SolanaError::new_with_request(error_kind, request);
 
         // Call our redaction function
-        let redacted_error = redact_solana_error(solana_error);
+        let redacted_error = strip_query_from_solana_error(solana_error);
 
         // Verify it returns an anyhow::Error and contains expected content
         let error_string = redacted_error.to_string();
@@ -2006,14 +2006,14 @@ mod tests {
 
     #[cfg(feature = "solana")]
     #[test]
-    fn test_redact_solana_error_url_clearing_mechanism() {
+    fn test_strip_query_from_solana_error_url_clearing_mechanism() {
         // For now, test with a simple IO error to verify the basic structure
         let io_error = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "Test error");
         let error_kind = SolanaErrorKind::Io(io_error);
         let request = solana_rpc_client_api::request::RpcRequest::GetAccountInfo;
         let solana_error = SolanaError::new_with_request(error_kind, request);
 
-        let redacted_error = redact_solana_error(solana_error);
+        let redacted_error = strip_query_from_solana_error(solana_error);
 
         // Verify the function works and returns anyhow::Error
         assert!(redacted_error.to_string().contains("Test error"));
@@ -2021,7 +2021,7 @@ mod tests {
 
     #[cfg(feature = "solana")]
     #[test]
-    fn test_redact_solana_error_preserves_non_reqwest_errors() {
+    fn test_strip_query_from_solana_error_preserves_non_reqwest_errors() {
         // Test that non-reqwest errors are passed through but still converted to anyhow::Error
         let io_error = std::io::Error::new(std::io::ErrorKind::TimedOut, "Request timed out");
         let error_kind = SolanaErrorKind::Io(io_error);
@@ -2029,7 +2029,7 @@ mod tests {
         let solana_error = SolanaError::new_with_request(error_kind, request);
 
         // Call our redaction function
-        let redacted_error = redact_solana_error(solana_error);
+        let redacted_error = strip_query_from_solana_error(solana_error);
 
         // Should still be converted to anyhow::Error but content preserved
         let error_string = redacted_error.to_string();
