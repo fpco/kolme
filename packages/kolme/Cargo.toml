@@ -41,8 +41,13 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 # Solana
 kolme-solana-bridge-client = { workspace = true, optional = true }
+solana-account = { workspace = true, optional = true }
 solana-client = { workspace = true, optional = true }
 solana-commitment-config = { workspace = true, optional = true }
+solana-hash = { workspace = true, optional = true }
+solana-pubkey = { workspace = true, optional = true }
+solana-rpc-client = { workspace = true, optional = true }
+solana-rpc-client-api = { workspace = true, optional = true }
 solana-signature = { workspace = true, optional = true }
 solana-transaction-status-client-types = { workspace = true, optional = true }
 
@@ -61,7 +66,9 @@ tempfile = { workspace = true }
 pass_through = []
 cosmwasm = ["dep:cosmos", "dep:cosmwasm-std", "shared/cosmwasm"]
 solana = [
-  "dep:solana-client", "dep:solana-commitment-config", "dep:solana-signature",
+  "dep:solana-account", "dep:solana-client", "dep:solana-commitment-config",
+  "dep:solana-hash", "dep:solana-signature", "dep:solana-pubkey",
+  "dep:solana-rpc-client", "dep:solana-rpc-client-api",
   "dep:solana-transaction-status-client-types", "dep:kolme-solana-bridge-client",
   "shared/solana"
 ]
