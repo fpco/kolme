@@ -63,7 +63,7 @@ solana-client = "2.2.7"
 solana-commitment-config = "2.2.1"
 solana-compute-budget-interface = "2.2.1"
 solana-rpc-client = "2.2"
-solana-rpc-client-api = "2.2"
+solana-rpc-client-api = "2.3"
 solana-hash = "2.2"
 solana-instruction = "2.2"
 solana-keypair = "2.2"
@@ -88,6 +88,7 @@ tempfile = "3.19.1"
 thiserror = "2.0.12"
 tinyvec = "1.9.0"
 tokio = { version = "1.43.0", features = ["full"] }
+tokio-util = { version = "0.7.12", features = ["rt"] }
 ring = { version = "0.17.14"}
 rustls = { version = "0.23.31", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-tungstenite = { version = "0.26.2", features = ["rustls", "rustls-tls-webpki-roots"] }
