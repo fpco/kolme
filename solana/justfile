@@ -27,6 +27,11 @@ download-solana:
 	rm solana-release.tar.bz2
 	rm -rf solana-release
 
+solana-test-validator:
+    nohup solana-test-validator > /dev/null &
+    @printf "Waiting for solana-test-validator to start..."
+    @while ! curl -s http://localhost:8899 > /dev/null; do sleep 1; printf .; done; sleep 1; echo
+
 # Cargo inherit
 inherit:
     cargo autoinherit
