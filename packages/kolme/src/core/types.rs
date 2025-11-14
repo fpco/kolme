@@ -16,7 +16,7 @@ use {
     solana_client::nonblocking::rpc_client::RpcClient as SolanaRpcClient,
     solana_signature::Signature as SolanaSignature,
     std::collections::HashMap,
-    utils::solana::strip_query_from_solana_error,
+    utils::solana::redact_solana_error,
 };
 
 use crate::*;
@@ -1811,7 +1811,7 @@ impl SolanaClient {
         self.0
             .get_account(pubkey)
             .await
-            .map_err(strip_query_from_solana_error)
+            .map_err(redact_solana_error)
     }
 
     pub async fn get_signatures_for_address(
@@ -1822,7 +1822,7 @@ impl SolanaClient {
         self.0
             .get_signatures_for_address(address)
             .await
-            .map_err(strip_query_from_solana_error)
+            .map_err(redact_solana_error)
     }
 
     pub async fn get_transaction(
@@ -1834,14 +1834,14 @@ impl SolanaClient {
         self.0
             .get_transaction(signature, encoding)
             .await
-            .map_err(strip_query_from_solana_error)
+            .map_err(redact_solana_error)
     }
 
     pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash> {
         self.0
             .get_latest_blockhash()
             .await
-            .map_err(strip_query_from_solana_error)
+            .map_err(redact_solana_error)
     }
 
     pub async fn send_and_confirm_transaction(
@@ -1851,7 +1851,7 @@ impl SolanaClient {
         self.0
             .send_and_confirm_transaction(transaction)
             .await
-            .map_err(strip_query_from_solana_error)
+            .map_err(redact_solana_error)
     }
 }
 

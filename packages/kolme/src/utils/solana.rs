@@ -3,7 +3,7 @@
 use solana_rpc_client_api::client_error;
 
 /// Helper function to redact and wrap Solana RPC errors to hide sensitive information
-pub fn strip_query_from_solana_error(mut error: client_error::Error) -> anyhow::Error {
+pub fn redact_solana_error(mut error: client_error::Error) -> anyhow::Error {
     if let client_error::ErrorKind::Reqwest(mut reqwest_error) = error.kind {
         let url = reqwest_error.url_mut();
         if let Some(url) = url {
@@ -20,7 +20,7 @@ mod tests {
     use std::future::IntoFuture;
 
     #[tokio::test]
-    async fn test_strip_query_from_solana_error() {
+    async fn test_redact_solana_error() {
         const HTTP_SERVER_ADDR: &str = "127.0.0.1:3924";
         const FAIL_STATUS_PATH: &str = "/status/502";
         const SENSITIVE_VALUE: &str = "SENSITIVE";
@@ -51,12 +51,12 @@ mod tests {
             kind: client_error::ErrorKind::Reqwest(reqwest_error),
         };
 
-        // Verify that the original error contains the URL including the sensitive value.
+        // Ensure that the original error contains the URL including the sensitive value.
         assert!(solana_error.to_string().contains(&fail_status_url));
         assert!(solana_error.to_string().contains(SENSITIVE_VALUE));
 
-        // Verify that the redacted error contains the URL _without_ the sensitive value.
-        let redacted_error = strip_query_from_solana_error(solana_error);
+        // Ensure that the redacted error contains the URL _without_ the sensitive value.
+        let redacted_error = redact_solana_error(solana_error);
         assert!(redacted_error.to_string().contains(&fail_status_url));
         assert!(!redacted_error.to_string().contains(SENSITIVE_VALUE));
     }
