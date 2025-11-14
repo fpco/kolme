@@ -13,7 +13,10 @@ use cosmwasm_std::{Binary, CosmosMsg, Uint128};
 use {
     base64::Engine,
     kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram},
+    solana_client::nonblocking::rpc_client::RpcClient as SolanaRpcClient,
+    solana_signature::Signature as SolanaSignature,
     std::collections::HashMap,
+    utils::solana::redact_solana_error,
 };
 
 use crate::*;
@@ -22,7 +25,8 @@ pub use accounts::{Account, Accounts, AccountsError};
 pub use error::KolmeError;
 
 #[cfg(feature = "solana")]
-pub type SolanaClient = solana_client::nonblocking::rpc_client::RpcClient;
+/// Wrapper around the Solana RPC client to hide sensitive information.
+pub struct SolanaClient(SolanaRpcClient);
 #[cfg(feature = "solana")]
 pub type SolanaPubsubClient = solana_client::nonblocking::pubsub_client::PubsubClient;
 
@@ -186,10 +190,10 @@ impl SolanaEndpoints {
 #[cfg(feature = "solana")]
 impl SolanaClientEndpoint {
     pub fn make_client(self) -> SolanaClient {
-        SolanaClient::new(match self {
+        SolanaClient::new(SolanaRpcClient::new(match self {
             SolanaClientEndpoint::Static(url) => url.to_owned(),
             SolanaClientEndpoint::Arc(url) => (*url).to_owned(),
-        })
+        }))
     }
 
     pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
@@ -1795,6 +1799,60 @@ pub enum DataLoadValidation {
     ValidateDataLoads,
     /// Trust that the loaded data is accurate.
     TrustDataLoads,
+}
+
+#[cfg(feature = "solana")]
+impl SolanaClient {
+    pub fn new(client: SolanaRpcClient) -> Self {
+        Self(client)
+    }
+
+    pub async fn get_account(&self, pubkey: &SolanaPubkey) -> Result<solana_account::Account> {
+        self.0
+            .get_account(pubkey)
+            .await
+            .map_err(redact_solana_error)
+    }
+
+    pub async fn get_signatures_for_address(
+        &self,
+        address: &SolanaPubkey,
+    ) -> Result<Vec<solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature>>
+    {
+        self.0
+            .get_signatures_for_address(address)
+            .await
+            .map_err(redact_solana_error)
+    }
+
+    pub async fn get_transaction(
+        &self,
+        signature: &SolanaSignature,
+        encoding: solana_transaction_status_client_types::UiTransactionEncoding,
+    ) -> Result<solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta>
+    {
+        self.0
+            .get_transaction(signature, encoding)
+            .await
+            .map_err(redact_solana_error)
+    }
+
+    pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash> {
+        self.0
+            .get_latest_blockhash()
+            .await
+            .map_err(redact_solana_error)
+    }
+
+    pub async fn send_and_confirm_transaction(
+        &self,
+        transaction: &impl solana_rpc_client::rpc_client::SerializableTransaction,
+    ) -> Result<SolanaSignature> {
+        self.0
+            .send_and_confirm_transaction(transaction)
+            .await
+            .map_err(redact_solana_error)
+    }
 }
 
 #[cfg(test)]
