@@ -153,7 +153,7 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
     testtasks.try_spawn_persistent(Submitter::new_cosmos(kolme.clone(), submitter_seed).run());
     testtasks.try_spawn_persistent(
         Listener::new(kolme.clone(), validator.clone()).run(ChainName::Cosmos),

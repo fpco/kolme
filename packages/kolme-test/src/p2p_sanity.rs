@@ -25,9 +25,8 @@ async fn sanity_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.try_spawn_persistent(
-        Processor::new(kolme_processor.clone(), my_secret_key().clone()).run(),
-    );
+    testtasks
+        .spawn_persistent(Processor::new(kolme_processor.clone(), my_secret_key().clone()).run());
     let discovery = testtasks.launch_websockets_discovery(kolme_processor, "sanity-processor");
 
     let tempfile_client = tempfile::tempdir().unwrap();

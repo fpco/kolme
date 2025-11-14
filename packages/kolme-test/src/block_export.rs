@@ -20,7 +20,7 @@ async fn block_export_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
+    testtasks.spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
 
     for _ in 0..10 {
         let secret = SecretKey::random();
@@ -66,7 +66,7 @@ async fn block_export_inner(testtasks: TestTasks, (): ()) {
         assert_eq!(block1.block.hash(), block2.block.hash());
     }
 
-    testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), my_secret_key()).run());
+    testtasks.spawn_persistent(Processor::new(kolme2.clone(), my_secret_key()).run());
 
     let secret = SecretKey::random();
     kolme1

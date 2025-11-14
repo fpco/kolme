@@ -144,7 +144,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     )
     .await
     .unwrap();
-    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), processor.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme1.clone(), processor.clone()).run());
     let discovery = testtasks.launch_websockets_discovery(kolme1.clone(), "kolme1");
 
     // And we'll launch the v2 processor immediately too, even though it won't do anything yet
@@ -152,7 +152,7 @@ async fn test_upgrade_inner(testtasks: TestTasks, (): ()) -> Result<()> {
     let kolme2 = Kolme::new(SampleKolmeApp2 { genesis }, VERSION2, store2.clone())
         .await
         .unwrap();
-    testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), processor.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme2.clone(), processor.clone()).run());
     testtasks.launch_websockets_client_with(kolme2.clone(), "kolme2", &discovery, |builder| {
         builder.set_sync_mode(
             SyncMode::StateTransfer,

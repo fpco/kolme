@@ -226,7 +226,7 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
 
     let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
     processor.add_secret(new_processor.clone());
-    testtasks.try_spawn_persistent(processor.run());
+    testtasks.spawn_persistent(processor.run());
     testtasks.try_spawn_persistent(Submitter::new_cosmos(kolme.clone(), submitter_seed).run());
     testtasks.try_spawn_persistent(
         Listener::new(kolme.clone(), listener.clone()).run(ChainName::Cosmos),
@@ -475,7 +475,11 @@ async fn test_solana_contract_update(self_replace: bool) {
 
     let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
     processor.add_secret(new_processor.clone());
-    set.spawn(processor.run());
+    set.spawn(async {
+        processor.run().await;
+        #[allow(unreachable_code)]
+        Err(anyhow::anyhow!("Unexpected exit from processor"))
+    });
     set.spawn(Submitter::new_solana(kolme.clone(), submitter, None).run());
     set.spawn(Listener::new(kolme.clone(), listener.clone()).run(ChainName::Solana));
     set.spawn(Approver::new(kolme.clone(), approver.clone()).run());
