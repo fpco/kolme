@@ -19,7 +19,7 @@ async fn migrate_stores_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
+    testtasks.spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
 
     // Send a few transactions to bump up the block height
     for _ in 0..10 {
@@ -40,7 +40,7 @@ async fn migrate_stores_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), my_secret_key()).run());
+    testtasks.spawn_persistent(Processor::new(kolme2.clone(), my_secret_key()).run());
 
     kolme2.ingest_blocks_from(&kolme1).await.unwrap();
 

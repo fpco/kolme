@@ -145,7 +145,7 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
     testtasks.try_spawn_persistent(Submitter::new_cosmos(kolme.clone(), submitter_seed).run());
     testtasks.try_spawn_persistent(
         Listener::new(kolme.clone(), listener.clone()).run(ChainName::Cosmos),

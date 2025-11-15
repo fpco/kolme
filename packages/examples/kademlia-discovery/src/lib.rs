@@ -156,7 +156,11 @@ pub async fn observer_node(validator_addr: &str, api_server_port: u16) -> Result
         .add_websockets_server(validator_addr)
         .build(kolme.clone())?;
 
-    set.spawn(gossip.run());
+    set.spawn(async {
+        gossip.run().await;
+        #[allow(unreachable_code)]
+        Err(anyhow::anyhow!("Unexpected exit from gossip"))
+    });
 
     let api = ApiServer::new(kolme);
     set.spawn(api.run(("0.0.0.0", api_server_port)));
@@ -219,7 +223,11 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     // Processor consumes mempool transactions and add new transactions into blockchain storage.
-    set.spawn(processor.run());
+    set.spawn(async {
+        processor.run().await;
+        #[allow(unreachable_code)]
+        Err(anyhow::anyhow!("Unexpected exit from processor"))
+    });
     // Listens bridge events. Based on bridge event ID, fetches the
     // event from chain and then constructs a tx which leads to adding
     // new mempool entry.
@@ -236,7 +244,11 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
         .set_duplicate_cache_time(Duration::from_secs(1))
         .add_websockets_server("ws://127.0.0.1:2006")
         .build(kolme.clone())?;
-    set.spawn(gossip.run());
+    set.spawn(async {
+        gossip.run().await;
+        #[allow(unreachable_code)]
+        Err(anyhow::anyhow!("Unexpected exit from gossip"))
+    });
 
     while let Some(res) = set.join_next().await {
         match res {
@@ -277,7 +289,11 @@ pub async fn validators(
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     // Processor consumes mempool transactions and add new transactions into blockchain storage.
-    set.spawn(processor.run());
+    set.spawn(async {
+        processor.run().await;
+        #[allow(unreachable_code)]
+        Err(anyhow::anyhow!("Unexpected exit from processor"))
+    });
     // Listens bridge events. Based on bridge event ID, fetches the
     // event from chain and then constructs a tx which leads to adding
     // new mempool entry.
@@ -295,7 +311,11 @@ pub async fn validators(
         .add_websockets_bind("0.0.0.0:2006".parse().unwrap())
         .set_duplicate_cache_time(Duration::from_secs(1))
         .build(kolme.clone())?;
-    set.spawn(gossip.run());
+    set.spawn(async {
+        gossip.run().await;
+        #[allow(unreachable_code)]
+        Err(anyhow::anyhow!("Unexpected exit from gossip"))
+    });
 
     if start_upgrade {
         let processor_upgrader = Upgrader::new(kolme.clone(), my_secret_key().clone(), VERSION2);
@@ -303,15 +323,18 @@ pub async fn validators(
         let approver_upgrader = Upgrader::new(kolme, my_approver_key().clone(), VERSION2);
         set.spawn(async move {
             processor_upgrader.run().await;
-            Ok(())
+            #[allow(unreachable_code)]
+            Err(anyhow::anyhow!("Unexpected exit from processor upgrader"))
         });
         set.spawn(async move {
             listener_upgrader.run().await;
-            Ok(())
+            #[allow(unreachable_code)]
+            Err(anyhow::anyhow!("Unexpected exit from listener upgrader"))
         });
         set.spawn(async move {
             approver_upgrader.run().await;
-            Ok(())
+            #[allow(unreachable_code)]
+            Err(anyhow::anyhow!("Unexpected exit from approver upgrader"))
         });
     }
 

@@ -197,7 +197,11 @@ pub async fn serve(kolme: Kolme<CosmosBridgeApp>, bind: SocketAddr) -> Result<()
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(processor.run());
+    set.spawn(async {
+        processor.run().await;
+        #[allow(unreachable_code)]
+        Err(anyhow::anyhow!("Unexpected exit from processor"))
+    });
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run(ChainName::Cosmos));
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());

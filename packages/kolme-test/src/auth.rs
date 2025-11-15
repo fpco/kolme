@@ -108,7 +108,7 @@ async fn test_sample_sanity_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
 
     testtasks
-        .try_spawn_persistent(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
+        .spawn_persistent(Processor::new(kolme.clone(), get_sample_secret_key().clone()).run());
     kolme.wait_for_block(BlockHeight::start()).await.unwrap();
 
     let secret1 = SecretKey::random();

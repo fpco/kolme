@@ -18,16 +18,7 @@ impl<App: KolmeApp> Upgrader<App> {
         }
     }
 
-    pub async fn run(self) {
-        loop {
-            if let Err(e) = self.run_inner().await {
-                tracing::error!("Unexpected error in Upgrader loop: {e}");
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            }
-        }
-    }
-
-    async fn run_inner(&self) -> Result<()> {
+    pub async fn run(self) -> ! {
         let mut new_block = self.kolme.subscribe_new_block();
         loop {
             if let Err(e) = self.run_single().await {

@@ -21,7 +21,7 @@ async fn fast_sync_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
+    testtasks.spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
 
     // Send a few transactions to bump up the block height
     for _ in 0..10 {

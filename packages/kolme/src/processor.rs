@@ -30,7 +30,7 @@ impl<App: KolmeApp> Processor<App> {
         self.latest_block_delay = latest_block_delay;
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> ! {
         let chains = self
             .kolme
             .read()
@@ -88,8 +88,7 @@ impl<App: KolmeApp> Processor<App> {
 
         tokio::join!(producer_loop, latest_loop);
 
-        // TODO: this function shouldn't return Result
-        Ok(())
+        panic!("Unexpected exit in processor");
     }
 
     async fn ensure_genesis_event(&self) -> Result<()> {

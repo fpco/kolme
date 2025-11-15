@@ -178,7 +178,7 @@ impl GossipBuilder {
 }
 
 impl<App: KolmeApp> Gossip<App> {
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> ! {
         let mut set = self.set.take().unwrap();
         set.spawn(self.run_inner());
         let res = set.join_next().await;

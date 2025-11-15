@@ -28,7 +28,7 @@ async fn sync_older_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
+    testtasks.spawn_persistent(Processor::new(kolme1.clone(), my_secret_key()).run());
 
     // Send a few transactions to bump up the block height
     for _ in 0..10 {
@@ -175,7 +175,7 @@ async fn sync_older_resume_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), my_secret_key()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), my_secret_key()).run());
 
     for _ in 0..10 {
         let secret = SecretKey::random();

@@ -56,12 +56,19 @@ impl<App: KolmeApp> Listener<App> {
                 {
                     let contracts = self.wait_for_contracts(name).await?;
                     for (chain, contract) in contracts {
-                        set.spawn(solana::listen(
-                            self.kolme.clone(),
-                            self.secret.clone(),
-                            chain.to_solana_chain().unwrap(),
-                            contract,
-                        ));
+                        let kolme = self.kolme.clone();
+                        let secret = self.secret.clone();
+                        set.spawn(async move {
+                            solana::listen(
+                                kolme,
+                                secret,
+                                chain.to_solana_chain().unwrap(),
+                                contract,
+                            )
+                            .await;
+                            #[allow(unreachable_code)]
+                            Err(anyhow::anyhow!("Unexpected exit from solana listener"))
+                        });
                     }
                 }
             }
