@@ -138,9 +138,7 @@ pub async fn api_server(bind: SocketAddr) -> Result<()> {
 
     let gossip = GossipBuilder::new().build(kolme.clone())?;
     set.spawn(async {
-        gossip.run().await;
-        #[allow(unreachable_code)]
-        Err(anyhow::anyhow!("Unexpected exit from gossip"))
+        absurd(gossip.run().await)
     });
     let api_server = ApiServer::new(kolme);
     set.spawn(api_server.run(bind));

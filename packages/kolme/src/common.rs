@@ -6,6 +6,14 @@ use crate::*;
 use tracing::Level;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+/// Turn a never-returning value into any desired type.
+///
+/// Useful for functions that logically don't return (e.g. long-running tasks)
+/// but need to satisfy an interface that expects a concrete return type.
+pub fn absurd<T>(never: !) -> T {
+    match never {}
+}
+
 /// Initialize the logging system.
 ///
 /// This leverages the tracing crate. If verbose is enabled,

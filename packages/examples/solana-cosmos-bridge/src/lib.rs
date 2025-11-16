@@ -175,9 +175,7 @@ pub async fn serve(
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(async {
-        processor.run().await;
-        #[allow(unreachable_code)]
-        Err(anyhow::anyhow!("Unexpected exit from processor"))
+        absurd(processor.run().await)
     });
 
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());

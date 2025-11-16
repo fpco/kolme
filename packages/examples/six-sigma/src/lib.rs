@@ -334,9 +334,7 @@ impl Tasks {
     pub fn spawn_processor(&mut self) {
         let processor = Processor::new(self.kolme.clone(), my_secret_key().clone());
         self.processor = Some(self.set.spawn(async {
-            processor.run().await;
-            #[allow(unreachable_code)]
-            Err(anyhow::anyhow!("Unexpected exit from processor"))
+            absurd(processor.run().await)
         }));
     }
 

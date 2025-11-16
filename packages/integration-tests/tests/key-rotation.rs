@@ -476,9 +476,7 @@ async fn test_solana_contract_update(self_replace: bool) {
     let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
     processor.add_secret(new_processor.clone());
     set.spawn(async {
-        processor.run().await;
-        #[allow(unreachable_code)]
-        Err(anyhow::anyhow!("Unexpected exit from processor"))
+        absurd(processor.run().await)
     });
     set.spawn(Submitter::new_solana(kolme.clone(), submitter, None).run());
     set.spawn(Listener::new(kolme.clone(), listener.clone()).run(ChainName::Solana));
