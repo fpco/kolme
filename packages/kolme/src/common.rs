@@ -10,8 +10,13 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 ///
 /// Useful for functions that logically don't return (e.g. long-running tasks)
 /// but need to satisfy an interface that expects a concrete return type.
-pub fn absurd<T>(never: !) -> T {
-    match never {}
+#[macro_export]
+macro_rules! absurd {
+    ($never:expr) => {{
+        let never: std::convert::Infallible = $never;
+        #[allow(unreachable_code, unreachable_patterns)]
+        match never {}
+    }};
 }
 
 /// Initialize the logging system.

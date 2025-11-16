@@ -198,7 +198,7 @@ pub async fn serve(kolme: Kolme<CosmosBridgeApp>, bind: SocketAddr) -> Result<()
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     set.spawn(async {
-        absurd(processor.run().await)
+        absurd!(processor.run().await)
     });
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(listener.run(ChainName::Cosmos));

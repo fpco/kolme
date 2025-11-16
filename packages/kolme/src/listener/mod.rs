@@ -59,7 +59,7 @@ impl<App: KolmeApp> Listener<App> {
                         let kolme = self.kolme.clone();
                         let secret = self.secret.clone();
                         set.spawn(async move {
-                            absurd(solana::listen(
+                            absurd!(solana::listen(
                                 kolme,
                                 secret,
                                 chain.to_solana_chain().unwrap(),
