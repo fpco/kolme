@@ -156,9 +156,7 @@ pub async fn observer_node(validator_addr: &str, api_server_port: u16) -> Result
         .add_websockets_server(validator_addr)
         .build(kolme.clone())?;
 
-    set.spawn(async {
-        absurd!(gossip.run().await)
-    });
+    set.spawn(async { absurd!(gossip.run().await) });
 
     let api = ApiServer::new(kolme);
     set.spawn(api.run(("0.0.0.0", api_server_port)));
@@ -221,9 +219,7 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     // Processor consumes mempool transactions and add new transactions into blockchain storage.
-    set.spawn(async {
-        absurd!(processor.run().await)
-    });
+    set.spawn(async { absurd!(processor.run().await) });
     // Listens bridge events. Based on bridge event ID, fetches the
     // event from chain and then constructs a tx which leads to adding
     // new mempool entry.
@@ -240,9 +236,7 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
         .set_duplicate_cache_time(Duration::from_secs(1))
         .add_websockets_server("ws://127.0.0.1:2006")
         .build(kolme.clone())?;
-    set.spawn(async {
-        absurd!(gossip.run().await)
-    });
+    set.spawn(async { absurd!(gossip.run().await) });
 
     while let Some(res) = set.join_next().await {
         match res {
@@ -283,9 +277,7 @@ pub async fn validators(
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     // Processor consumes mempool transactions and add new transactions into blockchain storage.
-    set.spawn(async {
-        absurd!(processor.run().await)
-    });
+    set.spawn(async { absurd!(processor.run().await) });
     // Listens bridge events. Based on bridge event ID, fetches the
     // event from chain and then constructs a tx which leads to adding
     // new mempool entry.
@@ -303,23 +295,15 @@ pub async fn validators(
         .add_websockets_bind("0.0.0.0:2006".parse().unwrap())
         .set_duplicate_cache_time(Duration::from_secs(1))
         .build(kolme.clone())?;
-    set.spawn(async {
-        absurd!(gossip.run().await)
-    });
+    set.spawn(async { absurd!(gossip.run().await) });
 
     if start_upgrade {
         let processor_upgrader = Upgrader::new(kolme.clone(), my_secret_key().clone(), VERSION2);
         let listener_upgrader = Upgrader::new(kolme.clone(), my_listener_key().clone(), VERSION2);
         let approver_upgrader = Upgrader::new(kolme, my_approver_key().clone(), VERSION2);
-        set.spawn(async move {
-            absurd!(processor_upgrader.run().await)
-        });
-        set.spawn(async move {
-            absurd!(listener_upgrader.run().await)
-        });
-        set.spawn(async move {
-            absurd!(approver_upgrader.run().await)
-        });
+        set.spawn(async move { absurd!(processor_upgrader.run().await) });
+        set.spawn(async move { absurd!(listener_upgrader.run().await) });
+        set.spawn(async move { absurd!(approver_upgrader.run().await) });
     }
 
     while let Some(res) = set.join_next().await {

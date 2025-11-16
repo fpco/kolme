@@ -333,9 +333,7 @@ pub struct Tasks {
 impl Tasks {
     pub fn spawn_processor(&mut self) {
         let processor = Processor::new(self.kolme.clone(), my_secret_key().clone());
-        self.processor = Some(self.set.spawn(async {
-            absurd!(processor.run().await)
-        }));
+        self.processor = Some(self.set.spawn(async { absurd!(processor.run().await) }));
     }
 
     pub fn spawn_listener(&mut self) {
