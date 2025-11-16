@@ -20,7 +20,7 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     chain: SolanaChain,
     contract: String,
-) -> Result<()> {
+) -> ! {
     loop {
         match listen_internal(kolme.clone(), &secret, chain, &contract).await {
             Ok(_) => tracing::error!("Inner listener loop exited unexpectedly!"),

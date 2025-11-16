@@ -33,7 +33,7 @@ impl TestTasks {
         let gossip = gossip.build(kolme).unwrap();
 
         // And now launch a gossip node for this Kolme
-        self.try_spawn_persistent(gossip.run());
+        self.spawn_persistent(gossip.run());
 
         WebsocketsDiscovery { port }
     }
@@ -66,7 +66,7 @@ impl TestTasks {
             .add_websockets_server(format!("ws://127.0.0.1:{}", discovery.port));
         let builder = f(builder);
         let gossip = builder.build(kolme.clone()).unwrap();
-        self.try_spawn_persistent(gossip.run());
+        self.spawn_persistent(gossip.run());
     }
 }
 

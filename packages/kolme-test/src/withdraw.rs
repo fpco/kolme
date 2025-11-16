@@ -140,7 +140,7 @@ async fn withdraw_inner(testtasks: TestTasks, (): ()) {
     let passthrough = tokio::task::spawn(passthrough.run(addr));
     assert!(!passthrough.is_finished());
 
-    testtasks.try_spawn_persistent(Processor::new(kolme1.clone(), processor.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme1.clone(), processor.clone()).run());
     let discovery = testtasks.launch_websockets_discovery(kolme1.clone(), "kolme1");
     testtasks.try_spawn_persistent(
         Listener::new(kolme1.clone(), listener.clone()).run(ChainName::PassThrough),

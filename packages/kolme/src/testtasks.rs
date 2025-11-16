@@ -51,19 +51,21 @@ impl TestTasks {
         rx_final.try_recv().unwrap()
     }
 
-    pub fn spawn_persistent<F>(&self, task: F)
+    pub fn spawn_persistent<F, T>(&self, task: F)
     where
-        F: std::future::Future<Output = ()> + Send + 'static,
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
     {
         self.try_spawn_persistent(async move {
             task.await;
             anyhow::Ok(())
         });
     }
-    pub fn try_spawn_persistent<F, E>(&self, task: F)
+    pub fn try_spawn_persistent<F, E, T>(&self, task: F)
     where
-        F: std::future::Future<Output = Result<(), E>> + Send + 'static,
+        F: std::future::Future<Output = Result<T, E>> + Send + 'static,
         anyhow::Error: From<E>,
+        T: Send + 'static,
     {
         self.spawn_helper(true, task)
     }
@@ -86,10 +88,11 @@ impl TestTasks {
         self.spawn_helper(false, task)
     }
 
-    fn spawn_helper<F, E>(&self, persistent: bool, task: F)
+    fn spawn_helper<F, E, T>(&self, persistent: bool, task: F)
     where
-        F: std::future::Future<Output = Result<(), E>> + Send + 'static,
+        F: std::future::Future<Output = Result<T, E>> + Send + 'static,
         anyhow::Error: From<E>,
+        T: Send + 'static,
     {
         let tasks = self.clone();
 
@@ -129,7 +132,7 @@ impl TestTasks {
 
             let err = if !was_aborted {
                 match res {
-                    Ok(Ok(())) => {
+                    Ok(Ok(_)) => {
                         if persistent {
                             Some(anyhow::anyhow!("Persistent task exited unexpectedly"))
                         } else {

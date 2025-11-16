@@ -26,7 +26,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
 
     let processor1 = Processor::new(kolme.clone(), secret1.clone());
-    testtasks.try_spawn_persistent(processor1.run());
+    testtasks.spawn_persistent(processor1.run());
 
     // Prove that we can produce a block
     kolme
@@ -123,7 +123,7 @@ async fn test_self_replace_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
     assert_eq!(kolme.get_tx_height(txhash).await.unwrap(), None);
-    testtasks.try_spawn_persistent(Processor::new(kolme2.clone(), secret2.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme2.clone(), secret2.clone()).run());
     assert_eq!(kolme.get_tx_height(txhash).await.unwrap(), None);
 
     // And try broadcasting the transaction again, it should work this time.
@@ -158,7 +158,7 @@ async fn test_total_replace_inner(testtasks: TestTasks, (): ()) {
 
     let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
     processor.add_secret(new_processor.clone());
-    testtasks.try_spawn_persistent(processor.run());
+    testtasks.spawn_persistent(processor.run());
 
     // Swap out the approver and listener right away. Since there's only one
     // key being used, we don't need to do any approving.

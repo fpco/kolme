@@ -30,7 +30,7 @@ async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
     .await
     .unwrap();
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-    test_tasks.try_spawn_persistent(processor.run());
+    test_tasks.spawn_persistent(processor.run());
     let discovery = test_tasks.launch_websockets_discovery_with(kolme.clone(), "kolme", |g| {
         g.set_duplicate_cache_time(Duration::from_micros(100))
     });
@@ -92,7 +92,7 @@ async fn tx_evicted_inner(test_tasks: TestTasks, (): ()) {
     .unwrap();
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-    test_tasks.try_spawn_persistent(processor.run());
+    test_tasks.spawn_persistent(processor.run());
     let discovery = test_tasks.launch_websockets_discovery(kolme.clone(), "kolme");
 
     timeout(

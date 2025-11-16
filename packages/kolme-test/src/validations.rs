@@ -22,7 +22,7 @@ async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
     .await
     .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
 
     let genesis = kolme.wait_for_block(BlockHeight(0)).await.unwrap();
     let secret = SecretKey::random();

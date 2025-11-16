@@ -223,7 +223,7 @@ async fn test_websocket_notifications_inner(
     });
 
     let kolme_cloned = kolme.clone();
-    testtasks.try_spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -279,7 +279,7 @@ async fn test_validate_tx_valid_signature_inner(
     });
 
     let kolme_cloned = kolme.clone();
-    testtasks.try_spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -373,7 +373,7 @@ async fn test_execute_transaction_genesis_inner(
     tracing::info!("Connected to WebSocket");
 
     let kolme_cloned = kolme.clone();
-    testtasks.try_spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme_cloned.clone(), secret.clone()).run());
 
     let notification = next_message_as_json(&mut ws).await.unwrap();
 
@@ -407,7 +407,7 @@ async fn test_validate_tx_invalid_nonce_inner(
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -464,7 +464,7 @@ async fn test_rejected_transaction_insufficient_balance_inner(
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -550,7 +550,7 @@ async fn test_many_transactions_inner(
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -618,7 +618,7 @@ async fn test_concurrent_transactions_inner(
     let secret = SecretKey::from_hex(SECRET_KEY_HEX).unwrap();
 
     testtasks.try_spawn_persistent(ApiServer::new(kolme.clone()).run(addr));
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), secret.clone()).run());
 
     let ws_url = format!("ws://localhost:{}/notifications", addr.port());
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();

@@ -114,7 +114,7 @@ async fn multiple_processors_inner(
         let kolme = kolme.set_tx_await_duration(tokio::time::Duration::from_secs(70));
 
         let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-        test_tasks.try_spawn_persistent(processor.run());
+        test_tasks.spawn_persistent(processor.run());
         test_tasks.try_spawn_persistent(check_failed_txs(kolme.clone()));
         kolmes.push(kolme);
     }
