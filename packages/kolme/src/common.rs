@@ -19,6 +19,17 @@ macro_rules! absurd {
     }};
 }
 
+/// Turn a never-returning future into a future yielding any desired type.
+///
+/// Useful for async tasks that logically don't complete but need to satisfy an
+/// interface expecting a concrete output type.
+#[macro_export]
+macro_rules! absurd_future {
+    ($never:expr $(,)?) => {{
+        async move { $crate::absurd!($never.await) }
+    }};
+}
+
 /// Initialize the logging system.
 ///
 /// This leverages the tracing crate. If verbose is enabled,

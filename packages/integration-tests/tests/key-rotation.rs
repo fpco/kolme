@@ -475,7 +475,7 @@ async fn test_solana_contract_update(self_replace: bool) {
 
     let mut processor = Processor::new(kolme.clone(), orig_processor.clone());
     processor.add_secret(new_processor.clone());
-    set.spawn(async { absurd!(processor.run().await) });
+    set.spawn(absurd_future!(processor.run()));
     set.spawn(Submitter::new_solana(kolme.clone(), submitter, None).run());
     set.spawn(Listener::new(kolme.clone(), listener.clone()).run(ChainName::Solana));
     set.spawn(Approver::new(kolme.clone(), approver.clone()).run());
