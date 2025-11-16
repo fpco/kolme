@@ -140,20 +140,6 @@ impl Store {
             .map_err(KolmeStoreError::custom)?;
         Ok(listener)
     }
-
-    //@@@ REVIEW
-    async fn notify_block_insert(&self, height: i64) -> Result<(), KolmeStoreError> {
-        //@@@ DO WITH TRIGGER INSTEAD?
-        let payload = height.to_string();
-        sqlx::query("SELECT pg_notify($1, $2)")
-            .bind(BLOCK_INSERT_CHANNEL)
-            .bind(payload)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
-            .map_err(KolmeStoreError::custom)
-            .inspect_err(|err| tracing::error!("{err:?}"))
-    }
 }
 
 impl KolmeBackingStore for Store {
@@ -382,9 +368,6 @@ impl KolmeBackingStore for Store {
             }
             return Err(KolmeStoreError::custom(e));
         }
-
-        //@@@ DO WITH TRIGGER INSTEAD?
-        self.notify_block_insert(height_i64).await?;
 
         Ok(())
     }
