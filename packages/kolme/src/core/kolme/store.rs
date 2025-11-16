@@ -1,7 +1,7 @@
 use crate::core::*;
 use std::{num::NonZeroUsize, path::Path};
 
-use kolme_store::sqlx::postgres::PgConnectOptions;
+use kolme_store::sqlx::postgres::{PgConnectOptions, PgListener};
 use kolme_store::sqlx::{pool::PoolOptions, Postgres};
 use kolme_store::{
     KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
@@ -212,5 +212,21 @@ impl<App: KolmeApp> KolmeStore<App> {
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
         self.inner.get_merkle_layer(hash).await
+    }
+
+    //@@@ RENAME?
+    //@@@ REVIEW
+    pub(super) async fn new_block_listener(&self) -> Result<Option<PgListener>, KolmeStoreError> {
+        match &self.inner {
+            KolmeStoreInner::KolmePostgresStore(store) => {
+                store.new_block_listener().await.map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    //@@@ REVIEW
+    pub(super) fn notify_external_block(&self) {
+        self.trigger_notify();
     }
 }

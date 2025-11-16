@@ -5,6 +5,7 @@ mod store;
 
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
+use kolme_store::sqlx::postgres::PgListener;
 use kolme_store::{KolmeConstructLock, KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
 #[cfg(feature = "solana")]
@@ -675,6 +676,8 @@ impl<App: KolmeApp> Kolme<App> {
             .validate_genesis_info(kolme.get_app().genesis_info())
             .await?;
 
+        kolme.init_block_notification_listener().await?;
+
         Ok(kolme)
     }
 
@@ -1185,6 +1188,87 @@ impl<App: KolmeApp> Kolme<App> {
             next = next.next();
         }
         Ok(next)
+    }
+
+    //@@@ REVIEW
+    async fn init_block_notification_listener(&self) -> Result<()> {
+        if let Some(listener) = self.inner.store.new_block_listener().await? {
+            tracing::debug!("Initialized PostgreSQL block notification listener"); //@@@ NEED TRACE?
+            self.spawn_block_notification_task(listener);
+        }
+        Ok(())
+    }
+
+    //@@@ REVIEW
+    fn spawn_block_notification_task(&self, listener: PgListener) {
+        let store = self.inner.store.clone();
+        let kolme = self.clone();
+        tokio::spawn(async move {
+            Self::process_block_notifications(store, kolme, listener).await;
+        });
+    }
+
+    //@@@ REVIEW
+    async fn process_block_notifications(
+        store: KolmeStore<App>,
+        kolme: Kolme<App>,
+        mut listener: PgListener,
+    ) {
+        loop {
+            match listener.recv().await {
+                Ok(notification) => {
+                    //@@@ DO WE NEED THE PAYLOAD STUFF?
+                    //@@@ NEED THE TRACES?
+                    let payload = notification.payload();
+                    if let Ok(height) = payload.parse::<i64>() {
+                        tracing::trace!(
+                            "Received PostgreSQL block notification for height {height}"
+                        );
+                    } else {
+                        tracing::trace!(
+                            payload,
+                            "Received PostgreSQL block notification with unparsed payload"
+                        );
+                    }
+                    if let Err(e) = kolme.resync().await {
+                        tracing::error!("Error resyncing after PostgreSQL notification: {e:?}");
+                    }
+                    store.notify_external_block();
+                }
+                Err(err) => {
+                    //@@@ NEED ERR CASE?
+                    tracing::error!(
+                        "PostgreSQL block notification listener error: {err:?}, attempting to reconnect"
+                    );
+                    match Self::reconnect_block_listener(&store).await {
+                        Some(new_listener) => listener = new_listener,
+                        None => break,
+                    }
+                }
+            }
+        }
+        tracing::warn!("PostgreSQL block notification listener exited");
+    }
+
+    //@@@ NEED THIS?
+    //@@@ REVIEW
+    async fn reconnect_block_listener(store: &KolmeStore<App>) -> Option<PgListener> {
+        //@@@ NEED TRACES?
+        loop {
+            match store.new_block_listener().await {
+                Ok(Some(listener)) => {
+                    tracing::debug!("Re-established PostgreSQL block notification listener");
+                    return Some(listener);
+                }
+                Ok(None) => return None,
+                Err(err) => {
+                    tracing::error!(
+                        "Unable to re-establish PostgreSQL block notification listener: {err:?}. Retrying in 5 seconds"
+                    );
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            }
+        }
     }
 }
 

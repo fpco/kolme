@@ -9,11 +9,14 @@ use merkle_map::{
 };
 use sqlx::{
     pool::PoolOptions,
-    postgres::{PgAdvisoryLock, PgConnectOptions},
+    postgres::{PgAdvisoryLock, PgConnectOptions, PgListener},
     Executor, Postgres,
 };
 use std::{collections::HashMap, sync::Arc};
 pub mod merkle;
+
+//@@@ RENAME VARIABLE AND CHANNEL?
+pub const BLOCK_INSERT_CHANNEL: &str = "kolme_blocks_insert";
 
 pub struct ConstructLock {
     tx_unlock: Option<tokio::sync::oneshot::Sender<()>>,
@@ -43,7 +46,8 @@ impl Store {
         options: PoolOptions<Postgres>,
     ) -> anyhow::Result<Self> {
         let pool = options
-            .connect_with(connect)
+            //@@@ WHY NEED CLONE?
+            .connect_with(connect.clone())
             .await
             .context("Could not connect to the database")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
@@ -123,6 +127,32 @@ impl Store {
         .await
         .map_err(KolmeStoreError::custom)
         .inspect_err(|err| tracing::error!("{err:?}"))
+    }
+
+    //@@@ REVIEW
+    pub async fn new_block_listener(&self) -> Result<PgListener, KolmeStoreError> {
+        let mut listener = PgListener::connect_with(&self.pool)
+            .await
+            .map_err(KolmeStoreError::custom)?;
+        listener
+            .listen(BLOCK_INSERT_CHANNEL)
+            .await
+            .map_err(KolmeStoreError::custom)?;
+        Ok(listener)
+    }
+
+    //@@@ REVIEW
+    async fn notify_block_insert(&self, height: i64) -> Result<(), KolmeStoreError> {
+        //@@@ DO WITH TRIGGER INSTEAD?
+        let payload = height.to_string();
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(BLOCK_INSERT_CHANNEL)
+            .bind(payload)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(KolmeStoreError::custom)
+            .inspect_err(|err| tracing::error!("{err:?}"))
     }
 }
 
@@ -352,6 +382,9 @@ impl KolmeBackingStore for Store {
             }
             return Err(KolmeStoreError::custom(e));
         }
+
+        //@@@ DO WITH TRIGGER INSTEAD?
+        self.notify_block_insert(height_i64).await?;
 
         Ok(())
     }
