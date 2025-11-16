@@ -1,4 +1,4 @@
-use std::{str::FromStr, time::Duration};
+use std::{convert::Infallible, str::FromStr, time::Duration};
 
 use base64::Engine;
 use borsh::BorshDeserialize;
@@ -20,7 +20,7 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     chain: SolanaChain,
     contract: String,
-) -> ! {
+) -> Infallible {
     loop {
         match listen_internal(kolme.clone(), &secret, chain, &contract).await {
             Ok(_) => tracing::error!("Inner listener loop exited unexpectedly!"),

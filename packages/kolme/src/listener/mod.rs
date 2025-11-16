@@ -56,11 +56,9 @@ impl<App: KolmeApp> Listener<App> {
                 {
                     let contracts = self.wait_for_contracts(name).await?;
                     for (chain, contract) in contracts {
-                        let kolme = self.kolme.clone();
-                        let secret = self.secret.clone();
-                        set.spawn(absurd_future!(solana::listen(
-                            kolme,
-                            secret,
+                        set.spawn(absurd_future(solana::listen(
+                            self.kolme.clone(),
+                            self.secret.clone(),
                             chain.to_solana_chain().unwrap(),
                             contract,
                         )));

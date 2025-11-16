@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::time::Instant;
+use std::{collections::HashMap, convert::Infallible, time::Instant};
 
 use kolme_store::KolmeStoreError;
 
@@ -30,7 +29,7 @@ impl<App: KolmeApp> Processor<App> {
         self.latest_block_delay = latest_block_delay;
     }
 
-    pub async fn run(self) -> ! {
+    pub async fn run(self) -> Infallible {
         let chains = self
             .kolme
             .read()

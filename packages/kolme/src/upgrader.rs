@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use crate::*;
 
 /// A component that ensures a proposal is sent to upgrade the chain, if needed.
@@ -18,7 +20,7 @@ impl<App: KolmeApp> Upgrader<App> {
         }
     }
 
-    pub async fn run(self) -> ! {
+    pub async fn run(self) -> Infallible {
         let mut new_block = self.kolme.subscribe_new_block();
         loop {
             if let Err(e) = self.run_single().await {
