@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::time::Instant;
+use std::{collections::HashMap, convert::Infallible, time::Instant};
 
 use kolme_store::KolmeStoreError;
 
@@ -30,7 +29,7 @@ impl<App: KolmeApp> Processor<App> {
         self.latest_block_delay = latest_block_delay;
     }
 
-    pub async fn run(self) -> Result<(), KolmeError> {
+    pub async fn run(self) -> Infallible {
         let chains = self
             .kolme
             .read()
@@ -88,8 +87,7 @@ impl<App: KolmeApp> Processor<App> {
 
         tokio::join!(producer_loop, latest_loop);
 
-        // TODO: this function shouldn't return Result
-        Ok(())
+        panic!("Unexpected exit in processor");
     }
 
     async fn ensure_genesis_event(&self) -> Result<(), KolmeError> {

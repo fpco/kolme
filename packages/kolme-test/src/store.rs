@@ -58,13 +58,10 @@ async fn test_postgres_block_double_insertion() {
     let options = options.database(&db_name);
     maintenance_pool.set_connect_options(options.clone());
 
-    let postgres = KolmeStore::new_postgres_with_options(
-        options,
-        PgPoolOptions::new().max_connections(2),
-        1024,
-    )
-    .await
-    .unwrap();
+    let postgres =
+        KolmeStore::new_postgres_with_options(options, PgPoolOptions::new().max_connections(2))
+            .await
+            .unwrap();
 
     TestTasks::start(test_block_double_insertion, postgres).await;
 }
@@ -76,7 +73,7 @@ async fn test_block_double_insertion(testtasks: TestTasks, store: KolmeStore<Sam
         .await
         .unwrap();
 
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
 
     let genesis = kolme.wait_for_block(BlockHeight(0)).await.unwrap();
     let secret = SecretKey::random();

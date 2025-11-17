@@ -9,8 +9,6 @@ use sqlx::{
     Decode, Encode, Postgres, Type,
 };
 
-use super::MerkleCache;
-
 // Helper structs for sqlx serialization
 pub struct Hash(Sha256Hash);
 
@@ -98,7 +96,6 @@ pub struct Children {
 
 pub struct MerklePostgresStore<'a> {
     pub pool: &'a sqlx::PgPool,
-    pub merkle_cache: &'a MerkleCache,
     pub hashes_to_insert: Vec<Hash>,
     pub payloads_to_insert: Vec<Payload>,
     pub childrens_to_insert: Vec<Children>,
@@ -112,12 +109,7 @@ impl MerkleStore for MerklePostgresStore<'_> {
     ) -> Result<(), merkle_map::MerkleSerialError> {
         let mut to_request = vec![];
         for hash in hashes {
-            match self.merkle_cache.lock().get(hash) {
-                None => to_request.push(hash.as_array().to_vec()),
-                Some(layer) => {
-                    dest.insert(*hash, layer.clone());
-                }
-            }
+            to_request.push(hash.as_array().to_vec())
         }
 
         let query = sqlx::query!(
@@ -168,8 +160,6 @@ impl MerkleStore for MerklePostgresStore<'_> {
             bytes: ChildrenInner(layer.children.clone()),
         });
 
-        self.merkle_cache.lock().put(hash, layer.clone());
-
         Ok(())
     }
 
@@ -177,10 +167,6 @@ impl MerkleStore for MerklePostgresStore<'_> {
         &mut self,
         hash: Sha256Hash,
     ) -> Result<bool, merkle_map::MerkleSerialError> {
-        if self.merkle_cache.lock().contains(&hash) {
-            return Ok(true);
-        }
-
         Ok(sqlx::query!(
             r#"
             SELECT 1 as "value!"

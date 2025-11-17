@@ -99,12 +99,11 @@ pub async fn execute(
             tracing::error!(
                 "Solana submitter failed to execute signed transaction: {}, error kind: {:?}",
                 e,
-                e.kind
+                e.root_cause()
+                    .downcast_ref::<solana_rpc_client_api::client_error::Error>()
+                    .map(|e| &e.kind)
             );
-
-            Err(KolmeError::SolanaSignedTxExecutionFailed {
-                details: e.to_string(),
-            })
+            Err(e)
         }
     }
 }

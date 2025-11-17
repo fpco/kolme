@@ -74,7 +74,26 @@ impl<T: MerkleDeserializeRaw + Send + Sync + 'static> MerkleDeserializeRaw for M
     fn merkle_deserialize_raw(
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
-        T::merkle_deserialize_raw(deserializer).map(MerkleLockable::new)
+        let start = deserializer.get_position();
+        let inner = Arc::new(T::merkle_deserialize_raw(deserializer)?);
+        let locked = Arc::new(OnceLock::new());
+
+        // In the specific case that we parsed the entire contents
+        // from this MerkleDeserializer, we can use its MerkleContents
+        // to lock immediately.
+        let contents = deserializer.get_merkle_contents();
+        if start == 0 && contents.payload.len() == deserializer.get_position() {
+            locked
+                .set(Locked::new(
+                    Self::lock_key_for(contents.hash()),
+                    inner.clone(),
+                    contents.clone(),
+                ))
+                .ok()
+                .expect("Impossible set on empty OnceLock failed");
+        }
+
+        Ok(MerkleLockable { locked, inner })
     }
 
     fn load_merkle_by_hash(hash: Sha256Hash) -> Option<Self> {

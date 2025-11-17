@@ -17,7 +17,7 @@ async fn max_tx_height_inner(testtasks: TestTasks, (): ()) {
     )
     .await
     .unwrap();
-    testtasks.try_spawn_persistent(Processor::new(kolme.clone(), my_secret_key().clone()).run());
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), my_secret_key().clone()).run());
 
     timeout(
         Duration::from_secs(30),

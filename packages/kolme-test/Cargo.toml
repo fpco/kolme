@@ -13,8 +13,6 @@ merkle-map = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
 sqlx = { workspace = true, features = ["time"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }

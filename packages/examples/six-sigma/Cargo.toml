@@ -9,7 +9,6 @@ clap = { workspace = true }
 cosmos = { workspace = true }
 jiff = { workspace = true }
 kolme = { workspace = true, features = ["pass_through"] }
-rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 rust_decimal = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

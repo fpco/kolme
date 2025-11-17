@@ -309,3 +309,11 @@ impl<A: Array<Item: MerkleDeserializeRaw>> MerkleDeserializeRaw for SmallVec<A> 
         Ok(result)
     }
 }
+
+impl MerkleDeserializeRaw for () {
+    fn merkle_deserialize_raw(
+        _deserializer: &mut MerkleDeserializer,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(())
+    }
+}

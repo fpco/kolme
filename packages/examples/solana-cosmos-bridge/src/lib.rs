@@ -174,7 +174,7 @@ pub async fn serve(
     let mut set = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(processor.run());
+    set.spawn(absurd_future(processor.run()));
 
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
     set.spawn(async move { listener.run(ChainName::Cosmos).await.map_err(Into::into) });

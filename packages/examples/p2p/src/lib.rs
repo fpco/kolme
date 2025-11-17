@@ -116,18 +116,9 @@ pub async fn processor() -> Result<()> {
     let gossip = GossipBuilder::new().build(kolme)?;
     set.spawn(gossip.run());
 
-    while let Some(res) = set.join_next().await {
-        match res {
-            Err(e) => {
-                set.abort_all();
-                return Err(anyhow::anyhow!("Task panicked: {e}"));
-            }
-            Ok(Err(e)) => {
-                set.abort_all();
-                return Err(e.into());
-            }
-            Ok(Ok(())) => (),
-        }
+    if let Some(Err(e)) = set.join_next().await {
+        set.abort_all();
+        return Err(anyhow::anyhow!("Task panicked: {e}"));
     }
 
     Ok(())
@@ -146,7 +137,7 @@ pub async fn api_server(bind: SocketAddr) -> Result<()> {
     let mut set = JoinSet::new();
 
     let gossip = GossipBuilder::new().build(kolme.clone())?;
-    set.spawn(gossip.run());
+    set.spawn(absurd_future(gossip.run()));
     let api_server = ApiServer::new(kolme);
     set.spawn(async move { api_server.run(bind).await.map_err(Into::into) });
 

@@ -42,21 +42,14 @@ impl KolmeStore {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-        cache_size: usize,
     ) -> anyhow::Result<Self> {
         Ok(KolmeStore::KolmePostgresStore(
-            postgres::Store::new_with_options(connect, options, cache_size).await?,
+            postgres::Store::new_with_options(connect, options).await?,
         ))
     }
 
     pub fn new_fjall(fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
         Ok(KolmeStore::KolmeFjallStore(fjall::Store::new(fjall_dir)?))
-    }
-
-    pub fn new_fjall_with(fjall_dir: impl AsRef<Path>, cache_size: usize) -> anyhow::Result<Self> {
-        Ok(KolmeStore::KolmeFjallStore(fjall::Store::new_with(
-            fjall_dir, cache_size,
-        )?))
     }
 
     pub fn new_in_memory() -> Self {
@@ -96,5 +89,3 @@ impl KolmeStore {
         })
     }
 }
-
-const DEFAULT_CACHE_SIZE: usize = 1024 * 512;
