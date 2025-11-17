@@ -1,3 +1,4 @@
+use crate::error::StorageBackend;
 use crate::{
     r#trait::KolmeBackingStore, BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError,
     StorableBlock,
@@ -13,6 +14,7 @@ use sqlx::{
     Executor, Postgres,
 };
 use std::{collections::HashMap, sync::Arc};
+
 pub mod merkle;
 
 pub struct ConstructLock {

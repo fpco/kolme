@@ -1,3 +1,4 @@
+use crate::error::StorageBackend;
 use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use anyhow::Context;
 use merkle_map::{MerkleDeserializeRaw, MerkleSerializeRaw, MerkleStore as _, Sha256Hash};
