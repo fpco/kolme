@@ -333,11 +333,7 @@ pub struct Tasks {
 impl Tasks {
     pub fn spawn_processor(&mut self) {
         let processor = Processor::new(self.kolme.clone(), my_secret_key().clone());
-        self.processor = Some(self.set.spawn(async {
-            processor.run().await;
-            #[allow(unreachable_code)]
-            Err(anyhow::anyhow!("Unexpected exit from processor"))
-        }));
+        self.processor = Some(self.set.spawn(absurd_future(processor.run())));
     }
 
     pub fn spawn_listener(&mut self) {

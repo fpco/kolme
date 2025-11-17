@@ -2,7 +2,7 @@ mod messages;
 mod sync_manager;
 mod websockets;
 
-use std::{net::SocketAddr, time::Duration};
+use std::{convert::Infallible, net::SocketAddr, time::Duration};
 
 use crate::*;
 use messages::*;
@@ -178,7 +178,7 @@ impl GossipBuilder {
 }
 
 impl<App: KolmeApp> Gossip<App> {
-    pub async fn run(mut self) -> ! {
+    pub async fn run(mut self) -> Infallible {
         let mut set = self.set.take().unwrap();
         set.spawn(self.run_inner());
         let res = set.join_next().await;
