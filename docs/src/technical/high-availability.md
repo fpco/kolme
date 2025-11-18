@@ -4,17 +4,16 @@
 
 ## Processor High Availability
 
-Kolme’s processor, responsible for transaction execution and block production, is designed for maximum uptime through a robust, fault-tolerant cluster configuration, ensuring continuous operation for applications like trading platforms or cross-chain swaps.
+Kolme’s processor is the only component that produces signed blocks, so keeping it online is critical. High availability is achieved operationally rather than through protocol-level leader election.
 
 - **Cluster Setup**:
-  - Runs as a cluster of three nodes deployed across different availability zones to mitigate regional outages, as detailed in [Core Chain Mechanics](core-mechanics.md).
-  - A PostgreSQL advisory lock, known as the construct lock, ensures only one processor node produces signed blocks at a time, preventing forks by coordinating leadership exclusively for the processor, as it’s the only component requiring a single active process.
+  - Run multiple processor binaries pointed at the same Postgres-backed store. The store uses a PostgreSQL advisory lock (the construct lock) so that only one instance is actively producing blocks, as described in [Core Chain Mechanics](core-mechanics.md).
+  - There is no fixed node count; deploy as many instances as you need based on your own monitoring and restart strategy.
 - **Failover**:
-  - If the active processor node fails (e.g., due to hardware issues or network disruptions), the construct lock is released, and another node in the cluster assumes leadership, achieving zero downtime.
-  - Hot standbys are always ready, with state synchronized via shared storage (e.g., Fjall volumes) or fast sync, per [Node Synchronization](node-sync.md).
+  - If the active processor dies, another instance can take over after acquiring the construct lock. The time to fail over depends on your process supervisor and whether instances already have the necessary state available locally.
+  - Sharing a Postgres store plus a synchronized Fjall merkle store keeps hand-offs fast; otherwise, the new leader must perform state sync before producing blocks, per [Node Synchronization](node-sync.md).
 - **Security**:
-  - The construct lock ensures a single block producer, addressing concerns about fork risks, while other nodes validate blocks, per [Triadic Security Model](triadic-security.md).
-  - High availability supports multichain operations (Solana, Ethereum, Near), with no impact on core chain functionality during external disruptions, as noted in [External Chain Resilience](external-chain-resilience.md).
+  - The construct lock prevents multiple processors from producing forks while still allowing other nodes to validate every block, per [Triadic Security Model](triadic-security.md).
 
 ## Listeners and Approvers
 
@@ -27,22 +26,18 @@ Listeners and approvers, critical for validating external chain events (e.g., de
   - **Listeners**: Downtime delays deposit confirmations from external chains but does not affect core app operations (e.g., transaction processing, state updates), reinforcing external chain resilience, per [External Chain Resilience](external-chain-resilience.md).
   - **Approvers**: Downtime delays withdrawal authorizations but allows in-app transactions to proceed uninterrupted, critical for user experience in high-traffic apps.
 - **Scalability**:
-  - Replicated setups scale with demand, supporting multichain apps that add new chains (e.g., Aptos, Cosmos) without reengineering, aligning with Kolme’s flexible design.
+  - Replicated setups scale with demand; quorum thresholds should be tuned to tolerate expected failure domains.
 
 ## Other Services
 
-Kolme’s supporting services—API servers and indexers—are architected for high availability, ensuring robust access and data processing for applications.
+Kolme’s supporting services—API servers and indexers—follow standard service-deployment patterns rather than protocol-specific HA guarantees.
 
 - **API Servers**:
-  - Scale horizontally behind load balancers, handling ephemeral queries for user interfaces or external integrations (e.g., Web3 wallet interactions).
-  - Use persistent storage (e.g., PostgreSQL) for critical data or ephemeral storage for transient queries, ensuring fault tolerance.
-  - Support multichain user access (Solana, Ethereum, Near) with no downtime impact from external chain issues, per [Wallets and Keys](wallets-keys.md).
+  - Can be scaled horizontally behind a load balancer. They are stateless aside from their backing data stores, so standard rolling-deploy practices apply.
 - **Indexers**:
-  - Process blockchain data in batches, storing results in shared databases (e.g., PostgreSQL) for high availability and efficient querying.
-  - Scale horizontally to handle large transaction volumes, supporting apps like trading or betting with heavy data needs.
-  - Maintain consistency across multichain operations, enabling seamless chain migrations, as noted in [External Chain Resilience](external-chain-resilience.md).
+  - Process blockchain data and store derived results in a database such as PostgreSQL. Availability comes from running multiple workers or using managed database HA features.
 - **Resilience**:
-  - Load balancers and shared storage ensure service continuity during node failures, with rapid recovery via persistent volumes or fast sync.
+  - Use persistent volumes for local caches when they improve startup times; otherwise plan for fresh state acquisition via sync.
 
 ## Startup and Recovery
 
@@ -52,21 +47,17 @@ Kolme’s high-availability design extends to node startup and recovery, minimiz
   - Nodes use Fjall volumes to retain recent blocks and state (framework and app), reducing sync time for restarts, as detailed in [Storage](storage.md).
   - Persistent storage ensures quick recovery after failures, maintaining app availability.
 - **Fast Sync**:
-  - New or ephemeral nodes use fast sync to load the full framework and application state, signed by the processor, enabling rapid onboarding, per [Node Synchronization](node-sync.md).
-  - Fast sync supports multichain apps by quickly aligning with external chain states (e.g., bridge contract events), ensuring no disruption during chain migrations.
+  - New or ephemeral nodes use fast/state sync to download framework and application state from peers instead of replaying every block, enabling rapid onboarding, per [Node Synchronization](node-sync.md).
+  - The trade-off is trust in the state provider until the node replays blocks (if desired) to verify.
 - **Recovery**:
-  - Failed nodes restart with Fjall volumes or fast sync, with HA clusters ensuring other nodes handle operations during recovery.
-  - Planned watchdogs will monitor recovery processes, detecting delays or errors, per [Watchdogs](watchdogs.md).
+  - Failed nodes restart with Fjall volumes or fast sync; other validator groups continue to operate while a replacement catches up.
+  - Monitoring to detect slow recovery is deployment-specific today; watchdogs remain a planned improvement, per [Watchdogs](watchdogs.md).
 
 ## Advantages
 
-Kolme’s high-availability design offers several benefits for developers building robust, multichain applications:
+Kolme’s HA story is practical and deployment-driven:
 
-- **Zero Downtime**: Processor clusters and quorum-based validators ensure continuous operation, critical for apps like trading or betting, unlike shared blockchains prone to congestion delays.
-- **Fault Tolerance**: HA clusters, replicated services, and persistent storage tolerate failures without disrupting app functionality, supporting Solana, Ethereum, Near integrations.
-- **Scalability**: Horizontal scaling of API servers and indexers handles high transaction volumes, with flexible chain migration (e.g., adding Cosmos) maintaining uptime, per [External Chain Resilience](external-chain-resilience.md).
-- **Rapid Recovery**: Persistent volumes and fast sync minimize startup time, ensuring quick restoration after failures, unlike slower sync methods on traditional platforms.
-- **Multichain Resilience**: External chain downtime affects only deposits/withdrawals, not core operations, with easy chain additions enhancing adaptability.
-- **Transparency**: HA operations are recorded on-chain, verifiable by nodes, ensuring trust, as described in [Triadic Security Model](triadic-security.md).
-
-These advantages make Kolme a reliable platform for building high-performance, fault-tolerant decentralized applications.
+- **Single active processor**: The construct lock prevents forks while allowing multiple hot spares.
+- **Graceful degradation**: Listener/approver quorums tolerate individual node failures; outages primarily delay deposits/withdrawals.
+- **Faster restarts**: Persisting Fjall data and using state sync reduces catch-up time after a crash.
+- **Standard service patterns**: API servers and indexers follow conventional HA practices; no bespoke orchestration is required.

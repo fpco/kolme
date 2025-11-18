@@ -11,8 +11,8 @@ Kolme’s triadic security model distributes responsibilities across three valid
 - **Role**: Executes transactions and produces signed blocks for the application’s dedicated blockchain. Validates transaction signatures, nonces, and message validity, runs deterministic Rust code, updates framework and application state, and broadcasts blocks via libp2p, as detailed in [Core Chain Mechanics](core-mechanics.md).
 - **Key Characteristics**:
   - Uses a single private key for block production, ensuring clarity and consistency.
-  - Runs in a high-availability cluster of three nodes across availability zones, coordinated by a PostgreSQL advisory lock (construct lock) to prevent forks, as described in [High Availability](high-availability.md).
-  - Sole block producer to avoid conflicting blocks, addressing concerns about forks. Other nodes validate blocks but cannot produce them, preserving decentralization through verification.
+  - Optional high availability via multiple processor binaries sharing a Postgres-backed store; the store’s construct lock ensures only one instance is producing blocks at any time, as described in [High Availability](high-availability.md).
+  - Sole block producer to avoid conflicting blocks; other nodes validate blocks but cannot produce them, preserving separation of duties.
 - **Security Contribution**: Centralizes block production for efficiency while relying on listeners and approvers for external validations, balancing performance and security.
 
 ### Listeners

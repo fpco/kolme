@@ -2,6 +2,8 @@
 
 <!-- toc -->
 
+> Status: planned. The watchdog roles described below are not yet implemented; they outline the intended responsibilities for a future monitoring component.
+
 ## Monitoring Role
 
 Kolme’s planned watchdog nodes enhance network integrity by monitoring validator behavior and system operations across multichain ecosystems like Solana, Ethereum, and Near.
@@ -34,26 +36,24 @@ Watchdogs are designed to identify and flag potential issues, ensuring robust se
 
 ## Reporting Mechanism
 
-Watchdogs provide transparent reporting to maintain trust and facilitate rapid issue resolution.
+The reporting flow for watchdog findings is still being designed. The current expectation is:
 
 - **Alerts**:
   - Broadcast signed alerts via libp2p gossip for detected issues (e.g., invalid blocks, quorum failures), informing nodes and users, per [Gossip](gossip.md).
-  - Alerts are recorded on-chain for auditability, enhancing transparency, per [Core Chain Mechanics](core-mechanics.md).
+  - Depending on how the feature is implemented, alerts may later be written on-chain for auditability.
 - **User and Validator Feedback**:
-  - Notifications reach user interfaces via API servers, enabling corrective actions, per [High Availability](high-availability.md).
-  - Validators (processor, listeners, approvers) receive alerts to address issues, per [Triadic Security Model](triadic-security.md).
+  - Notifications would reach user interfaces via API servers.
+  - Validators (processor, listeners, approvers) would receive alerts to address issues, per [Triadic Security Model](triadic-security.md).
 - **Security**:
   - Alerts use cryptographic signatures for authenticity, verified by nodes, per [External Data Handling](external-data.md).
 
 ## Advantages
 
-Kolme’s watchdog system offers several benefits for developers building secure, multichain applications:
+If implemented as planned, watchdogs would provide:
 
-- **Enhanced Security**: Detects and flags validator errors or misbehavior, ensuring trust, per [Triadic Security Model](triadic-security.md).
-- **Transparency**: On-chain alerts and verifiable reports maintain auditability, per [Core Chain Mechanics](core-mechanics.md).
-- **Resilience**: Independent operation ensures monitoring persists during failures, supporting zero-downtime apps, per [High Availability](high-availability.md).
-- **Multichain Integrity**: Validates bridge events and chain migrations (e.g., Cosmos), per [External Chain Resilience](external-chain-resilience.md).
-- **Proactive Monitoring**: Early detection of issues like censorship or storage errors improves reliability, per [Storage](storage.md).
-- **Scalability**: Supports high-throughput apps with minimal overhead, per [Node Synchronization](node-sync.md).
-
-These advantages make Kolme a robust platform for building high-performance, fault-tolerant decentralized applications.
+- **Enhanced Security**: Detect and flag validator errors or misbehavior, ensuring trust, per [Triadic Security Model](triadic-security.md).
+- **Transparency**: Broadcast signed alerts, with potential on-chain recording for auditability, per [Core Chain Mechanics](core-mechanics.md).
+- **Resilience**: Operate independently so monitoring persists during failures, per [High Availability](high-availability.md).
+- **Multichain Integrity**: Validate bridge events and chain migrations (e.g., Cosmos), per [External Chain Resilience](external-chain-resilience.md).
+- **Proactive Monitoring**: Surface issues like censorship or storage errors early, per [Storage](storage.md).
+- **Scalability**: Support high-throughput apps with minimal overhead, per [Node Synchronization](node-sync.md).

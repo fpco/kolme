@@ -38,17 +38,17 @@ The processor is a critical component of Kolme’s architecture, responsible for
 
 - **Function**:
   - **Validation**: Checks each transaction’s signature, nonce, and message validity to ensure it can be executed.
-  - **Execution**: Runs the transaction’s messages using deterministic Rust code, updating the framework and application state.
-  - **Block Production**: Creates a signed block containing the transaction, metadata, data loads, logs, and state hashes, then broadcasts it via libp2p.
-  - **State Updates**: Applies changes to the MerkleMap-based framework and app state, ensuring consistency across nodes.
+- **Execution**: Runs the transaction’s messages using deterministic Rust code, updating the framework and application state.
+- **Block Production**: Creates a signed block containing the transaction, metadata, data loads, logs, and state hashes, then broadcasts it via libp2p.
+- **State Updates**: Applies changes to the MerkleMap-based framework and app state, ensuring consistency across nodes.
 - **Sole Block Producer**:
-  - Only the processor produces signed blocks, preventing multiple nodes from creating conflicting blocks and risking hard forks. This design enables multiple processor executables to run in a high-availability cluster, with a PostgreSQL advisory lock (construct lock) ensuring one active processor at a time.
-  - This addresses confusion about block production, as other nodes validate blocks but cannot produce them, maintaining decentralization through validation.
+  - Only the processor produces signed blocks, preventing multiple nodes from creating conflicting blocks and risking hard forks. Multiple processor executables can run against the same Postgres-backed store for redundancy; the store’s advisory lock (the construct lock) ensures only one of them is actively producing blocks.
+  - Other nodes validate blocks but cannot produce them, maintaining separation between execution and verification.
 - **Validation by Other Nodes**:
   - Non-processor nodes (e.g., listeners, approvers, or community nodes) execute transactions locally to verify the processor’s blocks, checking state hashes and execution results.
   - This ensures the processor’s outputs are trustworthy, with planned watchdog nodes monitoring for discrepancies, as described in [watchdogs](watchdogs.md).
 - **High Availability**:
-  - The processor runs in a cluster of three nodes across availability zones, with the construct lock coordinating leadership. If the active processor fails, another node takes over, ensuring zero downtime, as detailed in [high availability](high-availability.md).
+  - High availability is achieved operationally (e.g., running multiple processor binaries with a shared Postgres backend) rather than through protocol magic. If the active processor fails, another instance can take over once it acquires the construct lock; the takeover speed depends on the deployment and store configuration, as detailed in [high availability](high-availability.md).
 
 ## Framework State
 
