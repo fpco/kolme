@@ -161,7 +161,7 @@ fn many_removes() {
 quickcheck! {
     fn removals_match_btreemap(
         inserts: Vec<(SerializableSlice<'static, u8>, u32)>,
-        removal_keys: Vec<SerializableSlice<'static, u8>>,
+        removal_keys: Vec<SerializableSlice<'static, u8>>
     ) -> bool {
         let mut merkle = MerkleMap::<Vec<u8>, u32>::new();
         let mut mirror = BTreeMap::<Vec<u8>, u32>::new();
