@@ -14,6 +14,7 @@ use {
     base64::Engine,
     kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram},
     solana_client::nonblocking::rpc_client::RpcClient as SolanaRpcClient,
+    solana_rpc_client_api::client_error,
     solana_signature::Signature as SolanaSignature,
     std::collections::HashMap,
     utils::solana::redact_solana_error,
@@ -190,10 +191,10 @@ impl SolanaEndpoints {
 #[cfg(feature = "solana")]
 impl SolanaClientEndpoint {
     pub fn make_client(self) -> SolanaClient {
-        SolanaClient::new(SolanaRpcClient::new(match self {
+        SolanaClient::new(match self {
             SolanaClientEndpoint::Static(url) => url.to_owned(),
             SolanaClientEndpoint::Arc(url) => (*url).to_owned(),
-        }))
+        })
     }
 
     pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
@@ -1803,15 +1804,21 @@ pub enum DataLoadValidation {
 
 #[cfg(feature = "solana")]
 impl SolanaClient {
-    pub fn new(client: SolanaRpcClient) -> Self {
-        Self(client)
+    pub fn new(url: String) -> Self {
+        Self(SolanaRpcClient::new(url))
+    }
+
+    pub async fn with_redacted_error<'client, F, Fut, T>(&'client self, func: F) -> Result<T>
+    where
+        F: FnOnce(&'client SolanaRpcClient) -> Fut,
+        Fut: std::future::Future<Output = std::result::Result<T, client_error::Error>> + 'client,
+    {
+        func(&self.0).await.map_err(redact_solana_error)
     }
 
     pub async fn get_account(&self, pubkey: &SolanaPubkey) -> Result<solana_account::Account> {
-        self.0
-            .get_account(pubkey)
+        self.with_redacted_error(|client| client.get_account(pubkey))
             .await
-            .map_err(redact_solana_error)
     }
 
     pub async fn get_signatures_for_address(
@@ -1819,10 +1826,8 @@ impl SolanaClient {
         address: &SolanaPubkey,
     ) -> Result<Vec<solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature>>
     {
-        self.0
-            .get_signatures_for_address(address)
+        self.with_redacted_error(|client| client.get_signatures_for_address(address))
             .await
-            .map_err(redact_solana_error)
     }
 
     pub async fn get_transaction(
@@ -1831,27 +1836,21 @@ impl SolanaClient {
         encoding: solana_transaction_status_client_types::UiTransactionEncoding,
     ) -> Result<solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta>
     {
-        self.0
-            .get_transaction(signature, encoding)
+        self.with_redacted_error(|client| client.get_transaction(signature, encoding))
             .await
-            .map_err(redact_solana_error)
     }
 
     pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash> {
-        self.0
-            .get_latest_blockhash()
+        self.with_redacted_error(|client| client.get_latest_blockhash())
             .await
-            .map_err(redact_solana_error)
     }
 
     pub async fn send_and_confirm_transaction(
         &self,
         transaction: &impl solana_rpc_client::rpc_client::SerializableTransaction,
     ) -> Result<SolanaSignature> {
-        self.0
-            .send_and_confirm_transaction(transaction)
+        self.with_redacted_error(|client| client.send_and_confirm_transaction(transaction))
             .await
-            .map_err(redact_solana_error)
     }
 }
 
