@@ -83,28 +83,44 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
         depth: u16,
         key_bytes: MerkleKey,
     ) -> (Node<K, V>, Option<(K, V)>) {
-        let index = key_bytes
-            .get_index_for_depth(depth)
-            .expect("Impossible: TreeContents::remove without sufficient bytes");
+        let Some(index) = key_bytes.get_index_for_depth(depth) else {
+            debug_assert!(depth == 0 || key_bytes.get_index_for_depth(depth - 1).is_some());
+            if let Some(entry) = self.leaf.take() {
+                if entry.key_bytes == key_bytes {
+                    self.len -= 1;
+                    let node = self.into_node_after_removal();
+                    return (node, Some((entry.key, entry.value)));
+                } else {
+                    self.leaf = Some(entry);
+                }
+            }
+            return (Node::Tree(MerkleLockable::new(self)), None);
+        };
         let index = usize::from(index);
-        let branch = self.branches[index]
-            .take()
-            .expect("Impossible: TreeContents::remove missing branch");
+        let Some(branch) = self.branches[index].take() else {
+            return (Node::Tree(MerkleLockable::new(self)), None);
+        };
         let (branch, v) = branch.remove(depth + 1, key_bytes);
         if !branch.is_empty() {
             self.branches[index] = Some(branch);
         }
         if v.is_some() {
             self.len -= 1;
+            let node = self.into_node_after_removal();
+            (node, v)
+        } else {
+            (Node::Tree(MerkleLockable::new(self)), None)
         }
-        let node = if self.len <= 16 {
+    }
+
+    fn into_node_after_removal(self) -> Node<K, V> {
+        if self.len <= 16 {
             let mut values = Vec::new();
             self.drain_entries_to(&mut values);
             Node::Leaf(MerkleLockable::new(LeafContents { values }))
         } else {
             Node::Tree(MerkleLockable::new(self))
-        };
-        (node, v)
+        }
     }
 
     pub(crate) fn drain_entries_to(self, entries: &mut Vec<LeafEntry<K, V>>) {
