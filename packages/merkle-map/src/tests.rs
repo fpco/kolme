@@ -158,6 +158,97 @@ fn many_removes() {
     assert!(tree.is_empty());
 }
 
+quickcheck! {
+    fn removals_match_btreemap(
+        inserts: Vec<(SerializableSlice<'static, u8>, u32)>,
+        removal_keys: Vec<SerializableSlice<'static, u8>>
+    ) -> bool {
+        let mut merkle = MerkleMap::<Vec<u8>, u32>::new();
+        let mut mirror = BTreeMap::<Vec<u8>, u32>::new();
+
+        for (SerializableSlice(bytes), value) in inserts {
+            let key = bytes.to_vec();
+            let merkle_prev = merkle.insert(key.clone(), value);
+            let mirror_prev = mirror.insert(key.clone(), value);
+
+            match (merkle_prev, mirror_prev) {
+                (None, None) => {}
+                (Some((prev_key, prev_value)), Some(expected_value)) => {
+                    if prev_key != key || prev_value != expected_value {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+
+        for SerializableSlice(bytes) in removal_keys {
+            let key = bytes.to_vec();
+            let merkle_prev = merkle.remove(&key);
+            let mirror_prev = mirror.remove(&key);
+
+            match (merkle_prev, mirror_prev) {
+                (None, None) => {}
+                (Some((prev_key, prev_value)), Some(expected_value)) => {
+                    if prev_key != key || prev_value != expected_value {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+
+        merkle.len() == mirror.len()
+    }
+}
+
+#[test]
+fn removing_unreachable_branch_returns_none() {
+    let mut tree = MerkleMap::<String, u32>::new();
+    for len in 1..=17usize {
+        let key = "a".repeat(len);
+        tree.insert(key, len as u32);
+    }
+
+    // Every inserted ASCII string begins with byte 0x61, so after the 17th insert
+    // the trie looks like:
+    //
+    //     root
+    //     └── 0x6 (depth 0)
+    //         └── 0x1 (depth 1)
+    //             └── ... (fifteen more 0x? nibbles that encode successive bytes of
+    //                     the strings)
+    //                 └── leaf (all keys "a".."a"*17)
+    //
+    // No other root branch exists, so removing a key that starts with another nibble
+    // ("0" begins with 0x3) descends into a missing branch. That branch is now treated as
+    // "missing key" instead of panicking, so we get `None` back.
+    assert_eq!(tree.remove("0"), None);
+    assert_eq!(tree.len(), 17);
+}
+
+#[test]
+fn removing_insufficient_bytes_returns_none() {
+    let mut tree = MerkleMap::<String, u32>::new();
+    for len in 2..=18usize {
+        let key = "a".repeat(len);
+        tree.insert(key, len as u32);
+    }
+
+    // These 17 inserts still populate only the root's 0x6 branch, and after the
+    // first level that branch immediately expands into another tree because it
+    // needs to separate the differing suffixes of "aa".."a"*18. None of those
+    // entries ends exactly at depth 2 (two nibbles), so the intermediate tree's
+    // `leaf` slot stays empty even though deeper branches exist.
+    //
+    // Removing "a" now exhausts its key bytes at that second depth. The old
+    // implementation assumed this could never happen, so it panicked with
+    // "Impossible: TreeContents::remove without sufficient bytes". The fix
+    // should simply return `None` and leave the trie untouched.
+    assert_eq!(tree.remove("a"), None);
+    assert_eq!(tree.len(), 17);
+}
+
 #[parameterized(size = { 17, 100 })]
 fn iterate(size: u32) {
     let mut tree = MerkleMap::<u32, u32>::new();
