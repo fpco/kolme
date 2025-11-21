@@ -65,7 +65,7 @@ impl TestTasks {
     pub fn try_spawn_persistent<F, E, T>(&self, task: F)
     where
         F: std::future::Future<Output = Result<T, E>> + Send + 'static,
-        anyhow::Error: From<E>,
+        KolmeError: From<E>,
         T: Send + 'static,
     {
         self.spawn_helper(true, task)
@@ -92,7 +92,7 @@ impl TestTasks {
     fn spawn_helper<F, E, T>(&self, persistent: bool, task: F)
     where
         F: std::future::Future<Output = Result<T, E>> + Send + 'static,
-        anyhow::Error: From<E>,
+        KolmeError: From<E>,
         T: Send + 'static,
     {
         let tasks = self.clone();

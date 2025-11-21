@@ -103,7 +103,7 @@ pub async fn execute(
                     .downcast_ref::<solana_rpc_client_api::client_error::Error>()
                     .map(|e| &e.kind)
             );
-            Err(e)
+            Err(e.into())
         }
     }
 }

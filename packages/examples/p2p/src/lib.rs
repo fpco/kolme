@@ -139,7 +139,7 @@ pub async fn api_server(bind: SocketAddr) -> Result<()> {
     let gossip = GossipBuilder::new().build(kolme.clone())?;
     set.spawn(absurd_future(gossip.run()));
     let api_server = ApiServer::new(kolme);
-    set.spawn(async move { api_server.run(bind).await.map_err(Into::into) });
+    set.spawn(async move { api_server.run(bind).await.map_err(KolmeError::from) });
 
     while let Some(res) = set.join_next().await {
         match res {
