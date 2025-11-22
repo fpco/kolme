@@ -14,7 +14,7 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub fn new(fjall_dir: impl AsRef<Path>) -> Result<Self, KolmeStoreError> {
         let merkle = merkle::MerkleFjallStore::new(fjall_dir)?;
 
         Ok(Self { merkle })
@@ -55,10 +55,7 @@ impl KolmeBackingStore for Store {
         self.merkle.clone().load_by_hash(hash)
     }
 
-    async fn get_height_for_tx(
-        &self,
-        txhash: Sha256Hash,
-    ) -> core::result::Result<Option<u64>, KolmeStoreError> {
+    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> Result<Option<u64>, KolmeStoreError> {
         let Some(height) = self.merkle.handle.get(tx_key(txhash))? else {
             return Ok(None);
         };
