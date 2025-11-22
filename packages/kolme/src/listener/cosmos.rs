@@ -11,7 +11,7 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     chain: CosmosChain,
     contract: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let kolme_r = kolme.read();
 
     let cosmos = kolme_r.get_cosmos(chain).await?;
@@ -69,11 +69,11 @@ pub async fn sanity_check_contract(
     contract: &str,
     expected_code_id: u64,
     info: &GenesisInfo,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let contract = cosmos.make_contract(contract.parse()?);
     let actual_code_id = contract.info().await?.code_id;
 
-    anyhow::ensure!(
+    kolme_ensure!(
         actual_code_id == expected_code_id,
         "Code ID mismatch, expected {expected_code_id}, but {contract} has {actual_code_id}"
     );
@@ -91,11 +91,11 @@ pub async fn sanity_check_contract(
         next_action_id: _,
     } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
 
-    anyhow::ensure!(info.validator_set.processor == processor);
-    anyhow::ensure!(listeners == info.validator_set.listeners);
-    anyhow::ensure!(needed_listeners == info.validator_set.needed_listeners);
-    anyhow::ensure!(approvers == info.validator_set.approvers);
-    anyhow::ensure!(needed_approvers == info.validator_set.needed_approvers);
+    kolme_ensure!(info.validator_set.processor == processor);
+    kolme_ensure!(listeners == info.validator_set.listeners);
+    kolme_ensure!(needed_listeners == info.validator_set.needed_listeners);
+    kolme_ensure!(approvers == info.validator_set.approvers);
+    kolme_ensure!(needed_approvers == info.validator_set.needed_approvers);
 
     Ok(())
 }

@@ -96,7 +96,7 @@ impl<App: KolmeApp> Submitter<App> {
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> Result<(), KolmeError> {
         let chains = self
             .kolme
             .read()

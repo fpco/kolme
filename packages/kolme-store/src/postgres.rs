@@ -1,3 +1,4 @@
+use crate::error::StorageBackend;
 use crate::{
     r#trait::KolmeBackingStore, BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError,
     StorableBlock,
@@ -13,6 +14,7 @@ use sqlx::{
     Executor, Postgres,
 };
 use std::{collections::HashMap, sync::Arc};
+
 pub mod merkle;
 
 pub struct ConstructLock {
@@ -135,8 +137,11 @@ impl KolmeBackingStore for Store {
             .map_err(KolmeStoreError::custom)
             .inspect_err(|err| tracing::error!("{err:?}"))
     }
+
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation("Postgres"))
+        Err(KolmeStoreError::UnsupportedDeleteOperation {
+            backend: StorageBackend::Postgres,
+        })
     }
 
     async fn take_construct_lock(&self) -> Result<KolmeConstructLock, KolmeStoreError> {
@@ -179,7 +184,7 @@ impl KolmeBackingStore for Store {
         merkle.load_by_hashes(&[hash], &mut dest).await?;
         Ok(dest.remove(&hash))
     }
-    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>> {
+    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> Result<Option<u64>, KolmeStoreError> {
         let txhash = txhash.as_array().as_slice();
         let height =
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
