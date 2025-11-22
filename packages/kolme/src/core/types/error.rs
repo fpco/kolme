@@ -200,6 +200,9 @@ impl From<AccountsError> for KolmeError {
 
 impl From<anyhow::Error> for KolmeError {
     fn from(e: anyhow::Error) -> Self {
+        if let Some(inner) = e.downcast_ref::<KolmeError>() {
+            return inner.clone();
+        }
         KolmeError::Other(format!("Error from Anyhow: {e}"))
     }
 }
