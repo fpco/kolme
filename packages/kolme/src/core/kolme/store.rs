@@ -64,10 +64,13 @@ impl<App: KolmeApp> KolmeStore<App> {
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
     pub(super) async fn validate_genesis_info(&self, expected: &GenesisInfo) -> Result<()> {
         if let Some(actual) = self.load_genesis_info().await? {
-            anyhow::ensure!(
-                &actual == expected,
-                "Mismatched genesis info.\nActual:   {actual:?}\nExpected: {expected:?}"
-            );
+            if &actual != expected {
+                return Err(KolmeError::MismatchedGenesisInfo {
+                    actual,
+                    expected: expected.clone(),
+                }
+                .into());
+            }
         }
         Ok(())
     }
@@ -107,7 +110,9 @@ impl<App: KolmeApp> KolmeStore<App> {
 
     pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
         for child in &layer.children {
-            anyhow::ensure!(self.has_merkle_hash(*child).await?);
+            if !self.has_merkle_hash(*child).await? {
+                return Err(KolmeStoreError::MissingMerkleChild { child: *child }.into());
+            }
         }
 
         self.inner.add_merkle_layer(layer).await

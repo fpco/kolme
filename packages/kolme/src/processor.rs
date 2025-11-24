@@ -315,7 +315,14 @@ impl<App: KolmeApp> Processor<App> {
         let mut approvers = vec![];
         for (key, sig) in &action.approvals {
             let key2 = sig.validate(action.payload.as_bytes())?;
-            anyhow::ensure!(key == &key2);
+            if key != &key2 {
+                return Err(KolmeError::InvalidSignature {
+                    expected: Box::new(*key),
+                    actual: Box::new(key2),
+                }
+                .into());
+            }
+
             if kolme.get_approver_pubkeys().contains(key) {
                 approvers.push(*sig);
             }

@@ -3,6 +3,8 @@ mod import_export;
 mod mempool;
 mod store;
 
+pub use import_export::KolmeImportExportError;
+
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{KolmeConstructLock, KolmeStoreError, StorableBlock};

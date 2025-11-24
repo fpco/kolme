@@ -1,5 +1,5 @@
-use crate::core::*;
 use crate::listener::cosmos::KolmeListenerError;
+use crate::{core::*, submitter::SubmitterError};
 use cosmos::error::{AddressError, WalletError};
 use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
 use kolme_store::KolmeStoreError;
@@ -130,11 +130,35 @@ pub enum KolmeError {
     #[error("API server error: {details}")]
     ApiServerError { details: String },
 
+    #[error("Mismatched genesis info: actual {actual:?}, expected {expected:?}")]
+    MismatchedGenesisInfo {
+        actual: GenesisInfo,
+        expected: GenesisInfo,
+    },
+
+    #[error("Identical proposal {id} already exists")]
+    DuplicateAdminProposal { id: AdminProposalId },
+
+    #[error("Invalid signature: expected signer {expected}, actual {actual}")]
+    InvalidSignature {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
     #[error("Executed block height mismatch: expected {expected}, got {actual}")]
     ExecutedHeightMismatch {
         expected: BlockHeight,
         actual: BlockHeight,
     },
+
+    #[error("Submitter error: {0}")]
+    Submitter(#[from] SubmitterError),
+
+    #[error("Import/export error: {0}")]
+    ImportExport(#[from] KolmeImportExportError),
+
+    #[error("Types error: {0}")]
+    TypesError(#[from] KolmeTypesError),
 
     #[error("Core error: {0}")]
     CoreError(#[from] KolmeCoreError),

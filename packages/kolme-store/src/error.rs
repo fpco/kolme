@@ -52,6 +52,15 @@ pub enum KolmeStoreError {
         reason: String,
     },
 
+    #[error("Merkle validation error: child hash {child} not found")]
+    MissingMerkleChild { child: Sha256Hash },
+
+    #[error("Invalid genesis message count in first block")]
+    InvalidGenesisMessageCount,
+
+    #[error("Invalid message type in first block: expected Genesis")]
+    InvalidFirstBlockMessageType,
+
     #[error("Fjall error: {0}")]
     Fjall(String),
 

@@ -26,6 +26,24 @@ pub use accounts::{Account, Accounts, AccountsError};
 pub use error::KolmeError;
 pub use error::KolmeExecutionError;
 
+#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum KolmeTypesError {
+    #[error("Block signed by invalid processor: expected {expected}, got {actual}")]
+    InvalidBlockProcessorSignature {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Transaction signed by invalid key: expected {expected}, got {actual}")]
+    InvalidTransactionSignature {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Genesis transaction format invalid")]
+    InvalidGenesisTransaction,
+}
+
 #[cfg(feature = "solana")]
 /// Wrapper around the Solana RPC client to hide sensitive information.
 pub struct SolanaClient(SolanaRpcClient);
@@ -899,7 +917,15 @@ pub struct SignedBlock<AppMessage>(pub SignedTaggedJson<Block<AppMessage>>);
 impl<AppMessage> SignedBlock<AppMessage> {
     pub fn validate_signature(&self) -> Result<()> {
         let pubkey = self.0.verify_signature()?;
-        anyhow::ensure!(pubkey == self.0.message.as_inner().processor);
+        let expected = self.0.message.as_inner().processor;
+        if pubkey != expected {
+            return Err(KolmeTypesError::InvalidBlockProcessorSignature {
+                expected: Box::new(expected),
+                actual: Box::new(pubkey),
+            }
+            .into());
+        }
+
         Ok(())
     }
 
@@ -1013,7 +1039,15 @@ pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMes
 impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
     pub fn validate_signature(&self) -> Result<()> {
         let pubkey = self.0.verify_signature()?;
-        anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
+        let expected = self.0.message.as_inner().pubkey;
+        if pubkey != expected {
+            return Err(KolmeTypesError::InvalidTransactionSignature {
+                expected: Box::new(expected),
+                actual: Box::new(pubkey),
+            }
+            .into());
+        }
+
         Ok(())
     }
 }
@@ -1027,14 +1061,21 @@ impl<AppMessage> SignedTransaction<AppMessage> {
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
     pub fn ensure_is_genesis(&self) -> Result<()> {
-        anyhow::ensure!(self.messages.len() == 1);
-        anyhow::ensure!(matches!(self.messages[0], Message::Genesis(_)));
+        if self.messages.len() != 1 {
+            return Err(KolmeTypesError::InvalidGenesisTransaction.into());
+        }
+
+        if !matches!(self.messages[0], Message::Genesis(_)) {
+            return Err(KolmeTypesError::InvalidGenesisTransaction.into());
+        }
         Ok(())
     }
 
     pub fn ensure_no_genesis(&self) -> Result<()> {
         for msg in &self.messages {
-            anyhow::ensure!(!matches!(msg, Message::Genesis(_)));
+            if matches!(msg, Message::Genesis(_)) {
+                return Err(KolmeTypesError::InvalidGenesisTransaction.into());
+            }
         }
         Ok(())
     }
