@@ -1,5 +1,5 @@
 #[cfg(feature = "cosmwasm")]
-mod cosmos;
+pub mod cosmos;
 #[cfg(feature = "solana")]
 mod solana;
 

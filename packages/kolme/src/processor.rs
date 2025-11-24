@@ -254,10 +254,13 @@ impl<App: KolmeApp> Processor<App> {
         } = kolme
             .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
             .await?;
-        kolme_ensure!(
-            height == proposed_height,
-            "Executed height does not match proposed height"
-        );
+
+        if height != proposed_height {
+            return Err(KolmeError::ExecutedHeightMismatch {
+                expected: proposed_height,
+                actual: height,
+            });
+        }
 
         if let Some(max_height) = tx.0.message.as_inner().max_height {
             if max_height < proposed_height {

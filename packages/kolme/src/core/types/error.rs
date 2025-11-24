@@ -1,27 +1,10 @@
 use crate::core::*;
+use crate::listener::cosmos::KolmeListenerError;
 use cosmos::error::{AddressError, WalletError};
 use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
 use kolme_store::KolmeStoreError;
 use std::num::TryFromIntError;
 use tokio::sync::broadcast::error::RecvError;
-
-#[macro_export]
-macro_rules! kolme_ensure {
-    ($cond:expr $(,)?) => {
-        if !$cond {
-            return Err($crate::core::KolmeError::Other(format!(
-                "Condition failed: {}",
-                stringify!($cond)
-            )));
-        }
-    };
-
-    ($cond:expr, $($arg:tt)*) => {
-        if !$cond {
-            return Err($crate::core::KolmeError::Other(format!($($arg)*)));
-        }
-    };
-}
 
 #[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum KolmeError {
@@ -147,6 +130,21 @@ pub enum KolmeError {
     #[error("API server error: {details}")]
     ApiServerError { details: String },
 
+    #[error("Executed block height mismatch: expected {expected}, got {actual}")]
+    ExecutedHeightMismatch {
+        expected: BlockHeight,
+        actual: BlockHeight,
+    },
+
+    #[error("Core error: {0}")]
+    CoreError(#[from] KolmeCoreError),
+
+    #[error("Listener error: {0}")]
+    ListenerError(#[from] KolmeListenerError),
+
+    #[error("Execution error: {0}")]
+    ExecuteError(#[from] KolmeExecuteError),
+
     #[error("Execution error: {0}")]
     Execution(#[from] KolmeExecutionError),
 
@@ -178,24 +176,36 @@ pub enum KolmeError {
     Other(String),
 }
 
-// CREATE A GENERIC, MACRO OR SOMETHING WITH SIMILAR BEHAVIOR
-
-impl From<CoreStateError> for KolmeError {
-    fn from(e: CoreStateError) -> Self {
-        KolmeError::Other(format!("CoreState error: {e}"))
-    }
+macro_rules! impl_from_to_other {
+    ($($source:ty => $msg:expr),+ $(,)?) => {
+        $(
+            impl From<$source> for KolmeError {
+                fn from(e: $source) -> Self {
+                    KolmeError::Other(format!($msg, e))
+                }
+            }
+        )+
+    };
 }
 
-impl From<AssetError> for KolmeError {
-    fn from(e: AssetError) -> Self {
-        KolmeError::Other(format!("Asset error: {e}"))
-    }
-}
-
-impl From<AccountsError> for KolmeError {
-    fn from(e: AccountsError) -> Self {
-        KolmeError::Other(format!("Accounts error: {e}"))
-    }
+impl_from_to_other! {
+    AddressError => "Address error: {}",
+    WalletError => "Wallet error: {}",
+    ParsePubkeyError => "Parse pubkey error: {}",
+    CoreStateError => "CoreState error: {}",
+    AssetError => "Asset error: {}",
+    AccountsError => "Accounts error: {}",
+    ValidatorSetError => "Validator set error: {}",
+    PublicKeyError => "Public key error: {}",
+    MerkleSerialError => "Merkle serialization error: {}",
+    TryFromIntError => "TryFromInt error: {}",
+    serde_json::Error => "JSON error: {}",
+    RecvError => "Recv error: {}",
+    cosmos::Error => "Cosmos error: {}",
+    base64::DecodeError => "Base64 decode error: {}",
+    solana_client::client_error::ClientError => "Solana client error: {}",
+    tokio_tungstenite::tungstenite::Error => "WebSocket error: {}",
+    std::io::Error => "IO error: {}",
 }
 
 impl From<anyhow::Error> for KolmeError {
@@ -204,90 +214,6 @@ impl From<anyhow::Error> for KolmeError {
             return inner.clone();
         }
         KolmeError::Other(format!("Error from Anyhow: {e}"))
-    }
-}
-
-impl From<std::io::Error> for KolmeError {
-    fn from(e: std::io::Error) -> Self {
-        KolmeError::Other(format!("std::io::Error Error: {e}"))
-    }
-}
-
-impl From<ValidatorSetError> for KolmeError {
-    fn from(e: ValidatorSetError) -> Self {
-        KolmeError::Other(format!("Validator set error: {e}"))
-    }
-}
-
-impl From<PublicKeyError> for KolmeError {
-    fn from(e: PublicKeyError) -> Self {
-        KolmeError::Other(format!("Public key error: {e}"))
-    }
-}
-
-impl From<MerkleSerialError> for KolmeError {
-    fn from(e: MerkleSerialError) -> Self {
-        KolmeError::Other(format!("Merkle serialization error: {e}"))
-    }
-}
-
-impl From<ParsePubkeyError> for KolmeError {
-    fn from(e: ParsePubkeyError) -> Self {
-        KolmeError::Other(format!("Parse public key error: {e}"))
-    }
-}
-
-impl From<AddressError> for KolmeError {
-    fn from(e: AddressError) -> Self {
-        KolmeError::Other(format!("Address error: {e}"))
-    }
-}
-
-impl From<TryFromIntError> for KolmeError {
-    fn from(e: TryFromIntError) -> Self {
-        KolmeError::Other(format!("TryFromInt error: {e}"))
-    }
-}
-
-impl From<serde_json::Error> for KolmeError {
-    fn from(e: serde_json::Error) -> Self {
-        KolmeError::Other(format!("Serde JSON error: {e}"))
-    }
-}
-
-impl From<RecvError> for KolmeError {
-    fn from(e: RecvError) -> Self {
-        KolmeError::Other(format!("Recv error: {e}"))
-    }
-}
-
-impl From<solana_client::client_error::ClientError> for KolmeError {
-    fn from(e: solana_client::client_error::ClientError) -> Self {
-        KolmeError::Other(e.to_string())
-    }
-}
-
-impl From<base64::DecodeError> for KolmeError {
-    fn from(e: base64::DecodeError) -> Self {
-        KolmeError::Other(format!("Base64 decode error: {e}"))
-    }
-}
-
-impl From<WalletError> for KolmeError {
-    fn from(e: WalletError) -> Self {
-        KolmeError::Other(format!("Wallet error: {e}"))
-    }
-}
-
-impl From<cosmos::Error> for KolmeError {
-    fn from(e: cosmos::Error) -> Self {
-        KolmeError::Other(format!("Cosmos error: {e}"))
-    }
-}
-
-impl From<tokio_tungstenite::tungstenite::Error> for KolmeError {
-    fn from(e: tokio_tungstenite::tungstenite::Error) -> Self {
-        KolmeError::Other(format!("WebSocket error: {e}"))
     }
 }
 

@@ -21,6 +21,48 @@ pub use mempool::ProposeTransactionError;
 
 use crate::core::*;
 
+#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum KolmeCoreError {
+    #[error("Executed height mismatch: expected {expected}, actual {actual}")]
+    ExecutedHeight {
+        expected: BlockHeight,
+        actual: BlockHeight,
+    },
+
+    #[error("Executed loads mismatch")]
+    ExecutedLoads {
+        expected: Vec<BlockDataLoad>,
+        actual: Vec<BlockDataLoad>,
+    },
+
+    #[error("Framework state hash mismatch")]
+    FrameworkStateHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("App state hash mismatch")]
+    AppStateHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("Logs hash mismatch")]
+    LogsHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("Missing framework merkle layer {hash}")]
+    MissingFrameworkMerkleLayer { hash: Sha256Hash },
+
+    #[error("Missing app merkle layer {hash}")]
+    MissingAppMerkleLayer { hash: Sha256Hash },
+
+    #[error("Missing logs merkle layer {hash}")]
+    MissingLogMerkleLayer { hash: Sha256Hash },
+}
+
 /// A running instance of Kolme for the given application.
 ///
 /// This type represents the core execution environment for Kolme.
@@ -470,19 +512,21 @@ impl<App: KolmeApp> Kolme<App> {
             )
             .await?;
 
-        kolme_ensure!(
-            height == signed_block.height(),
-            "Height mismatch: expected {}, got {}",
-            height,
-            signed_block.height()
-        );
+        if height != signed_block.height() {
+            return Err(KolmeCoreError::ExecutedHeight {
+                expected: signed_block.height(),
+                actual: height,
+            }
+            .into());
+        }
 
-        kolme_ensure!(
-            loads == block.loads,
-            "Block loads mismatch: expected {:?}, got {:?}",
-            block.loads,
-            loads
-        );
+        if loads != block.loads {
+            return Err(KolmeCoreError::ExecutedLoads {
+                expected: block.loads.clone(),
+                actual: loads.clone(),
+            }
+            .into());
+        }
 
         self.add_executed_block(ExecutedBlock {
             signed_block,
@@ -512,22 +556,37 @@ impl<App: KolmeApp> Kolme<App> {
         let height = signed_block.height();
 
         let framework_state_hash = self.inner.store.save(&framework_state).await?;
-        kolme_ensure!(
-            framework_state_hash == signed_block.0.message.as_inner().framework_state,
-            "Serialized framework state hash mismatch"
-        );
+        let expected_fw = signed_block.0.message.as_inner().framework_state;
+
+        if framework_state_hash != expected_fw {
+            return Err(KolmeCoreError::FrameworkStateHash {
+                expected: expected_fw,
+                actual: framework_state_hash,
+            }
+            .into());
+        }
 
         let app_state_hash = self.inner.store.save(&app_state).await?;
-        kolme_ensure!(
-            app_state_hash == signed_block.0.message.as_inner().app_state,
-            "Serialized app state hash mismatch"
-        );
+        let expected_app = signed_block.0.message.as_inner().app_state;
+
+        if app_state_hash != expected_app {
+            return Err(KolmeCoreError::AppStateHash {
+                expected: expected_app,
+                actual: app_state_hash,
+            }
+            .into());
+        }
 
         let logs_hash = self.inner.store.save(&logs).await?;
-        kolme_ensure!(
-            logs_hash == signed_block.0.message.as_inner().logs,
-            "Serialized logs hash mismatch"
-        );
+        let expected_logs = signed_block.0.message.as_inner().logs;
+
+        if logs_hash != expected_logs {
+            return Err(KolmeCoreError::LogsHash {
+                expected: expected_logs,
+                actual: logs_hash,
+            }
+            .into());
+        }
 
         self.inner
             .store
@@ -600,29 +659,30 @@ impl<App: KolmeApp> Kolme<App> {
         let kolme = self.read();
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
-        kolme_ensure!(
-            expected_processor == actual_processor,
-            "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
-        );
+        if expected_processor != actual_processor {
+            return Err(KolmeError::InvalidBlockProcessor {
+                expected_processor: Box::new(expected_processor),
+                actual_processor: Box::new(actual_processor),
+            });
+        }
 
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
 
-        kolme_ensure!(
-            self.has_merkle_hash(block.framework_state).await?,
-            "Framework state {} not written to Merkle store",
-            block.framework_state
-        );
-        kolme_ensure!(
-            self.has_merkle_hash(block.app_state).await?,
-            "App state {} not written to Merkle store",
-            block.app_state
-        );
-        kolme_ensure!(
-            self.has_merkle_hash(block.logs).await?,
-            "Logs {} not written to Merkle store",
-            block.logs
-        );
+        let fw_hash = block.framework_state;
+        if !self.has_merkle_hash(fw_hash).await? {
+            return Err(KolmeCoreError::MissingFrameworkMerkleLayer { hash: fw_hash }.into());
+        }
+
+        let app_hash = block.app_state;
+        if !self.has_merkle_hash(app_hash).await? {
+            return Err(KolmeCoreError::MissingAppMerkleLayer { hash: app_hash }.into());
+        }
+
+        let logs_hash = block.logs;
+        if !self.has_merkle_hash(logs_hash).await? {
+            return Err(KolmeCoreError::MissingLogMerkleLayer { hash: logs_hash }.into());
+        }
 
         self.inner
             .store

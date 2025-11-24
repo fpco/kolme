@@ -2,6 +2,15 @@ use std::collections::VecDeque;
 
 use crate::core::*;
 
+#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum KolmeExecuteError {
+    #[error("Listener pubkey not allowed for this event")]
+    InvalidListenerPubkey,
+
+    #[error("Listener has already signed this event")]
+    DuplicateListenerSignature,
+}
+
 /// Execution context for a single message.
 pub struct ExecutionContext<'a, App: KolmeApp> {
     framework_state: FrameworkState,
@@ -205,15 +214,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         event: &BridgeEvent,
         event_id: BridgeEventId,
     ) -> Result<(), KolmeError> {
-        kolme_ensure!(self
+        if !self
             .framework_state
             .get_validator_set()
             .listeners
-            .contains(&self.pubkey),
-            "Received a listener message for bridge event ID {event_id} on {chain}, but provided pubkey {} is not part of the listener set {:?}",
-            self.pubkey,
-            self.framework_state.get_validator_set().listeners
-        );
+            .contains(&self.pubkey)
+        {
+            return Err(KolmeExecuteError::InvalidListenerPubkey.into());
+        }
 
         let state = self.framework_state.chains.get_mut(chain)?;
 
@@ -252,9 +260,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         // Make sure it wasn't already approved
         if !was_inserted {
-            return Err(KolmeError::Other(
-                "Listener has already signed this event".to_string(),
-            ));
+            return Err(KolmeExecuteError::DuplicateListenerSignature.into());
         }
 
         // Now that we've added a signature, go through all pending events

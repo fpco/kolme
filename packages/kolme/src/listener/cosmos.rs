@@ -6,6 +6,27 @@ use ::cosmos::{Contract, Cosmos};
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
 
+#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum KolmeListenerError {
+    #[error("Code ID mismatch: expected {expected}, actual {actual}")]
+    CodeId { expected: u64, actual: u64 },
+
+    #[error("Processor mismatch")]
+    Processor,
+
+    #[error("Listeners mismatch")]
+    Listeners,
+
+    #[error("Needed listeners mismatch")]
+    NeededListeners,
+
+    #[error("Approvers mismatch")]
+    Approvers,
+
+    #[error("Needed approvers mismatch")]
+    NeededApprovers,
+}
+
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
@@ -73,10 +94,13 @@ pub async fn sanity_check_contract(
     let contract = cosmos.make_contract(contract.parse()?);
     let actual_code_id = contract.info().await?.code_id;
 
-    kolme_ensure!(
-        actual_code_id == expected_code_id,
-        "Code ID mismatch, expected {expected_code_id}, but {contract} has {actual_code_id}"
-    );
+    if actual_code_id != expected_code_id {
+        return Err(KolmeListenerError::CodeId {
+            expected: expected_code_id,
+            actual: actual_code_id,
+        }
+        .into());
+    }
 
     let shared::cosmos::State {
         set:
@@ -91,11 +115,24 @@ pub async fn sanity_check_contract(
         next_action_id: _,
     } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
 
-    kolme_ensure!(info.validator_set.processor == processor);
-    kolme_ensure!(listeners == info.validator_set.listeners);
-    kolme_ensure!(needed_listeners == info.validator_set.needed_listeners);
-    kolme_ensure!(approvers == info.validator_set.approvers);
-    kolme_ensure!(needed_approvers == info.validator_set.needed_approvers);
+    if info.validator_set.processor != processor {
+        return Err(KolmeListenerError::Processor.into());
+    }
+    if listeners != info.validator_set.listeners {
+        return Err(KolmeListenerError::Listeners.into());
+    }
+
+    if needed_listeners != info.validator_set.needed_listeners {
+        return Err(KolmeListenerError::NeededListeners.into());
+    }
+
+    if approvers != info.validator_set.approvers {
+        return Err(KolmeListenerError::Approvers.into());
+    }
+
+    if needed_approvers != info.validator_set.needed_approvers {
+        return Err(KolmeListenerError::NeededApprovers.into());
+    }
 
     Ok(())
 }
