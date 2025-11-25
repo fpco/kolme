@@ -6,19 +6,30 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+aes-gcm = { workspace = true, optional = true }
 borsh = { workspace = true, features = ["derive"], optional = true }
 cosmwasm-std = { workspace = true, optional = true }
 cw-storage-plus = { workspace = true, optional = true }
+hkdf = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
-k256 = { workspace = true, features = ["ecdsa", "serde", "sha256"], optional = true }
+k256 = { workspace = true, features = ["ecdsa", "ecdh", "serde", "sha256"], optional = true }
 rand = { workspace = true, optional = true }
 serde = { workspace = true }
+sha2 = { workspace = true, optional = true }
 thiserror = { workspace = true }
 
 [features]
 chaincryptography = []
 cosmwasm = ["dep:cosmwasm-std", "dep:cw-storage-plus"]
-realcryptography = ["borsh?/std", "dep:hex", "dep:k256", "dep:rand"]
+realcryptography = [
+  "borsh?/std",
+  "dep:aes-gcm",
+  "dep:hex",
+  "dep:hkdf",
+  "dep:k256",
+  "dep:rand",
+  "dep:sha2",
+]
 solana = ["dep:borsh", "dep:hex"]
 
 [lints]
