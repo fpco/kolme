@@ -6,7 +6,7 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-aes-gcm = { workspace = true, optional = true }
+chacha20poly1305 = { workspace = true, optional = true }
 borsh = { workspace = true, features = ["derive"], optional = true }
 cosmwasm-std = { workspace = true, optional = true }
 cw-storage-plus = { workspace = true, optional = true }
@@ -23,7 +23,7 @@ chaincryptography = []
 cosmwasm = ["dep:cosmwasm-std", "dep:cw-storage-plus"]
 realcryptography = [
   "borsh?/std",
-  "dep:aes-gcm",
+  "dep:chacha20poly1305",
   "dep:hex",
   "dep:hkdf",
   "dep:k256",

@@ -14,7 +14,6 @@ members = [
 ]
 
 [workspace.dependencies]
-aes-gcm = "0.10.3"
 anyhow = "1.0.97"
 axum = "0.8.3"
 backon = "1.4.1"
@@ -33,6 +32,7 @@ fjall = "2.9.0"
 futures = "0.3.31"
 futures-util = "0.3.31"
 hex = "0.4.3"
+chacha20poly1305 = "0.10.1"
 hkdf = "0.12.4"
 jiff = { version = "0.2.3", features = ["serde"] }
 k256 = "0.13.4"

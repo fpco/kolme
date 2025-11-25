@@ -1,16 +1,15 @@
 pub use rand::rngs::ThreadRng;
 
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Key, Nonce,
+use chacha20poly1305::{
+    aead::{AeadInPlace, KeyInit},
+    ChaCha20Poly1305, Key, Nonce, Tag,
 };
 use k256::ecdh::{diffie_hellman, EphemeralSecret, SharedSecret};
 use rand::{CryptoRng, RngCore};
 use sha2::Sha256;
 use std::{fmt::Display, str::FromStr};
 
-const KEY_DERIVATION_SALT: &[u8] = b"kolme-ecdh-salt-v1";
-const KEY_DERIVATION_INFO_PREFIX: &[u8] = b"kolme-ecdh-aes256-gcm-v1";
+const KEY_DERIVATION_INFO: &[u8] = b"kolme/chacha20poly1305-v1";
 
 /// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -82,20 +81,22 @@ impl PublicKey {
         let ephemeral_secret = EphemeralSecret::random(rng);
         let ephemeral_public_key: PublicKey = k256::PublicKey::from(&ephemeral_secret).into();
         let shared_secret = ephemeral_secret.diffie_hellman(&self.0);
-        let key = derive_encryption_key(&shared_secret, &ephemeral_public_key, self)?;
+        let key = derive_encryption_key(&shared_secret)?;
 
         let mut nonce_bytes = [0u8; 12];
         rng.fill_bytes(&mut nonce_bytes);
 
-        let cipher = Aes256Gcm::new(&key);
-        let ciphertext = cipher
-            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
+        let cipher = ChaCha20Poly1305::new(&key);
+        let mut buffer = plaintext.as_ref().to_vec();
+        let tag = cipher
+            .encrypt_in_place_detached(Nonce::from_slice(&nonce_bytes), &[], &mut buffer)
             .map_err(|_| EncryptionError::EncryptionFailed)?;
 
         Ok(EncryptedMessage {
             ephemeral_public_key,
             nonce: nonce_bytes,
-            ciphertext,
+            ciphertext: buffer,
+            tag: tag.into(),
         })
     }
 }
@@ -215,6 +216,7 @@ pub struct EncryptedMessage {
     pub ephemeral_public_key: PublicKey,
     pub nonce: [u8; 12],
     pub ciphertext: Vec<u8>,
+    pub tag: [u8; 16],
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -281,19 +283,16 @@ impl SecretKey {
             self.0.to_nonzero_scalar(),
             message.ephemeral_public_key.0.as_affine(),
         );
-        let key = derive_encryption_key(
-            &shared_secret,
-            &message.ephemeral_public_key,
-            &self.public_key(),
-        )?;
+        let key = derive_encryption_key(&shared_secret)?;
 
-        let cipher = Aes256Gcm::new(&key);
+        let cipher = ChaCha20Poly1305::new(&key);
+        let mut buffer = message.ciphertext.clone();
+        let tag = Tag::from_slice(&message.tag);
         cipher
-            .decrypt(
-                Nonce::from_slice(&message.nonce),
-                message.ciphertext.as_ref(),
-            )
-            .map_err(|_| EncryptionError::DecryptionFailed)
+            .decrypt_in_place_detached(Nonce::from_slice(&message.nonce), &[], &mut buffer, tag)
+            .map_err(|_| EncryptionError::DecryptionFailed)?;
+
+        Ok(buffer)
     }
 }
 
@@ -311,27 +310,13 @@ impl std::fmt::Debug for SecretKey {
     }
 }
 
-fn derive_encryption_key(
-    shared_secret: &SharedSecret,
-    ephemeral_public_key: &PublicKey,
-    recipient_public_key: &PublicKey,
-) -> Result<Key<Aes256Gcm>, EncryptionError> {
-    let hkdf = shared_secret.extract::<Sha256>(Some(KEY_DERIVATION_SALT));
-    let ephemeral_bytes = ephemeral_public_key.as_bytes();
-    let recipient_bytes = recipient_public_key.as_bytes();
-
-    let mut info = Vec::with_capacity(
-        KEY_DERIVATION_INFO_PREFIX.len() + ephemeral_bytes.len() + recipient_bytes.len(),
-    );
-    info.extend_from_slice(KEY_DERIVATION_INFO_PREFIX);
-    info.extend_from_slice(&ephemeral_bytes);
-    info.extend_from_slice(&recipient_bytes);
-
+fn derive_encryption_key(shared_secret: &SharedSecret) -> Result<Key, EncryptionError> {
+    let hkdf = shared_secret.extract::<Sha256>(None);
     let mut okm = [0u8; 32];
-    hkdf.expand(&info, &mut okm)
+    hkdf.expand(KEY_DERIVATION_INFO, &mut okm)
         .map_err(|_| EncryptionError::KeyDerivationFailed)?;
 
-    Ok(Key::<Aes256Gcm>::clone_from_slice(&okm))
+    Ok(Key::clone_from_slice(&okm))
 }
 
 mod sigerr {
