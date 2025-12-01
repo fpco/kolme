@@ -806,8 +806,23 @@ impl BlockHeight {
         BlockHeight(0)
     }
 
-    pub(crate) fn is_start(&self) -> bool {
+    pub fn is_start(&self) -> bool {
         self.0 == 0
+    }
+
+    pub fn increasing_middle(&self, block_height: BlockHeight) -> Result<BlockHeight, KolmeError> {
+        if self.0 > block_height.0 {
+            return Err(KolmeError::InvalidBlockHeight {
+                start: *self,
+                end: block_height,
+            });
+        }
+
+        // This cannot underflow due to the check above.
+        let diff = block_height.0 - self.0;
+        let middle = diff / 2;
+
+        Ok(BlockHeight(middle + self.0))
     }
 }
 

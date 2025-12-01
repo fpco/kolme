@@ -1,8 +1,8 @@
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use reqwest::{Client, Url};
 use serde::Deserialize;
 
-use crate::RequestBuilderExt;
+use crate::{RequestBuilderExt, BlockHeight};
 
 pub struct ChainApi {
     client: Client,
@@ -27,37 +27,6 @@ pub struct BlockResponse {
 pub struct ForkInfo {
     pub first_block: BlockHeight,
     pub last_block: BlockHeight,
-}
-
-#[derive(Deserialize, Copy, Clone, Debug)]
-pub struct BlockHeight(pub u32);
-
-impl BlockHeight {
-    pub fn pred(&self) -> Result<BlockHeight> {
-        let pred = self.0.checked_sub(1).context("Underflow in pred")?;
-        Ok(BlockHeight(pred))
-    }
-
-    pub fn succ(&self) -> Result<BlockHeight> {
-        let succ = self.0.checked_add(1).context("Overflow in succ")?;
-        Ok(BlockHeight(succ))
-    }
-
-    pub fn increasing_middle(&self, block_height: BlockHeight) -> Result<BlockHeight> {
-        ensure!(
-            self.0 <= block_height.0,
-            "Cannot compute middle since start_block is greater than end_block"
-        );
-
-        let middle = block_height
-            .0
-            .checked_sub(self.0)
-            .context("Overflow in sub")?
-            .checked_div(2)
-            .context("Underflow in div")?;
-
-        Ok(BlockHeight(middle + self.0))
-    }
 }
 
 impl ChainApi {
@@ -96,8 +65,11 @@ impl ChainApi {
     /// Find an arbitrary block height with a particular chain version
     async fn find_block_height(&self, chain_version: &str) -> Result<BlockResponse> {
         let response = self.root_info().await?;
-        let mut start_block = BlockHeight(0);
-        let mut end_block = response.next_height.pred()?;
+        let mut start_block = BlockHeight::start();
+        let mut end_block = response
+            .next_height
+            .prev()
+            .context("Underflow in pred")?;
 
         while start_block.0 <= end_block.0 {
             let middle_block = start_block.increasing_middle(end_block)?;
@@ -110,7 +82,7 @@ impl ChainApi {
                 version_compare::Cmp::Lt => {
                     // The version we want is older than the one at `middle_block`.
                     // Search in the lower half.
-                    if middle_block.0 == 0 {
+                    if middle_block.is_start() {
                         // We are at the beginning and the version is still too high.
                         bail!(
                             "Chain version {} not found, earliest is {}",
@@ -118,12 +90,12 @@ impl ChainApi {
                             response.chain_version
                         );
                     }
-                    end_block = middle_block.pred()?;
+                    end_block = middle_block.prev().context("Underflow in pred")?;
                 }
                 version_compare::Cmp::Gt => {
                     // The version we want is newer than the one at `middle_block`.
                     // Search in the upper half.
-                    start_block = middle_block.succ()?;
+                    start_block = middle_block.next();
                 }
                 _ => bail!("Impossible case"),
             }
@@ -138,7 +110,7 @@ impl ChainApi {
         chain_version: &str,
         mut end_block: BlockHeight,
     ) -> Result<BlockHeight> {
-        let mut start_block = BlockHeight(0);
+        let mut start_block = BlockHeight::start();
         let mut first_block = None;
 
         while start_block.0 <= end_block.0 {
@@ -147,20 +119,20 @@ impl ChainApi {
 
             if response.chain_version == chain_version {
                 first_block = Some(middle_block);
-                if middle_block.0 == 0 {
+                if middle_block.is_start() {
                     break;
                 }
-                end_block = middle_block.pred()?;
+                end_block = middle_block.prev().context("Underflow in pred")?;
             } else if version_compare::compare(&response.chain_version, chain_version)
                 .map_err(|err| anyhow!("{err:?}"))?
                 == version_compare::Cmp::Lt
             {
-                start_block = middle_block.succ()?;
+                start_block = middle_block.next();
             } else {
-                if middle_block.0 == 0 {
+                if middle_block.is_start() {
                     break;
                 }
-                end_block = middle_block.pred()?;
+                end_block = middle_block.prev().context("Underflow in pred")?;
             }
         }
 
@@ -175,7 +147,12 @@ impl ChainApi {
         chain_version: &str,
         mut start_block: BlockHeight,
     ) -> Result<BlockHeight> {
-        let latest_block = self.root_info().await?.next_height.pred()?;
+        let latest_block = self
+            .root_info()
+            .await?
+            .next_height
+            .prev()
+            .context("Underflow in pred")?;
         let mut end_block = latest_block;
         let mut last_block = None;
 
@@ -185,17 +162,17 @@ impl ChainApi {
 
             if response.chain_version == chain_version {
                 last_block = Some(middle_block);
-                start_block = middle_block.succ()?;
+                start_block = middle_block.next();
             } else if version_compare::compare(&response.chain_version, chain_version)
                 .map_err(|err| anyhow!("{err:?}"))?
                 == version_compare::Cmp::Gt
             {
-                if middle_block.0 == 0 {
+                if middle_block.is_start() {
                     break;
                 }
-                end_block = middle_block.pred()?;
+                end_block = middle_block.prev().context("Underflow in pred")?;
             } else {
-                start_block = middle_block.succ()?;
+                start_block = middle_block.next();
             }
         }
 
