@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use anyhow::{anyhow, bail, Context};
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
@@ -67,6 +68,7 @@ pub fn base_api_router<App: KolmeApp>() -> axum::Router<Kolme<App>> {
         .route("/account-id/pubkey/{wallet}", get(account_id_for_pubkey))
         .route("/account-id/{account_id}", get(account_id))
         .route("/healthz", get(healthz))
+        .route("/fork-info", get(fork_info))
 }
 
 async fn basics<App: KolmeApp>(State(kolme): State<Kolme<App>>) -> impl IntoResponse {
@@ -188,6 +190,183 @@ async fn get_block_inner<App: KolmeApp>(
     };
 
     Ok(Json(resp).into_response())
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct ForkInfo {
+    pub first_block: BlockHeight,
+    pub last_block: BlockHeight,
+}
+
+struct BlockResponse {
+    /// Chain version at that specific block
+    pub chain_version: String,
+    pub block_height: BlockHeight,
+}
+
+async fn block_response<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    block: BlockHeight,
+) -> Result<BlockResponse> {
+    let Some(signed_block) = kolme.get_block(block).await? else {
+        bail!("Block {} not found", block);
+    };
+
+    let framework_hash = signed_block.block.as_inner().framework_state;
+    let state = kolme.get_framework(framework_hash).await?;
+    let chain_version = state.get_chain_version().clone();
+
+    Ok(BlockResponse {
+        chain_version,
+        block_height: block,
+    })
+}
+
+/// Find an arbitrary block height with a particular chain version
+async fn find_block_height<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    chain_version: &str,
+) -> Result<BlockResponse> {
+    let next_height = kolme.read().get_next_height();
+    let mut start_block = BlockHeight::start();
+    let mut end_block = next_height.prev().context("No blocks in chain")?;
+
+    while start_block.0 <= end_block.0 {
+        let middle_block = start_block.increasing_middle(end_block)?;
+        let response = block_response(kolme, middle_block).await?;
+        let result = version_compare::compare(chain_version, &response.chain_version)
+            .map_err(|err| anyhow!("{err:?}"))?;
+
+        match result {
+            version_compare::Cmp::Eq => return Ok(response),
+            version_compare::Cmp::Lt | version_compare::Cmp::Le => {
+                // The version we want is older than the one at `middle_block`.
+                // Search in the lower half.
+                if middle_block.is_start() {
+                    // We are at the beginning and the version is still too high.
+                    bail!(
+                        "Chain version {} not found, earliest is {}",
+                        chain_version,
+                        response.chain_version
+                    );
+                }
+                end_block = middle_block.prev().context("Underflow in prev")?;
+            }
+            version_compare::Cmp::Gt | version_compare::Cmp::Ge => {
+                // The version we want is newer than the one at `middle_block`.
+                // Search in the upper half.
+                start_block = middle_block.next();
+            }
+            version_compare::Cmp::Ne => bail!("Not able to compare version"),
+        }
+    }
+
+    bail!("Could not find a block with chain version {chain_version}");
+}
+
+/// Find the first block height with a particular chain version
+async fn find_first_block<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    chain_version: &str,
+    mut end_block: BlockHeight,
+) -> Result<BlockHeight> {
+    let mut start_block = BlockHeight::start();
+    let mut first_block = None;
+
+    while start_block.0 <= end_block.0 {
+        let middle_block = start_block.increasing_middle(end_block)?;
+        let response = block_response(kolme, middle_block).await?;
+
+        if response.chain_version == chain_version {
+            first_block = Some(middle_block);
+            if middle_block.is_start() {
+                break;
+            }
+            end_block = middle_block.prev().context("Underflow in prev")?;
+        } else if version_compare::compare(&response.chain_version, chain_version)
+            .map_err(|err| anyhow!("{err:?}"))?
+            == version_compare::Cmp::Lt
+        {
+            start_block = middle_block.next();
+        } else {
+            if middle_block.is_start() {
+                break;
+            }
+            end_block = middle_block.prev().context("Underflow in prev")?;
+        }
+    }
+
+    first_block.context(format!(
+        "Could not find first block for chain version {chain_version}"
+    ))
+}
+
+/// Find the last block height with a particular chain version
+async fn find_last_block<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    chain_version: &str,
+    mut start_block: BlockHeight,
+) -> Result<BlockHeight> {
+    let next_height = kolme.read().get_next_height();
+    let latest_block = next_height.prev().context("No blocks in chain")?;
+    let mut end_block = latest_block;
+    let mut last_block = None;
+
+    while start_block.0 <= end_block.0 {
+        let middle_block = start_block.increasing_middle(end_block)?;
+        let response = block_response(kolme, middle_block).await?;
+
+        if response.chain_version == chain_version {
+            last_block = Some(middle_block);
+            start_block = middle_block.next();
+        } else if version_compare::compare(&response.chain_version, chain_version)
+            .map_err(|err| anyhow!("{err:?}"))?
+            == version_compare::Cmp::Gt
+        {
+            if middle_block.is_start() {
+                break;
+            }
+            end_block = middle_block.prev().context("Underflow in prev")?;
+        } else {
+            start_block = middle_block.next();
+        }
+    }
+
+    last_block.context(format!(
+        "Could not find last block for chain version {chain_version}"
+    ))
+}
+
+#[derive(serde::Deserialize)]
+struct ForkInfoQuery {
+    chain_version: String,
+}
+
+async fn fork_info<App: KolmeApp>(
+    State(kolme): State<Kolme<App>>,
+    Query(query): Query<ForkInfoQuery>,
+) -> impl IntoResponse {
+    let chain_version = query.chain_version;
+    let result: Result<ForkInfo> = async {
+        let found_block = find_block_height(&kolme, &chain_version).await?;
+        let first_block =
+            find_first_block(&kolme, &chain_version, found_block.block_height).await?;
+        let last_block = find_last_block(&kolme, &chain_version, first_block).await?;
+        Ok(ForkInfo {
+            first_block,
+            last_block,
+        })
+    }
+    .await;
+
+    match result {
+        Ok(fork_info) => Json(fork_info).into_response(),
+        Err(e) => {
+            let mut res = e.to_string().into_response();
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            res
+        }
+    }
 }
 
 async fn ws_handler<App: KolmeApp>(

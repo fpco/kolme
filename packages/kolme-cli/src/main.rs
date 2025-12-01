@@ -24,7 +24,7 @@ enum Cmd {
     },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
-    /// Fork height information
+    /// Find the first and last block that has the given chain version
     ForkHeight {
         /// Chain version tag that you want to query
         #[clap(long, env = "KOLME_CLI_CHAIN_VERSION")]
