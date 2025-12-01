@@ -11,3 +11,4 @@ rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
+absurd-future = { workspace = true }

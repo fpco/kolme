@@ -1,59 +1,10 @@
 /// Common helper functions and utilities.
-use std::{
-    convert::Infallible,
-    fmt::Display,
-    future::Future,
-    marker::PhantomData,
-    pin::Pin,
-    sync::OnceLock,
-    task::{Context, Poll},
-};
+use std::{fmt::Display, sync::OnceLock};
 
 use crate::*;
 
 use tracing::Level;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-
-/// Turn a never-returning future into a future yielding any desired type.
-///
-/// Useful for async tasks that logically don't complete but need to satisfy an
-/// interface expecting a concrete output type.
-#[must_use = "futures do nothing unless polled"]
-pub struct AbsurdFuture<F, T> {
-    inner: Pin<Box<F>>,
-    _marker: PhantomData<fn() -> T>,
-}
-
-impl<F, T> AbsurdFuture<F, T> {
-    pub fn new(inner: F) -> Self {
-        Self {
-            inner: Box::pin(inner),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<F, T> Future for AbsurdFuture<F, T>
-where
-    F: Future<Output = Infallible>,
-{
-    type Output = T;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let inner = self.get_mut().inner.as_mut();
-        match Future::poll(inner, cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(never) => match never {},
-        }
-    }
-}
-
-pub fn absurd_future<F, T>(future: F) -> AbsurdFuture<F, T>
-where
-    F: Future<Output = Infallible>,
-{
-    AbsurdFuture::new(future)
-}
 
 /// Initialize the logging system.
 ///

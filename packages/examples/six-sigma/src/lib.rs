@@ -13,6 +13,7 @@ use std::{
     sync::Arc,
 };
 
+use absurd_future::absurd_future;
 use anyhow::Result;
 use cosmos::SeedPhrase;
 
