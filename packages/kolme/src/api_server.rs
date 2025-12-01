@@ -6,7 +6,7 @@ use axum::{
         ws::{Message as WsMessage, WebSocket},
         Path, Query, State, WebSocketUpgrade,
     },
-    http::header::CONTENT_TYPE,
+    http::header::{self, CONTENT_TYPE},
     response::{IntoResponse, Response},
     routing::{get, put},
     Json, Router,
@@ -360,7 +360,14 @@ async fn fork_info<App: KolmeApp>(
     .await;
 
     match result {
-        Ok(fork_info) => Json(fork_info).into_response(),
+        Ok(fork_info) => {
+            let mut response = Json(fork_info).into_response();
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("public, max-age=300"),
+            );
+            response
+        }
         Err(e) => {
             let mut res = e.to_string().into_response();
             *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
