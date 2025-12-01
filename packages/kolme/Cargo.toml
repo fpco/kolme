@@ -55,6 +55,7 @@ solana-transaction-status-client-types = { workspace = true, optional = true }
 # CosmWasm
 cosmos = { workspace = true, features = ["config"], optional = true }
 cosmwasm-std = { workspace = true, optional = true }
+absurd-future = { workspace = true }
 
 [dev-dependencies]
 kademlia-discovery = { workspace = true }

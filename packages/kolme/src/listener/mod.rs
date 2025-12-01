@@ -4,6 +4,7 @@ mod cosmos;
 mod solana;
 
 use crate::*;
+use absurd_future::absurd_future;
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {

@@ -13,6 +13,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "absurd-future"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7202e268bd51b9e23dc8836065753c1612192b2d36c32ff9a0cbc46182f65ea"
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2451,6 +2457,7 @@ dependencies = [
 name = "example-cosmos-bridge"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "clap 4.5.38",
  "cosmos",
@@ -2467,6 +2474,7 @@ dependencies = [
 name = "example-p2p"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "clap 4.5.38",
  "jiff",
@@ -2481,6 +2489,7 @@ dependencies = [
 name = "example-six-sigma"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "backon",
  "clap 4.5.38",
@@ -2506,6 +2515,7 @@ dependencies = [
 name = "example-solana-cosmos-bridge"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "cosmos",
  "jiff",
@@ -3619,6 +3629,7 @@ dependencies = [
 name = "integration-tests"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "axum 0.8.4",
  "backon",
@@ -3857,6 +3868,7 @@ dependencies = [
 name = "kademlia-discovery"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "clap 4.5.38",
  "kolme",
@@ -3889,6 +3901,7 @@ dependencies = [
 name = "kolme"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "axum 0.8.4",
  "base64 0.22.1",
@@ -4002,6 +4015,7 @@ dependencies = [
 name = "kolme-test"
 version = "0.1.0"
 dependencies = [
+ "absurd-future",
  "anyhow",
  "jiff",
  "kademlia-discovery",

@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use absurd_future::absurd_future;
 use anyhow::Result;
 use cosmos::{HasAddressHrp, SeedPhrase};
 

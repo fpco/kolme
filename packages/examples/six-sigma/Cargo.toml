@@ -18,6 +18,7 @@ solana-keypair = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
+absurd-future = { workspace = true }
 
 [dev-dependencies]
 backon = { workspace = true }
