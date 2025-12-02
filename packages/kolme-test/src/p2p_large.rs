@@ -13,7 +13,7 @@ pub struct SampleKolmeApp {
 #[derive(Clone, Debug)]
 pub struct SampleState {
     next_hi: u64,
-    payloads: MerkleMap<u64, usize>,
+    payloads: MerkleMap<u8, usize>,
 }
 
 impl MerkleSerialize for SampleState {
@@ -100,7 +100,7 @@ impl KolmeApp for SampleKolmeApp {
         match msg {
             SampleMessage::SayHi { payload } => {
                 let state = ctx.state_mut();
-                let idx = state.next_hi;
+                let idx = state.next_hi as u8;
                 state.next_hi += 1;
                 state.payloads.insert(idx, payload.len());
             }
