@@ -216,7 +216,7 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
     )
     .await?;
 
-    let mut set = JoinSet::new();
+    let mut set: JoinSet<std::result::Result<(), KolmeError>> = JoinSet::new();
 
     let processor = Processor::new(kolme.clone(), my_secret_key().clone());
     // Processor consumes mempool transactions and add new transactions into blockchain storage.
@@ -247,7 +247,7 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }
@@ -315,7 +315,7 @@ pub async fn validators(
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }
