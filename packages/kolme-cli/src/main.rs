@@ -1,7 +1,12 @@
+pub(crate) mod chain_query;
+
 use anyhow::{Context, Result};
+use chain_query::ChainApi;
 use clap::Parser;
+use comfy_table::{presets, Cell, Table};
 use kolme::*;
 use reqwest::{RequestBuilder, Url};
+use version_compare::Version;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,6 +25,21 @@ enum Cmd {
     },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
+    /// Check if a version string is valid.
+    CheckVersion { version: String },
+    /// Find the first and last block that has the given chain version
+    ForkHeight {
+        /// Chain version tag that you want to query
+        #[clap(long, env = "KOLME_CLI_CHAIN_VERSION")]
+        version: String,
+        /// API server root
+        #[clap(
+            long,
+            env = "KOLME_CLI_API_SERVER",
+            default_value = "http://localhost:3000"
+        )]
+        api_server: Url,
+    },
 }
 
 #[derive(clap::Parser)]
@@ -42,6 +62,35 @@ async fn main_inner() -> Result<()> {
         Cmd::PubKey { secret } => {
             let public = secret.public_key();
             eprintln!("Public key: {public}");
+        }
+
+        Cmd::ForkHeight {
+            version,
+            api_server,
+        } => {
+            let app = ChainApi::new(api_server)?;
+            let fork_info = app.fork_info(version).await?;
+
+            let mut table = Table::new();
+            table.load_preset(presets::NOTHING);
+            table
+                .add_row(vec![
+                    Cell::new("First block"),
+                    Cell::new(fork_info.first_block.0),
+                ])
+                .add_row(vec![
+                    Cell::new("Last block"),
+                    Cell::new(fork_info.last_block.0),
+                ]);
+
+            println!("{table}");
+        }
+        Cmd::CheckVersion { version } => {
+            let version = Version::from(version.as_str());
+            match version {
+                Some(_) => println!("Supported"),
+                None => println!("Not Supported"),
+            }
         }
     }
     Ok(())

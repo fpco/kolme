@@ -81,7 +81,7 @@ impl<K, V> TreeContents<K, V> {
         assert!(self
             .branches
             .iter()
-            .all(|branch| branch.as_ref().map_or(true, |node| !node.is_empty())));
+            .all(|branch| branch.as_ref().is_none_or(|node| !node.is_empty())));
         let expected = self
             .branches
             .iter()

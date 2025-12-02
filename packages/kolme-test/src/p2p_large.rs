@@ -133,7 +133,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
 
     // Send a few transactions to bump up the block height
     for i in 0..200 {
-        let payload = std::iter::repeat(i).take(50_000).collect::<Vec<_>>();
+        let payload = std::iter::repeat_n(i, 50_000).collect::<Vec<_>>();
         let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(

@@ -8,8 +8,8 @@ use kolme::*;
 use tokio::task::JoinSet;
 use tokio::time::{self, Duration};
 
-const VERSION1: &str = "dummy code version v1";
-const VERSION2: &str = "dummy code version v2";
+const VERSION1: &str = "0.1";
+const VERSION2: &str = "0.2";
 
 #[derive(Clone, Debug)]
 pub struct KademliaTestApp {

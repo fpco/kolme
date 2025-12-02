@@ -806,8 +806,23 @@ impl BlockHeight {
         BlockHeight(0)
     }
 
-    pub(crate) fn is_start(&self) -> bool {
+    pub fn is_start(&self) -> bool {
         self.0 == 0
+    }
+
+    pub fn increasing_middle(&self, block_height: BlockHeight) -> Result<BlockHeight, KolmeError> {
+        if self.0 >= block_height.0 {
+            return Err(KolmeError::InvalidBlockHeight {
+                start: *self,
+                end: block_height,
+            });
+        }
+
+        // This cannot underflow due to the check above.
+        let diff = block_height.0 - self.0;
+        let middle_offset = diff.div_ceil(2);
+
+        Ok(BlockHeight(self.0 + middle_offset))
     }
 }
 
@@ -1859,6 +1874,27 @@ mod tests {
     use super::*;
     use quickcheck::quickcheck;
     use rust_decimal::dec;
+
+    #[test]
+    fn increasing_middle_with_difference_of_one() {
+        let start = BlockHeight(10);
+        let end = BlockHeight(11);
+        assert_eq!(start.increasing_middle(end).unwrap(), end);
+    }
+
+    quickcheck! {
+        fn property_increasing_middle(start: u64, end: u64) -> bool {
+            let start_bh = BlockHeight(start);
+            let end_bh = BlockHeight(end);
+
+            if start >= end {
+                start_bh.increasing_middle(end_bh).is_err()
+            } else {
+                let middle_bh = start_bh.increasing_middle(end_bh).unwrap();
+                middle_bh.0 > start_bh.0 && middle_bh.0 <= end_bh.0
+            }
+        }
+    }
 
     #[test]
     fn to_decimal() {
