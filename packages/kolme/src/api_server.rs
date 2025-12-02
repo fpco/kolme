@@ -205,7 +205,7 @@ struct BlockResponse {
     pub block_height: BlockHeight,
 }
 
-async fn block_response<'a, App: KolmeApp>(
+async fn block_response<App: KolmeApp>(
     kolme: &Kolme<App>,
     block: BlockHeight,
 ) -> Result<BlockResponse> {
@@ -352,7 +352,7 @@ async fn fork_info<App: KolmeApp>(
     let chain_version = match chain_version {
         Some(version) => version,
         None => {
-            let mut res = format!("Invalid chain_version").into_response();
+            let mut res = "Invalid chain version".into_response();
             *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             return res;
         }

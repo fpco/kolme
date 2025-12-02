@@ -22,7 +22,7 @@ pub enum KolmeError {
     #[error("Start height {start} is greater than {end} height")]
     InvalidBlockHeight {
         start: BlockHeight,
-        end: BlockHeight
+        end: BlockHeight,
     },
     #[error("{0}")]
     Other(String),
