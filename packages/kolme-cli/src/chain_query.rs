@@ -33,12 +33,6 @@ impl ChainApi {
         })
     }
 
-    #[allow(dead_code)]
-    async fn root_info(&self) -> Result<ChainVersion> {
-        let response = self.client.get(self.url.clone()).send_check_json().await?;
-        Ok(response)
-    }
-
     pub async fn fork_info(&self, chain_version: String) -> Result<ForkInfo> {
         let mut url = self.url.clone();
         url.set_path("/fork-info");
