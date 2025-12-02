@@ -11,3 +11,7 @@ public:
 # Fork height information
 fork-height:
     cargo run -- fork-height
+
+# Check version
+check-version:
+	cargo run -- check-version 0.1

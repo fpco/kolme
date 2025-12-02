@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{bail, Context};
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
@@ -13,6 +13,7 @@ use axum::{
 };
 use reqwest::{Method, StatusCode};
 use tower_http::cors::{Any, CorsLayer};
+use version_compare::Version;
 
 use crate::*;
 
@@ -204,7 +205,7 @@ struct BlockResponse {
     pub block_height: BlockHeight,
 }
 
-async fn block_response<App: KolmeApp>(
+async fn block_response<'a, App: KolmeApp>(
     kolme: &Kolme<App>,
     block: BlockHeight,
 ) -> Result<BlockResponse> {
@@ -215,7 +216,6 @@ async fn block_response<App: KolmeApp>(
     let framework_hash = signed_block.block.as_inner().framework_state;
     let state = kolme.get_framework(framework_hash).await?;
     let chain_version = state.get_chain_version().clone();
-
     Ok(BlockResponse {
         chain_version,
         block_height: block,
@@ -225,7 +225,7 @@ async fn block_response<App: KolmeApp>(
 /// Find an arbitrary block height with a particular chain version
 async fn find_block_height<App: KolmeApp>(
     kolme: &Kolme<App>,
-    chain_version: &str,
+    chain_version: &Version<'_>,
 ) -> Result<BlockResponse> {
     let next_height = kolme.read().get_next_height();
     let mut start_block = BlockHeight::start();
@@ -234,9 +234,9 @@ async fn find_block_height<App: KolmeApp>(
     while start_block.0 <= end_block.0 {
         let middle_block = start_block.increasing_middle(end_block)?;
         let response = block_response(kolme, middle_block).await?;
-        let result = version_compare::compare(chain_version, &response.chain_version)
-            .map_err(|err| anyhow!("{err:?}"))?;
-
+        let existing_version =
+            Version::from(&response.chain_version).context("Invalid version from response")?;
+        let result = chain_version.compare(existing_version);
         match result {
             version_compare::Cmp::Eq => return Ok(response),
             version_compare::Cmp::Lt | version_compare::Cmp::Le => {
@@ -267,7 +267,7 @@ async fn find_block_height<App: KolmeApp>(
 /// Find the first block height with a particular chain version
 async fn find_first_block<App: KolmeApp>(
     kolme: &Kolme<App>,
-    chain_version: &str,
+    chain_version: &Version<'_>,
     mut end_block: BlockHeight,
 ) -> Result<BlockHeight> {
     let mut start_block = BlockHeight::start();
@@ -277,16 +277,16 @@ async fn find_first_block<App: KolmeApp>(
         let middle_block = start_block.increasing_middle(end_block)?;
         let response = block_response(kolme, middle_block).await?;
 
-        if response.chain_version == chain_version {
+        let response_chain_version =
+            Version::from(&response.chain_version).context("Invalid chain version")?;
+
+        if response_chain_version == *chain_version {
             first_block = Some(middle_block);
             if middle_block.is_start() {
                 break;
             }
             end_block = middle_block.prev().context("Underflow in prev")?;
-        } else if version_compare::compare(&response.chain_version, chain_version)
-            .map_err(|err| anyhow!("{err:?}"))?
-            == version_compare::Cmp::Lt
-        {
+        } else if response_chain_version.compare(chain_version) == version_compare::Cmp::Lt {
             start_block = middle_block.next();
         } else {
             if middle_block.is_start() {
@@ -304,7 +304,7 @@ async fn find_first_block<App: KolmeApp>(
 /// Find the last block height with a particular chain version
 async fn find_last_block<App: KolmeApp>(
     kolme: &Kolme<App>,
-    chain_version: &str,
+    chain_version: &Version<'_>,
     mut start_block: BlockHeight,
 ) -> Result<BlockHeight> {
     let next_height = kolme.read().get_next_height();
@@ -316,13 +316,13 @@ async fn find_last_block<App: KolmeApp>(
         let middle_block = start_block.increasing_middle(end_block)?;
         let response = block_response(kolme, middle_block).await?;
 
-        if response.chain_version == chain_version {
+        let response_chain_version =
+            Version::from(&response.chain_version).context("Invalid chain version")?;
+
+        if response_chain_version == *chain_version {
             last_block = Some(middle_block);
             start_block = middle_block.next();
-        } else if version_compare::compare(&response.chain_version, chain_version)
-            .map_err(|err| anyhow!("{err:?}"))?
-            == version_compare::Cmp::Gt
-        {
+        } else if response_chain_version.compare(chain_version) == version_compare::Cmp::Gt {
             if middle_block.is_start() {
                 break;
             }
@@ -347,11 +347,22 @@ async fn fork_info<App: KolmeApp>(
     Query(query): Query<ForkInfoQuery>,
 ) -> impl IntoResponse {
     let chain_version = query.chain_version;
+    let chain_version = Version::from(&chain_version);
+
+    let chain_version = match chain_version {
+        Some(version) => version,
+        None => {
+            let mut res = format!("Invalid chain_version").into_response();
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            return res;
+        }
+    };
+
     let result: Result<ForkInfo> = async {
         let found_block = find_block_height(&kolme, &chain_version).await?;
         let first_block =
             find_first_block(&kolme, &chain_version, found_block.block_height).await?;
-        let last_block = find_last_block(&kolme, &chain_version, first_block).await?;
+        let last_block = find_last_block(&kolme, &chain_version, found_block.block_height).await?;
         Ok(ForkInfo {
             first_block,
             last_block,

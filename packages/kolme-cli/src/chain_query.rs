@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
-use kolme::core::BlockHeight;
+use anyhow::Result;
+use kolme::BlockHeight;
 use reqwest::{Client, Url};
 use serde::Deserialize;
 
