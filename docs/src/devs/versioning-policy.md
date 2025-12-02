@@ -45,6 +45,33 @@ Technically, however, you only need to perform such a version bump if a change c
 
 Unless explicitly stated otherwise, any change discussed below should be considered as _requiring a new application version_.
 
+### Application versioning scheme recommendation
+
+While you can theoretically use any string for the application version, we recommend a semantic versioning-like scheme to take full advantage of the tooling within the Kolme ecosystem. Our recommended format is `x.y.z` for standard releases, with an optional `a` suffix for hotfixes (e.g., `x.y.z.a`).
+
+A key principle is to always increment version numbers sequentially. Never reuse or roll back a version number.
+
+- **Major (`x`):** For sweeping, high-impact changes that alter large portions of the system's behavior, such as introducing a major new feature.
+- **Minor (`y`):** For smaller feature additions that still require a chain upgrade.
+- **Patch (`z`):** For bug fixes or polish that require redeployment, even if the scope is limited.
+- **Hotfix (`a`):** Reserved for rare scenarios where a narrowly scoped patch is needed for a live network (e.g., mainnet). This is typically used when a fix already exists on your default branch (e.g., `main`), but you cannot deploy the entire branch and must apply only the critical fix.
+
+Examples of this scheme include `1.0.0`, `1.0.1`, and `1.2.0`.
+
+#### Tooling Compatibility
+
+Kolme uses the [`version_compare`](https://docs.rs/version-compare/latest/version_compare/) crate to parse version strings. If you opt for a different versioning scheme, you must ensure it is compatible with this library. You can verify your version string using `kolme-cli`:
+
+```
+$ kolme-cli check-version 1.0.0
+Supported
+
+$ kolme-cli check-version abc
+Not Supported
+```
+
+For a complete list of supported version formats, please refer to the `version-compare` [test cases](https://gitlab.com/timvisee/version-compare/-/blob/0c261ec99783236a5acfc511f62253ba2d3f21b8/src/test.rs#L20).
+
 ## Changing Merkle serialization
 
 Merkle serialization is the most important piece of Kolme to maintain compatibility for. Without this, old block data will be unreadable by newer versions of the library.
