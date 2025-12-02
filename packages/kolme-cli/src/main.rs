@@ -6,6 +6,7 @@ use clap::Parser;
 use comfy_table::{presets, Cell, Table};
 use kolme::*;
 use reqwest::{RequestBuilder, Url};
+use version_compare::Version;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,6 +25,8 @@ enum Cmd {
     },
     /// Send a transaction via an API server.
     SendTx(SendTxOpt),
+    /// Check if a version string is valid.
+    CheckVersion { version: String },
     /// Find the first and last block that has the given chain version
     ForkHeight {
         /// Chain version tag that you want to query
@@ -60,6 +63,7 @@ async fn main_inner() -> Result<()> {
             let public = secret.public_key();
             eprintln!("Public key: {public}");
         }
+
         Cmd::ForkHeight {
             version,
             api_server,
@@ -80,6 +84,13 @@ async fn main_inner() -> Result<()> {
                 ]);
 
             println!("{table}");
+        }
+        Cmd::CheckVersion { version } => {
+            let version = Version::from(version.as_str());
+            match version {
+                Some(_) => println!("Supported"),
+                None => println!("Not Supported"),
+            }
         }
     }
     Ok(())
