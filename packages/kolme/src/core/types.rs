@@ -820,7 +820,7 @@ impl BlockHeight {
 
         // This cannot underflow due to the check above.
         let diff = block_height.0 - self.0;
-        let middle_offset = (diff + 1) / 2;
+        let middle_offset = diff.div_ceil(2);
 
         Ok(BlockHeight(self.0 + middle_offset))
     }
