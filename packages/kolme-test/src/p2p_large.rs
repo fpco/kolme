@@ -12,7 +12,7 @@ pub struct SampleKolmeApp {
 
 #[derive(Clone, Debug)]
 pub struct SampleState {
-    next_hi: u64,
+    next_hi: u8,
     payloads: MerkleMap<u8, Vec<u8>>,
 }
 
@@ -100,7 +100,7 @@ impl KolmeApp for SampleKolmeApp {
         match msg {
             SampleMessage::SayHi { payload } => {
                 let state = ctx.state_mut();
-                let idx = state.next_hi as u8;
+                let idx = state.next_hi;
                 state.next_hi += 1;
                 state.payloads.insert(idx, payload.clone());
             }
