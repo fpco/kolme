@@ -43,6 +43,10 @@ pub trait KolmeBackingStore {
     async fn load<T>(&self, hash: Sha256Hash) -> Result<T, MerkleSerialError>
     where
         T: MerkleDeserializeRaw;
+
+    async fn init_remote_data_listener<N>(&self, notify: N) -> Result<(), KolmeStoreError>
+    where
+        N: Fn() + Send + 'static;
 }
 
 pub trait HasBlockHashes {

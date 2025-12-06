@@ -203,6 +203,14 @@ impl KolmeBackingStore for Store {
             .context("Unable to retrieve latest height")?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
     }
+
+    async fn init_remote_data_listener<N: Fn() + Send + 'static>(
+        &self,
+        _: N,
+    ) -> Result<(), KolmeStoreError> {
+        // Since fjall is a local-only store, this does nothing.
+        Ok(())
+    }
 }
 
 fn block_key(height: u64) -> [u8; 14] {
