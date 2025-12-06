@@ -172,4 +172,12 @@ impl KolmeBackingStore for Store {
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
         Ok(self.0.read().await.latest_archived_block)
     }
+
+    async fn init_remote_data_listener<N: Fn() + Send + 'static>(
+        &self,
+        _: N,
+    ) -> Result<(), KolmeStoreError> {
+        // Since in-memory is a local-only store, this does nothing.
+        Ok(())
+    }
 }

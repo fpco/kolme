@@ -675,6 +675,8 @@ impl<App: KolmeApp> Kolme<App> {
             .validate_genesis_info(kolme.get_app().genesis_info())
             .await?;
 
+        kolme.init_remote_data_listener().await?;
+
         Ok(kolme)
     }
 
@@ -1185,6 +1187,22 @@ impl<App: KolmeApp> Kolme<App> {
             next = next.next();
         }
         Ok(next)
+    }
+
+    async fn init_remote_data_listener(&self) -> Result<()> {
+        self.inner.store.init_remote_data_listener().await?;
+        let mut sub = self.inner.store.subscribe_remote_data();
+        let kolme = self.clone();
+        tokio::spawn(async move {
+            loop {
+                sub.listen().await;
+                tracing::info!("Resyncing after new remote data notification");
+                if let Err(err) = kolme.resync().await {
+                    tracing::error!("Error resyncing after remote data notification: {err:?}");
+                }
+            }
+        });
+        Ok(())
     }
 }
 

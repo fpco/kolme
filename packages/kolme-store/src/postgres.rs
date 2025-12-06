@@ -9,7 +9,7 @@ use merkle_map::{
 };
 use sqlx::{
     pool::PoolOptions,
-    postgres::{PgAdvisoryLock, PgConnectOptions},
+    postgres::{PgAdvisoryLock, PgConnectOptions, PgListener},
     Executor, Postgres,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -423,6 +423,39 @@ impl KolmeBackingStore for Store {
             .await
             .context("Unable to commit archive block height changes")?;
 
+        Ok(())
+    }
+
+    async fn init_remote_data_listener<N: Fn() + Send + 'static>(
+        &self,
+        notify: N,
+    ) -> Result<(), KolmeStoreError> {
+        let mut listener = PgListener::connect_with(&self.pool)
+            .await
+            .map_err(KolmeStoreError::custom)?;
+        listener
+            .listen("insert_blocks")
+            .await
+            .map_err(KolmeStoreError::custom)?;
+        tokio::spawn(async move {
+            loop {
+                match listener.recv().await {
+                    Ok(_) => {
+                        notify();
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            "PostgreSQL insert block notification listener error: {err:?}"
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        // recv() will automatically attempt to reconnect on the next call, but
+                        // intervening notifications may be lost, so we send a potentially spurious
+                        // notification just to be safe.
+                        notify();
+                    }
+                }
+            }
+        });
         Ok(())
     }
 }
