@@ -54,7 +54,20 @@ impl<App: KolmeApp> PartialEq for WebsocketsPrivateSender<App> {
 impl<App: KolmeApp> Eq for WebsocketsPrivateSender<App> {}
 
 impl<App: KolmeApp> WebsocketsManager<App> {
+    const CHANNEL_SIZE: usize = 100;
+
     pub(super) fn publish(&self, msg: &GossipMessage<App>) {
+        let percentage = self.tx_gossip.len() as f32 / Self::CHANNEL_SIZE as f32;
+
+        if percentage >= 0.8 {
+            tracing::warn!(
+                "Gossip broadcast sender channel buffer is at {}% capacity - {}/{}.",
+                (percentage * 100.) as u32,
+                self.tx_gossip.len(),
+                Self::CHANNEL_SIZE
+            );
+        }
+
         self.tx_gossip.send(msg.clone()).ok();
     }
 
@@ -66,8 +79,8 @@ impl<App: KolmeApp> WebsocketsManager<App> {
         local_display_name: &str,
         kolme: Kolme<App>,
     ) -> Result<Self> {
-        let tx_gossip = Sender::new(100);
-        let (tx_message, rx_message) = tokio::sync::mpsc::channel(100);
+        let tx_gossip = Sender::new(Self::CHANNEL_SIZE);
+        let (tx_message, rx_message) = tokio::sync::mpsc::channel(Self::CHANNEL_SIZE);
         let local_display_name: Arc<str> = local_display_name.into();
         for bind in websockets_binds {
             set.spawn(launch_server(
@@ -97,8 +110,24 @@ impl<App: KolmeApp> WebsocketsManager<App> {
 
     pub(super) async fn get_incoming(&mut self) -> WebsocketsMessage<App> {
         match self.rx_message.recv().await {
-            Some(msg) => msg,
-            None => std::future::pending().await,
+            Some(msg) => {
+                let percentage = self.rx_message.len() as f32 / Self::CHANNEL_SIZE as f32;
+
+                if percentage >= 0.8 {
+                    tracing::warn!(
+                        "Gossip websocket message receiver channel buffer is at {}% capacity - {}/{}.",
+                        (percentage * 100.) as u32,
+                        self.rx_message.len(),
+                        Self::CHANNEL_SIZE
+                    );
+                }
+
+                msg
+            }
+            None => {
+                tracing::error!("Peer sender channel closed. Moving into endless future!");
+                std::future::pending().await
+            }
         }
     }
 }
@@ -332,7 +361,9 @@ async fn ws_helper<App: KolmeApp, S: WebSocketWrapper>(
     local_display_name: &str,
     latest: Option<Arc<SignedTaggedJson<LatestBlock>>>,
 ) {
-    let (tx_private, mut rx_private) = tokio::sync::mpsc::channel(16);
+    const CHANNEL_SIZE: usize = 16;
+
+    let (tx_private, mut rx_private) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
 
     if let Some(latest) = latest {
         let msg = GossipMessage::ProvideLatestBlock { latest };
@@ -358,6 +389,18 @@ async fn ws_helper<App: KolmeApp, S: WebSocketWrapper>(
             gossip = rx_gossip.recv() => Triple::LocalGossip(gossip),
             payload = rx_private.recv() => Triple::LocalPrivate(payload),
         };
+
+        let percentage = rx_private.len() as f32 / CHANNEL_SIZE as f32;
+
+        if percentage >= 0.8 {
+            tracing::warn!(
+                %local_display_name,
+                "Local gossip receiver channel buffer is at {}% capacity - {}/{}.",
+                (percentage * 100.) as u32,
+                rx_private.len(),
+                CHANNEL_SIZE
+            );
+        }
 
         let payload = match next {
             Triple::Peer(recv) => match recv {
