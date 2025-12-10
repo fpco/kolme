@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::{ops::Deref, sync::atomic::AtomicU64};
 
 use axum::{
     extract::{ws::WebSocket, State, WebSocketUpgrade},
@@ -407,6 +407,10 @@ async fn ws_helper<App: KolmeApp, S: WebSocketWrapper>(
                 WebsocketsRecv::Close => break,
                 WebsocketsRecv::Skip => continue,
                 WebsocketsRecv::Payload(payload) => {
+                    if let GossipMessage::<App>::ProvideLatestBlock { latest } = payload.deref() {
+                        tracing::info!(%local_display_name, "Received latest block with height: {}", latest.message.as_inner().height);
+                    }
+
                     if let Err(e) = tx_message
                         .send(WebsocketsMessage {
                             payload: *payload,
