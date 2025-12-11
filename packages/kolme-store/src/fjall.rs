@@ -1,4 +1,7 @@
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
+    StorableBlock,
+};
 use anyhow::Context;
 use merkle_map::{MerkleDeserializeRaw, MerkleSerializeRaw, MerkleStore as _, Sha256Hash};
 use std::path::Path;
@@ -204,12 +207,8 @@ impl KolmeBackingStore for Store {
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
     }
 
-    async fn init_remote_data_listener<N: Fn() + Send + 'static>(
-        &self,
-        _: N,
-    ) -> Result<(), KolmeStoreError> {
-        // Since fjall is a local-only store, this does nothing.
-        Ok(())
+    async fn listen_remote_data(&self) -> Result<Option<RemoteDataListener>, KolmeStoreError> {
+        Ok(None)
     }
 }
 

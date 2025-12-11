@@ -5,7 +5,7 @@ mod store;
 
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
-use kolme_store::{KolmeConstructLock, KolmeStoreError, StorableBlock};
+use kolme_store::{BackingRemoteDataListener, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
 #[cfg(feature = "solana")]
 use solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -70,6 +70,12 @@ pub(super) struct KolmeInner<App: KolmeApp> {
 pub struct KolmeRead<App: KolmeApp> {
     kolme: Kolme<App>,
     current: Arc<MaybeBlockInfo<App>>,
+}
+
+/// A weak reference to a `Kolme` instance.
+struct WeakKolme<App: KolmeApp> {
+    inner: std::sync::Weak<KolmeInner<App>>,
+    tx_await_duration: tokio::time::Duration,
 }
 
 impl<App: KolmeApp> Deref for KolmeRead<App> {
@@ -1101,6 +1107,24 @@ impl<App: KolmeApp> Kolme<App> {
         }
         Ok(())
     }
+
+    /// Create a `WeakKolme` weak reference to this `Kolme` instance.
+    fn weak(&self) -> WeakKolme<App> {
+        WeakKolme {
+            inner: Arc::downgrade(&self.inner),
+            tx_await_duration: self.tx_await_duration,
+        }
+    }
+}
+
+impl<App: KolmeApp> WeakKolme<App> {
+    /// Upgrade the weak reference to a `Kolme` instance.
+    fn upgrade(&self) -> Option<Kolme<App>> {
+        self.inner.upgrade().map(|inner| Kolme {
+            inner,
+            tx_await_duration: self.tx_await_duration,
+        })
+    }
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -1190,15 +1214,23 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     async fn init_remote_data_listener(&self) -> Result<()> {
-        self.inner.store.init_remote_data_listener().await?;
-        let mut sub = self.inner.store.subscribe_remote_data();
-        let kolme = self.clone();
+        let Some(mut listener) = self.inner.store.listen_remote_data().await? else {
+            return Ok(());
+        };
+        let weak_kolme = self.weak();
         tokio::spawn(async move {
             loop {
-                sub.listen().await;
-                tracing::info!("Resyncing after new remote data notification");
-                if let Err(err) = kolme.resync().await {
-                    tracing::error!("Error resyncing after remote data notification: {err:?}");
+                let resync = tokio::time::timeout(Duration::from_secs(1), listener.recv())
+                    .await
+                    .is_ok();
+                let Some(kolme) = weak_kolme.upgrade() else {
+                    break;
+                };
+                if resync {
+                    tracing::info!("Resyncing after new remote data notification");
+                    if let Err(err) = kolme.resync().await {
+                        tracing::error!("Error resyncing after remote data notification: {err:?}");
+                    }
                 }
             }
         });

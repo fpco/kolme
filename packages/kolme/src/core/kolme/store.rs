@@ -5,7 +5,7 @@ use kolme_store::sqlx::postgres::PgConnectOptions;
 use kolme_store::sqlx::{pool::PoolOptions, Postgres};
 use kolme_store::{
     KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
-    StorableBlock,
+    RemoteDataListener, StorableBlock,
 };
 use lru::LruCache;
 use parking_lot::RwLock;
@@ -18,7 +18,6 @@ pub struct KolmeStore<App: KolmeApp> {
     inner: KolmeStoreInner,
     block_cache: Arc<RwLock<BlockCacheMap<App>>>,
     notify: Trigger,
-    remote_data_notify: Trigger,
 }
 
 #[allow(type_alias_bounds)]
@@ -32,7 +31,6 @@ impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
             inner,
             block_cache: Arc::new(RwLock::new(cache)),
             notify: Trigger::new("notify"),
-            remote_data_notify: Trigger::new("remote_notify"),
         }
     }
 }
@@ -207,14 +205,6 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.notify.subscribe()
     }
 
-    /// Subscribe to receive notifications of new remote data becoming available in the store. To
-    /// receive these notifications, you must call `init_remote_data_listener` first. Note that
-    /// there may be spurious notifications, such as own-writes, and when no new data is available.
-    /// It is the responsibility of the caller to handle these spurious notifications.
-    pub(crate) fn subscribe_remote_data(&self) -> TriggerSubscriber {
-        self.remote_data_notify.subscribe()
-    }
-
     pub(crate) async fn get_merkle_layer(
         &self,
         hash: Sha256Hash,
@@ -222,12 +212,11 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.inner.get_merkle_layer(hash).await
     }
 
-    /// Initialize the listener for new remote data become available in the store. This has no
-    /// effect for local-only stores.
-    pub(super) async fn init_remote_data_listener(&self) -> Result<(), KolmeStoreError> {
-        let remote_data_notify = self.remote_data_notify.clone();
-        self.inner
-            .init_remote_data_listener(move || remote_data_notify.trigger())
-            .await
+    /// Starts listening for notifications of new remote data (created by other database clients)
+    /// becoming available in the store. This returns `None` for local-only stores.
+    pub(super) async fn listen_remote_data(
+        &self,
+    ) -> Result<Option<RemoteDataListener>, KolmeStoreError> {
+        self.inner.listen_remote_data().await
     }
 }

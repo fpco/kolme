@@ -3,7 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
+    StorableBlock,
+};
 use merkle_map::{
     MerkleDeserializeRaw, MerkleMemoryStore, MerkleSerializeRaw, MerkleStore, Sha256Hash,
 };
@@ -173,11 +176,7 @@ impl KolmeBackingStore for Store {
         Ok(self.0.read().await.latest_archived_block)
     }
 
-    async fn init_remote_data_listener<N: Fn() + Send + 'static>(
-        &self,
-        _: N,
-    ) -> Result<(), KolmeStoreError> {
-        // Since in-memory is a local-only store, this does nothing.
-        Ok(())
+    async fn listen_remote_data(&self) -> Result<Option<RemoteDataListener>, KolmeStoreError> {
+        Ok(None)
     }
 }

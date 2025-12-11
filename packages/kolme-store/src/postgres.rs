@@ -1,5 +1,6 @@
 use crate::{
-    r#trait::KolmeBackingStore, BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError,
+    r#trait::{BackingRemoteDataListener, KolmeBackingStore},
+    BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
     StorableBlock,
 };
 use anyhow::Context as _;
@@ -30,6 +31,7 @@ impl Drop for ConstructLock {
 #[derive(Clone)]
 pub struct Store {
     pool: sqlx::PgPool,
+    last_insert_blocks_height: Arc<tokio::sync::RwLock<Option<u64>>>,
 }
 
 impl Store {
@@ -54,7 +56,10 @@ impl Store {
             .context("Unable to execute migrations")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            last_insert_blocks_height: Arc::new(tokio::sync::RwLock::new(None)),
+        })
     }
 
     pub fn new_store(&self) -> merkle::MerklePostgresStore<'_> {
@@ -297,6 +302,8 @@ impl KolmeBackingStore for Store {
         } = block.get_block_hashes();
         let rendered = serde_json::to_string(&block).map_err(KolmeStoreError::custom)?;
 
+        let mut last_insert_blocks_height_guard = self.last_insert_blocks_height.write().await;
+
         let res = sqlx::query!(
             r#"
                 INSERT INTO
@@ -352,6 +359,8 @@ impl KolmeBackingStore for Store {
             }
             return Err(KolmeStoreError::custom(e));
         }
+
+        *last_insert_blocks_height_guard = Some(*height);
 
         Ok(())
     }
@@ -426,10 +435,7 @@ impl KolmeBackingStore for Store {
         Ok(())
     }
 
-    async fn init_remote_data_listener<N: Fn() + Send + 'static>(
-        &self,
-        notify: N,
-    ) -> Result<(), KolmeStoreError> {
+    async fn listen_remote_data(&self) -> Result<Option<RemoteDataListener>, KolmeStoreError> {
         let mut listener = PgListener::connect_with(&self.pool)
             .await
             .map_err(KolmeStoreError::custom)?;
@@ -437,25 +443,42 @@ impl KolmeBackingStore for Store {
             .listen("insert_blocks")
             .await
             .map_err(KolmeStoreError::custom)?;
-        tokio::spawn(async move {
-            loop {
-                match listener.recv().await {
-                    Ok(_) => {
-                        notify();
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            "PostgreSQL insert block notification listener error: {err:?}"
-                        );
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        // recv() will automatically attempt to reconnect on the next call, but
-                        // intervening notifications may be lost, so we send a potentially spurious
-                        // notification just to be safe.
-                        notify();
+        Ok(Some(RemoteDataListener::from(PostgresRemoteDataListener {
+            listener,
+            last_insert_blocks_height: self.last_insert_blocks_height.clone(),
+        })))
+    }
+}
+
+pub struct PostgresRemoteDataListener {
+    listener: PgListener,
+    last_insert_blocks_height: Arc<tokio::sync::RwLock<Option<u64>>>,
+}
+
+impl BackingRemoteDataListener for PostgresRemoteDataListener {
+    async fn recv(&mut self) {
+        loop {
+            match self.listener.recv().await {
+                Ok(notification) => {
+                    // This parses the pg_notify payload into a JSON object and extracts the height
+                    // of the inserted block, then checks if it is greater than the last
+                    // locally-written height.
+                    let height = serde_json::from_str::<serde_json::Value>(notification.payload())
+                        .ok()
+                        .and_then(|v| v.get("height")?.as_str()?.parse::<u64>().ok());
+                    if height.is_none() || height > *self.last_insert_blocks_height.read().await {
+                        return;
                     }
                 }
+                Err(err) => {
+                    tracing::error!("PostgreSQL insert block notification listener error: {err:?}");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    // listener.recv() will automatically attempt to reconnect on the next call, but
+                    // intervening notifications may be lost, so potentially spuriously return just
+                    // to be safe.
+                    return;
+                }
             }
-        });
-        Ok(())
+        }
     }
 }
