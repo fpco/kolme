@@ -162,7 +162,7 @@ mod tests {
         let random_u64: u64 = rand::random();
         let db_name = format!("test_db_{random_u64}");
         let maintenance_pool = PgPoolOptions::new()
-            .max_connections(1)
+            .max_connections(2)
             .connect(&block_db_str)
             .await
             .expect("Failed to create maintenance pool");

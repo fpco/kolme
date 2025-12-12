@@ -12,8 +12,8 @@ use in_memory::Store as KolmeInMemoryStore;
 use merkle_map::{
     MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerializeRaw, Sha256Hash,
 };
-use postgres::Store as KolmePostgresStore;
-pub use r#trait::{HasBlockHashes, KolmeBackingStore};
+use postgres::{PostgresRemoteDataListener, Store as KolmePostgresStore};
+pub use r#trait::{BackingRemoteDataListener, HasBlockHashes, KolmeBackingStore};
 pub use sqlx;
 use sqlx::{pool::PoolOptions, postgres::PgConnectOptions, Postgres};
 use std::{path::Path, sync::Arc};
@@ -31,6 +31,11 @@ pub enum KolmeStore {
     KolmeInMemoryStore,
     KolmeFjallStore,
     KolmePostgresStore,
+}
+
+#[enum_dispatch::enum_dispatch]
+pub enum RemoteDataListener {
+    PostgresRemoteDataListener,
 }
 
 impl KolmeStore {
