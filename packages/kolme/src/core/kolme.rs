@@ -1220,13 +1220,21 @@ impl<App: KolmeApp> Kolme<App> {
         let weak_kolme = self.weak();
         tokio::spawn(async move {
             loop {
-                let resync = tokio::time::timeout(Duration::from_secs(1), listener.recv())
-                    .await
-                    .is_ok();
+                // To ensure this task stops when the Kolme is dropped, this times out on the
+                // listener.recv(), which could otherwise wait forever, and then tries to upgrade
+                // the weak reference.
+                let recv_result =
+                    tokio::time::timeout(Duration::from_secs(1), listener.recv()).await;
                 let Some(kolme) = weak_kolme.upgrade() else {
-                    break;
+                    return;
                 };
-                if resync {
+                if let Ok(Err(err)) = &recv_result {
+                    tracing::error!("Remote data listener error: {err:?}");
+                    // When the listener errors, this resyncs anyway in case of missed
+                    // notifications, with a delay to ensure we don't spin too fast.
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                }
+                if recv_result.is_ok() {
                     tracing::info!("Resyncing after new remote data notification");
                     if let Err(err) = kolme.resync().await {
                         tracing::error!("Error resyncing after remote data notification: {err:?}");

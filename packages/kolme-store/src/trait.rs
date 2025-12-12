@@ -53,9 +53,12 @@ pub trait HasBlockHashes {
 
 #[enum_dispatch(RemoteDataListener)]
 pub trait BackingRemoteDataListener {
-    /// Receives the next notification of new remote data (created by other database clients)
-    /// becoming available in the store. There may be spurious notifications; it is the
-    /// responsibility of the caller to handle these gracefully.
+    /// Receives the next notification of new remote data (created by other clients) becoming
+    /// available in the store. There may be spurious notifications; it is the responsibility of the
+    /// caller to handle these gracefully.  
+    ///
+    /// May return `Err` due to an intermittent problem (such as lost connection), and the next call
+    /// will automatically attempt to recover.
     #[allow(async_fn_in_trait)]
-    async fn recv(&mut self);
+    async fn recv(&mut self) -> Result<(), KolmeStoreError>;
 }

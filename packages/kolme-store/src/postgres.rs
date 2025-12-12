@@ -456,28 +456,21 @@ pub struct PostgresRemoteDataListener {
 }
 
 impl BackingRemoteDataListener for PostgresRemoteDataListener {
-    async fn recv(&mut self) {
+    async fn recv(&mut self) -> Result<(), KolmeStoreError> {
         loop {
-            match self.listener.recv().await {
-                Ok(notification) => {
-                    // This parses the pg_notify payload into a JSON object and extracts the height
-                    // of the inserted block, then checks if it is greater than the last
-                    // locally-written height.
-                    let height = serde_json::from_str::<serde_json::Value>(notification.payload())
-                        .ok()
-                        .and_then(|v| v.get("height")?.as_str()?.parse::<u64>().ok());
-                    if height.is_none() || height > *self.last_insert_blocks_height.read().await {
-                        return;
-                    }
-                }
-                Err(err) => {
-                    tracing::error!("PostgreSQL insert block notification listener error: {err:?}");
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    // listener.recv() will automatically attempt to reconnect on the next call, but
-                    // intervening notifications may be lost, so potentially spuriously return just
-                    // to be safe.
-                    return;
-                }
+            let notification = self
+                .listener
+                .recv()
+                .await
+                .map_err(KolmeStoreError::custom)?;
+            // To avoid notifications for own-writes, this parses the pg_notify payload into a JSON
+            // object and extracts the height of the inserted block, then checks whether it is
+            // greater than the last locally-written height.
+            let height = serde_json::from_str::<serde_json::Value>(notification.payload())
+                .ok()
+                .and_then(|v| v.get("height")?.as_str()?.parse::<u64>().ok());
+            if height.is_none() || height > *self.last_insert_blocks_height.read().await {
+                return Ok(());
             }
         }
     }
