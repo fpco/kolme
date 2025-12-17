@@ -55,10 +55,13 @@ pub trait HasBlockHashes {
 pub trait BackingRemoteDataListener {
     /// Receives the next notification of new remote data (created by other clients) becoming
     /// available in the store. There may be spurious notifications; it is the responsibility of the
-    /// caller to handle these gracefully.  
+    /// caller to handle these gracefully.
     ///
-    /// May return `Err` due to an intermittent problem (such as lost connection), and the next call
-    /// will automatically attempt to recover.
+    /// Returns `Err(KolmeStoreError::RemoteDataListenerStopped)` when the store connection is
+    /// closed and no more notifications are expected.
+    ///
+    /// May return other `Err` values due to an intermittent problem (such as lost connection), and
+    /// the next call will automatically attempt to recover.
     #[allow(async_fn_in_trait)]
     async fn recv(&mut self) -> Result<(), KolmeStoreError>;
 }

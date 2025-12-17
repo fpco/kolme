@@ -450,6 +450,17 @@ impl KolmeBackingStore for Store {
     }
 }
 
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Closing the pool is necessary for the listener created by `listen_remote_data` to get a
+        // PoolClosed error so it will shut down gracefully.
+        let pool = self.pool.clone();
+        tokio::spawn(async move {
+            pool.close().await;
+        });
+    }
+}
+
 pub struct PostgresRemoteDataListener {
     listener: PgListener,
     last_insert_blocks_height: Arc<tokio::sync::RwLock<Option<u64>>>,
@@ -458,19 +469,22 @@ pub struct PostgresRemoteDataListener {
 impl BackingRemoteDataListener for PostgresRemoteDataListener {
     async fn recv(&mut self) -> Result<(), KolmeStoreError> {
         loop {
-            let notification = self
-                .listener
-                .recv()
-                .await
-                .map_err(KolmeStoreError::custom)?;
-            // To avoid notifications for own-writes, this parses the pg_notify payload into a JSON
-            // object and extracts the height of the inserted block, then checks whether it is
-            // greater than the last locally-written height.
-            let height = serde_json::from_str::<serde_json::Value>(notification.payload())
-                .ok()
-                .and_then(|v| v.get("height")?.as_str()?.parse::<u64>().ok());
-            if height.is_none() || height > *self.last_insert_blocks_height.read().await {
-                return Ok(());
+            match self.listener.recv().await {
+                Ok(notification) => {
+                    // To avoid notifications for own-writes, this parses the pg_notify payload into a JSON
+                    // object and extracts the height of the inserted block, then checks whether it is
+                    // greater than the last locally-written height.
+                    let height = serde_json::from_str::<serde_json::Value>(notification.payload())
+                        .ok()
+                        .and_then(|v| v.get("height")?.as_str()?.parse::<u64>().ok());
+                    if height.is_none() || height > *self.last_insert_blocks_height.read().await {
+                        return Ok(());
+                    }
+                }
+                Err(sqlx::Error::PoolClosed) => {
+                    return Err(KolmeStoreError::RemoteDataListenerStopped)
+                }
+                Err(err) => return Err(KolmeStoreError::custom(err)),
             }
         }
     }

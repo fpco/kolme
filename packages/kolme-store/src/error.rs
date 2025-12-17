@@ -22,6 +22,8 @@ pub enum KolmeStoreError {
     MatchingBlockAlreadyInserted { height: u64 },
     #[error("Transaction is already present in database: {txhash}")]
     TxAlreadyInDb { txhash: Sha256Hash },
+    #[error("Remote data listener stopped")]
+    RemoteDataListenerStopped,
     #[error("{0}")]
     Other(String),
 }
