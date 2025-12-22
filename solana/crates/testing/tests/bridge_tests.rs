@@ -260,7 +260,7 @@ fn false_processor_signature_is_rejected() {
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
         meta.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(3))
+        TransactionError::InstructionError(0, InstructionError::Custom(2))
     );
 
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
@@ -274,7 +274,7 @@ fn false_processor_signature_is_rejected() {
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
         meta.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(3))
+        TransactionError::InstructionError(0, InstructionError::Custom(2))
     );
 }
 
