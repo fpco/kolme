@@ -201,9 +201,10 @@ async fn checker(
 ) -> Result<()> {
     let highest_block = *highest_block.lock();
 
-    // Resynchronize all the Kolmes so they have the most up to date state from the database.
+    // Delay a moment to allow all the Kolmes to auto-resynchronize so they have the most up to date
+    // state from the database.
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     for kolme in &*kolmes {
-        kolme.resync().await.unwrap();
         assert_eq!(kolme.read().get_next_height(), highest_block.next());
     }
     let highest_block = kolmes[0]

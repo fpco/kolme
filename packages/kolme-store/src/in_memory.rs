@@ -3,7 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::{r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{
+    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
+    StorableBlock,
+};
 use merkle_map::{
     MerkleDeserializeRaw, MerkleMemoryStore, MerkleSerializeRaw, MerkleStore, Sha256Hash,
 };
@@ -171,5 +174,9 @@ impl KolmeBackingStore for Store {
 
     async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
         Ok(self.0.read().await.latest_archived_block)
+    }
+
+    async fn listen_remote_data(&self) -> Result<Option<RemoteDataListener>, KolmeStoreError> {
+        Ok(None)
     }
 }

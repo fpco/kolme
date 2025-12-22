@@ -152,7 +152,7 @@ async fn setup_postgres() -> Result<(Kolme<TestApp>, SocketAddr)> {
         .expect("Unable to run migrations");
 
     let store =
-        KolmeStore::new_postgres_with_options(options, PgPoolOptions::new().max_connections(2))
+        KolmeStore::new_postgres_with_options(options, PgPoolOptions::new().max_connections(3))
             .await?;
     let code_version = app.genesis.version.clone();
     let kolme = Kolme::new(app, code_version, store).await?;
