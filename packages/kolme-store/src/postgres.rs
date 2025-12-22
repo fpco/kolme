@@ -450,17 +450,6 @@ impl KolmeBackingStore for Store {
     }
 }
 
-impl Drop for Store {
-    fn drop(&mut self) {
-        // Closing the pool is necessary for the listener created by `listen_remote_data` to get a
-        // PoolClosed error so it will shut down gracefully.
-        let pool = self.pool.clone();
-        tokio::spawn(async move {
-            pool.close().await;
-        });
-    }
-}
-
 pub struct PostgresRemoteDataListener {
     listener: PgListener,
     last_insert_blocks_height: Arc<tokio::sync::RwLock<Option<u64>>>,
@@ -480,9 +469,6 @@ impl BackingRemoteDataListener for PostgresRemoteDataListener {
                     if height.is_none() || height > *self.last_insert_blocks_height.read().await {
                         return Ok(());
                     }
-                }
-                Err(sqlx::Error::PoolClosed) => {
-                    return Err(KolmeStoreError::RemoteDataListenerStopped)
                 }
                 Err(err) => return Err(KolmeStoreError::custom(err)),
             }
