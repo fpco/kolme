@@ -5,7 +5,7 @@ use kolme_store::sqlx::postgres::PgConnectOptions;
 use kolme_store::sqlx::{pool::PoolOptions, Postgres};
 use kolme_store::{
     KolmeBackingStore, KolmeConstructLock, KolmeStore as KolmeStoreInner, KolmeStoreError,
-    StorableBlock,
+    RemoteDataListener, StorableBlock,
 };
 use lru::LruCache;
 use parking_lot::RwLock;
@@ -210,5 +210,13 @@ impl<App: KolmeApp> KolmeStore<App> {
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError> {
         self.inner.get_merkle_layer(hash).await
+    }
+
+    /// Starts listening for notifications of new remote data (created by other database clients)
+    /// becoming available in the store. This returns `None` for local-only stores.
+    pub(super) async fn listen_remote_data(
+        &self,
+    ) -> Result<Option<RemoteDataListener>, KolmeStoreError> {
+        self.inner.listen_remote_data().await
     }
 }

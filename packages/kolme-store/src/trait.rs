@@ -1,4 +1,4 @@
-use crate::{BlockHashes, KolmeConstructLock, KolmeStoreError, StorableBlock};
+use crate::{BlockHashes, KolmeConstructLock, KolmeStoreError, RemoteDataListener, StorableBlock};
 use enum_dispatch::enum_dispatch;
 use merkle_map::{
     MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerializeRaw, Sha256Hash,
@@ -43,8 +43,25 @@ pub trait KolmeBackingStore {
     async fn load<T>(&self, hash: Sha256Hash) -> Result<T, MerkleSerialError>
     where
         T: MerkleDeserializeRaw;
+
+    async fn listen_remote_data(&self) -> Result<Option<RemoteDataListener>, KolmeStoreError>;
 }
 
 pub trait HasBlockHashes {
     fn get_block_hashes(&self) -> BlockHashes;
+}
+
+#[enum_dispatch(RemoteDataListener)]
+pub trait BackingRemoteDataListener {
+    /// Receives the next notification of new remote data (created by other clients) becoming
+    /// available in the store. There may be spurious notifications; it is the responsibility of the
+    /// caller to handle these gracefully.
+    ///
+    /// Returns `Err(KolmeStoreError::RemoteDataListenerStopped)` when the store connection is
+    /// closed and no more notifications are expected.
+    ///
+    /// May return other `Err` values due to an intermittent problem (such as lost connection), and
+    /// the next call will automatically attempt to recover.
+    #[allow(async_fn_in_trait)]
+    async fn recv(&mut self) -> Result<(), KolmeStoreError>;
 }

@@ -1,5 +1,6 @@
 use crate::{
-    r#trait::KolmeBackingStore, BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError,
+    r#trait::{BackingRemoteDataListener, KolmeBackingStore},
+    BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
     StorableBlock,
 };
 use anyhow::Context as _;
@@ -9,7 +10,7 @@ use merkle_map::{
 };
 use sqlx::{
     pool::PoolOptions,
-    postgres::{PgAdvisoryLock, PgConnectOptions},
+    postgres::{PgAdvisoryLock, PgConnectOptions, PgListener},
     Executor, Postgres,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -30,6 +31,7 @@ impl Drop for ConstructLock {
 #[derive(Clone)]
 pub struct Store {
     pool: sqlx::PgPool,
+    last_insert_blocks_height: Arc<tokio::sync::RwLock<Option<u64>>>,
 }
 
 impl Store {
@@ -54,7 +56,10 @@ impl Store {
             .context("Unable to execute migrations")
             .inspect_err(|err| tracing::error!("{err:?}"))?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            last_insert_blocks_height: Arc::new(tokio::sync::RwLock::new(None)),
+        })
     }
 
     pub fn new_store(&self) -> merkle::MerklePostgresStore<'_> {
@@ -297,6 +302,8 @@ impl KolmeBackingStore for Store {
         } = block.get_block_hashes();
         let rendered = serde_json::to_string(&block).map_err(KolmeStoreError::custom)?;
 
+        let mut last_insert_blocks_height_guard = self.last_insert_blocks_height.write().await;
+
         let res = sqlx::query!(
             r#"
                 INSERT INTO
@@ -352,6 +359,8 @@ impl KolmeBackingStore for Store {
             }
             return Err(KolmeStoreError::custom(e));
         }
+
+        *last_insert_blocks_height_guard = Some(*height);
 
         Ok(())
     }
@@ -424,5 +433,59 @@ impl KolmeBackingStore for Store {
             .context("Unable to commit archive block height changes")?;
 
         Ok(())
+    }
+
+    async fn listen_remote_data(&self) -> Result<Option<RemoteDataListener>, KolmeStoreError> {
+        let mut listener = PgListener::connect_with(&self.pool)
+            .await
+            .map_err(KolmeStoreError::custom)?;
+        listener
+            .listen("insert_blocks")
+            .await
+            .map_err(KolmeStoreError::custom)?;
+        Ok(Some(RemoteDataListener::from(PostgresRemoteDataListener {
+            listener,
+            last_insert_blocks_height: self.last_insert_blocks_height.clone(),
+        })))
+    }
+}
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Closing the pool is necessary for the listener created by `listen_remote_data` to get a
+        // PoolClosed error so it will shut down gracefully.
+        let pool = self.pool.clone();
+        tokio::spawn(async move {
+            pool.close().await;
+        });
+    }
+}
+
+pub struct PostgresRemoteDataListener {
+    listener: PgListener,
+    last_insert_blocks_height: Arc<tokio::sync::RwLock<Option<u64>>>,
+}
+
+impl BackingRemoteDataListener for PostgresRemoteDataListener {
+    async fn recv(&mut self) -> Result<(), KolmeStoreError> {
+        loop {
+            match self.listener.recv().await {
+                Ok(notification) => {
+                    // To avoid notifications for own-writes, this parses the pg_notify payload into a JSON
+                    // object and extracts the height of the inserted block, then checks whether it is
+                    // greater than the last locally-written height.
+                    let height = serde_json::from_str::<serde_json::Value>(notification.payload())
+                        .ok()
+                        .and_then(|v| v.get("height")?.as_str()?.parse::<u64>().ok());
+                    if height.is_none() || height > *self.last_insert_blocks_height.read().await {
+                        return Ok(());
+                    }
+                }
+                Err(sqlx::Error::PoolClosed) => {
+                    return Err(KolmeStoreError::RemoteDataListenerStopped)
+                }
+                Err(err) => return Err(KolmeStoreError::custom(err)),
+            }
+        }
     }
 }
