@@ -15,22 +15,34 @@ use keypair::Keypair;
 use message::Message;
 use pubkey::Pubkey;
 use signer::Signer;
+use solana_loader_v3_interface::get_program_data_address;
 use transaction::Transaction;
 
 use shared::solana::{
     ExecuteAction, InitializeIxData, InstructionAccount, Payload, RegularMsgIxData, SignedAction,
     SignedMsgIxData, SignerAccount, GIT_REV_SEED, INITIALIZE_IX, REGULAR_IX, SIGNED_IX, STATE_SEED,
-    TOKEN_HOLDER_SEED,
+    TOKEN_HOLDER_SEED, UPGRADE_AUTHORITY_SEED,
 };
 
 const SYSTEM: Pubkey = Pubkey::from_str_const("11111111111111111111111111111111");
 const TOKEN: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_2022: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+const LOADER_V3: Pubkey = Pubkey::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111");
 
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
 pub enum TokenProgram {
     Legacy,
     Token2022,
+}
+
+impl TokenProgram {
+    #[inline]
+    pub fn program_id(&self) -> Pubkey {
+        match self {
+            Self::Legacy => TOKEN,
+            Self::Token2022 => TOKEN_2022,
+        }
+    }
 }
 
 pub fn init_tx(
@@ -56,12 +68,16 @@ pub fn init_ix(
 
     let state_pda = derive_state_pda(&program_id);
     let git_rev_pda = derive_git_rev_pda(&program_id);
+    let upgrade_authority_pda = derive_upgrade_authority_pda(&program_id);
+    let program_data = get_program_data_address(&program_id);
 
     let accounts = vec![
         AccountMeta::new(sender, true),
         AccountMeta::new(SYSTEM, false),
         AccountMeta::new(state_pda, false),
         AccountMeta::new(git_rev_pda, false),
+        AccountMeta::new(upgrade_authority_pda, false),
+        AccountMeta::new_readonly(program_data, false),
     ];
 
     Ok(Message::new_with_blockhash(
@@ -213,25 +229,6 @@ pub fn regular_ix(
     ))
 }
 
-pub fn derive_state_pda(program_id: &Pubkey) -> Pubkey {
-    let (pubkey, _) = Pubkey::find_program_address(&[STATE_SEED], program_id);
-
-    pubkey
-}
-
-pub fn derive_token_holder_acc(program_id: &Pubkey, mint: &Pubkey) -> Pubkey {
-    let seeds = token_holder_seeds(mint);
-    let (holder, _) = Pubkey::find_program_address(&seeds, program_id);
-
-    holder
-}
-
-pub fn derive_git_rev_pda(program_id: &Pubkey) -> Pubkey {
-    let (pubkey, _) = Pubkey::find_program_address(&[GIT_REV_SEED], program_id);
-
-    pubkey
-}
-
 pub fn transfer_payload(
     id: u64,
     program_id: Pubkey,
@@ -284,7 +281,7 @@ pub fn transfer_payload(
     Payload {
         id,
         action: SignedAction::Execute(ExecuteAction {
-            program_id: TOKEN.to_bytes(),
+            program_id: token_program.to_bytes(),
             accounts,
             instruction_data,
             signer: Some(SignerAccount {
@@ -295,16 +292,66 @@ pub fn transfer_payload(
     }
 }
 
-fn token_holder_seeds(mint: &Pubkey) -> [&[u8]; 2] {
-    [TOKEN_HOLDER_SEED, mint.as_array().as_slice()]
+pub fn upgrade_payload(id: u64, program_id: Pubkey, buffer: Pubkey, spill: Pubkey) -> Payload {
+    let (upgrade_authority, bump) =
+        Pubkey::find_program_address(&[UPGRADE_AUTHORITY_SEED], &program_id);
+    let seeds = vec![Vec::from(UPGRADE_AUTHORITY_SEED), Vec::from(&[bump])];
+
+    let ix = solana_loader_v3_interface::instruction::upgrade(
+        &program_id,
+        &buffer,
+        &upgrade_authority,
+        &spill,
+    );
+
+    let accounts: Vec<InstructionAccount> = ix
+        .accounts
+        .into_iter()
+        .map(|x| InstructionAccount {
+            pubkey: x.pubkey.to_bytes(),
+            is_writable: x.is_writable,
+        })
+        .collect();
+
+    // Last account is the authority which must be the signer
+    let index = (accounts.len() - 1) as u8;
+
+    Payload {
+        id,
+        action: SignedAction::Execute(ExecuteAction {
+            program_id: LOADER_V3.to_bytes(),
+            accounts,
+            instruction_data: ix.data,
+            signer: Some(SignerAccount { index, seeds }),
+        }),
+    }
 }
 
-impl TokenProgram {
-    #[inline]
-    pub fn program_id(&self) -> Pubkey {
-        match self {
-            Self::Legacy => TOKEN,
-            Self::Token2022 => TOKEN_2022,
-        }
-    }
+pub fn derive_git_rev_pda(program_id: &Pubkey) -> Pubkey {
+    let (pubkey, _) = Pubkey::find_program_address(&[GIT_REV_SEED], program_id);
+
+    pubkey
+}
+
+pub fn derive_state_pda(program_id: &Pubkey) -> Pubkey {
+    let (pubkey, _) = Pubkey::find_program_address(&[STATE_SEED], program_id);
+
+    pubkey
+}
+
+pub fn derive_upgrade_authority_pda(program_id: &Pubkey) -> Pubkey {
+    let (pubkey, _) = Pubkey::find_program_address(&[UPGRADE_AUTHORITY_SEED], program_id);
+
+    pubkey
+}
+
+pub fn derive_token_holder_acc(program_id: &Pubkey, mint: &Pubkey) -> Pubkey {
+    let seeds = token_holder_seeds(mint);
+    let (holder, _) = Pubkey::find_program_address(&seeds, program_id);
+
+    holder
+}
+
+fn token_holder_seeds(mint: &Pubkey) -> [&[u8]; 2] {
+    [TOKEN_HOLDER_SEED, mint.as_array().as_slice()]
 }

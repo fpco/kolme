@@ -1,3 +1,5 @@
+pub mod bpf_loader_upgradeable;
+
 pub use pinocchio;
 pub use pinocchio_pubkey as pubkey;
 pub use pinocchio_system as system;
@@ -12,7 +14,11 @@ use pinocchio::{
     program_error::ProgramError,
     pubkey::{create_program_address, find_program_address, Pubkey},
     syscalls,
-    sysvars::{rent::Rent, Sysvar},
+    sysvars::{
+        clock,
+        rent::{self, Rent},
+        Sysvar,
+    },
 };
 use smallvec::SmallVec;
 
@@ -91,12 +97,8 @@ pub fn log_pubkey(pubkey: &Pubkey) {
 
 #[inline]
 pub fn assert_owner(acc: &AccountInfo, owner_key: &Pubkey) -> Result<()> {
-    unsafe {
-        // SAFETY: acc.owner() requires unsafe because a call to acc.assign() would invalidate the reference.
-        // However we do not keep or receive any references to it.
-        if acc.owner() != owner_key {
-            return Err(ProgramError::InvalidAccountOwner);
-        }
+    if !acc.is_owned_by(owner_key) {
+        return Err(ProgramError::InvalidAccountOwner);
     }
 
     Ok(())
@@ -114,10 +116,7 @@ impl<'a> Context<'a> {
 
     #[inline]
     pub fn rent(&self) -> Result<Rent> {
-        Lazy::force(&self.rent)
-            .as_ref()
-            .map_err(|e| e.clone())
-            .cloned()
+        Lazy::force(&self.rent).as_ref().map_err(|e| *e).cloned()
     }
 
     #[inline]
@@ -131,7 +130,7 @@ impl<'a> Context<'a> {
 
     #[inline]
     pub fn account(&self, index: usize, req: AccountReq) -> Result<AccountInfo> {
-        let acc = self.accounts[index].clone();
+        let acc = self.accounts[index];
 
         let not_ok = (req.contains(AccountReq::SIGNER) & !acc.is_signer())
             | (req.contains(AccountReq::WRITABLE) & !acc.is_writable())
@@ -145,22 +144,58 @@ impl<'a> Context<'a> {
     }
 
     #[inline]
-    pub fn assert_is_system_program(&self, index: usize) -> Result<()> {
-        if self.accounts[index].key() != &system::ID {
-            return Err(ProgramError::IllegalOwner);
+    pub fn assert_is_system_program(&self, index: usize) -> Result<AccountInfo> {
+        let account = self.accounts[index];
+
+        if account.key() != &system::ID {
+            return Err(ProgramError::InvalidArgument);
         }
 
-        Ok(())
+        Ok(account)
     }
 
     #[inline]
-    pub fn assert_is_token_program(&self, index: usize) -> Result<()> {
-        let pubkey = self.accounts[index].key();
-        if pubkey != &token::ID && pubkey != &token2022::ID {
-            return Err(ProgramError::IllegalOwner);
+    pub fn assert_is_token_program(&self, index: usize) -> Result<AccountInfo> {
+        let account = self.accounts[index];
+
+        if account.key() != &token::ID && account.key() != &token2022::ID {
+            return Err(ProgramError::InvalidArgument);
         }
 
-        Ok(())
+        Ok(account)
+    }
+
+    #[inline]
+    pub fn assert_is_loader_v3(&self, index: usize) -> Result<AccountInfo> {
+        let account = self.accounts[index];
+
+        if account.key() != &bpf_loader_upgradeable::ID {
+            return Err(ProgramError::InvalidArgument);
+        }
+
+        Ok(account)
+    }
+
+    #[inline]
+    pub fn assert_is_rent_sysvar(&self, index: usize) -> Result<AccountInfo> {
+        let account = self.accounts[index];
+
+        if account.key() != &rent::RENT_ID {
+            return Err(ProgramError::InvalidArgument);
+        }
+
+        Ok(account)
+    }
+
+    #[inline]
+    pub fn assert_is_clock_sysvar(&self, index: usize) -> Result<AccountInfo> {
+        let account = self.accounts[index];
+
+        if account.key() != &clock::CLOCK_ID {
+            return Err(ProgramError::InvalidArgument);
+        }
+
+        Ok(account)
     }
 
     /// Will create and initialize the account with the given data. Will return an error if the program is already the owner (account was already initialized).
@@ -172,12 +207,8 @@ impl<'a> Context<'a> {
         derivation: PdaDerivation,
         data: T,
     ) -> Result<PdaData<T, D>> {
-        unsafe {
-            // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
-            // However we do not keep or receive any references to it.
-            if pda.owner() == self.program_id {
-                return Err(ProgramError::AccountAlreadyInitialized);
-            }
+        if pda.owner() == self.program_id {
+            return Err(ProgramError::AccountAlreadyInitialized);
         }
 
         let (address, bump) = if let Some(bump) = derivation.bump {
@@ -269,15 +300,10 @@ impl<'a> Context<'a> {
         pda: &AccountInfo,
         seeds: &[&[u8]],
     ) -> Result<PdaData<T, D>> {
-        unsafe {
-            // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
-            // However we do not keep or receive any references to it.
-
-            // We check if data_len() is zero because it's possible for another program to have transferred ownership over.
-            // In such case it has to have set the storage to 0 and we catch this early.
-            if pda.owner() != self.program_id || pda.data_len() == 0 {
-                return Err(ProgramError::UninitializedAccount);
-            }
+        // We check if data_len() is zero because it's possible for another program to have transferred ownership over.
+        // In such case it has to have set the storage to 0 and we catch this early.
+        if pda.owner() != self.program_id || pda.data_len() == 0 {
+            return Err(ProgramError::UninitializedAccount);
         }
 
         // Since the account contains data that it means that it was initialized before.
@@ -311,13 +337,8 @@ impl<'a> Context<'a> {
     ) -> Result<PdaData<T, D>> {
         // Note: load_pda() also checks for data_len being 0 (see the comment there).
         // Here we don't because we still want to treat the account as initialized in such case.
-        let is_initialized = unsafe {
-            // SAFETY: pda.owner() requires unsafe because a call to pda.assign() would invalidate the reference.
-            // However we do not keep or receive any references to it.
-            pda.owner() == self.program_id
-        };
 
-        if is_initialized {
+        if pda.owner() == self.program_id {
             self.load_pda(pda, derivation.seeds)
         } else {
             self.init_pda(payer, pda, derivation, init())
@@ -337,6 +358,10 @@ impl<'a> PdaDerivation<'a> {
             seeds,
             bump: Some(bump),
         }
+    }
+
+    pub fn as_seeds(&'a self) -> SmallVec<[Seed<'a>; 4]> {
+        SmallVec::<[Seed<'a>; 4]>::from_iter(self.seeds.iter().map(|x| Seed::from(*x)))
     }
 }
 
@@ -364,7 +389,6 @@ impl<T: PdaDataSerialize, const D: u8> PdaData<T, D> {
         acc: &AccountInfo,
         payer: &AccountInfo,
         rent: &Rent,
-        zero_mem: bool,
     ) -> Result<()> {
         let data_size = (self.data.serialized_size() + 2) as usize; // +2 for discriminant and bump seed bytes.
         let bytes = &mut *acc.try_borrow_mut_data()?;
@@ -380,7 +404,7 @@ impl<T: PdaDataSerialize, const D: u8> PdaData<T, D> {
         }
 
         let needed_space = data_size - bytes.len();
-        let _ = bytes; // Drop the borrow because realloc() needs it.
+        let _ = bytes; // Drop the borrow because resize() needs it.
 
         let existing_lamports = acc.lamports();
         let required_lamports = rent
@@ -397,7 +421,7 @@ impl<T: PdaDataSerialize, const D: u8> PdaData<T, D> {
             .invoke()?;
         }
 
-        acc.realloc(data_size, zero_mem)?;
+        acc.resize(data_size)?;
 
         let bytes = &mut *acc.try_borrow_mut_data()?;
         bytes[0] = D;

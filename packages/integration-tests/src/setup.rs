@@ -1,4 +1,4 @@
-use std::{collections::btree_map::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::btree_map::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::{ensure, Result};
 use cosmos::{
@@ -7,7 +7,8 @@ use cosmos::{
 };
 use kolme::*;
 use kolme_solana_bridge_client::{
-    derive_token_holder_acc, keypair::Keypair, pubkey::Pubkey, signer::Signer, TokenProgram,
+    derive_token_holder_acc, derive_upgrade_authority_pda, keypair::Keypair, pubkey::Pubkey,
+    signer::Signer, TokenProgram,
 };
 use rust_decimal::Decimal;
 use shared::{
@@ -82,6 +83,8 @@ pub async fn deploy_solana_bridge() -> Result<()> {
         BRIDGE_PUBKEY.to_string()
     );
 
+    let authority = derive_upgrade_authority_pda(&BRIDGE_PUBKEY);
+
     // Unfortunately the Solana libs do not provide a way to programatically deploy
     // and the CLI deployment code is too unhinged to easily port:
     // https://github.com/anza-xyz/agave/blob/266ad4781481bddffcf6d3afa995dfaee2ea033e/cli/src/program.rs#L1275
@@ -93,6 +96,22 @@ pub async fn deploy_solana_bridge() -> Result<()> {
             "--program-id",
             "./solana/bridge_keypair.json",
             "./solana/sbf-out/kolme_solana_bridge.so",
+            "--url",
+            "http://localhost:8899",
+        ])
+        .spawn()?
+        .wait()
+        .await?;
+
+    let mut cmd = Command::new("solana");
+    cmd.current_dir(workdir)
+        .args([
+            "program",
+            "set-upgrade-authority",
+            &BRIDGE_PUBKEY.to_string(),
+            "--new-upgrade-authority",
+            &authority.to_string(),
+            "--skip-new-upgrade-authority-signer-check",
             "--url",
             "http://localhost:8899",
         ])
@@ -146,6 +165,142 @@ pub async fn make_cosmos_client() -> Result<Cosmos> {
         .builder_with_config()
         .await?
         .build()?)
+}
+
+// TODO: This doesn't write the program code properly for some reason. Should find out why and fix
+// instead of using the crappy bodge below.
+
+// pub async fn make_buffer(
+//     client: &SolanaClient,
+//     deployer: &Keypair,
+//     program_bytes: &[u8],
+//     authority: &Pubkey
+// ) -> Result<Pubkey> {
+//     let buffer_keypair = Keypair::new();
+//     let temp_authority = Keypair::new();
+
+//     let size = UpgradeableLoaderState::size_of_buffer(program_bytes.len());
+//     let lamports = client.get_minimum_balance_for_rent_exemption(size).await?;
+
+//     let create_ixs = solana_loader_v3_interface::instruction::create_buffer(
+//         &deployer.pubkey(),
+//         &buffer_keypair.pubkey(),
+//         &temp_authority.pubkey(),
+//         lamports,
+//         program_bytes.len()
+//     ).unwrap();
+
+//     let blockhash = client.get_latest_blockhash().await?;
+//     let tx = Transaction::new_signed_with_payer(
+//         &create_ixs,
+//         Some(&deployer.pubkey()),
+//         &[deployer, &buffer_keypair],
+//         blockhash,
+//     );
+
+//     tracing::info!("Creating buffer...");
+//     let signature = client.send_and_confirm_transaction(&tx).await?;
+//     tracing::info!("Done: {signature}");
+
+//     const CHUNK_SIZE: usize = 800;
+
+//     tracing::info!("Writing data into buffer...");
+//     let config = RpcSendTransactionConfig {
+//         skip_preflight: true,
+//         ..Default::default()
+//     };
+
+//     let mut total_written = 0;
+//     let mut last_write_sig: Option<Signature> = None;
+
+//     for chunk in program_bytes.chunks(CHUNK_SIZE) {
+//         let write_ix = solana_loader_v3_interface::instruction::write(
+//             &buffer_keypair.pubkey(),
+//             &temp_authority.pubkey(),
+//             total_written as u32,
+//             Vec::from(chunk),
+//         );
+
+//         total_written += chunk.len();
+
+//         let blockhash = client.get_latest_blockhash().await?;
+//         let tx = Transaction::new_signed_with_payer(
+//             &[write_ix],
+//             Some(&deployer.pubkey()),
+//             &[deployer, &temp_authority],
+//             blockhash,
+//         );
+
+//         let signature = client.send_transaction_with_config(&tx, config.clone()).await?;
+//         client.confirm_transaction_with_commitment(&signature, CommitmentConfig::confirmed()).await?;
+//         last_write_sig = Some(signature);
+//     }
+
+//     let tx = Transaction::new_signed_with_payer(
+//         &[solana_loader_v3_interface::instruction::set_buffer_authority(
+//             &buffer_keypair.pubkey(),
+//             &temp_authority.pubkey(),
+//             authority
+//         )],
+//         Some(&deployer.pubkey()),
+//         &[deployer, &temp_authority],
+//         blockhash
+//     );
+
+//     tracing::info!("Setting {authority} as buffer authority...");
+//     let signature = client.send_and_confirm_transaction(&tx).await?;
+//     tracing::info!("Done: {signature}");
+
+//     if let Some(signature) = last_write_sig {
+//         tracing::info!("Waiting for the buffer write transactions to be finalized.");
+//         client.poll_for_signature_with_commitment(&signature, CommitmentConfig::finalized()).await?;
+//     }
+
+//     Ok(buffer_keypair.pubkey())
+// }
+
+pub async fn make_buffer(program_path: &str, authority: &Pubkey) -> Result<Pubkey> {
+    let workdir = env!("CARGO_MANIFEST_DIR");
+
+    let mut cmd = Command::new("solana");
+    let output = cmd
+        .current_dir(workdir)
+        .args([
+            "program",
+            "write-buffer",
+            program_path,
+            "--commitment",
+            "finalized",
+            "--url",
+            "http://localhost:8899",
+        ])
+        .output()
+        .await?;
+
+    assert!(output.status.success());
+
+    let output = String::from_utf8(output.stdout)?;
+    let buffer =
+        Pubkey::from_str(output.as_str().trim_end().trim_start_matches("Buffer: ")).unwrap();
+
+    let mut cmd = Command::new("solana");
+    cmd.current_dir(workdir)
+        .args([
+            "program",
+            "set-buffer-authority",
+            &buffer.to_string(),
+            "--new-buffer-authority",
+            &authority.to_string(),
+            "--commitment",
+            "finalized",
+            "--url",
+            "http://localhost:8899",
+        ])
+        .spawn()?
+        .wait()
+        .await?;
+
+    Ok(buffer)
 }
 
 pub async fn cosmos_send_osmo(

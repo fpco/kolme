@@ -1,14 +1,12 @@
-use std::{collections::BTreeMap, path::PathBuf, str::FromStr};
+use std::collections::BTreeMap;
 
-use cosmos::{
-    proto::cosmos::bank::v1beta1::MsgSend, Coin, CosmosNetwork, HasAddress, HasAddressHrp,
-    SeedPhrase, TxBuilder,
+use integration_tests::setup::{
+    airdrop, deploy_solana_bridge, make_buffer, make_solana_client, BRIDGE_PUBKEY,
 };
-use integration_tests::{get_cosmos_connection, prepare_local_contract};
 use kolme::*;
+use kolme_solana_bridge_client::{derive_upgrade_authority_pda, keypair::Keypair, signer::Signer};
 use testtasks::TestTasks;
 
-/// In the future, move to an example and convert the binary to a library.
 #[derive(Clone)]
 pub struct SampleKolmeApp {
     pub genesis: GenesisInfo,
@@ -43,17 +41,20 @@ pub enum SampleMessage {
 const DUMMY_CODE_VERSION: &str = "dummy code version";
 
 impl SampleKolmeApp {
-    fn new(code_id: u64, listener: PublicKey, processor: PublicKey, approver: PublicKey) -> Self {
+    fn new(listener: PublicKey, processor: PublicKey, approver: PublicKey) -> Self {
         let mut chains = ConfiguredChains::default();
         chains
-            .insert_cosmos(
-                CosmosChain::OsmosisLocal,
+            .insert_solana(
+                SolanaChain::Local,
                 ChainConfig {
                     assets: BTreeMap::new(),
-                    bridge: BridgeContract::NeededCosmosBridge { code_id },
+                    bridge: BridgeContract::NeededSolanaBridge {
+                        program_id: BRIDGE_PUBKEY.to_string(),
+                    },
                 },
             )
             .unwrap();
+
         let genesis = GenesisInfo {
             kolme_ident: "Dev code".to_owned(),
             validator_set: ValidatorSet {
@@ -93,48 +94,37 @@ impl KolmeApp for SampleKolmeApp {
 }
 
 #[tokio::test]
-async fn test_cosmos_migrate() {
+#[ignore = "depends on local Solana validator thus hidden from default tests"]
+async fn test_solana_migrate() {
     init_logger(true, None);
-    TestTasks::start(test_cosmos_migrate_inner, ()).await;
+    TestTasks::start(test_solana_migrate_inner, ()).await;
 }
 
-async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
-    // Ensure we have exclusive access to the master wallet
-    // and fund our local wallet.
-    let cosmos = get_cosmos_connection().await.unwrap();
-    let submitter_seed = SeedPhrase::random();
-    let submitter_wallet = submitter_seed
-        .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
-        .unwrap();
-    let master_wallet = SeedPhrase::from_str("osmosis-local")
-        .unwrap()
-        .with_hrp(CosmosNetwork::OsmosisLocal.get_address_hrp())
-        .unwrap();
+async fn test_solana_migrate_inner(testtasks: TestTasks, (): ()) {
+    deploy_solana_bridge().await.unwrap();
 
-    let mut builder = TxBuilder::default();
-    builder.add_message(MsgSend {
-        from_address: master_wallet.get_address_string(),
-        to_address: submitter_wallet.get_address_string(),
-        amount: vec![Coin {
-            denom: "uosmo".to_owned(),
-            amount: "20000000".to_owned(),
-        }],
-    });
-    builder
-        .sign_and_broadcast(&cosmos, &master_wallet)
+    let client = make_solana_client();
+
+    let submitter = Keypair::new();
+    // let deployer = Keypair::new();
+
+    // futures::join!(
+    //     async { airdrop(&client, &submitter.pubkey(), 10000000).await.unwrap(); },
+    //     async { airdrop(&client, &deployer.pubkey(), 20000000000).await.unwrap(); },
+    // );
+
+    airdrop(&client, &submitter.pubkey(), 10000000)
         .await
         .unwrap();
+
+    let spill_address = Keypair::new();
 
     let processor = SecretKey::random();
     let listener = SecretKey::random();
     let approver = SecretKey::random();
-    let orig_code_id = prepare_local_contract(&submitter_wallet)
-        .await
-        .unwrap()
-        .get_code_id();
+
     let kolme = Kolme::new(
         SampleKolmeApp::new(
-            orig_code_id,
             listener.public_key(),
             processor.public_key(),
             approver.public_key(),
@@ -146,54 +136,42 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
     .unwrap();
 
     testtasks.spawn_persistent(Processor::new(kolme.clone(), processor.clone()).run());
-    testtasks.try_spawn_persistent(Submitter::new_cosmos(kolme.clone(), submitter_seed).run());
+    testtasks.try_spawn_persistent(Submitter::new_solana(kolme.clone(), submitter, None).run());
     testtasks.try_spawn_persistent(
-        Listener::new(kolme.clone(), listener.clone()).run(ChainName::Cosmos),
+        Listener::new(kolme.clone(), listener.clone()).run(ChainName::Solana),
     );
     testtasks.try_spawn_persistent(Approver::new(kolme.clone(), approver.clone()).run());
 
-    kolme
-        .wait_for_block(BlockHeight::start().next())
-        .await
-        .unwrap();
+    let (_, buffer) = futures::join!(
+        async {
+            kolme
+                .wait_for_block(BlockHeight::start().next())
+                .await
+                .unwrap();
+        },
+        async {
+            let authority = derive_upgrade_authority_pda(&BRIDGE_PUBKEY);
 
-    let cosmos = kolme.get_cosmos(CosmosChain::OsmosisLocal).await.unwrap();
+            let workdir = env!("CARGO_MANIFEST_DIR");
+            let path = format!("{workdir}/solana/sbf-out/kolme_solana_bridge.so");
 
-    // OK, setup is done.
-    let contract = match &kolme
-        .read()
-        .get_bridge_contracts()
-        .get(ExternalChain::OsmosisLocal)
-        .unwrap()
-        .config
-        .bridge
-    {
-        BridgeContract::NeededCosmosBridge { .. } => unreachable!(),
-        BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
-        BridgeContract::Deployed(addr) => addr.parse().unwrap(),
-    };
-    let contract = cosmos.make_contract(contract);
+            make_buffer(&path, &authority).await.unwrap()
+        }
+    );
 
-    // Make sure we started with code ID 1
-    assert_eq!(contract.info().await.unwrap().code_id, orig_code_id);
+    assert_eq!(
+        client.get_balance(&spill_address.pubkey()).await.unwrap(),
+        0
+    );
 
-    // Upload the contract again
-    let mut wasm_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    wasm_file.push("../../wasm/artifacts/kolme_cosmos_bridge.wasm");
-    let new_code_id = cosmos
-        .store_code_path(&submitter_wallet, &wasm_file)
-        .await
-        .unwrap();
-
-    // Initiate a contract migration
     let block = kolme
         .sign_propose_await_transaction(
             &approver,
             vec![Message::Admin(AdminMessage::MigrateContract(Box::new(
-                TaggedJson::new(MigrateContract::Cosmos {
-                    chain: CosmosChain::OsmosisLocal,
-                    new_code_id: new_code_id.get_code_id(),
-                    message: serde_json::json!({}),
+                TaggedJson::new(MigrateContract::Solana {
+                    chain: SolanaChain::Local,
+                    buffer_address: buffer,
+                    spill_address: spill_address.pubkey(),
                 })
                 .unwrap()
                 .sign(&approver)
@@ -205,11 +183,14 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
 
     let mut log_events = kolme.get_log_events_for(block.height()).await.unwrap();
     assert_eq!(log_events.len(), 1);
+
     let proposal_id = match log_events.pop().unwrap() {
         LogEvent::NewAdminProposal(id) => id,
         _ => unreachable!(),
     };
+
     let kolme_r = kolme.read();
+
     let payload = kolme_r.get_admin_proposal_payload(proposal_id).unwrap();
     let block = kolme
         .sign_propose_await_transaction(
@@ -220,9 +201,11 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
         )
         .await
         .unwrap();
+
     let log_events = kolme.get_log_events_for(block.height()).await.unwrap();
     assert_eq!(log_events.len(), 2);
     assert_eq!(log_events[0], LogEvent::AdminProposalApproved(proposal_id));
+
     match log_events[1] {
         LogEvent::NewBridgeAction { chain, id } => {
             kolme.wait_for_action_finished(chain, id).await.unwrap();
@@ -230,8 +213,5 @@ async fn test_cosmos_migrate_inner(testtasks: TestTasks, (): ()) {
         _ => unreachable!(),
     }
 
-    assert_eq!(
-        contract.info().await.unwrap().code_id,
-        new_code_id.get_code_id()
-    );
+    assert!(client.get_balance(&spill_address.pubkey()).await.unwrap() > 0);
 }

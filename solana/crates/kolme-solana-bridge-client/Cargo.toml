@@ -17,3 +17,4 @@ solana-pubkey = { workspace = true, features = ["curve25519", "std"] }
 solana-signer = { workspace = true }
 solana-transaction = { workspace = true, features = ["bincode"] }
 spl-associated-token-account-client = { workspace = true }
+solana-loader-v3-interface = { workspace = true, features = ["bincode"] }

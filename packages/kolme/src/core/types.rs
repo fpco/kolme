@@ -1221,10 +1221,34 @@ pub enum AdminMessage {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct MigrateContract {
-    pub chain: ExternalChain,
-    pub new_code_id: u64,
-    pub message: serde_json::Value,
+pub enum MigrateContract {
+    #[cfg(feature = "cosmwasm")]
+    Cosmos {
+        chain: CosmosChain,
+        new_code_id: u64,
+        message: serde_json::Value,
+    },
+    #[cfg(feature = "solana")]
+    Solana {
+        chain: SolanaChain,
+        buffer_address: SolanaPubkey,
+        spill_address: SolanaPubkey,
+    },
+}
+
+impl MigrateContract {
+    // Because we are matching on a reference, Rust requires that the _ pattern is
+    // used even on an empty enum despite that it could never match in practice.
+    #[allow(unreachable_patterns)]
+    pub fn chain(&self) -> ExternalChain {
+        match self {
+            #[cfg(feature = "cosmwasm")]
+            Self::Cosmos { chain, .. } => (*chain).into(),
+            #[cfg(feature = "solana")]
+            Self::Solana { chain, .. } => (*chain).into(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -1679,23 +1703,35 @@ impl ExecAction {
                 ChainName::PassThrough => todo!(),
             },
             ExecAction::MigrateContract { migrate_contract } => {
+                let contract_addr = match &config.bridge {
+                    BridgeContract::Deployed(addr) => addr.clone(),
+                    _ => anyhow::bail!(
+                        "Unable to migrate contract for chain {chain}: contract isn't deployed"
+                    ),
+                };
+
                 match chain.name() {
                     #[cfg(feature = "cosmwasm")]
                     ChainName::Cosmos => {
-                        let contract_addr = match &config.bridge {
-                        BridgeContract::Deployed(addr) => addr.clone(),
-                        _ => anyhow::bail!("Unable to migrate contract for chain {chain}: contract isn't deployed")
-                    };
-                        let MigrateContract {
-                            chain: _,
+                        #[allow(irrefutable_let_patterns)]
+                        let MigrateContract::Cosmos {
                             new_code_id,
                             message,
-                        } = migrate_contract.as_inner();
+                            ..
+                        } = migrate_contract.as_inner()
+                        else {
+                            anyhow::bail!(
+                                "Expecting Cosmos migrate message, got one for: {}.",
+                                migrate_contract.as_inner().chain()
+                            );
+                        };
+
                         let msg = CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Migrate {
                             contract_addr,
                             new_code_id: *new_code_id,
                             msg: Binary::from(serde_json::to_vec(message)?),
                         });
+
                         let payload = serde_json::to_string(&cosmos::PayloadWithId {
                             id,
                             action: shared::cosmos::CosmosAction::Cosmos(vec![msg]),
@@ -1706,7 +1742,30 @@ impl ExecAction {
                     #[cfg(not(feature = "cosmwasm"))]
                     ChainName::Cosmos => unreachable!(),
                     #[cfg(feature = "solana")]
-                    ChainName::Solana => todo!(),
+                    ChainName::Solana => {
+                        #[allow(irrefutable_let_patterns)]
+                        let MigrateContract::Solana {
+                            buffer_address,
+                            spill_address,
+                            ..
+                        } = migrate_contract.as_inner()
+                        else {
+                            anyhow::bail!(
+                                "Expecting Solana migrate message, got one for: {}.",
+                                migrate_contract.as_inner().chain()
+                            );
+                        };
+
+                        let program_id = SolanaPubkey::from_str(&contract_addr)?;
+                        let payload = kolme_solana_bridge_client::upgrade_payload(
+                            id.0,
+                            program_id,
+                            *buffer_address,
+                            *spill_address,
+                        );
+
+                        serialize_solana_payload(&payload)
+                    }
                     #[cfg(not(feature = "solana"))]
                     ChainName::Solana => unreachable!(),
                     #[cfg(feature = "pass_through")]

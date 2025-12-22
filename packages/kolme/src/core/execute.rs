@@ -828,7 +828,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 }
                 ProposalPayload::MigrateContract(migrate_contract) => {
                     self.add_action(
-                        migrate_contract.as_inner().chain,
+                        migrate_contract.as_inner().chain(),
                         ExecAction::MigrateContract { migrate_contract },
                     )?;
                 }
