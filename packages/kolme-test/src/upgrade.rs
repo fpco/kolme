@@ -66,7 +66,7 @@ impl KolmeApp for SampleKolmeApp1 {
     async fn execute(
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
-        SampleMessage::SayHi {}: &Self::Message,
+        SampleMessage::SayHi: &Self::Message,
     ) -> Result<()> {
         ctx.state_mut().hi_count1 += 1;
         Ok(())
@@ -96,7 +96,7 @@ impl KolmeApp for SampleKolmeApp2 {
     async fn execute(
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
-        SampleMessage::SayHi {}: &Self::Message,
+        SampleMessage::SayHi: &Self::Message,
     ) -> Result<()> {
         // This is the only difference between the two versions!
         // But it results in totally different resulting app states.

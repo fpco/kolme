@@ -13,3 +13,4 @@ serde = { workspace = true, features = ["derive"] }
 solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true, features = ["serde", "std"] }
 tokio = { workspace = true }
+absurd-future = { workspace = true }

@@ -12,8 +12,8 @@ pub struct SampleKolmeApp {
 
 #[derive(Clone, Debug)]
 pub struct SampleState {
-    next_hi: u64,
-    payloads: MerkleMap<u64, Vec<u8>>,
+    next_hi: u8,
+    payloads: MerkleMap<u8, Vec<u8>>,
 }
 
 impl MerkleSerialize for SampleState {
@@ -112,10 +112,18 @@ impl KolmeApp for SampleKolmeApp {
 #[tokio::test]
 async fn large_sync() {
     kolme::init_logger(true, None);
-    TestTasks::start(large_sync_inner, ()).await
+    let mut payload_size = 10_000;
+
+    if let Ok(payload_size_str) = std::env::var("LARGE_SYNC_PAYLOAD_SIZE") {
+        if let Ok(size) = payload_size_str.parse::<usize>() {
+            tracing::info!("LARGE_SYNC_PAYLOAD_SIZE detected, using its value");
+            payload_size = size
+        }
+    };
+    TestTasks::start(large_sync_inner, payload_size).await
 }
 
-async fn large_sync_inner(testtasks: TestTasks, (): ()) {
+async fn large_sync_inner(testtasks: TestTasks, payload_size: usize) {
     // We're going to launch a fully working cluster, then manually
     // delete some older blocks and confirm we can fast-sync
     // just the newest block.
@@ -133,7 +141,7 @@ async fn large_sync_inner(testtasks: TestTasks, (): ()) {
 
     // Send a few transactions to bump up the block height
     for i in 0..200 {
-        let payload = std::iter::repeat(i).take(50_000).collect::<Vec<_>>();
+        let payload = std::iter::repeat_n(i, payload_size).collect::<Vec<_>>();
         let secret = SecretKey::random();
         kolme1
             .sign_propose_await_transaction(

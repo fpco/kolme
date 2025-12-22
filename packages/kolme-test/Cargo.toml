@@ -17,6 +17,7 @@ sqlx = { workspace = true, features = ["time"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+absurd-future = { workspace = true }
 
 [target.'cfg(tokio_unstable)'.dependencies]
 tokio = { workspace = true, features = ["test-util"] }

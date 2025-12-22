@@ -22,6 +22,7 @@ solana-signature = { workspace = true }
 spl-token-client = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+absurd-future = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true, features = ["ws"] }

@@ -35,7 +35,7 @@ jobs:
           tool: just@1.40.0,nextest@0.9.99,sqlx-cli
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.84.0
+          toolchain: 1.86.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:

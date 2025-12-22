@@ -1,5 +1,6 @@
 use std::{collections::BTreeSet, net::SocketAddr};
 
+use absurd_future::absurd_future;
 use anyhow::Result;
 
 use kolme::*;

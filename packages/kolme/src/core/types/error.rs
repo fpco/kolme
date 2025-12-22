@@ -19,6 +19,11 @@ pub enum KolmeError {
         max_height: BlockHeight,
         proposed_height: BlockHeight,
     },
+    #[error("Start height {start} is greater than {end} height")]
+    InvalidBlockHeight {
+        start: BlockHeight,
+        end: BlockHeight,
+    },
     #[error("{0}")]
     Other(String),
 }
