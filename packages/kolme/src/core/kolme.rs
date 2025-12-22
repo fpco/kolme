@@ -1224,15 +1224,11 @@ impl<App: KolmeApp> Kolme<App> {
         let weak_kolme = self.weak();
         self.inner.tasks.write().spawn(async move {
             loop {
-                match listener.recv().await {
-                    Err(KolmeStoreError::RemoteDataListenerStopped) => return,
-                    Err(err) => {
-                        tracing::error!("Remote data listener error: {err:?}");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        // When the listener errors, this resyncs anyway in case of missed
-                        // notifications, with a delay to ensure we don't spin too fast.
-                    }
-                    Ok(_) => {}
+                if let Err(err) = listener.recv().await {
+                    tracing::error!("Remote data listener error: {err:?}");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    // When the listener errors, this resyncs anyway in case of missed
+                    // notifications, with a delay to ensure we don't spin too fast.
                 }
                 let Some(kolme) = weak_kolme.upgrade() else {
                     return;
