@@ -10,6 +10,7 @@ use parking_lot::RwLock;
 #[cfg(feature = "solana")]
 use solana_client::nonblocking::pubsub_client::PubsubClient;
 pub use store::KolmeStore;
+use tokio::task::JoinSet;
 use utils::trigger::TriggerSubscriber;
 
 #[cfg(any(feature = "solana", feature = "cosmwasm"))]
@@ -64,6 +65,8 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     block_requester: OnceLock<tokio::sync::mpsc::Sender<BlockHeight>>,
     landed_txs: OnceLock<tokio::sync::mpsc::Sender<Arc<SignedBlock<App::Message>>>>,
     failed_txs: tokio::sync::broadcast::Sender<Arc<SignedTaggedJson<FailedTransaction>>>,
+    // Set of background tasks that will be aborted when Kolme is dropped.
+    tasks: Arc<RwLock<JoinSet<()>>>,
 }
 
 /// Access to a specific block height.
@@ -668,6 +671,7 @@ impl<App: KolmeApp> Kolme<App> {
             block_requester: OnceLock::new(),
             landed_txs: OnceLock::new(),
             failed_txs: tokio::sync::broadcast::Sender::new(100),
+            tasks: Arc::new(RwLock::new(JoinSet::new())),
         };
 
         let kolme = Kolme {
@@ -1218,7 +1222,7 @@ impl<App: KolmeApp> Kolme<App> {
             return Ok(());
         };
         let weak_kolme = self.weak();
-        tokio::spawn(async move {
+        self.inner.tasks.write().spawn(async move {
             loop {
                 match listener.recv().await {
                     Err(KolmeStoreError::RemoteDataListenerStopped) => return,
