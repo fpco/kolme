@@ -21,7 +21,7 @@ pub enum State {
         // The raw program data follows this serialized structure in the
         // account's data.
     },
-    /// An Program account.
+    /// A Program account.
     Program {
         /// Address of the ProgramData account.
         programdata_address: Pubkey,
