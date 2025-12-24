@@ -1236,10 +1236,35 @@ pub enum AdminMessage {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct MigrateContract {
-    pub chain: ExternalChain,
-    pub new_code_id: u64,
-    pub message: serde_json::Value,
+pub enum MigrateContract {
+    #[cfg(feature = "cosmwasm")]
+    Cosmos {
+        chain: CosmosChain,
+        new_code_id: u64,
+        message: serde_json::Value,
+    },
+    #[cfg(feature = "solana")]
+    Solana {
+        chain: SolanaChain,
+        buffer_address: SolanaPubkey,
+        spill_address: SolanaPubkey,
+    },
+}
+
+impl MigrateContract {
+    #[allow(unreachable_patterns)]
+    pub fn chain(&self) -> ExternalChain {
+        match self {
+            #[cfg(feature = "cosmwasm")]
+            Self::Cosmos { chain, .. } => (*chain).into(),
+            #[cfg(feature = "solana")]
+            Self::Solana { chain, .. } => (*chain).into(),
+            // While the underlying MigrateContract type is uninhabited for this combination of flags,
+            // references are always inhabited, and therefore this catch-all is necessary but unreachable.
+            #[cfg(not(any(feature = "cosmwasm", feature = "solana")))]
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -1694,23 +1719,26 @@ impl ExecAction {
                 ChainName::PassThrough => todo!(),
             },
             ExecAction::MigrateContract { migrate_contract } => {
-                match chain.name() {
+                let contract_addr = match &config.bridge {
+                    BridgeContract::Deployed(addr) => addr.clone(),
+                    _ => anyhow::bail!(
+                        "Unable to migrate contract for chain {chain}: contract isn't deployed"
+                    ),
+                };
+
+                match migrate_contract.as_inner() {
                     #[cfg(feature = "cosmwasm")]
-                    ChainName::Cosmos => {
-                        let contract_addr = match &config.bridge {
-                        BridgeContract::Deployed(addr) => addr.clone(),
-                        _ => anyhow::bail!("Unable to migrate contract for chain {chain}: contract isn't deployed")
-                    };
-                        let MigrateContract {
-                            chain: _,
-                            new_code_id,
-                            message,
-                        } = migrate_contract.as_inner();
+                    MigrateContract::Cosmos {
+                        new_code_id,
+                        message,
+                        ..
+                    } => {
                         let msg = CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Migrate {
                             contract_addr,
                             new_code_id: *new_code_id,
                             msg: Binary::from(serde_json::to_vec(message)?),
                         });
+
                         let payload = serde_json::to_string(&cosmos::PayloadWithId {
                             id,
                             action: shared::cosmos::CosmosAction::Cosmos(vec![msg]),
@@ -1718,14 +1746,26 @@ impl ExecAction {
 
                         Ok(payload)
                     }
-                    #[cfg(not(feature = "cosmwasm"))]
-                    ChainName::Cosmos => unreachable!(),
                     #[cfg(feature = "solana")]
-                    ChainName::Solana => todo!(),
-                    #[cfg(not(feature = "solana"))]
-                    ChainName::Solana => unreachable!(),
-                    #[cfg(feature = "pass_through")]
-                    ChainName::PassThrough => todo!(),
+                    MigrateContract::Solana {
+                        buffer_address,
+                        spill_address,
+                        ..
+                    } => {
+                        let program_id = SolanaPubkey::from_str(&contract_addr)?;
+                        let payload = kolme_solana_bridge_client::upgrade_payload(
+                            id.0,
+                            program_id,
+                            *buffer_address,
+                            *spill_address,
+                        );
+
+                        serialize_solana_payload(&payload)
+                    }
+                    // While the underlying MigrateContract type is uninhabited for this combination of flags,
+                    // references are always inhabited, and therefore this catch-all is necessary but unreachable.
+                    #[cfg(not(any(feature = "cosmwasm", feature = "solana")))]
+                    _ => unreachable!(),
                 }
             }
         }

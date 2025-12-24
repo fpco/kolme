@@ -10,6 +10,7 @@ anyhow = { workspace = true }
 cosmos = { workspace = true }
 kolme = { workspace = true, features = ["cosmwasm", "solana", "pass_through"] }
 kolme-solana-bridge-client = { workspace = true }
+solana-loader-v3-interface = "5.0.0"
 reqwest = { workspace = true, features = ["json"] }
 rust_decimal = { workspace = true }
 serde = { workspace = true }
@@ -17,6 +18,7 @@ serde_json = { workspace = true }
 shared = { workspace = true, features = ["cosmwasm", "realcryptography"] }
 solana-client = { workspace = true }
 solana-commitment-config = { workspace = true }
+solana-signature = { workspace = true }
 spl-token-client = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

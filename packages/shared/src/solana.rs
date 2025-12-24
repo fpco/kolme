@@ -1,8 +1,9 @@
+use borsh::{BorshDeserialize, BorshSerialize};
+
 use crate::{
     cryptography::{PublicKey, SignatureWithRecovery},
     types::{KeyRegistration, ValidatorSet},
 };
-use borsh::{BorshDeserialize, BorshSerialize};
 
 pub type Pubkey = [u8; 32];
 
@@ -13,6 +14,7 @@ pub const SIGNED_IX: u8 = 2;
 pub const STATE_SEED: &[u8] = b"state";
 pub const TOKEN_HOLDER_SEED: &[u8] = b"token_holder";
 pub const GIT_REV_SEED: &[u8] = b"git_rev";
+pub const UPGRADE_AUTHORITY_SEED: &[u8] = b"upgrade_auth";
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct InitializeIxData {

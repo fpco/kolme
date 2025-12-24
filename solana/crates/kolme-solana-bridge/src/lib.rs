@@ -7,12 +7,12 @@ use shared::{
     solana::{
         BridgeMessage, ExecuteAction, InitializeIxData, Message, Payload, RegularMsgIxData,
         SignedAction, SignedMsgIxData, State, Token, GIT_REV_SEED, INITIALIZE_IX, REGULAR_IX,
-        SIGNED_IX, STATE_SEED, TOKEN_HOLDER_SEED,
+        SIGNED_IX, STATE_SEED, TOKEN_HOLDER_SEED, UPGRADE_AUTHORITY_SEED,
     },
     types::{SelfReplace, ValidatorSet, ValidatorType},
 };
 use solbox::{
-    log, log_base64,
+    bpf_loader_upgradeable, log, log_base64,
     pinocchio::{
         account_info::{AccountInfo, Ref},
         cpi,
@@ -50,17 +50,20 @@ const GIT_REV: &str = "N/A";
 // PDAs
 const STATE_DERIVATION: PdaDerivation = PdaDerivation::new(&[STATE_SEED]);
 const GIT_REV_DERIVATION: PdaDerivation = PdaDerivation::new(&[GIT_REV_SEED]);
+const UPGRADE_AUTHORITY_DERIVATION: PdaDerivation = PdaDerivation::new(&[UPGRADE_AUTHORITY_SEED]);
 
 type StatePda = PdaData<State, 0>;
 type TokenHolderPda = PdaData<TokenHolder, 1>;
 type GitRevPda = PdaData<GitRev, 2>;
+type UpgradeAuthorityPda = PdaData<(), 3>;
 
 const SHA256_DIGEST_SIZE: usize = 32;
 
 #[repr(u32)]
 pub enum InitIxError {
-    NoApproversProvided = 0,
-    ValidatorSetError = 1,
+    ValidatorSetError = 0,
+    InvalidBridgeProgramData = 1,
+    BridgeNotUpgradeAuthority = 2,
 }
 
 #[repr(u32)]
@@ -75,14 +78,13 @@ pub enum RegularIxError {
 #[repr(u32)]
 pub enum SignedIxError {
     InsufficientSignatures = 0,
-    TooManyApprovers = 1,
-    DuplicateApproverKey = 2,
-    ProcessorKeyMismatch = 3,
-    IncorrectOutgoingId = 4,
-    AccountMetaAndPassedAccountsMismatch = 5,
-    InvalidBase64Payload = 6,
-    InvalidSelfReplace = 7,
-    JsonDeserialize = 8,
+    DuplicateApproverKey = 1,
+    ProcessorKeyMismatch = 2,
+    IncorrectOutgoingId = 3,
+    AccountMetaAndPassedAccountsMismatch = 4,
+    InvalidBase64Payload = 5,
+    InvalidSelfReplace = 6,
+    JsonDeserialize = 7,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -138,15 +140,18 @@ pub fn process_instruction(
 }
 
 fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
-    ctx.assert_accounts_len(4)?;
+    ctx.assert_accounts_len(6)?;
     let payer_acc = ctx.account(0, AccountReq::SIGNER)?;
     ctx.assert_is_system_program(1)?;
     let state_acc = ctx.account(2, AccountReq::WRITABLE)?;
     let git_rev_acc = ctx.account(3, AccountReq::WRITABLE)?;
+    let upgrade_authority_acc = ctx.account(4, AccountReq::WRITABLE)?;
+    let bridge_program_data_acc = ctx.account(5, AccountReq::empty())?;
 
     let ix = InitializeIxData::try_from_slice(instruction_data)
         .map_err(|_| ProgramError::BorshIoError)?;
 
+    // Create state account
     if let Err(e) = ix.set.validate() {
         log!("Validator set validation error: {}", e);
 
@@ -163,6 +168,7 @@ fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError>
     let state_pda: StatePda = ctx.init_pda(&payer_acc, &state_acc, STATE_DERIVATION, state)?;
     state_pda.serialize_into(&state_acc)?;
 
+    // Create git rev account
     let git_rev = GitRev {
         hash: GIT_REV.trim().into(),
     };
@@ -172,6 +178,35 @@ fn initialize(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError>
     git_rev_pda.serialize_into(&git_rev_acc)?;
 
     log!("Git rev: {}", GIT_REV.trim());
+
+    // Verify that upgrade authority PDA is this program's upgrade authority
+    let expected_bridge_program_data_pubkey =
+        bpf_loader_upgradeable::get_program_data_address(&ctx.program_id);
+
+    if *bridge_program_data_acc.key() != expected_bridge_program_data_pubkey {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let bpf_loader_upgradeable::State::ProgramData {
+        upgrade_authority_address,
+        ..
+    } = bpf_loader_upgradeable::get_state(&bridge_program_data_acc)?
+    else {
+        return Err(InitIxError::InvalidBridgeProgramData.into());
+    };
+
+    let upgrade_authority_pda: UpgradeAuthorityPda = ctx.init_pda(
+        &payer_acc,
+        &upgrade_authority_acc,
+        UPGRADE_AUTHORITY_DERIVATION,
+        (),
+    )?;
+
+    upgrade_authority_pda.serialize_into(&upgrade_authority_acc)?;
+
+    if !upgrade_authority_address.is_some_and(|x| x == *upgrade_authority_acc.key()) {
+        return Err(InitIxError::BridgeNotUpgradeAuthority.into());
+    }
 
     Ok(())
 }
@@ -216,8 +251,7 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
             let holder_acc = ctx.account(index + 2, AccountReq::WRITABLE)?;
             let holder_ata_acc = ctx.account(index + 3, AccountReq::WRITABLE)?;
 
-            // SAFETY: The owner of this cannot be changed here.
-            let token_program = unsafe { *mint_acc.owner() };
+            let token_program = *mint_acc.owner();
 
             if token_program != token::ID && token_program != token2022::ID {
                 log!("Mint is not owned by a token program.");
@@ -238,19 +272,16 @@ fn regular(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
                 return Err(ProgramError::InvalidArgument);
             }
 
-            // SAFETY: We are not keeping a reference or have called .assign() at all.
-            unsafe {
-                if holder_ata_acc.owner() != mint_acc.owner() {
-                    log!("Holder ATA not created or illegal account.");
+            if holder_ata_acc.owner() != mint_acc.owner() {
+                log!("Holder ATA not created or illegal account.");
 
-                    return Err(ProgramError::IllegalOwner);
-                }
+                return Err(ProgramError::IllegalOwner);
+            }
 
-                if sender_ata_acc.owner() != mint_acc.owner() {
-                    log!("Sender ATA not created or illegal account.");
+            if sender_ata_acc.owner() != mint_acc.owner() {
+                log!("Sender ATA not created or illegal account.");
 
-                    return Err(ProgramError::IllegalOwner);
-                }
+                return Err(ProgramError::IllegalOwner);
             }
 
             {
@@ -535,7 +566,7 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         }
     }
 
-    state_pda.serialize_into_growable(&state_acc, &sender_acc, &ctx.rent()?, false)?;
+    state_pda.serialize_into_growable(&state_acc, &sender_acc, &ctx.rent()?)?;
 
     let msg = BridgeMessage {
         id: incoming_id,
@@ -545,10 +576,11 @@ fn signed(ctx: Context, instruction_data: &[u8]) -> Result<(), ProgramError> {
         },
     };
 
-    let mut bytes = Vec::with_capacity(borsh::object_length(&msg)
-        .map_err(|_| ProgramError::BorshIoError)?);
+    let mut bytes =
+        Vec::with_capacity(borsh::object_length(&msg).map_err(|_| ProgramError::BorshIoError)?);
 
-    msg.serialize(&mut bytes).map_err(|_| ProgramError::BorshIoError)?;
+    msg.serialize(&mut bytes)
+        .map_err(|_| ProgramError::BorshIoError)?;
 
     log_base64(&[bytes.as_slice()]);
 
@@ -664,7 +696,7 @@ fn ata_data(account_info: &AccountInfo) -> Result<Ref<TokenAccount>, ProgramErro
     }
 
     Ok(Ref::map(account_info.try_borrow_data()?, |data| unsafe {
-        TokenAccount::from_bytes(&data[..TokenAccount::LEN])
+        TokenAccount::from_bytes_unchecked(&data[..TokenAccount::LEN])
     }))
 }
 
@@ -682,7 +714,7 @@ fn mint_data(account_info: &AccountInfo) -> Result<Ref<Mint>, ProgramError> {
     }
 
     Ok(Ref::map(account_info.try_borrow_data()?, |data| unsafe {
-        Mint::from_bytes(data)
+        Mint::from_bytes_unchecked(data)
     }))
 }
 

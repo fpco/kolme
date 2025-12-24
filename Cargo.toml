@@ -75,6 +75,7 @@ solana-transaction = "2.2"
 solana-transaction-status-client-types = "2.2.7"
 spl-associated-token-account-client = "2.0.0"
 spl-token-client = "0.14.0"
+solana-loader-v3-interface = "5.0.0"
 sqlx = { version = "0.8.5", default-features = false, features = [
   "macros",
   "migrate",

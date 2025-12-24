@@ -1,8 +1,9 @@
-use std::process::Command;
+use std::{fs, process::Command};
 
 use borsh::BorshSerialize;
 use kolme_solana_bridge_client::{
-    instruction::error::InstructionError, keypair::Keypair, signer::Signer, spl_client,
+    derive_git_rev_pda, derive_upgrade_authority_pda, instruction::error::InstructionError,
+    keypair::Keypair, signer::Signer, spl_client,
 };
 use litesvm_token::{
     get_spl_account, spl_token::state::Account as SplAccount, CreateAssociatedTokenAccount,
@@ -15,8 +16,8 @@ use shared::{
 };
 use solana_transaction_error::TransactionError;
 use testing::{
-    token_holder_acc, Program, APPROVER1_KEY, APPROVER2_KEY, APPROVER3_KEY, APPROVER4_KEY,
-    GIT_REV_PDA, TOKEN,
+    token_holder_acc, Program, APPROVER1_KEY, APPROVER2_KEY, APPROVER3_KEY, APPROVER4_KEY, ID,
+    TOKEN,
 };
 
 #[test]
@@ -259,7 +260,7 @@ fn false_processor_signature_is_rejected() {
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
         meta.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(3))
+        TransactionError::InstructionError(0, InstructionError::Custom(2))
     );
 
     let payload = p.transfer_payload(0, sender.pubkey(), 1000);
@@ -273,7 +274,7 @@ fn false_processor_signature_is_rejected() {
     let meta = p.signed(&sender, &data, &metas).unwrap_err();
     assert_eq!(
         meta.err,
-        TransactionError::InstructionError(0, InstructionError::Custom(3))
+        TransactionError::InstructionError(0, InstructionError::Custom(2))
     );
 }
 
@@ -321,6 +322,30 @@ fn false_executor_signature_is_rejected() {
 }
 
 #[test]
+fn upgrade() {
+    let mut p = Program::new();
+    let sender = Keypair::new();
+    let spill = Keypair::new();
+
+    p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
+
+    p.init_default(&sender).unwrap();
+
+    let program_bytes = fs::read("../../target/deploy/kolme_solana_bridge.so").unwrap();
+
+    let authority = derive_upgrade_authority_pda(&ID);
+    let buffer = p.make_buffer(program_bytes, &authority);
+
+    let payload = p.upgrade_payload(0, buffer, spill.pubkey());
+    let (data, metas) = p.make_signed_msg(&payload, &[APPROVER3_KEY, APPROVER4_KEY, APPROVER1_KEY]);
+
+    p.signed(&sender, &data, &metas).unwrap();
+
+    // Spill account should exist now
+    p.svm.get_account(&spill.pubkey()).unwrap();
+}
+
+#[test]
 fn contains_correct_git_rev() {
     let mut p = Program::new();
     let sender = Keypair::new();
@@ -328,7 +353,9 @@ fn contains_correct_git_rev() {
     p.svm.airdrop(&sender.pubkey(), 1000000000).unwrap();
 
     p.init_default(&sender).unwrap();
-    let acc = p.svm.get_account(&GIT_REV_PDA).unwrap();
+
+    let git_rev_pda = derive_git_rev_pda(&ID);
+    let acc = p.svm.get_account(&git_rev_pda).unwrap();
 
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])

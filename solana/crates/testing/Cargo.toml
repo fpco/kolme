@@ -9,6 +9,10 @@ borsh = { workspace = true }
 kolme-solana-bridge-client = { workspace = true }
 litesvm = { workspace = true }
 litesvm-token = { workspace = true }
+litesvm-loader = { workspace = true }
 sha_256 = { workspace = true }
 shared = { workspace = true, features = ["realcryptography", "solana"] }
 solana-transaction-error = { workspace = true }
+solana-loader-v3-interface = { workspace = true, features = ["bincode"] }
+solana-feature-set = "2.2"
+solana-sysvar = { workspace = true }
