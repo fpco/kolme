@@ -4,7 +4,6 @@ mod cosmos;
 mod solana;
 
 use crate::*;
-use absurd_future::absurd_future;
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {
@@ -57,7 +56,7 @@ impl<App: KolmeApp> Listener<App> {
                 {
                     let contracts = self.wait_for_contracts(name).await?;
                     for (chain, contract) in contracts {
-                        set.spawn(absurd_future(solana::listen(
+                        set.spawn(absurd_future::absurd_future(solana::listen(
                             self.kolme.clone(),
                             self.secret.clone(),
                             chain.to_solana_chain().unwrap(),

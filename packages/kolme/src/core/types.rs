@@ -1252,8 +1252,6 @@ pub enum MigrateContract {
 }
 
 impl MigrateContract {
-    // Because we are matching on a reference, Rust requires that the _ pattern is
-    // used even on an empty enum despite that it could never match in practice.
     #[allow(unreachable_patterns)]
     pub fn chain(&self) -> ExternalChain {
         match self {
@@ -1261,6 +1259,9 @@ impl MigrateContract {
             Self::Cosmos { chain, .. } => (*chain).into(),
             #[cfg(feature = "solana")]
             Self::Solana { chain, .. } => (*chain).into(),
+            // While the underlying MigrateContract type is uninhabited for this combination of flags,
+            // references are always inhabited, and therefore this catch-all is necessary but unreachable.
+            #[cfg(not(any(feature = "cosmwasm", feature = "solana")))]
             _ => unreachable!(),
         }
     }
@@ -1725,22 +1726,13 @@ impl ExecAction {
                     ),
                 };
 
-                match chain.name() {
+                match migrate_contract.as_inner() {
                     #[cfg(feature = "cosmwasm")]
-                    ChainName::Cosmos => {
-                        #[allow(irrefutable_let_patterns)]
-                        let MigrateContract::Cosmos {
-                            new_code_id,
-                            message,
-                            ..
-                        } = migrate_contract.as_inner()
-                        else {
-                            anyhow::bail!(
-                                "Expecting Cosmos migrate message, got one for: {}.",
-                                migrate_contract.as_inner().chain()
-                            );
-                        };
-
+                    MigrateContract::Cosmos {
+                        new_code_id,
+                        message,
+                        ..
+                    } => {
                         let msg = CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Migrate {
                             contract_addr,
                             new_code_id: *new_code_id,
@@ -1754,23 +1746,12 @@ impl ExecAction {
 
                         Ok(payload)
                     }
-                    #[cfg(not(feature = "cosmwasm"))]
-                    ChainName::Cosmos => unreachable!(),
                     #[cfg(feature = "solana")]
-                    ChainName::Solana => {
-                        #[allow(irrefutable_let_patterns)]
-                        let MigrateContract::Solana {
-                            buffer_address,
-                            spill_address,
-                            ..
-                        } = migrate_contract.as_inner()
-                        else {
-                            anyhow::bail!(
-                                "Expecting Solana migrate message, got one for: {}.",
-                                migrate_contract.as_inner().chain()
-                            );
-                        };
-
+                    MigrateContract::Solana {
+                        buffer_address,
+                        spill_address,
+                        ..
+                    } => {
                         let program_id = SolanaPubkey::from_str(&contract_addr)?;
                         let payload = kolme_solana_bridge_client::upgrade_payload(
                             id.0,
@@ -1781,10 +1762,10 @@ impl ExecAction {
 
                         serialize_solana_payload(&payload)
                     }
-                    #[cfg(not(feature = "solana"))]
-                    ChainName::Solana => unreachable!(),
-                    #[cfg(feature = "pass_through")]
-                    ChainName::PassThrough => todo!(),
+                    // While the underlying MigrateContract type is uninhabited for this combination of flags,
+                    // references are always inhabited, and therefore this catch-all is necessary but unreachable.
+                    #[cfg(not(any(feature = "cosmwasm", feature = "solana")))]
+                    _ => unreachable!(),
                 }
             }
         }
