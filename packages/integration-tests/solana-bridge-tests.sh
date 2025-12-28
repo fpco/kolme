@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-nohup solana-test-validator > /dev/null &
-SOL_VALIDATOR_PID=$!
-
-echo "Waiting for solana-test-validator to start"
-sleep 5
+(cd ../../solana; just solana-test-validator)
+trap 'rm -rf test-ledger/; echo; echo "Shutting down solana-test-validator"; killall solana-test-validator' EXIT
 
 RUST_LOG=info,kolme=debug,six_sigma=debug cargo t $1 -- --ignored --nocapture
-
-echo "Shutting down solana-test-validator"
-kill $SOL_VALIDATOR_PID
-
-rm -rf test-ledger/
