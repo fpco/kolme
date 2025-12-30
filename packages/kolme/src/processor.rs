@@ -1,8 +1,5 @@
-use std::{collections::HashMap, convert::Infallible, time::Instant};
-
-use kolme_store::KolmeStoreError;
-
 use crate::*;
+use std::{collections::HashMap, convert::Infallible, time::Instant};
 
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
@@ -90,7 +87,7 @@ impl<App: KolmeApp> Processor<App> {
         panic!("Unexpected exit in processor");
     }
 
-    async fn ensure_genesis_event(&self) -> Result<()> {
+    async fn ensure_genesis_event(&self) -> Result<(), KolmeError> {
         if self.kolme.read().get_next_height().is_start() {
             let code_version = self.kolme.get_code_version();
             let kolme = self.kolme.read();
@@ -111,20 +108,20 @@ impl<App: KolmeApp> Processor<App> {
     /// Get the correct secret key for the current validator set.
     ///
     /// If we don't have it, returns an error.
-    fn get_correct_secret(&self, kolme: &KolmeRead<App>) -> Result<&SecretKey> {
+    fn get_correct_secret(&self, kolme: &KolmeRead<App>) -> Result<&SecretKey, TransactionError> {
         let pubkey = &kolme.get_framework_state().get_validator_set().processor;
-        self.secrets.get(pubkey).with_context(|| {
+        self.secrets.get(pubkey).ok_or_else(|| {
             let pubkeys = self.secrets.keys().collect::<Vec<_>>();
-            format!(
+            TransactionError::CoreError(format!(
                 "Current processor pubkey is {pubkey}, but we don't have the matching secret key, we have: {pubkeys:?}"
-            )
+            ))
         })
     }
 
-    pub async fn create_genesis_event(&self) -> Result<()> {
+    pub async fn create_genesis_event(&self) -> Result<(), KolmeError> {
         let info = self.kolme.get_app().genesis_info().clone();
         let kolme = self.kolme.read();
-        let secret = self.get_correct_secret(&kolme)?;
+        let secret = self.get_correct_secret(&kolme).map_err(KolmeError::from)?;
         let signed = self
             .kolme
             .read()
@@ -135,17 +132,17 @@ impl<App: KolmeApp> Processor<App> {
             .await?;
         if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             // kolme#144 - Discard unneeded fields
-            if let Some(KolmeStoreError::ConflictingBlockInDb { .. }) = e.downcast_ref() {
+            if let TransactionError::ConflictingBlockInDb { .. } = &e {
                 self.kolme.resync().await?;
             }
-            Err(e)
+            Err(KolmeError::Transaction(e))
         } else {
             self.emit_latest().ok();
             Ok(())
         }
     }
 
-    async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<()> {
+    async fn add_transaction(&self, tx: SignedTransaction<App::Message>) -> Result<(), KolmeError> {
         // We'll retry adding a transaction multiple times before giving up.
         // We only retry if the transaction is still not present in the database,
         // and our failure is because of a block creation race condition.
@@ -179,11 +176,11 @@ impl<App: KolmeApp> Processor<App> {
         .await;
         if let Err(e) = &res {
             // kolme#144 - Discard unneeded fields
-            if let Some(KolmeStoreError::ConflictingBlockInDb {
+            if let TransactionError::ConflictingBlockInDb {
                 height,
                 adding,
                 existing,
-            }) = e.downcast_ref()
+            } = e
             {
                 tracing::warn!(
                     "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this. Height: {height}. Adding: {adding}. Existing: {existing}."
@@ -194,13 +191,12 @@ impl<App: KolmeApp> Processor<App> {
                     let failed = FailedTransaction {
                         txhash,
                         proposed_height,
-                        error: match e.downcast_ref::<KolmeError>() {
-                            Some(e) => e.clone(),
-                            None => KolmeError::Other(e.to_string()),
-                        },
+                        error: e.clone(),
                     };
                     let failed = TaggedJson::new(failed)?;
-                    let key = self.get_correct_secret(&self.kolme.read())?;
+                    let key = self
+                        .get_correct_secret(&self.kolme.read())
+                        .map_err(KolmeError::from)?;
                     failed.sign(key)
                 })();
 
@@ -226,23 +222,29 @@ impl<App: KolmeApp> Processor<App> {
             );
         }
         self.emit_latest().ok();
-        res
+        Ok(res?)
     }
 
     async fn construct_block(
         &self,
         tx: SignedTransaction<App::Message>,
         proposed_height: BlockHeight,
-    ) -> Result<ExecutedBlock<App>> {
+    ) -> Result<ExecutedBlock<App>, TransactionError> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
 
         let txhash = tx.hash();
-        if kolme.get_tx_height(txhash).await?.is_some() {
-            return Err(anyhow::Error::from(KolmeStoreError::TxAlreadyInDb {
-                txhash: txhash.0,
-            }));
+        if kolme
+            .get_tx_height(txhash)
+            .await
+            .map_err(|e| TransactionError::CoreError(e.to_string()))?
+            .is_some()
+        {
+            return Err(TransactionError::StoreError(format!(
+                "TxAlreadyInDb: {}",
+                txhash.0
+            )));
         }
 
         let now = Timestamp::now();
@@ -255,17 +257,23 @@ impl<App: KolmeApp> Processor<App> {
             height,
         } = kolme
             .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
-            .await?;
-        anyhow::ensure!(height == proposed_height);
+            .await
+            .map_err(TransactionError::from)?;
+
+        if height != proposed_height {
+            return Err(TransactionError::ExecutedHeightMismatch {
+                expected: proposed_height,
+                actual: height,
+            });
+        }
 
         if let Some(max_height) = tx.0.message.as_inner().max_height {
             if max_height < proposed_height {
-                return Err(KolmeError::PastMaxHeight {
+                return Err(TransactionError::PastMaxHeight {
                     txhash,
                     max_height,
                     proposed_height,
-                }
-                .into());
+                });
             }
         }
 
@@ -275,13 +283,24 @@ impl<App: KolmeApp> Processor<App> {
             processor: secret.public_key(),
             height: proposed_height,
             parent: kolme.get_current_block_hash(),
-            framework_state: merkle_map::api::serialize(&framework_state)?.hash(),
-            app_state: merkle_map::api::serialize(&app_state)?.hash(),
+            framework_state: merkle_map::api::serialize(&framework_state)
+                .map_err(|e| TransactionError::CoreError(e.to_string()))?
+                .hash(),
+            app_state: merkle_map::api::serialize(&app_state)
+                .map_err(|e| TransactionError::CoreError(e.to_string()))?
+                .hash(),
             loads,
-            logs: merkle_map::api::serialize(&logs)?.hash(),
+            logs: merkle_map::api::serialize(&logs)
+                .map_err(|e| TransactionError::CoreError(e.to_string()))?
+                .hash(),
         };
-        let block = TaggedJson::new(approved_block)?;
-        let signed_block = Arc::new(SignedBlock(block.sign(secret)?));
+        let block = TaggedJson::new(approved_block)
+            .map_err(|e| TransactionError::CoreError(e.to_string()))?;
+        let signed_block = Arc::new(SignedBlock(
+            block
+                .sign(secret)
+                .map_err(|e| TransactionError::CoreError(e.to_string()))?,
+        ));
         Ok(ExecutedBlock {
             signed_block,
             framework_state,
@@ -303,7 +322,7 @@ impl<App: KolmeApp> Processor<App> {
         // approve an action, it produces a new block, which will allow us to check if we
         // need to approve anything else.
         let kolme = self.kolme.read();
-        let secret = self.get_correct_secret(&kolme)?;
+        let secret = self.get_correct_secret(&kolme).map_err(KolmeError::from)?;
 
         let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());
@@ -312,7 +331,14 @@ impl<App: KolmeApp> Processor<App> {
         let mut approvers = vec![];
         for (key, sig) in &action.approvals {
             let key2 = sig.validate(action.payload.as_bytes())?;
-            anyhow::ensure!(key == &key2);
+            if key != &key2 {
+                return Err(KolmeError::InvalidSignature {
+                    expected: Box::new(*key),
+                    actual: Box::new(key2),
+                }
+                .into());
+            }
+
             if kolme.get_approver_pubkeys().contains(key) {
                 approvers.push(*sig);
             }
@@ -359,7 +385,7 @@ impl<App: KolmeApp> Processor<App> {
         };
         let json = TaggedJson::new(latest)?;
         let kolme = self.kolme.read();
-        let secret = self.get_correct_secret(&kolme)?;
+        let secret = self.get_correct_secret(&kolme).map_err(KolmeError::from)?;
         let signed = json.sign(secret)?;
         self.kolme.update_latest_block(Arc::new(signed));
         Ok(())

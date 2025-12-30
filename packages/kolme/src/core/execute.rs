@@ -2,6 +2,70 @@ use std::collections::VecDeque;
 
 use crate::core::*;
 
+#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum KolmeExecuteError {
+    #[error("Listener pubkey not allowed for this event")]
+    InvalidListenerPubkey,
+
+    #[error("Listener has already signed this event")]
+    DuplicateListenerSignature,
+
+    #[error("Genesis message must be signed by the processor")]
+    InvalidGenesisPubkey {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Chain code version mismatch: code={code}, chain={chain}")]
+    VersionMismatch {
+        code: String,
+        chain: String,
+        txhash: TxHash,
+    },
+
+    #[error("Unexpected extra data loads during block validation")]
+    ExtraDataLoads,
+
+    #[error("Genesis message does not match expected value")]
+    GenesisMismatch,
+
+    #[error("Not enough approver signatures: needed {needed}, got {actual}")]
+    NotEnoughApprovers { needed: u16, actual: usize },
+
+    #[error("Processor approval already exists for this action")]
+    ProcessorAlreadyApproved,
+
+    #[error("Duplicate approver signatures found")]
+    DuplicateApproverEntries,
+
+    #[error("Cannot approve bridge action with a non-approver pubkey: {pubkey}")]
+    NonApproverSignature { pubkey: Box<PublicKey> },
+
+    #[error("Bridge action already approved with pubkey {pubkey}")]
+    DuplicateApproverSignature { pubkey: Box<PublicKey> },
+
+    #[error("Processor signature invalid")]
+    InvalidProcessorSignature {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Approver signature invalid: signer {pubkey}")]
+    InvalidApproverSignature { pubkey: Box<PublicKey> },
+
+    #[error("Mismatch in prior data loads")]
+    DataLoadMismatch,
+
+    #[error("Cannot remove signing key from account")]
+    CannotRemoveSigningKey {
+        key: Box<PublicKey>,
+        account: AccountId,
+    },
+
+    #[error("Invalid data load request: expected {expected}, got {actual}")]
+    InvalidDataLoadRequest { expected: String, actual: String },
+}
+
 /// Execution context for a single message.
 pub struct ExecutionContext<'a, App: KolmeApp> {
     framework_state: FrameworkState,
@@ -79,7 +143,15 @@ impl<App: KolmeApp> KolmeRead<App> {
         // Make sure this is a genesis event if and only if we have no events so far
         if self.get_next_height().is_start() {
             tx.ensure_is_genesis()?;
-            anyhow::ensure!(tx.pubkey == self.get_processor_pubkey());
+            let expected = self.get_processor_pubkey();
+            let actual = tx.pubkey;
+            if actual != expected {
+                return Err(KolmeExecuteError::InvalidGenesisPubkey {
+                    expected: Box::new(expected),
+                    actual: Box::new(actual),
+                }
+                .into());
+            }
         } else {
             tx.ensure_no_genesis()?;
         };
@@ -93,12 +165,19 @@ impl<App: KolmeApp> KolmeRead<App> {
         signed_tx: &SignedTransaction<App::Message>,
         timestamp: Timestamp,
         block_data_handling: BlockDataHandling,
-    ) -> Result<ExecutionResults<App>> {
+    ) -> Result<ExecutionResults<App>, KolmeError> {
         // If we're running different code versions, we can't
         // get reproducible results.
         let chain_version = self.get_chain_version();
         let code_version = self.get_code_version();
-        anyhow::ensure!(chain_version == code_version, "Cannot execute transaction {}, current code version is {code_version}, but chain is running {chain_version}", signed_tx.hash());
+        if chain_version != code_version {
+            return Err(KolmeExecuteError::VersionMismatch {
+                code: code_version.clone(),
+                chain: chain_version.clone(),
+                txhash: signed_tx.hash(),
+            }
+            .into());
+        }
 
         self.validate_tx(signed_tx)?;
         let tx = signed_tx.0.message.as_inner();
@@ -148,7 +227,9 @@ impl<App: KolmeApp> KolmeRead<App> {
             } => {
                 // For a proper validation, every piece of data loaded during execution
                 // must be used during validation.
-                anyhow::ensure!(loads.is_empty());
+                if !loads.is_empty() {
+                    return Err(KolmeExecuteError::ExtraDataLoads.into());
+                }
             }
         }
 
@@ -167,7 +248,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         match message {
             Message::Genesis(actual) => {
                 let expected = app.genesis_info();
-                anyhow::ensure!(expected == actual);
+                if expected != actual {
+                    return Err(KolmeExecuteError::GenesisMismatch.into());
+                }
             }
             Message::App(msg) => {
                 app.execute(self, msg).await?;
@@ -204,26 +287,33 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         chain: ExternalChain,
         event: &BridgeEvent,
         event_id: BridgeEventId,
-    ) -> Result<()> {
-        anyhow::ensure!(self
+    ) -> Result<(), KolmeError> {
+        if !self
             .framework_state
             .get_validator_set()
             .listeners
-            .contains(&self.pubkey),
-            "Received a listener message for bridge event ID {event_id} on {chain}, but provided pubkey {} is not part of the listener set {:?}",
-            self.pubkey,
-            self.framework_state.get_validator_set().listeners
-        );
+            .contains(&self.pubkey)
+        {
+            return Err(KolmeExecuteError::InvalidListenerPubkey.into());
+        }
 
         let state = self.framework_state.chains.get_mut(chain)?;
 
         let attestations = match state.pending_events.get_mut(&event_id) {
             Some(pending) => {
-                anyhow::ensure!(pending.event == *event);
+                if pending.event != *event {
+                    return Err(KolmeError::Execution(
+                        KolmeExecutionError::MismatchedBridgeEvent,
+                    ));
+                }
                 &mut pending.attestations
             }
             None => {
-                anyhow::ensure!(event_id == state.next_event_id);
+                if event_id != state.next_event_id {
+                    return Err(KolmeError::Execution(
+                        KolmeExecutionError::UnexpectedBridgeEventId,
+                    ));
+                }
                 state.next_event_id = event_id.next();
                 state.pending_events.insert(
                     event_id,
@@ -243,14 +333,16 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let was_inserted = attestations.insert(self.pubkey);
 
         // Make sure it wasn't already approved
-        anyhow::ensure!(was_inserted);
+        if !was_inserted {
+            return Err(KolmeExecuteError::DuplicateListenerSignature.into());
+        }
 
         // Now that we've added a signature, go through all pending events
         // in order and process them if they have sufficient attestations.
         self.process_ready_events(chain)
     }
 
-    fn process_ready_events(&mut self, chain: ExternalChain) -> Result<()> {
+    fn process_ready_events(&mut self, chain: ExternalChain) -> Result<(), KolmeError> {
         fn get_next_ready_event(
             framework_state: &FrameworkState,
             chain: ExternalChain,
@@ -303,9 +395,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 BridgeEvent::Instantiated { contract } => {
                     let config = &mut self.framework_state.chains.get_mut(chain)?.config;
                     match config.bridge {
-                        BridgeContract::NeededCosmosBridge { .. } |
-                            BridgeContract::NeededSolanaBridge { .. } => (),
-                        BridgeContract::Deployed(_) => anyhow::bail!("Already have a bridge contract for {chain:?}, just received another from a listener"),
+                        BridgeContract::NeededCosmosBridge { .. }
+                        | BridgeContract::NeededSolanaBridge { .. } => (),
+                        BridgeContract::Deployed(_) => {
+                            return Err(KolmeError::BridgeAlreadyDeployed { chain });
+                        }
                     }
                     config.bridge = BridgeContract::Deployed(contract.clone());
                 }
@@ -334,11 +428,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         };
 
                         let amount = asset_config.to_decimal(*amount)?;
-                        self.framework_state.accounts.mint(
-                            account_id,
-                            asset_config.asset_id,
-                            amount,
-                        )?;
+                        self.framework_state
+                            .accounts
+                            .mint(account_id, asset_config.asset_id, amount)
+                            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
                         self.framework_state
                             .chains
                             .get_mut(chain)?
@@ -360,9 +453,26 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         .keys()
                         .next()
                         .context("Cannot report on an action when no pending actions present")?;
-                    anyhow::ensure!(*next_action_id == action_id);
-                    let (old_id, _old) = actions.remove(&action_id).unwrap();
-                    anyhow::ensure!(old_id == action_id);
+
+                    if *next_action_id != action_id {
+                        return Err(KolmeError::ActionIdMismatch {
+                            expected: *next_action_id,
+                            found: action_id,
+                        });
+                    }
+
+                    let Some((old_id, _old)) = actions.remove(&action_id) else {
+                        return Err(KolmeError::ActionError(format!(
+                            "Expected action ID {action_id:?} not found in pending actions"
+                        )));
+                    };
+
+                    if old_id != action_id {
+                        return Err(KolmeError::ActionIdMismatch {
+                            expected: old_id,
+                            found: action_id,
+                        });
+                    }
                 }
             }
         }
@@ -388,14 +498,26 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let key = signature.validate(action.payload.as_bytes())?;
         // Using config.as_ref() instead of framework_state.get_config to work around
         // a borrow conflict with the mutable borrow above
-        anyhow::ensure!(self
+        if !self
             .framework_state
             .validator_set
             .as_ref()
             .approvers
-            .contains(&key));
+            .contains(&key)
+        {
+            return Err(KolmeExecuteError::NonApproverSignature {
+                pubkey: Box::new(key),
+            }
+            .into());
+        }
+
         let old = action.approvals.insert(key, signature);
-        anyhow::ensure!(old.is_none(), "Cannot approve bridge action ID {action_id} for chain {chain} with already-used public key {key}");
+        if old.is_some() {
+            return Err(KolmeExecuteError::DuplicateApproverSignature {
+                pubkey: Box::new(key),
+            }
+            .into());
+        }
         Ok(())
     }
 
@@ -406,14 +528,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         processor: &SignatureWithRecovery,
         approvers: &[SignatureWithRecovery],
     ) -> Result<()> {
-        anyhow::ensure!(
-            approvers.len()
-                >= self
-                    .framework_state
-                    .get_validator_set()
-                    .needed_approvers
-                    .into()
-        );
+        let needed = self.framework_state.get_validator_set().needed_approvers as usize;
+        if approvers.len() < needed {
+            return Err(KolmeExecuteError::NotEnoughApprovers {
+                needed: needed as u16,
+                actual: approvers.len(),
+            }
+            .into());
+        }
 
         let action = self
             .framework_state
@@ -423,26 +545,45 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .get_mut(&action_id)
             .with_context(|| format!("No pending action {action_id} found for {chain}"))?;
 
-        anyhow::ensure!(action.processor.is_none());
+        if action.processor.is_some() {
+            return Err(KolmeExecuteError::ProcessorAlreadyApproved.into());
+        }
 
         let payload = action.payload.as_bytes();
         let processor_key = processor.validate(payload)?;
-        anyhow::ensure!(processor_key == self.framework_state.validator_set.as_ref().processor);
+        let expected = self.framework_state.validator_set.as_ref().processor;
+
+        if processor_key != expected {
+            return Err(KolmeExecuteError::InvalidProcessorSignature {
+                expected: Box::new(expected),
+                actual: Box::new(processor_key),
+            }
+            .into());
+        }
 
         let approvers_checked = approvers
             .iter()
             .map(|sig| {
                 let pubkey = sig.validate(payload)?;
-                anyhow::ensure!(self
+                if !self
                     .framework_state
                     .validator_set
                     .as_ref()
                     .approvers
-                    .contains(&pubkey));
+                    .contains(&pubkey)
+                {
+                    return Err(KolmeError::from(
+                        KolmeExecuteError::InvalidApproverSignature {
+                            pubkey: Box::new(pubkey),
+                        },
+                    ));
+                }
                 Ok(pubkey)
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
-        anyhow::ensure!(approvers.len() == approvers_checked.len());
+        if approvers_checked.len() != approvers.len() {
+            return Err(KolmeExecuteError::DuplicateApproverEntries.into());
+        }
 
         action.processor = Some(*processor);
 
@@ -629,7 +770,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .context("Incorrect number of data loads")?;
                 let prev_req = serde_json::from_str::<Req>(&request)?;
                 let prev_res = serde_json::from_str(&response)?;
-                anyhow::ensure!(prev_req == req);
+                if prev_req != req {
+                    return Err(KolmeExecuteError::InvalidDataLoadRequest {
+                        expected: request,
+                        actual: request_str.clone(),
+                    }
+                    .into());
+                }
                 match validation {
                     DataLoadValidation::ValidateDataLoads => {
                         req.validate(self.app, &prev_res).await?;
@@ -678,7 +825,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .add_pubkey_to_account_error_overlap(self.get_sender_id(), *key)?;
             }
             AuthMessage::RemovePublicKey { key } => {
-                anyhow::ensure!(key != &self.signing_key, "Cannot remove public key {key} from account {} with a transaction signed by the same key", self.get_sender_id());
+                if key == &self.signing_key {
+                    return Err(KolmeExecuteError::CannotRemoveSigningKey {
+                        key: Box::new(*key),
+                        account: self.get_sender_id(),
+                    }
+                    .into());
+                }
+
                 self.framework_state
                     .accounts
                     .remove_pubkey_from_account(self.get_sender_id(), *key)?;
@@ -697,24 +851,29 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    fn admin(&mut self, admin: &AdminMessage) -> Result<()> {
+    fn admin(&mut self, admin: &AdminMessage) -> Result<(), KolmeError> {
         match admin {
             AdminMessage::SelfReplace(self_replace) => {
                 let signer = self_replace.verify_signature()?;
-                anyhow::ensure!(signer == self.pubkey);
+                if signer != self.pubkey {
+                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                }
                 fn set_helper(
                     validator_set: &mut ValidatorSet,
                     is_approver: bool,
                     sender: PublicKey,
                     replacement: PublicKey,
-                ) -> Result<()> {
+                ) -> Result<(), KolmeError> {
                     let set = if is_approver {
                         &mut validator_set.approvers
                     } else {
                         &mut validator_set.listeners
                     };
                     if !set.remove(&sender) {
-                        anyhow::bail!("Signing public key {} is not a member of the {} set and cannot self-replace", sender, if is_approver {"approver"}else{"listener"});
+                        return Err(KolmeError::NotInValidatorSet {
+                            signer: Box::new(sender),
+                            role: if is_approver { "approver" } else { "listener" }.to_string(),
+                        });
                     }
                     set.insert(replacement);
                     Ok(())
@@ -727,7 +886,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         if config.processor == signer {
                             config.processor = replacement;
                         } else {
-                            anyhow::bail!("Signing public key {} is not the current processor and cannot self-replace", self.pubkey);
+                            return Err(KolmeError::NotProcessor {
+                                signer: Box::new(self.pubkey),
+                            });
                         }
                     }
                     ValidatorType::Listener => {
@@ -742,7 +903,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             AdminMessage::NewSet { validator_set } => {
                 let signer = validator_set.verify_signature()?;
-                anyhow::ensure!(signer == self.pubkey);
+                if signer != self.pubkey {
+                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                }
                 self.framework_state
                     .validator_set
                     .as_ref()
@@ -757,7 +920,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             AdminMessage::MigrateContract(migrate) => {
                 let signer = migrate.verify_signature()?;
-                anyhow::ensure!(signer == self.pubkey);
+                if signer != self.pubkey {
+                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                }
                 self.framework_state
                     .validator_set
                     .as_ref()
@@ -771,7 +936,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             }
             AdminMessage::Upgrade(upgrade) => {
                 let signer = upgrade.verify_signature()?;
-                anyhow::ensure!(signer == self.pubkey);
+                if signer != self.pubkey {
+                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                }
                 self.framework_state
                     .validator_set
                     .as_ref()
@@ -801,14 +968,17 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     })?;
 
                 let pubkey = signature.validate(pending.payload.as_bytes())?;
-                anyhow::ensure!(pubkey == self.pubkey);
+                if pubkey != self.pubkey {
+                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                }
 
                 let old_value = pending.approvals.insert(pubkey, *signature);
-                anyhow::ensure!(
-                    old_value.is_none(),
-                    "{} already approved proposal {admin_proposal_id}",
-                    self.pubkey
-                );
+                if old_value.is_some() {
+                    return Err(KolmeError::AlreadyApprovedProposal {
+                        signer: self.pubkey,
+                        proposal_id: *admin_proposal_id,
+                    });
+                }
                 self.check_pending_proposals()?;
             }
         }

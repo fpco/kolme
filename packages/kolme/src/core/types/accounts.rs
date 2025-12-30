@@ -22,6 +22,39 @@ pub enum AccountsError {
         asset_id: AssetId,
         to_burn: Decimal,
     },
+
+    #[error("Pubkey {key} already in use")]
+    PubkeyAlreadyInUse { key: PublicKey },
+
+    #[error("Wallet {wallet} already in use")]
+    WalletAlreadyInUse { wallet: Wallet },
+
+    #[error(
+        "Cannot remove pubkey {key} from account {id}, it's actually connected to {actual_id}"
+    )]
+    PubkeyAccountMismatch {
+        key: PublicKey,
+        id: AccountId,
+        actual_id: AccountId,
+    },
+
+    #[error(
+        "Cannot remove wallet {wallet} from account {id}, it's actually connected to {actual_id}"
+    )]
+    WalletAccountMismatch {
+        wallet: Wallet,
+        id: AccountId,
+        actual_id: AccountId,
+    },
+
+    #[error(
+        "New account for pubkey {pubkey} expects an initial nonce of {expected}, received {actual}"
+    )]
+    InvalidInitialNonce {
+        pubkey: PublicKey,
+        expected: AccountNonce,
+        actual: AccountNonce,
+    },
 }
 
 /// Track all information on accounts.
@@ -154,10 +187,9 @@ impl Accounts {
         account_id: AccountId,
         key: PublicKey,
     ) -> Result<()> {
-        anyhow::ensure!(
-            !self.pubkeys.contains_key(&key),
-            "Pubkey {key} already in use"
-        );
+        if self.pubkeys.contains_key(&key) {
+            return Err(AccountsError::PubkeyAlreadyInUse { key }.into());
+        }
         let account = self
             .accounts
             .get_mut(&account_id)
@@ -238,10 +270,10 @@ impl Accounts {
             .pubkeys
             .remove(&key)
             .with_context(|| format!("Cannot remove unknown pubkey {key}"))?;
-        anyhow::ensure!(
-            id == actual_id,
-            "Cannot remove pubkey {key} from account {id}, it's actually connected to {actual_id}"
-        );
+        if id != actual_id {
+            return Err(AccountsError::PubkeyAccountMismatch { key, id, actual_id }.into());
+        }
+
         let was_present = self.accounts.get_mut(&id).unwrap().pubkeys.remove(&key);
         assert!(was_present);
         Ok(())
@@ -252,10 +284,13 @@ impl Accounts {
         account_id: AccountId,
         wallet: &Wallet,
     ) -> Result<()> {
-        anyhow::ensure!(
-            !self.wallets.contains_key(wallet),
-            "Wallet {wallet} already in use"
-        );
+        if self.wallets.contains_key(wallet) {
+            return Err(AccountsError::WalletAlreadyInUse {
+                wallet: wallet.clone(),
+            }
+            .into());
+        }
+
         let account = self
             .accounts
             .get_mut(&account_id)
@@ -274,7 +309,15 @@ impl Accounts {
             .wallets
             .remove(wallet)
             .with_context(|| format!("Cannot remove unknown wallet {wallet}"))?;
-        anyhow::ensure!(id == actual_id, "Cannot remove wallet {wallet} from account {id}, it's actually connected to {actual_id}");
+        if id != actual_id {
+            return Err(AccountsError::WalletAccountMismatch {
+                wallet: wallet.clone(),
+                id,
+                actual_id,
+            }
+            .into());
+        }
+
         let was_present = self.accounts.get_mut(&id).unwrap().wallets.remove(wallet);
         assert!(was_present);
         Ok(())
@@ -308,7 +351,14 @@ impl Accounts {
                 let account = self.accounts.get_or_default(account_id);
                 self.pubkeys.insert(pubkey, account_id);
                 account.pubkeys.insert(pubkey);
-                anyhow::ensure!(nonce == account.next_nonce, "New account for pubkey {pubkey} expects an initial nonce of {}, received {nonce}", account.next_nonce);
+                if nonce != account.next_nonce {
+                    return Err(AccountsError::InvalidInitialNonce {
+                        pubkey,
+                        expected: account.next_nonce,
+                        actual: nonce,
+                    }
+                    .into());
+                }
                 account.next_nonce = account.next_nonce.next();
                 Ok(account_id)
             }
@@ -337,17 +387,21 @@ impl MerkleDeserialize for Accounts {
             for wallet in &account.wallets {
                 let x = wallets.insert(wallet.clone(), *id);
                 if let Some((_, id2)) = x {
-                    return Err(MerkleSerialError::Other(format!(
-                        "Wallet {wallet} used in both account {id} and {id2}"
-                    )));
+                    return Err(MerkleSerialError::WalletUsedInMultipleAccounts {
+                        wallet: wallet.to_string(),
+                        id: id.to_string(),
+                        other_id: id2.to_string(),
+                    });
                 }
             }
             for pubkey in &account.pubkeys {
                 let x = pubkeys.insert(*pubkey, *id);
                 if let Some((_, id2)) = x {
-                    return Err(MerkleSerialError::Other(format!(
-                        "Pubkey {pubkey} used in both account {id} and {id2}"
-                    )));
+                    return Err(MerkleSerialError::PubkeyUsedInMultipleAccounts {
+                        pubkey: pubkey.to_string(),
+                        id: id.to_string(),
+                        other_id: id2.to_string(),
+                    });
                 }
             }
         }
