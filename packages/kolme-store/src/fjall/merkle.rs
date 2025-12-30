@@ -116,10 +116,9 @@ fn render_children(children: &[Sha256Hash]) -> Vec<u8> {
 
 fn parse_children(children: &[u8]) -> Result<SmallVec<[Sha256Hash; 16]>, MerkleSerialError> {
     if children.len() % 32 != 0 {
-        return Err(MerkleSerialError::custom(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Children in fjall store not a multiple of 32 bytes",
-        )));
+        return Err(MerkleSerialError::InvalidChildrenLength {
+            len: children.len(),
+        });
     }
     let count = children.len() / 32;
     let mut v = SmallVec::with_capacity(count);

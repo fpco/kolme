@@ -44,15 +44,13 @@ async fn max_tx_height_inner(testtasks: TestTasks, (): ()) {
     let e: KolmeError = kolme
         .sign_propose_await_transaction(&secret, tx_builder)
         .await
-        .unwrap_err()
-        .downcast()
-        .unwrap();
+        .unwrap_err();
     match e {
-        KolmeError::PastMaxHeight {
+        KolmeError::Transaction(TransactionError::PastMaxHeight {
             txhash: _,
             max_height,
             proposed_height,
-        } => {
+        }) => {
             assert_eq!(latest.next(), proposed_height);
             assert_eq!(max, max_height);
         }

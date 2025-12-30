@@ -1,7 +1,7 @@
 #[cfg(feature = "cosmwasm")]
-mod cosmos;
+pub mod cosmos;
 #[cfg(feature = "solana")]
-mod solana;
+pub mod solana;
 
 use crate::*;
 use tokio::task::JoinSet;
@@ -32,8 +32,8 @@ impl<App: KolmeApp> Listener<App> {
         Listener { kolme, secret }
     }
 
-    pub async fn run(self, name: ChainName) -> Result<()> {
-        let mut set = JoinSet::new();
+    pub async fn run(self, name: ChainName) -> Result<(), KolmeError> {
+        let mut set = JoinSet::<Result<(), KolmeError>>::new();
         tracing::debug!("Listen on {name:?}");
 
         match name {
@@ -42,12 +42,17 @@ impl<App: KolmeApp> Listener<App> {
                 {
                     let contracts = self.wait_for_contracts(name).await?;
                     for (chain, contract) in contracts {
-                        set.spawn(cosmos::listen(
-                            self.kolme.clone(),
-                            self.secret.clone(),
-                            chain.to_cosmos_chain().unwrap(),
-                            contract,
-                        ));
+                        use futures_util::TryFutureExt;
+
+                        set.spawn(
+                            cosmos::listen(
+                                self.kolme.clone(),
+                                self.secret.clone(),
+                                chain.to_cosmos_chain().unwrap(),
+                                contract,
+                            )
+                            .map_err(KolmeError::from),
+                        );
                     }
                 }
             }
@@ -83,7 +88,9 @@ impl<App: KolmeApp> Listener<App> {
             match res {
                 Err(e) => {
                     set.abort_all();
-                    return Err(anyhow::anyhow!("Listener panicked: {e}"));
+                    return Err(KolmeError::ListenerPanicked {
+                        details: e.to_string(),
+                    });
                 }
                 Ok(Err(e)) => return Err(e),
                 Ok(Ok(())) => (),
@@ -131,7 +138,11 @@ impl<App: KolmeApp> Listener<App> {
         }
     }
 
-    async fn try_new_contract(&self, chain: ExternalChain, contract: &str) -> Result<()> {
+    async fn try_new_contract(
+        &self,
+        chain: ExternalChain,
+        contract: &str,
+    ) -> Result<(), KolmeError> {
         let kolme = self.kolme.read();
         let next = get_next_bridge_event_id(&kolme, self.secret.public_key(), chain);
         if next != BridgeEventId::start() {
@@ -140,10 +151,10 @@ impl<App: KolmeApp> Listener<App> {
         let config = &kolme.get_bridge_contracts().get(chain)?.config;
 
         if let BridgeContract::Deployed(_) = config.bridge {
-            anyhow::bail!("Already have a deployed contract on {chain:?}")
+            return Err(KolmeError::ContractAlreadyDeployed { chain });
         };
 
-        let res: Result<()> = match ChainKind::from(chain) {
+        let res: Result<(), KolmeError> = match ChainKind::from(chain) {
             #[cfg(feature = "cosmwasm")]
             ChainKind::Cosmos(chain) => {
                 let cosmos = kolme.get_cosmos(chain).await?;
@@ -151,7 +162,9 @@ impl<App: KolmeApp> Listener<App> {
                     BridgeContract::NeededCosmosBridge { code_id } => code_id,
                     BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
                     BridgeContract::Deployed(_) => {
-                        anyhow::bail!("Already have a deployed contract on {chain:?}")
+                        return Err(KolmeError::ContractAlreadyDeployed {
+                            chain: chain.into(),
+                        });
                     }
                 };
 
@@ -162,6 +175,7 @@ impl<App: KolmeApp> Listener<App> {
                     self.kolme.get_app().genesis_info(),
                 )
                 .await
+                .map_err(KolmeError::from)
             }
             #[cfg(not(feature = "cosmwasm"))]
             ChainKind::Cosmos(_) => Ok(()),
@@ -180,7 +194,7 @@ impl<App: KolmeApp> Listener<App> {
             ChainKind::Solana(_) => Ok(()),
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => {
-                anyhow::bail!("No wait for pass-through contract is expected")
+                return Err(KolmeError::UnexpectedPassThroughContract);
             }
         };
 

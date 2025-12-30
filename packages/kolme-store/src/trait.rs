@@ -16,7 +16,7 @@ pub trait KolmeBackingStore {
         &self,
         hash: Sha256Hash,
     ) -> Result<Option<MerkleLayerContents>, MerkleSerialError>;
-    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>>;
+    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> Result<Option<u64>, KolmeStoreError>;
 
     async fn load_latest_block(&self) -> Result<Option<u64>, KolmeStoreError>;
     async fn load_block<Block>(

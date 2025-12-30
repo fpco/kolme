@@ -11,6 +11,24 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 
 use crate::*;
 
+#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum KolmeImportExportError {
+    #[error("Child hash {child} was not previously written")]
+    ChildHashNotPreviouslyWritten { child: Sha256Hash },
+
+    #[error("Merkle hash {child} not found in Merkle store for parent {parent}")]
+    MissingMerkleHashInStore {
+        child: Sha256Hash,
+        parent: Sha256Hash,
+    },
+
+    #[error("Logic error: writing layer {parent} but its child {child} is not yet written")]
+    LogicChildNotYetWritten {
+        parent: Sha256Hash,
+        child: Sha256Hash,
+    },
+}
+
 impl<App: KolmeApp> Kolme<App> {
     pub async fn export_blocks_to<P: AsRef<Path>, R: RangeBounds<BlockHeight>>(
         &self,
@@ -118,12 +136,22 @@ impl<App: KolmeApp> Kolme<App> {
                         let mut buff = [0u8; 32];
                         src.read_exact(&mut buff).await?;
                         let child = Sha256Hash::from_array(buff);
-                        anyhow::ensure!(
-                            hashes.contains(&child),
-                            "Child hash {} was not previously written.",
-                            child
-                        );
-                        anyhow::ensure!(self.has_merkle_hash(child).await?, "Merkle hash {child} of a child not found in Merkle store for parent {}", payload.hash());
+
+                        if !hashes.contains(&child) {
+                            return Err(KolmeImportExportError::ChildHashNotPreviouslyWritten {
+                                child,
+                            }
+                            .into());
+                        }
+
+                        let parent = payload.hash();
+                        if !self.has_merkle_hash(child).await? {
+                            return Err(KolmeImportExportError::MissingMerkleHashInStore {
+                                child,
+                                parent,
+                            }
+                            .into());
+                        }
                         children.push(child);
                     }
                     let hash = payload.hash();
@@ -164,10 +192,13 @@ async fn write_layer(
     dest.write_u32(u32::try_from(layer.children.len()).context("Too many children")?)
         .await?;
     for child in &layer.children {
-        anyhow::ensure!(
-            written_layers.contains(child),
-            "Logic error, writing layer {hash} but its child {child} is not yet written"
-        );
+        if !written_layers.contains(child) {
+            return Err(KolmeImportExportError::LogicChildNotYetWritten {
+                parent: hash,
+                child: *child,
+            }
+            .into());
+        }
         dest.write_all(child.as_array()).await?;
     }
     written_layers.insert(hash);

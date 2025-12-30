@@ -36,19 +36,21 @@ impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
-    pub async fn new_postgres(url: &str) -> Result<Self> {
+    pub async fn new_postgres(url: &str) -> Result<Self, KolmeError> {
         KolmeStoreInner::new_postgres(url)
             .await
             .map(KolmeStore::from)
+            .map_err(KolmeError::from)
     }
 
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         KolmeStoreInner::new_postgres_with_options(connect, options)
             .await
             .map(KolmeStore::from)
+            .map_err(KolmeError::from)
     }
 
     pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
@@ -62,23 +64,28 @@ impl<App: KolmeApp> KolmeStore<App> {
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
     pub(super) async fn validate_genesis_info(&self, expected: &GenesisInfo) -> Result<()> {
         if let Some(actual) = self.load_genesis_info().await? {
-            anyhow::ensure!(
-                &actual == expected,
-                "Mismatched genesis info.\nActual:   {actual:?}\nExpected: {expected:?}"
-            );
+            if &actual != expected {
+                return Err(KolmeError::MismatchedGenesisInfo {
+                    actual,
+                    expected: expected.clone(),
+                }
+                .into());
+            }
         }
         Ok(())
     }
 
-    async fn load_genesis_info(&self) -> Result<Option<GenesisInfo>> {
+    async fn load_genesis_info(&self) -> Result<Option<GenesisInfo>, KolmeError> {
         let Some(block) = self.load_signed_block(BlockHeight::start()).await? else {
             return Ok(None);
         };
         let messages = &block.tx().0.message.as_inner().messages;
-        anyhow::ensure!(messages.len() == 1);
+        if messages.len() != 1 {
+            return Err(KolmeError::InvalidGenesisMessageCount);
+        }
         match messages.first().unwrap() {
             Message::Genesis(genesis_info) => Ok(Some(genesis_info.clone())),
-            _ => Err(anyhow::anyhow!("Invalid messages in first block")),
+            _ => Err(KolmeError::InvalidFirstBlockMessageType),
         }
     }
 
@@ -103,7 +110,9 @@ impl<App: KolmeApp> KolmeStore<App> {
 
     pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
         for child in &layer.children {
-            anyhow::ensure!(self.has_merkle_hash(*child).await?);
+            if !self.has_merkle_hash(*child).await? {
+                return Err(KolmeStoreError::MissingMerkleChild { child: *child }.into());
+            }
         }
 
         self.inner.add_merkle_layer(layer).await
@@ -156,7 +165,10 @@ impl<App: KolmeApp> KolmeStore<App> {
             .await?)
     }
 
-    pub(super) async fn get_height_for_tx(&self, txhash: TxHash) -> Result<Option<BlockHeight>> {
+    pub(super) async fn get_height_for_tx(
+        &self,
+        txhash: TxHash,
+    ) -> Result<Option<BlockHeight>, KolmeStoreError> {
         Ok(self
             .inner
             .get_height_for_tx(txhash.0)

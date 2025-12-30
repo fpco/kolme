@@ -10,7 +10,7 @@ impl<App: KolmeApp> Approver<App> {
         Approver { kolme, secret }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> Result<(), KolmeError> {
         let mut new_block = self.kolme.subscribe_new_block();
         self.catch_up_approvals_all().await?;
         loop {

@@ -38,7 +38,7 @@ impl<App: KolmeApp> ApiServer<App> {
         self
     }
 
-    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<()> {
+    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<(), KolmeError> {
         let cors = CorsLayer::new()
             .allow_methods([Method::GET, Method::POST, Method::PUT])
             .allow_origin(Any)
@@ -52,9 +52,7 @@ impl<App: KolmeApp> ApiServer<App> {
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
         tracing::info!("Starting API server on {:?}", listener.local_addr()?);
-        axum::serve(listener, app)
-            .await
-            .map_err(anyhow::Error::from)
+        axum::serve(listener, app).await.map_err(KolmeError::from)
     }
 }
 
@@ -432,8 +430,8 @@ async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocke
                 next_height = next_height.next();
                 block.map(|block| Action::Raw(RawMessage::Block(block)))
             }
-            failed = failed_txs.recv() => failed.map(|failed| Action::Raw(RawMessage::Failed(failed))).map_err(anyhow::Error::from),
-            latest = get_next_latest(&mut latest) => latest.map(|latest| Action::Raw(RawMessage::Latest(latest))),
+            failed = failed_txs.recv() => failed.map(|failed| Action::Raw(RawMessage::Failed(failed))).map_err(KolmeError::from),
+            latest = get_next_latest(&mut latest) => latest.map(|latest| Action::Raw(RawMessage::Latest(latest))).map_err(KolmeError::from),
         };
 
         let action = match action {

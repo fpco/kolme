@@ -45,7 +45,7 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload: &str,
-) -> Result<String> {
+) -> Result<String, KolmeError> {
     tracing::info!("Executing signed message on bridge: {contract}");
 
     let msg = ExecuteMsg::Signed {
@@ -70,8 +70,7 @@ pub async fn execute(
                 "Cosmos submitter failed to execute signed transaction: {}",
                 e
             );
-
-            Err(anyhow::anyhow!(e))
+            Err(KolmeError::CosmosExecutionFailed(e))
         }
     }
 }

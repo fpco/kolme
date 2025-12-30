@@ -117,7 +117,7 @@ impl PassThrough {
         }
     }
 
-    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<()> {
+    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<(), KolmeError> {
         let cors = CorsLayer::new()
             .allow_methods([Method::GET, Method::POST, Method::PUT])
             .allow_origin(Any)
@@ -137,9 +137,7 @@ impl PassThrough {
             "Starting PassThrough server on {:?}",
             listener.local_addr()?
         );
-        axum::serve(listener, app)
-            .await
-            .map_err(anyhow::Error::from)
+        axum::serve(listener, app).await.map_err(KolmeError::from)
     }
 }
 
@@ -147,7 +145,7 @@ pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
     port: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     tracing::debug!("pass through listen");
     let mut next_bridge_event_id = get_next_bridge_event_id(
         &kolme.read(),

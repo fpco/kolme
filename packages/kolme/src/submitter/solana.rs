@@ -22,7 +22,7 @@ pub async fn instantiate(
 
     let program_pubkey = Pubkey::from_str(program_id)?;
     let blockhash = client.get_latest_blockhash().await?;
-    let tx = init_tx(program_pubkey, blockhash, keypair, &data).map_err(|x| anyhow::anyhow!(x))?;
+    let tx = init_tx(program_pubkey, blockhash, keypair, &data).map_err(KolmeError::from)?;
 
     client.send_and_confirm_transaction(&tx).await?;
 
@@ -37,7 +37,7 @@ pub async fn execute(
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: String,
     fee_per_cu: Option<u64>,
-) -> Result<String> {
+) -> Result<String, KolmeError> {
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
     let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
         .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
@@ -99,7 +99,7 @@ pub async fn execute(
                     .downcast_ref::<solana_rpc_client_api::client_error::Error>()
                     .map(|e| &e.kind)
             );
-            Err(e)
+            Err(e.into())
         }
     }
 }
