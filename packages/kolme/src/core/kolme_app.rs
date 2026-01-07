@@ -34,6 +34,18 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
     ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum KolmeDataError {
+    #[error("Data validation failed")]
+    ValidationFailed,
+
+    #[error("Data mismatch")]
+    Mismatch,
+
+    #[error("Invalid data request")]
+    InvalidRequest,
+}
+
 pub trait KolmeDataRequest<App>:
     serde::Serialize + serde::de::DeserializeOwned + PartialEq
 {
@@ -41,9 +53,9 @@ pub trait KolmeDataRequest<App>:
 
     /// Do an initial load of the data
     #[allow(async_fn_in_trait)]
-    async fn load(self, app: &App) -> Result<Self::Response>;
+    async fn load(self, app: &App) -> Result<Self::Response, KolmeDataError>;
 
     /// Validate previously loaded data
     #[allow(async_fn_in_trait)]
-    async fn validate(self, app: &App, prev_res: &Self::Response) -> Result<()>;
+    async fn validate(self, app: &App, prev_res: &Self::Response) -> Result<(), KolmeDataError>;
 }

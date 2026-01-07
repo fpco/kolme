@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::core::*;
 
-#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(thiserror::Error, Debug)]
 pub enum KolmeExecuteError {
     #[error("Listener pubkey not allowed for this event")]
     InvalidListenerPubkey,
@@ -64,6 +64,30 @@ pub enum KolmeExecuteError {
 
     #[error("Invalid data load request: expected {expected}, got {actual}")]
     InvalidDataLoadRequest { expected: String, actual: String },
+
+    #[error("Public key error: {0}")]
+    PublicKeyError(#[from] shared::cryptography::PublicKeyError),
+
+    #[error(transparent)]
+    State(#[from] CoreStateError),
+
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    Types(#[from] KolmeTypesError),
+
+    #[error(transparent)]
+    Data(#[from] KolmeDataError),
+
+    #[error("Cannot approve missing bridge action {action_id} for chain {chain}")]
+    MissingBridgeAction {
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    },
+
+    #[error(transparent)]
+    Accounts(#[from] Box<AccountsError>),
 }
 
 /// Execution context for a single message.
@@ -134,7 +158,7 @@ pub enum BlockDataHandling {
 }
 
 impl<App: KolmeApp> KolmeRead<App> {
-    fn validate_tx(&self, tx: &SignedTransaction<App::Message>) -> Result<()> {
+    fn validate_tx(&self, tx: &SignedTransaction<App::Message>) -> Result<(), KolmeExecuteError> {
         // Ensure that the signature is valid
         tx.validate_signature()?;
 
@@ -149,8 +173,7 @@ impl<App: KolmeApp> KolmeRead<App> {
                 return Err(KolmeExecuteError::InvalidGenesisPubkey {
                     expected: Box::new(expected),
                     actual: Box::new(actual),
-                }
-                .into());
+                });
             }
         } else {
             tx.ensure_no_genesis()?;
@@ -244,7 +267,11 @@ impl<App: KolmeApp> KolmeRead<App> {
 }
 
 impl<App: KolmeApp> ExecutionContext<'_, App> {
-    async fn execute_message(&mut self, app: &App, message: &Message<App::Message>) -> Result<()> {
+    async fn execute_message(
+        &mut self,
+        app: &App,
+        message: &Message<App::Message>,
+    ) -> Result<(), KolmeError> {
         match message {
             Message::Genesis(actual) => {
                 let expected = app.genesis_info();
@@ -485,16 +512,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         chain: ExternalChain,
         action_id: BridgeActionId,
         signature: SignatureWithRecovery,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeExecuteError> {
         let action = self
             .framework_state
             .chains
             .get_mut(chain)?
             .pending_actions
             .get_mut(&action_id)
-            .with_context(|| {
-                format!("Cannot approve missing bridge action ID {action_id} for chain {chain}")
-            })?;
+            .ok_or(KolmeExecuteError::MissingBridgeAction { chain, action_id })?;
         let key = signature.validate(action.payload.as_bytes())?;
         // Using config.as_ref() instead of framework_state.get_config to work around
         // a borrow conflict with the mutable borrow above
@@ -507,16 +532,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         {
             return Err(KolmeExecuteError::NonApproverSignature {
                 pubkey: Box::new(key),
-            }
-            .into());
+            });
         }
 
         let old = action.approvals.insert(key, signature);
         if old.is_some() {
             return Err(KolmeExecuteError::DuplicateApproverSignature {
                 pubkey: Box::new(key),
-            }
-            .into());
+            });
         }
         Ok(())
     }
@@ -527,7 +550,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         action_id: BridgeActionId,
         processor: &SignatureWithRecovery,
         approvers: &[SignatureWithRecovery],
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         let needed = self.framework_state.get_validator_set().needed_approvers as usize;
         if approvers.len() < needed {
             return Err(KolmeExecuteError::NotEnoughApprovers {
@@ -761,21 +784,20 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     pub async fn load_data<Req: KolmeDataRequest<App>>(
         &mut self,
         req: Req,
-    ) -> Result<Req::Response> {
+    ) -> Result<Req::Response, KolmeExecuteError> {
         let request_str = serde_json::to_string(&req)?;
         let res = match &mut self.block_data_handling {
             BlockDataHandling::PriorData { loads, validation } => {
                 let BlockDataLoad { request, response } = loads
                     .pop_front()
-                    .context("Incorrect number of data loads")?;
+                    .ok_or(KolmeExecuteError::DataLoadMismatch)?;
                 let prev_req = serde_json::from_str::<Req>(&request)?;
                 let prev_res = serde_json::from_str(&response)?;
                 if prev_req != req {
                     return Err(KolmeExecuteError::InvalidDataLoadRequest {
                         expected: request,
                         actual: request_str.clone(),
-                    }
-                    .into());
+                    });
                 }
                 match validation {
                     DataLoadValidation::ValidateDataLoads => {
@@ -817,35 +839,38 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    fn auth(&mut self, auth: &AuthMessage) -> Result<()> {
+    fn auth(&mut self, auth: &AuthMessage) -> Result<(), KolmeExecuteError> {
         match auth {
             AuthMessage::AddPublicKey { key } => {
                 self.framework_state
                     .accounts
-                    .add_pubkey_to_account_error_overlap(self.get_sender_id(), *key)?;
+                    .add_pubkey_to_account_error_overlap(self.get_sender_id(), *key)
+                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
             }
             AuthMessage::RemovePublicKey { key } => {
                 if key == &self.signing_key {
                     return Err(KolmeExecuteError::CannotRemoveSigningKey {
                         key: Box::new(*key),
                         account: self.get_sender_id(),
-                    }
-                    .into());
+                    });
                 }
 
                 self.framework_state
                     .accounts
-                    .remove_pubkey_from_account(self.get_sender_id(), *key)?;
+                    .remove_pubkey_from_account(self.get_sender_id(), *key)
+                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
             }
             AuthMessage::AddWallet { wallet } => {
                 self.framework_state
                     .accounts
-                    .add_wallet_to_account(self.get_sender_id(), wallet)?;
+                    .add_wallet_to_account(self.get_sender_id(), wallet)
+                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
             }
             AuthMessage::RemoveWallet { wallet } => {
                 self.framework_state
                     .accounts
-                    .remove_wallet_from_account(self.get_sender_id(), wallet)?;
+                    .remove_wallet_from_account(self.get_sender_id(), wallet)
+                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
             }
         }
         Ok(())

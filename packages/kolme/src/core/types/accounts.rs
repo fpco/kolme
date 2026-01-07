@@ -55,6 +55,15 @@ pub enum AccountsError {
         expected: AccountNonce,
         actual: AccountNonce,
     },
+
+    #[error("Account {account_id} not found")]
+    AccountNotFound { account_id: AccountId },
+
+    #[error("Pubkey {key} not found")]
+    PubkeyNotFound { key: PublicKey },
+
+    #[error("Wallet {wallet} not found")]
+    WalletNotFound { wallet: Wallet },
 }
 
 /// Track all information on accounts.
@@ -186,14 +195,14 @@ impl Accounts {
         &mut self,
         account_id: AccountId,
         key: PublicKey,
-    ) -> Result<()> {
+    ) -> Result<(), AccountsError> {
         if self.pubkeys.contains_key(&key) {
-            return Err(AccountsError::PubkeyAlreadyInUse { key }.into());
+            return Err(AccountsError::PubkeyAlreadyInUse { key });
         }
         let account = self
             .accounts
             .get_mut(&account_id)
-            .with_context(|| format!("Account ID {account_id} not found"))?;
+            .ok_or(AccountsError::AccountNotFound { account_id })?;
         self.pubkeys.insert(key, account_id);
         account.pubkeys.insert(key);
         Ok(())
@@ -265,13 +274,13 @@ impl Accounts {
         &mut self,
         id: AccountId,
         key: PublicKey,
-    ) -> Result<()> {
+    ) -> Result<(), AccountsError> {
         let (_, actual_id) = self
             .pubkeys
             .remove(&key)
-            .with_context(|| format!("Cannot remove unknown pubkey {key}"))?;
+            .ok_or(AccountsError::PubkeyNotFound { key })?;
         if id != actual_id {
-            return Err(AccountsError::PubkeyAccountMismatch { key, id, actual_id }.into());
+            return Err(AccountsError::PubkeyAccountMismatch { key, id, actual_id });
         }
 
         let was_present = self.accounts.get_mut(&id).unwrap().pubkeys.remove(&key);
@@ -283,18 +292,17 @@ impl Accounts {
         &mut self,
         account_id: AccountId,
         wallet: &Wallet,
-    ) -> Result<()> {
+    ) -> Result<(), AccountsError> {
         if self.wallets.contains_key(wallet) {
             return Err(AccountsError::WalletAlreadyInUse {
                 wallet: wallet.clone(),
-            }
-            .into());
+            });
         }
 
         let account = self
             .accounts
             .get_mut(&account_id)
-            .with_context(|| format!("Account ID {account_id} not found"))?;
+            .ok_or(AccountsError::AccountNotFound { account_id })?;
         self.wallets.insert(wallet.clone(), account_id);
         account.wallets.insert(wallet.clone());
         Ok(())
@@ -304,18 +312,19 @@ impl Accounts {
         &mut self,
         id: AccountId,
         wallet: &Wallet,
-    ) -> Result<()> {
+    ) -> Result<(), AccountsError> {
         let (_, actual_id) = self
             .wallets
             .remove(wallet)
-            .with_context(|| format!("Cannot remove unknown wallet {wallet}"))?;
+            .ok_or(AccountsError::WalletNotFound {
+                wallet: wallet.clone(),
+            })?;
         if id != actual_id {
             return Err(AccountsError::WalletAccountMismatch {
                 wallet: wallet.clone(),
                 id,
                 actual_id,
-            }
-            .into());
+            });
         }
 
         let was_present = self.accounts.get_mut(&id).unwrap().wallets.remove(wallet);

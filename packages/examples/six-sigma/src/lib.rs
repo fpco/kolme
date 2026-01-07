@@ -310,11 +310,11 @@ struct OddsSource;
 impl<App> KolmeDataRequest<App> for OddsSource {
     type Response = Odds;
 
-    async fn load(self, _: &App) -> Result<Self::Response> {
+    async fn load(self, _: &App) -> Result<Self::Response, KolmeDataError> {
         Ok([dec!(1.8), dec!(2.5), dec!(6.5)])
     }
 
-    async fn validate(self, _: &App, _: &Self::Response) -> Result<()> {
+    async fn validate(self, _: &App, _: &Self::Response) -> Result<(), KolmeDataError> {
         // No validation possible
         Ok(())
     }

@@ -43,6 +43,9 @@ pub enum KolmeTypesError {
 
     #[error("Genesis transaction format invalid")]
     InvalidGenesisTransaction,
+
+    #[error("Failed to verify transaction signature")]
+    SignatureVerificationFailed,
 }
 
 #[cfg(feature = "solana")]
@@ -1055,15 +1058,17 @@ pub struct Block<AppMessage> {
 pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMessage>>);
 
 impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
-    pub fn validate_signature(&self) -> Result<()> {
-        let pubkey = self.0.verify_signature()?;
+    pub fn validate_signature(&self) -> Result<(), KolmeTypesError> {
+        let pubkey = self
+            .0
+            .verify_signature()
+            .map_err(|_| KolmeTypesError::SignatureVerificationFailed)?;
         let expected = self.0.message.as_inner().pubkey;
         if pubkey != expected {
             return Err(KolmeTypesError::InvalidTransactionSignature {
                 expected: Box::new(expected),
                 actual: Box::new(pubkey),
-            }
-            .into());
+            });
         }
 
         Ok(())
@@ -1078,21 +1083,21 @@ impl<AppMessage> SignedTransaction<AppMessage> {
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
-    pub fn ensure_is_genesis(&self) -> Result<()> {
+    pub fn ensure_is_genesis(&self) -> Result<(), KolmeTypesError> {
         if self.messages.len() != 1 {
-            return Err(KolmeTypesError::InvalidGenesisTransaction.into());
+            return Err(KolmeTypesError::InvalidGenesisTransaction);
         }
 
         if !matches!(self.messages[0], Message::Genesis(_)) {
-            return Err(KolmeTypesError::InvalidGenesisTransaction.into());
+            return Err(KolmeTypesError::InvalidGenesisTransaction);
         }
         Ok(())
     }
 
-    pub fn ensure_no_genesis(&self) -> Result<()> {
+    pub fn ensure_no_genesis(&self) -> Result<(), KolmeTypesError> {
         for msg in &self.messages {
             if matches!(msg, Message::Genesis(_)) {
-                return Err(KolmeTypesError::InvalidGenesisTransaction.into());
+                return Err(KolmeTypesError::InvalidGenesisTransaction);
             }
         }
         Ok(())
