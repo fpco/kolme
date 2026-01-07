@@ -1,3 +1,4 @@
+use crate::error::StorageBackend;
 use crate::{
     r#trait::{BackingRemoteDataListener, KolmeBackingStore},
     BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
@@ -14,6 +15,7 @@ use sqlx::{
     Executor, Postgres,
 };
 use std::{collections::HashMap, sync::Arc};
+
 pub mod merkle;
 
 pub struct ConstructLock {
@@ -140,8 +142,11 @@ impl KolmeBackingStore for Store {
             .map_err(KolmeStoreError::custom)
             .inspect_err(|err| tracing::error!("{err:?}"))
     }
+
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation("Postgres"))
+        Err(KolmeStoreError::UnsupportedDeleteOperation {
+            backend: StorageBackend::Postgres,
+        })
     }
 
     async fn take_construct_lock(&self) -> Result<KolmeConstructLock, KolmeStoreError> {
@@ -184,14 +189,13 @@ impl KolmeBackingStore for Store {
         merkle.load_by_hashes(&[hash], &mut dest).await?;
         Ok(dest.remove(&hash))
     }
-    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>> {
+    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> Result<Option<u64>, KolmeStoreError> {
         let txhash = txhash.as_array().as_slice();
         let height =
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
                 .fetch_optional(&self.pool)
                 .await
-                .context("Unable to query tx height")
-                .inspect_err(|err| tracing::error!("{err:?}"))?;
+                .map_err(KolmeStoreError::custom)?;
         match height {
             None => Ok(None),
             Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
@@ -273,7 +277,7 @@ impl KolmeBackingStore for Store {
         .fetch_one(&self.pool)
         .await
         .map_err(KolmeStoreError::custom)?
-        .ok_or(KolmeStoreError::Other(
+        .ok_or(KolmeStoreError::Custom(
             "Impossible empty result from a SELECT EXISTS query in has_block".to_owned(),
         ))
     }

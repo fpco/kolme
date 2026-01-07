@@ -111,33 +111,78 @@ where
 pub enum MerkleSerialError {
     #[error("Insufficient input when parsing buffer")]
     InsufficientInput,
+
     #[error("A usize value would be larger than the machine representation")]
     UsizeOverflow,
+
     #[error(
         "Unexpected magic byte to distinguish Tree from Leaf, expected 0 or 1, but got {byte}"
     )]
     UnexpectedMagicByte { byte: u8 },
+
     #[error("Invalid byte at start of tree, expected 0 or 1, but got {byte}")]
     InvalidTreeStart { byte: u8 },
+
     #[error("Leftover input was unconsumed")]
     TooMuchInput,
+
     #[error("Serialized content was invalid")]
     InvalidSerializedContent,
+
     #[error("Hashes not found in store: {hashes:?}")]
     HashesNotFound {
         hashes: HashSet<shared::types::Sha256Hash>,
     },
+
     #[error("Leaf content limit exceeded: limit {limit}, actual {actual}")]
     LeafContentLimitExceeded { limit: usize, actual: usize },
+
     #[error("Unexpected version number during deserialization of {type_name}, received {actual}, but highest supported is {highest_supported} at position {offset}")]
     UnexpectedVersion {
         highest_supported: usize,
         actual: usize,
-        type_name: &'static str,
+        type_name: String,
         offset: usize,
     },
-    #[error(transparent)]
-    Custom(Box<dyn std::error::Error + Send + Sync>),
-    #[error("{0}")]
-    Other(String),
+
+    #[error("Merkle error: {0}")]
+    Custom(String),
+
+    #[error("Children buffer length {len} is not a multiple of 32 bytes")]
+    InvalidChildrenLength { len: usize },
+
+    #[error("Invalid UTF-8 during deserialization")]
+    InvalidUtf8(#[from] std::str::Utf8Error),
+
+    #[error("Invalid JSON during deserialization")]
+    InvalidJson(#[from] serde_json::Error),
+
+    #[error("Invalid external chain identifier: {value}")]
+    InvalidExternalChain { value: String },
+
+    #[error("Invalid merkle key length: expected {expected}, got {actual}")]
+    InvalidMerkleKeyLength { expected: usize, actual: usize },
+
+    #[error("Invalid recovery id byte: {byte}")]
+    InvalidRecoveryId { byte: u8 },
+
+    #[error("Invalid byte {byte} when deserializing Option")]
+    InvalidOptionByte { byte: u8 },
+
+    #[error("Invalid timestamp during deserialization")]
+    InvalidTimestamp(#[from] jiff::Error),
+
+    #[error("Wallet {wallet} used in both account {id} and {other_id}")]
+    WalletUsedInMultipleAccounts {
+        wallet: String,
+        id: String,
+        other_id: String,
+    },
+
+    #[error("Pubkey {pubkey} used in both account {id} and {other_id}")]
+    PubkeyUsedInMultipleAccounts {
+        pubkey: String,
+        id: String,
+        other_id: String,
+    },
 }

@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = { workspace = true }
 jiff = { workspace = true }
 kademlia-discovery = { workspace = true }
-kolme = { workspace = true }
+kolme = { workspace = true, features = ["solana"] }
 kolme-store = { workspace = true }
 merkle-map = { workspace = true }
 parking_lot = { workspace = true }

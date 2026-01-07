@@ -77,10 +77,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .as_ref()
             .proposals
         {
-            anyhow::ensure!(
-                existing.payload != payload,
-                "Identical proposal {id} already exists"
-            );
+            if existing.payload == payload {
+                return Err(KolmeError::DuplicateAdminProposal { id: *id }.into());
+            }
         }
 
         let state = self.framework_state_mut().admin_proposal_state.as_mut();
