@@ -67,11 +67,11 @@ async fn listen_internal<App: KolmeApp>(
     contract: &str,
 ) -> Result<()> {
     let contract_pubkey = Pubkey::from_str_const(contract);
-
     let client = kolme.get_solana_client(chain).await;
-    let pubsub_client = kolme.get_solana_pubsub_client(chain).await?;
 
     loop {
+        let pubsub_client = kolme.get_solana_pubsub_client(chain).await?;
+
         let mut next_bridge_event_id =
             get_next_bridge_event_id(&kolme.read(), secret.public_key(), chain.into());
 
