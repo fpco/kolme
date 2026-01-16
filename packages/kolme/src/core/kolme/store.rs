@@ -53,7 +53,7 @@ impl<App: KolmeApp> KolmeStore<App> {
             .map_err(KolmeError::from)
     }
 
-    pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
+    pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self, KolmeStoreError> {
         KolmeStoreInner::new_fjall(dir).map(KolmeStore::from)
     }
 
@@ -108,21 +108,26 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.inner.has_merkle_hash(hash).await
     }
 
-    pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
+    pub(crate) async fn add_merkle_layer(
+        &self,
+        layer: &MerkleLayerContents,
+    ) -> Result<(), KolmeStoreError> {
         for child in &layer.children {
             if !self.has_merkle_hash(*child).await? {
-                return Err(KolmeStoreError::MissingMerkleChild { child: *child }.into());
+                return Err(KolmeStoreError::MissingMerkleChild { child: *child });
             }
         }
 
         self.inner.add_merkle_layer(layer).await
     }
 
-    pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<()> {
+    pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<(), KolmeStoreError> {
         self.inner.archive_block(height.0).await
     }
 
-    pub(crate) async fn get_latest_archived_block_height(&self) -> Result<Option<u64>> {
+    pub(crate) async fn get_latest_archived_block_height(
+        &self,
+    ) -> Result<Option<u64>, KolmeStoreError> {
         self.inner.get_latest_archived_block_height().await
     }
 }
@@ -196,7 +201,10 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Save data to the merkle store.
-    pub async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> Result<Sha256Hash> {
+    pub async fn save<T: MerkleSerializeRaw>(
+        &self,
+        value: &T,
+    ) -> Result<Sha256Hash, KolmeStoreError> {
         self.inner.save(value).await
     }
 

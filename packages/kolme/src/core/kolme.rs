@@ -230,7 +230,10 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.add(tx)
     }
 
-    fn verify_processor_signature<T>(&self, signed: &SignedTaggedJson<T>) -> Result<()> {
+    fn verify_processor_signature<T>(
+        &self,
+        signed: &SignedTaggedJson<T>,
+    ) -> Result<(), KolmeError> {
         // Note that during a key rotation, we will have a switch in the
         // processor, and during that period some signatures will be
         // incorrectly excluded. That's acceptable, we expect the new block data
@@ -248,9 +251,10 @@ impl<App: KolmeApp> Kolme<App> {
         if pubkey == processor {
             Ok(())
         } else {
-            Err(anyhow::anyhow!(
-                "Latest block was signed by {pubkey}, but processor is {processor}"
-            ))
+            Err(KolmeError::InvalidBlockProcessor {
+                expected_processor: Box::new(processor),
+                actual_processor: Box::new(pubkey),
+            })
         }
     }
 
@@ -1171,7 +1175,10 @@ impl<App: KolmeApp> Kolme<App> {
     /// Add a Merkle layer for this hash.
     ///
     /// Invariant: you must ensure that all children are already stored.
-    pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
+    pub(crate) async fn add_merkle_layer(
+        &self,
+        layer: &MerkleLayerContents,
+    ) -> Result<(), KolmeStoreError> {
         self.inner.store.add_merkle_layer(layer).await
     }
 

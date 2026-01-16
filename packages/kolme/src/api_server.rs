@@ -156,7 +156,7 @@ async fn get_block<App: KolmeApp>(
 async fn get_block_inner<App: KolmeApp>(
     kolme: &Kolme<App>,
     height: BlockHeight,
-) -> Result<Response, anyhow::Error> {
+) -> Result<Response, KolmeError> {
     #[derive(serde::Serialize)]
     struct Response<'a, App: KolmeApp> {
         code_version: &'a String,

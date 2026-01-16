@@ -4,7 +4,6 @@ use crate::{
     BlockHashes, HasBlockHashes, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
     StorableBlock,
 };
-use anyhow::Context as _;
 use merkle_map::{
     MerkleDeserializeRaw, MerkleLayerContents, MerkleSerialError, MerkleSerializeRaw,
     MerkleStore as _, Sha256Hash,
@@ -37,26 +36,26 @@ pub struct Store {
 }
 
 impl Store {
-    pub async fn new(url: &str) -> anyhow::Result<Self> {
-        let connect_options = url.parse()?;
+    pub async fn new(url: &str) -> Result<Self, KolmeStoreError> {
+        let connect_options = url.parse().map_err(KolmeStoreError::custom)?;
         Self::new_with_options(connect_options, PoolOptions::new().max_connections(5)).await
     }
 
     pub async fn new_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, KolmeStoreError> {
         let pool = options
             .connect_with(connect)
             .await
-            .context("Could not connect to the database")
-            .inspect_err(|err| tracing::error!("{err:?}"))?;
+            .inspect_err(|err| tracing::error!("{err:?}"))
+            .map_err(KolmeStoreError::custom)?;
 
         sqlx::migrate!()
             .run(&pool)
             .await
-            .context("Unable to execute migrations")
-            .inspect_err(|err| tracing::error!("{err:?}"))?;
+            .inspect_err(|err| tracing::error!("{err:?}"))
+            .map_err(KolmeStoreError::custom)?;
 
         Ok(Self {
             pool,
@@ -368,7 +367,7 @@ impl KolmeBackingStore for Store {
 
         Ok(())
     }
-    async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> anyhow::Result<()> {
+    async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<(), KolmeStoreError> {
         let mut merkle = self.new_store();
         merkle.save_by_hash(layer).await?;
         self.consume_stores(&self.pool, [merkle]).await?;
@@ -376,7 +375,7 @@ impl KolmeBackingStore for Store {
         Ok(())
     }
 
-    async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> anyhow::Result<Sha256Hash> {
+    async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> Result<Sha256Hash, KolmeStoreError> {
         let mut store = self.new_store();
         let contents = merkle_map::save(&mut store, value).await?;
         self.consume_stores(&self.pool, [store]).await?;
@@ -391,24 +390,21 @@ impl KolmeBackingStore for Store {
         merkle_map::load::<T, _>(&mut store, hash).await
     }
 
-    async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
+    async fn get_latest_archived_block_height(&self) -> Result<Option<u64>, KolmeStoreError> {
         sqlx::query_scalar!(
             r#"
             SELECT height as "height!" FROM latest_archived_block_height
             "#
         )
         .fetch_optional(&self.pool)
-        .await?
-        .map(|x| u64::try_from(x).map_err(anyhow::Error::from))
+        .await
+        .map_err(KolmeStoreError::custom)?
+        .map(|x| u64::try_from(x).map_err(KolmeStoreError::custom))
         .transpose()
     }
 
-    async fn archive_block(&self, height: u64) -> anyhow::Result<()> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("Unable to start database")?;
+    async fn archive_block(&self, height: u64) -> Result<(), KolmeStoreError> {
+        let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
 
         sqlx::query!(
             r#"
@@ -421,7 +417,7 @@ impl KolmeBackingStore for Store {
         )
         .execute(&mut *tx)
         .await
-        .context("Unable to store latest archived block height")?;
+        .map_err(KolmeStoreError::custom)?;
 
         sqlx::query!(
             r#"
@@ -430,12 +426,9 @@ impl KolmeBackingStore for Store {
         )
         .execute(&mut *tx)
         .await
-        .context("Unable to refresh materialized view")?;
+        .map_err(KolmeStoreError::custom)?;
 
-        tx.commit()
-            .await
-            .context("Unable to commit archive block height changes")?;
-
+        tx.commit().await.map_err(KolmeStoreError::custom)?;
         Ok(())
     }
 

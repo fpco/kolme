@@ -62,9 +62,8 @@ pub enum KolmeStoreError {
     #[error("Invalid message type in first block: expected Genesis")]
     InvalidFirstBlockMessageType,
 }
-
 impl KolmeStoreError {
-    pub fn custom<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
+    pub fn custom<E: std::fmt::Display>(e: E) -> Self {
         Self::Custom(e.to_string())
     }
 }
