@@ -1824,8 +1824,7 @@ impl ExecAction {
 
 #[cfg(feature = "solana")]
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String, KolmeError> {
-    let len = borsh::object_length(&payload)
-        .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
+    let len = borsh::object_length(&payload).map_err(KolmeError::from)?;
 
     let mut buf = Vec::with_capacity(len);
     borsh::BorshSerialize::serialize(&payload, &mut buf).map_err(KolmeError::from)?;

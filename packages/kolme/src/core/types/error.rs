@@ -1,3 +1,4 @@
+use crate::api_server::KolmeApiError;
 use crate::listener::{cosmos::CosmosListenerError, solana::ListenerSolanaError};
 use crate::{core::*, submitter::SubmitterError};
 use cosmos::error::{AddressError, WalletError};
@@ -157,6 +158,18 @@ pub enum KolmeError {
     #[error("Store error: {0}")]
     StoreError(#[from] KolmeStoreError),
 
+    #[error("API server error")]
+    ApiError(#[from] KolmeApiError),
+
+    #[error(transparent)]
+    Secretkey(#[from] SecretKeyError),
+
+    #[error("Transaction already in mempool")]
+    TxAlreadyInMempool,
+
+    #[error("Transaction already included in block {0}")]
+    TxAlreadyInBlock(BlockHeight),
+
     #[error("Failed to serialize Solana payload to Borsh")]
     SolanaPayloadSerializationError(std::io::Error),
 
@@ -246,6 +259,20 @@ impl From<anyhow::Error> for KolmeError {
             return inner;
         }
         KolmeError::Other(other)
+    }
+}
+
+impl<T> From<ProposeTransactionError<T>> for KolmeError {
+    fn from(e: ProposeTransactionError<T>) -> Self {
+        match e {
+            ProposeTransactionError::InMempool => KolmeError::TxAlreadyInMempool,
+
+            ProposeTransactionError::InBlock(block) => KolmeError::TxAlreadyInBlock(block.height()),
+
+            ProposeTransactionError::Failed(failed) => {
+                KolmeError::Transaction(failed.message.as_inner().error.clone())
+            }
+        }
     }
 }
 

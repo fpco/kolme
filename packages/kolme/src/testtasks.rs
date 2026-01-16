@@ -77,7 +77,7 @@ impl TestTasks {
     {
         self.try_spawn(async move {
             task.await;
-            anyhow::Ok(())
+            Ok::<(), KolmeError>(())
         })
     }
 

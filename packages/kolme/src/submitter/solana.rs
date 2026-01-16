@@ -39,8 +39,8 @@ pub async fn execute(
     fee_per_cu: Option<u64>,
 ) -> Result<String, KolmeError> {
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
-    let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)
-        .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge payload: {:?}", x))?;
+    let payload: Payload =
+        BorshDeserialize::try_from_slice(&payload_bytes).map_err(KolmeError::from)?;
 
     tracing::info!(
         "Executing signed message on bridge {program_id}: {:?}",
@@ -87,7 +87,7 @@ pub async fn execute(
         &data,
         &metas,
     )
-    .map_err(|x| anyhow::anyhow!(x))?;
+    .map_err(KolmeError::from)?;
 
     match client.send_and_confirm_transaction(&tx).await {
         Ok(sig) => Ok(sig.to_string()),

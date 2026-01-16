@@ -27,6 +27,9 @@ pub enum KolmeImportExportError {
         parent: Sha256Hash,
         child: Sha256Hash,
     },
+
+    #[error("Import blocks failed, found unexpected byte {byte}")]
+    UnexpectedByte { byte: u8 },
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -173,7 +176,7 @@ impl<App: KolmeApp> Kolme<App> {
                         self.add_block_with_state(block).await?;
                     }
                 }
-                b => anyhow::bail!("Import blocks failed, found unexpected byte {b}"),
+                b => return Err(KolmeImportExportError::UnexpectedByte { byte: b }.into()),
             }
         }
     }

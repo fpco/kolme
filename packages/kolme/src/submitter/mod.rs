@@ -156,7 +156,7 @@ impl<App: KolmeApp> Submitter<App> {
                     _ = listen_genesis_available.listen() => (),
                 }
             }
-            anyhow::Ok(())
+            Ok(())
         };
 
         let ongoing = async {

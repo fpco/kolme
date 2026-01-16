@@ -16,6 +16,12 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use super::GossipMessage;
 use crate::*;
 
+#[derive(thiserror::Error, Debug)]
+enum WebsocketError {
+    #[error(transparent)]
+    InvalidJson(#[from] serde_json::Error),
+}
+
 pub(super) struct WebsocketsManager<App: KolmeApp> {
     tx_gossip: Sender<GossipMessage<App>>,
     rx_message: tokio::sync::mpsc::Receiver<WebsocketsMessage<App>>,
@@ -226,7 +232,7 @@ enum WebsocketsRecv<App: KolmeApp> {
     Close,
     Skip,
     Payload(Box<GossipMessage<App>>),
-    Err(anyhow::Error),
+    Err(WebsocketError),
 }
 
 trait WebSocketWrapper {

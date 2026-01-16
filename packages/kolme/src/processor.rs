@@ -317,7 +317,7 @@ impl<App: KolmeApp> Processor<App> {
         }
     }
 
-    async fn approve_actions(&self, chain: ExternalChain) -> Result<()> {
+    async fn approve_actions(&self, chain: ExternalChain) -> Result<(), KolmeError> {
         // We only need to bother approving one action at a time. Each time we
         // approve an action, it produces a new block, which will allow us to check if we
         // need to approve anything else.
@@ -335,8 +335,7 @@ impl<App: KolmeApp> Processor<App> {
                 return Err(KolmeError::InvalidSignature {
                     expected: Box::new(*key),
                     actual: Box::new(key2),
-                }
-                .into());
+                });
             }
 
             if kolme.get_approver_pubkeys().contains(key) {
@@ -354,7 +353,9 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
 
-        let processor = secret.sign_recoverable(&action.payload)?;
+        let processor = secret
+            .sign_recoverable(&action.payload)
+            .map_err(KolmeError::from)?;
 
         let tx = kolme.create_signed_transaction(
             secret,

@@ -3,6 +3,7 @@ use std::mem;
 use super::get_next_bridge_event_id;
 use crate::*;
 use ::cosmos::{Contract, Cosmos};
+use cosmos::error::AddressError;
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
 
@@ -26,8 +27,11 @@ pub enum CosmosListenerError {
     #[error("Needed approvers mismatch")]
     NeededApprovers,
 
+    #[error("Invalid contract address: {0}")]
+    InvalidAddress(#[from] AddressError),
+
     #[error(transparent)]
-    Anyhow(#[from] anyhow::Error),
+    CosmosError(#[from] cosmos::Error),
 }
 
 pub async fn listen<App: KolmeApp>(
@@ -35,11 +39,11 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     chain: CosmosChain,
     contract: String,
-) -> Result<(), CosmosListenerError> {
+) -> Result<(), KolmeError> {
     let kolme_r = kolme.read();
 
-    let cosmos = kolme_r.get_cosmos(chain).await?;
-    let contract = cosmos.make_contract(contract.parse().map_err(anyhow::Error::from)?);
+    let cosmos = kolme_r.get_cosmos(chain).await.map_err(KolmeError::from)?;
+    let contract = cosmos.make_contract(contract.parse().map_err(KolmeError::from)?);
 
     let mut next_bridge_event_id =
         get_next_bridge_event_id(&kolme_r, secret.public_key(), chain.into());
@@ -64,24 +68,23 @@ async fn listen_once<App: KolmeApp>(
     chain: CosmosChain,
     contract: &Contract,
     next_bridge_event_id: &mut BridgeEventId,
-) -> Result<(), CosmosListenerError> {
+) -> Result<(), KolmeError> {
     match contract
         .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
         })
         .await
-        .map_err(anyhow::Error::from)?
+        .map_err(KolmeError::from)?
     {
         GetEventResp::Found { message } => {
-            let message = serde_json::from_slice::<BridgeEventMessage>(&message)
-                .map_err(anyhow::Error::from)?;
+            let message =
+                serde_json::from_slice::<BridgeEventMessage>(&message).map_err(KolmeError::from)?;
             let message =
                 to_kolme_message::<App::Message>(message, chain.into(), *next_bridge_event_id);
 
             kolme
                 .sign_propose_await_transaction(secret, vec![message])
-                .await
-                .map_err(anyhow::Error::from)?;
+                .await?;
 
             *next_bridge_event_id = next_bridge_event_id.next();
 
@@ -97,8 +100,16 @@ pub async fn sanity_check_contract(
     expected_code_id: u64,
     info: &GenesisInfo,
 ) -> Result<(), CosmosListenerError> {
-    let contract = cosmos.make_contract(contract.parse().map_err(anyhow::Error::from)?);
-    let actual_code_id = contract.info().await.map_err(anyhow::Error::from)?.code_id;
+    let contract = cosmos.make_contract(
+        contract
+            .parse::<cosmos::Address>()
+            .map_err(CosmosListenerError::InvalidAddress)?,
+    );
+    let actual_code_id = contract
+        .info()
+        .await
+        .map_err(CosmosListenerError::from)?
+        .code_id;
 
     if actual_code_id != expected_code_id {
         return Err(CosmosListenerError::CodeId {
@@ -121,7 +132,7 @@ pub async fn sanity_check_contract(
     } = contract
         .query(shared::cosmos::QueryMsg::Config {})
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(CosmosListenerError::from)?;
 
     if info.validator_set.processor != processor {
         return Err(CosmosListenerError::Processor);
