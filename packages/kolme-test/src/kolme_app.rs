@@ -99,7 +99,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(SampleState { hi_count: 0 })
     }
 
@@ -107,7 +107,7 @@ impl KolmeApp for SampleKolmeApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             SampleMessage::SayHi {} => ctx.state_mut().hi_count += 1,
         }
