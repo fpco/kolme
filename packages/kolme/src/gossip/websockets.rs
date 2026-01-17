@@ -71,7 +71,7 @@ impl<App: KolmeApp> WebsocketsManager<App> {
         websockets_servers: Vec<String>,
         local_display_name: &str,
         kolme: Kolme<App>,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         let tx_gossip = Sender::new(100);
         let (tx_message, rx_message) = tokio::sync::mpsc::channel(100);
         let local_display_name: Arc<str> = local_display_name.into();
@@ -145,7 +145,7 @@ async fn launch_client_inner<App: KolmeApp>(
     tx_message: &mut tokio::sync::mpsc::Sender<WebsocketsMessage<App>>,
     server: &str,
     latest: Option<Arc<SignedTaggedJson<LatestBlock>>>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let (stream, res) = tokio_tungstenite::connect_async(server).await?;
     tracing::debug!(%local_display_name,"launch_client_inner on {server}: got res {res:?}");
     ws_helper(rx_gossip, tx_message, stream, &local_display_name, latest).await;
@@ -188,7 +188,7 @@ async fn launch_server<App: KolmeApp>(server_state: ServerState<App>, bind: std:
 async fn launch_server_inner<App: KolmeApp>(
     server_state: ServerState<App>,
     bind: std::net::SocketAddr,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let listener = tokio::net::TcpListener::bind(bind).await?;
     let router = axum::Router::new()
         .route("/", get(ws_handler_wrapper))
@@ -241,7 +241,7 @@ trait WebSocketWrapper {
         &mut self,
         payload: GossipMessage<App>,
         local_display_name: &str,
-    ) -> Result<()>;
+    ) -> Result<(), KolmeError>;
 }
 
 impl WebSocketWrapper for WebSocket {
@@ -280,8 +280,8 @@ impl WebSocketWrapper for WebSocket {
         &mut self,
         payload: GossipMessage<App>,
         _: &str,
-    ) -> Result<()> {
-        let payload = serde_json::to_string(&payload)?;
+    ) -> Result<(), KolmeError> {
+        let payload = serde_json::to_string(&payload).map_err(KolmeError::from)?;
         self.send(axum::extract::ws::Message::text(payload)).await?;
         Ok(())
     }
@@ -323,7 +323,7 @@ impl WebSocketWrapper for WebSocketStream<MaybeTlsStream<TcpStream>> {
         &mut self,
         payload: GossipMessage<App>,
         _: &str,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         let payload = serde_json::to_string(&payload)?;
         self.send(tokio_tungstenite::tungstenite::Message::text(payload))
             .await?;

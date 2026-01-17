@@ -339,7 +339,7 @@ impl Accounts {
         &mut self,
         pubkey: PublicKey,
         nonce: AccountNonce,
-    ) -> Result<AccountId> {
+    ) -> Result<AccountId, KolmeError> {
         match self.pubkeys.get(&pubkey) {
             Some(account_id) => {
                 let account = self.accounts.get_mut(account_id).unwrap();
@@ -349,8 +349,7 @@ impl Accounts {
                         account_id: *account_id,
                         expected: account.next_nonce,
                         actual: nonce,
-                    }
-                    .into());
+                    });
                 }
                 account.next_nonce = account.next_nonce.next();
                 Ok(*account_id)
@@ -361,12 +360,13 @@ impl Accounts {
                 self.pubkeys.insert(pubkey, account_id);
                 account.pubkeys.insert(pubkey);
                 if nonce != account.next_nonce {
-                    return Err(AccountsError::InvalidInitialNonce {
-                        pubkey,
-                        expected: account.next_nonce,
-                        actual: nonce,
-                    }
-                    .into());
+                    return Err(KolmeError::Accounts(Box::new(
+                        AccountsError::InvalidInitialNonce {
+                            pubkey,
+                            expected: account.next_nonce,
+                            actual: nonce,
+                        },
+                    )));
                 }
                 account.next_nonce = account.next_nonce.next();
                 Ok(account_id)

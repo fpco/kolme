@@ -250,10 +250,7 @@ async fn block_response<App: KolmeApp>(
     };
 
     let framework_hash = signed_block.block.as_inner().framework_state;
-    let state = kolme
-        .get_framework(framework_hash)
-        .await
-        .map_err(KolmeError::from)?;
+    let state = kolme.get_framework(framework_hash).await?;
     let chain_version = state.get_chain_version().clone();
     Ok(BlockResponse {
         chain_version,
@@ -420,7 +417,7 @@ async fn fork_info<App: KolmeApp>(
         }
     };
 
-    let result: Result<ForkInfo> = async {
+    let result: Result<ForkInfo, KolmeError> = async {
         let found_block = find_block_height(&kolme, &chain_version).await?;
         let first_block =
             find_first_block(&kolme, &chain_version, found_block.block_height).await?;
@@ -473,9 +470,9 @@ async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocke
 
     async fn get_next_latest(
         latest: &mut tokio::sync::watch::Receiver<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
-    ) -> Result<Arc<SignedTaggedJson<LatestBlock>>> {
+    ) -> Result<Arc<SignedTaggedJson<LatestBlock>>, KolmeError> {
         loop {
-            latest.changed().await?;
+            latest.changed().await.map_err(KolmeError::from)?;
             if let Some(latest) = latest.borrow().clone().as_ref() {
                 break Ok(latest.clone());
             }
@@ -495,7 +492,7 @@ async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocke
                 block.map(|block| Action::Raw(RawMessage::Block(block)))
             }
             failed = failed_txs.recv() => failed.map(|failed| Action::Raw(RawMessage::Failed(failed))).map_err(KolmeError::from),
-            latest = get_next_latest(&mut latest) => latest.map(|latest| Action::Raw(RawMessage::Latest(latest))).map_err(KolmeError::from),
+            latest = get_next_latest(&mut latest) => latest.map(|latest| Action::Raw(RawMessage::Latest(latest))),
         };
 
         let action = match action {

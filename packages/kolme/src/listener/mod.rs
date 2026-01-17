@@ -100,7 +100,10 @@ impl<App: KolmeApp> Listener<App> {
         Ok(())
     }
 
-    async fn wait_for_contracts(&self, name: ChainName) -> Result<BTreeMap<ExternalChain, String>> {
+    async fn wait_for_contracts(
+        &self,
+        name: ChainName,
+    ) -> Result<BTreeMap<ExternalChain, String>, KolmeError> {
         let mut new_block = self.kolme.subscribe_new_block();
         let mut mempool = self.kolme.subscribe_mempool_additions();
         loop {

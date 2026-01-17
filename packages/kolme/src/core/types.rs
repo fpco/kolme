@@ -46,6 +46,14 @@ pub enum KolmeTypesError {
 
     #[error("Failed to verify transaction signature")]
     SignatureVerificationFailed,
+
+    #[error("Overflow while depositing asset {asset_id}, amount == {amount}")]
+    OverflowWhileDepositing { asset_id: AssetId, amount: Decimal },
+
+    #[error("Insufficient funds while withdrawing asset {asset_id}, amount == {amount}")]
+    InsufficientFundsWhileWithdrawing { asset_id: AssetId, amount: Decimal },
+    #[error("Unsupported asset ID")]
+    UnsupportedAssetId,
 }
 
 #[cfg(feature = "solana")]
@@ -161,7 +169,7 @@ impl CosmosChain {
     }
 
     #[cfg(feature = "cosmwasm")]
-    pub async fn make_client(self) -> Result<cosmos::Cosmos> {
+    pub async fn make_client(self) -> Result<cosmos::Cosmos, KolmeError> {
         let network = match self {
             Self::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
             Self::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
@@ -373,17 +381,21 @@ pub struct ChainState {
 impl ChainState {
     pub(crate) fn deposit(&mut self, asset_id: AssetId, amount: Decimal) -> Result<(), KolmeError> {
         let old = self.assets.entry(asset_id).or_default();
-        *old = old.checked_add(amount).with_context(|| {
-            format!("Overflow while depositing asset {asset_id}, amount == {amount}")
-        })?;
+        *old = old
+            .checked_add(amount)
+            .ok_or(KolmeTypesError::OverflowWhileDepositing { asset_id, amount })?;
         Ok(())
     }
 
-    pub(crate) fn withdraw(&mut self, asset_id: AssetId, amount: Decimal) -> Result<()> {
+    pub(crate) fn withdraw(
+        &mut self,
+        asset_id: AssetId,
+        amount: Decimal,
+    ) -> Result<(), KolmeError> {
         let old = self.assets.entry(asset_id).or_default();
-        *old = old.checked_sub(amount).with_context(|| {
-            format!("Insufficient funds while withdrawing asset {asset_id}, amount == {amount}")
-        })?;
+        *old = old
+            .checked_sub(amount)
+            .ok_or(KolmeTypesError::InsufficientFundsWhileWithdrawing { asset_id, amount })?;
         Ok(())
     }
 }
@@ -936,7 +948,7 @@ impl MerkleDeserializeRaw for Wallet {
 pub struct SignedBlock<AppMessage>(pub SignedTaggedJson<Block<AppMessage>>);
 
 impl<AppMessage> SignedBlock<AppMessage> {
-    pub fn validate_signature(&self) -> Result<()> {
+    pub fn validate_signature(&self) -> Result<(), KolmeError> {
         let pubkey = self.0.verify_signature()?;
         let expected = self.0.message.as_inner().processor;
         if pubkey != expected {
@@ -1115,7 +1127,7 @@ pub struct Transaction<AppMessage> {
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
-    pub fn sign(self, key: &SecretKey) -> Result<SignedTransaction<AppMessage>> {
+    pub fn sign(self, key: &SecretKey) -> Result<SignedTransaction<AppMessage>, KolmeError> {
         Ok(SignedTransaction(TaggedJson::new(self)?.sign(key)?))
     }
 }
@@ -1327,7 +1339,7 @@ impl AdminMessage {
         validator_type: ValidatorType,
         replacement: PublicKey,
         current: &SecretKey,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         let self_replace = SelfReplace {
             validator_type,
             replacement,
@@ -1337,7 +1349,7 @@ impl AdminMessage {
         Ok(AdminMessage::SelfReplace(Box::new(signed)))
     }
 
-    pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self> {
+    pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self, KolmeError> {
         let json = TaggedJson::new(set)?;
         let signed = json.sign(proposer)?;
         Ok(AdminMessage::NewSet {
@@ -1345,7 +1357,10 @@ impl AdminMessage {
         })
     }
 
-    pub fn upgrade(desired_version: impl Into<String>, proposer: &SecretKey) -> Result<Self> {
+    pub fn upgrade(
+        desired_version: impl Into<String>,
+        proposer: &SecretKey,
+    ) -> Result<Self, KolmeError> {
         let json = TaggedJson::new(Upgrade {
             desired_version: desired_version.into(),
         })?;
@@ -1357,7 +1372,7 @@ impl AdminMessage {
         admin_proposal_id: AdminProposalId,
         payload: &ProposalPayload,
         validator: &SecretKey,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         let signature = validator.sign_recoverable(payload.as_bytes())?;
         Ok(AdminMessage::Approve {
             admin_proposal_id,
@@ -1441,7 +1456,7 @@ pub struct GenesisInfo {
 }
 
 impl GenesisInfo {
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<(), KolmeError> {
         self.validator_set.validate()?;
         Ok(())
     }
@@ -1621,7 +1636,7 @@ impl ExecAction {
                                 .assets
                                 .iter()
                                 .find(|(_name, config)| config.asset_id == *id)
-                                .context("Unsupported asset ID")?
+                                .ok_or(KolmeTypesError::UnsupportedAssetId)?
                                 .0;
 
                             let denom = denom.0.clone();
@@ -1653,8 +1668,7 @@ impl ExecAction {
                                 .assets
                                 .iter()
                                 .find(|(_name, config)| config.asset_id == coin.id)
-                                .context("Unsupported asset ID")?;
-
+                                .ok_or(KolmeTypesError::UnsupportedAssetId)?;
                             coins.push((&asset.0 .0, coin.amount));
                         }
 
@@ -1911,15 +1925,21 @@ impl SolanaClient {
         Self(SolanaRpcClient::new(url))
     }
 
-    pub async fn with_redacted_error<'client, F, Fut, T>(&'client self, func: F) -> Result<T>
+    pub async fn with_redacted_error<'client, F, Fut, T>(
+        &'client self,
+        func: F,
+    ) -> Result<T, KolmeError>
     where
         F: FnOnce(&'client SolanaRpcClient) -> Fut,
         Fut: std::future::Future<Output = std::result::Result<T, client_error::Error>> + 'client,
     {
-        func(&self.0).await.map_err(redact_solana_error)
+        Ok(func(&self.0).await.map_err(redact_solana_error)?)
     }
 
-    pub async fn get_account(&self, pubkey: &SolanaPubkey) -> Result<solana_account::Account> {
+    pub async fn get_account(
+        &self,
+        pubkey: &SolanaPubkey,
+    ) -> Result<solana_account::Account, KolmeError> {
         self.with_redacted_error(|client| client.get_account(pubkey))
             .await
     }
@@ -1927,8 +1947,10 @@ impl SolanaClient {
     pub async fn get_signatures_for_address(
         &self,
         address: &SolanaPubkey,
-    ) -> Result<Vec<solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature>>
-    {
+    ) -> Result<
+        Vec<solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature>,
+        KolmeError,
+    > {
         self.with_redacted_error(|client| client.get_signatures_for_address(address))
             .await
     }
@@ -1937,13 +1959,15 @@ impl SolanaClient {
         &self,
         signature: &SolanaSignature,
         encoding: solana_transaction_status_client_types::UiTransactionEncoding,
-    ) -> Result<solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta>
-    {
+    ) -> Result<
+        solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta,
+        KolmeError,
+    > {
         self.with_redacted_error(|client| client.get_transaction(signature, encoding))
             .await
     }
 
-    pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash> {
+    pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash, KolmeError> {
         self.with_redacted_error(|client| client.get_latest_blockhash())
             .await
     }
@@ -1951,7 +1975,7 @@ impl SolanaClient {
     pub async fn send_and_confirm_transaction(
         &self,
         transaction: &impl solana_rpc_client::rpc_client::SerializableTransaction,
-    ) -> Result<SolanaSignature> {
+    ) -> Result<SolanaSignature, KolmeError> {
         self.with_redacted_error(|client| client.send_and_confirm_transaction(transaction))
             .await
     }

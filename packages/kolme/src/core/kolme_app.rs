@@ -24,14 +24,14 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
     fn genesis_info(&self) -> &GenesisInfo;
 
     /// Generate a blank state.
-    fn new_state(&self) -> Result<Self::State>;
+    fn new_state(&self) -> Result<Self::State, KolmeError>;
 
     /// Execute a message.
     fn execute(
         &self,
         ctx: &mut ExecutionContext<Self>,
         msg: &Self::Message,
-    ) -> impl std::future::Future<Output = Result<()>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), KolmeError>> + Send;
 }
 
 #[derive(thiserror::Error, Debug)]

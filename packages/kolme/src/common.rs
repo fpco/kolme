@@ -151,7 +151,7 @@ impl<T> std::fmt::Debug for TaggedJson<T> {
 }
 
 impl<T: serde::Serialize> TaggedJson<T> {
-    pub fn new(value: T) -> Result<Self> {
+    pub fn new(value: T) -> Result<Self, KolmeError> {
         let serialized = serde_json::to_string(&value)?;
         let hash = Sha256Hash::hash(&serialized);
         Ok(TaggedJson {
@@ -161,7 +161,7 @@ impl<T: serde::Serialize> TaggedJson<T> {
         })
     }
 
-    pub fn sign(self, key: &SecretKey) -> Result<SignedTaggedJson<T>> {
+    pub fn sign(self, key: &SecretKey) -> Result<SignedTaggedJson<T>, KolmeError> {
         let SignatureWithRecovery { recid, sig } = key.sign_recoverable(self.as_bytes())?;
         Ok(SignedTaggedJson {
             message: self,

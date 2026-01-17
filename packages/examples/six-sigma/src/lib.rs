@@ -199,7 +199,7 @@ impl KolmeApp for SixSigmaApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(State::new([admin_secret_key().public_key()]))
     }
 
@@ -207,19 +207,27 @@ impl KolmeApp for SixSigmaApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             AppMessage::SendFunds { asset_id, amount } => {
-                ctx.state_mut().send_funds(*asset_id, *amount)
+                ctx.state_mut()
+                    .send_funds(*asset_id, *amount)
+                    .map_err(KolmeError::from)?;
+                Ok(())
             }
             AppMessage::Init => {
                 let signing_key = ctx.get_signing_key();
-                ctx.state_mut().initialize(signing_key)
+                ctx.state_mut()
+                    .initialize(signing_key)
+                    .map_err(KolmeError::from)?;
+                Ok(())
             }
             AppMessage::AddMarket { id, asset_id, name } => {
                 let signing_key = ctx.get_signing_key();
                 ctx.state_mut()
                     .add_market(signing_key, *id, *asset_id, name)
+                    .map_err(KolmeError::from)?;
+                Ok(())
             }
             AppMessage::PlaceBet {
                 wallet,
@@ -269,7 +277,7 @@ impl fmt::Debug for SixSigmaApp {
 fn change_balance(
     ctx: &mut ExecutionContext<'_, SixSigmaApp>,
     change: &BalanceChange,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     match change {
         BalanceChange::Mint {
             asset_id,

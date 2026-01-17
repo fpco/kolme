@@ -48,7 +48,7 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
         }
     }
 
-    pub(super) async fn load(store: &KolmeStore<App>, app: &App) -> Result<Self> {
+    pub(super) async fn load(store: &KolmeStore<App>, app: &App) -> Result<Self, KolmeError> {
         // Use a JoinSet for convenient, so that the task will be canceled when the set
         // is dropped.
         let mut set = JoinSet::new();
@@ -63,11 +63,10 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
         });
         let res = match output {
             Some(height) => {
-                let storable = store.load_block(height).await?.with_context(|| {
-                    format!(
-                        "Latest block height is {height}, but it wasn't found in the data store"
-                    )
-                })?;
+                let storable = store
+                    .load_block(height)
+                    .await?
+                    .ok_or_else(|| KolmeError::BlockMissingInStore { height })?;
                 let (framework_state, app_state) = tokio::try_join!(
                     store.load(storable.block.as_inner().framework_state),
                     store.load(storable.block.as_inner().app_state)

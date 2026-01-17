@@ -8,7 +8,7 @@ pub async fn instantiate(
     seed_phrase: &SeedPhrase,
     code_id: u64,
     set: ValidatorSet,
-) -> Result<String> {
+) -> Result<String, KolmeError> {
     let msg = InstantiateMsg { set };
 
     let wallet = seed_phrase.with_hrp(cosmos.get_address_hrp())?;

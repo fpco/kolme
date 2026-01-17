@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use base64::Engine;
 use borsh::BorshDeserialize;
 use kolme_solana_bridge_client::{
@@ -7,6 +5,8 @@ use kolme_solana_bridge_client::{
     ComputeBudgetInstruction,
 };
 use shared::solana::{InitializeIxData, Payload, SignedAction, SignedMsgIxData};
+use std::error::Error;
+use std::str::FromStr;
 
 use super::*;
 
@@ -15,7 +15,7 @@ pub async fn instantiate(
     keypair: &Keypair,
     program_id: &str,
     set: ValidatorSet,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     tracing::info!("Instantiate new contract: {program_id}");
 
     let data = InitializeIxData { set };
@@ -95,11 +95,11 @@ pub async fn execute(
             tracing::error!(
                 "Solana submitter failed to execute signed transaction: {}, error kind: {:?}",
                 e,
-                e.root_cause()
-                    .downcast_ref::<solana_rpc_client_api::client_error::Error>()
+                e.source()
+                    .and_then(|s| s.downcast_ref::<solana_rpc_client_api::client_error::Error>())
                     .map(|e| &e.kind)
             );
-            Err(e.into())
+            Err(e)
         }
     }
 }

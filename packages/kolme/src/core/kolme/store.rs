@@ -62,14 +62,16 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
-    pub(super) async fn validate_genesis_info(&self, expected: &GenesisInfo) -> Result<()> {
+    pub(super) async fn validate_genesis_info(
+        &self,
+        expected: &GenesisInfo,
+    ) -> Result<(), KolmeError> {
         if let Some(actual) = self.load_genesis_info().await? {
             if &actual != expected {
                 return Err(KolmeError::MismatchedGenesisInfo {
                     actual,
                     expected: expected.clone(),
-                }
-                .into());
+                });
             }
         }
         Ok(())
@@ -95,7 +97,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.inner.clear_blocks().await
     }
 
-    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
+    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock, KolmeError> {
         Ok(self.inner.take_construct_lock().await?)
     }
 
@@ -133,14 +135,14 @@ impl<App: KolmeApp> KolmeStore<App> {
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
-    pub async fn load_latest_block(&self) -> Result<Option<BlockHeight>> {
+    pub async fn load_latest_block(&self) -> Result<Option<BlockHeight>, KolmeError> {
         Ok(self.inner.load_latest_block().await?.map(BlockHeight))
     }
 
     pub async fn load_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>> {
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>, KolmeError> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.clone()));
         }
@@ -159,7 +161,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub async fn load_signed_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
+    ) -> Result<Option<Arc<SignedBlock<App::Message>>>, KolmeError> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.block.clone()));
         }
@@ -184,7 +186,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(super) async fn add_block(
         &self,
         block: StorableBlock<SignedBlock<App::Message>>,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         let insertion_result = self.inner.add_block(&block).await;
         match insertion_result {
             Err(KolmeStoreError::MatchingBlockAlreadyInserted { .. }) | Ok(_) => {

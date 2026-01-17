@@ -69,7 +69,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         payload: ProposalPayload,
         pubkey: PublicKey,
         sigrec: SignatureWithRecovery,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         // Check to ensure we don't already have this proposal.
         for (id, existing) in &self
             .framework_state()
@@ -78,7 +78,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .proposals
         {
             if existing.payload == payload {
-                return Err(KolmeError::DuplicateAdminProposal { id: *id }.into());
+                return Err(KolmeError::DuplicateAdminProposal { id: *id });
             }
         }
 

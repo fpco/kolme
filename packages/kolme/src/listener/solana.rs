@@ -109,7 +109,7 @@ async fn listen_internal<App: KolmeApp>(
     secret: &SecretKey,
     chain: SolanaChain,
     contract: &str,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let contract_pubkey = Pubkey::from_str_const(contract);
 
     let client = kolme.get_solana_client(chain).await;
@@ -209,7 +209,7 @@ async fn catch_up<App: KolmeApp>(
     last_seen: BridgeEventId,
     chain: SolanaChain,
     contract: &Pubkey,
-) -> Result<Option<BridgeEventId>> {
+) -> Result<Option<BridgeEventId>, KolmeError> {
     tracing::info!("Catching up on missing bridge events until {}.", last_seen);
 
     let mut messages = vec![];
@@ -222,7 +222,7 @@ async fn catch_up<App: KolmeApp>(
             continue;
         }
 
-        let sig = Signature::from_str(&tx.signature)?;
+        let sig = Signature::from_str(&tx.signature).map_err(KolmeError::from)?;
         let tx = client
             .get_transaction(&sig, UiTransactionEncoding::Binary)
             .await?

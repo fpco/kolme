@@ -373,13 +373,13 @@ impl<App: KolmeApp> Processor<App> {
         Ok(())
     }
 
-    fn emit_latest(&self) -> Result<()> {
+    fn emit_latest(&self) -> Result<(), KolmeError> {
         let height = self
             .kolme
             .read()
             .get_next_height()
             .prev()
-            .context("Emit latest block: no blocks available")?;
+            .ok_or_else(|| KolmeError::NoBlocksAvailable)?;
         let latest = LatestBlock {
             height,
             when: jiff::Timestamp::now(),

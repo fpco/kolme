@@ -88,6 +88,18 @@ pub enum KolmeExecuteError {
 
     #[error(transparent)]
     Accounts(#[from] Box<AccountsError>),
+
+    #[error("Cannot report on an action when no pending actions are present")]
+    NoPendingActionsToReport,
+
+    #[error("No pending action {action_id} found for {chain}")]
+    NoPendingActionsOnChain {
+        action_id: BridgeActionId,
+        chain: ExternalChain,
+    },
+
+    #[error("Specified an unknown proposal ID {admin_proposal_id}")]
+    UnknownAdminProposalId { admin_proposal_id: AdminProposalId },
 }
 
 /// Execution context for a single message.
@@ -479,7 +491,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     let next_action_id = actions
                         .keys()
                         .next()
-                        .context("Cannot report on an action when no pending actions present")?;
+                        .ok_or(KolmeExecuteError::NoPendingActionsToReport)?;
 
                     if *next_action_id != action_id {
                         return Err(KolmeError::ActionIdMismatch {
@@ -566,7 +578,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .get_mut(chain)?
             .pending_actions
             .get_mut(&action_id)
-            .with_context(|| format!("No pending action {action_id} found for {chain}"))?;
+            .ok_or(KolmeExecuteError::NoPendingActionsOnChain { action_id, chain })?;
 
         if action.processor.is_some() {
             return Err(KolmeExecuteError::ProcessorAlreadyApproved.into());
@@ -681,7 +693,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state.accounts.get_assets(account_id)
     }
 
-    fn add_action(&mut self, chain: ExternalChain, action: ExecAction) -> Result<BridgeActionId> {
+    fn add_action(
+        &mut self,
+        chain: ExternalChain,
+        action: ExecAction,
+    ) -> Result<BridgeActionId, KolmeError> {
         let state = self.framework_state.chains.get_mut(chain)?;
         let id = state.next_action_id;
         let payload = action.to_payload(chain, &state.config, id)?;
@@ -699,7 +715,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     }
 
     /// Add an action on all chains
-    fn add_action_all_chains(&mut self, action: ExecAction) -> Result<()> {
+    fn add_action_all_chains(&mut self, action: ExecAction) -> Result<(), KolmeError> {
         let chains = self.framework_state.chains.keys().collect::<Vec<_>>();
         for chain in chains {
             self.add_action(chain, action.clone())?;
@@ -716,12 +732,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         source: AccountId,
         wallet: &Wallet,
         amount: Decimal,
-    ) -> Result<BridgeActionId> {
+    ) -> Result<BridgeActionId, KolmeError> {
         let config = self.framework_state.get_asset_config(chain, asset_id)?;
         let (amount_dec, amount_u128) = config.to_u128(amount)?;
         self.framework_state
             .accounts
-            .burn(source, asset_id, amount_dec)?;
+            .burn(source, asset_id, amount_dec)
+            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
         self.framework_state
             .chains
             .get_mut(chain)?
@@ -747,7 +764,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         source: AccountId,
         dest: AccountId,
         amount: Decimal,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         self.burn_asset(asset_id, source, amount)?;
         self.mint_asset(asset_id, dest, amount)?;
         Ok(())
@@ -759,10 +776,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         asset_id: AssetId,
         recipient: AccountId,
         amount: Decimal,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         self.framework_state
             .accounts
-            .mint(recipient, asset_id, amount)?;
+            .mint(recipient, asset_id, amount)
+            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
         Ok(())
     }
 
@@ -774,10 +792,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         asset_id: AssetId,
         owner: AccountId,
         amount: Decimal,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         self.framework_state
             .accounts
-            .burn(owner, asset_id, amount)?;
+            .burn(owner, asset_id, amount)
+            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
         Ok(())
     }
 
@@ -817,7 +836,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(res)
     }
 
-    fn bank(&mut self, bank: &BankMessage) -> Result<()> {
+    fn bank(&mut self, bank: &BankMessage) -> Result<(), KolmeError> {
         match bank {
             BankMessage::Withdraw {
                 asset,
@@ -985,12 +1004,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .ensure_is_validator(self.pubkey)?;
 
                 let state = self.framework_state.admin_proposal_state.as_mut();
-                let pending = state
-                    .proposals
-                    .get_mut(admin_proposal_id)
-                    .with_context(|| {
-                        format!("Specified an unknown proposal ID {admin_proposal_id}")
-                    })?;
+                let pending = state.proposals.get_mut(admin_proposal_id).ok_or(
+                    KolmeExecuteError::UnknownAdminProposalId {
+                        admin_proposal_id: *admin_proposal_id,
+                    },
+                )?;
 
                 let pubkey = signature.validate(pending.payload.as_bytes())?;
                 if pubkey != self.pubkey {
@@ -1010,7 +1028,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         Ok(())
     }
 
-    fn check_pending_proposals(&mut self) -> Result<()> {
+    fn check_pending_proposals(&mut self) -> Result<(), KolmeError> {
         if let Some((id, PendingProposal { payload, approvals })) = self.find_approved_proposal() {
             self.log_event(LogEvent::AdminProposalApproved(id))?;
             match payload {
@@ -1056,12 +1074,12 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.logs.last_mut().unwrap().push(msg.into());
     }
 
-    pub fn log_event(&mut self, event: LogEvent) -> Result<()> {
+    pub fn log_event(&mut self, event: LogEvent) -> Result<(), KolmeError> {
         self.log_json(&event)
     }
 
     /// Log any serializable value as JSON.
-    pub fn log_json<T: serde::Serialize>(&mut self, msg: &T) -> Result<()> {
+    pub fn log_json<T: serde::Serialize>(&mut self, msg: &T) -> Result<(), KolmeError> {
         let json = serde_json::to_string(msg)?;
         self.log(json);
         Ok(())

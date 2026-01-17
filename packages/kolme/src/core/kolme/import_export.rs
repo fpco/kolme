@@ -22,6 +22,9 @@ pub enum KolmeImportExportError {
         parent: Sha256Hash,
     },
 
+    #[error("Missing layer {hash}")]
+    MissingLayer { hash: Sha256Hash },
+
     #[error("Logic error: writing layer {parent} but its child {child} is not yet written")]
     LogicChildNotYetWritten {
         parent: Sha256Hash,
@@ -30,6 +33,12 @@ pub enum KolmeImportExportError {
 
     #[error("Import blocks failed, found unexpected byte {byte}")]
     UnexpectedByte { byte: u8 },
+
+    #[error("Payload is too large")]
+    PayloadTooLarge,
+
+    #[error("Too many children")]
+    TooManyChildren,
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -37,7 +46,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         dest: P,
         range: R,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         let dest = tokio::fs::File::create(dest).await?;
         let mut dest = BufWriter::new(dest);
         let mut curr = match range.start_bound() {
@@ -65,7 +74,7 @@ impl<App: KolmeApp> Kolme<App> {
         dest: &mut BufWriter<tokio::fs::File>,
         written_layers: &mut std::collections::HashSet<Sha256Hash>,
         height: BlockHeight,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         let block = self.load_block(height).await?;
 
         enum Work {
@@ -87,7 +96,7 @@ impl<App: KolmeApp> Kolme<App> {
                     let layer = self
                         .get_merkle_layer(hash)
                         .await?
-                        .with_context(|| format!("Missing layer {hash}"))?;
+                        .ok_or(KolmeImportExportError::MissingLayer { hash })?;
                     let children = layer.children.clone();
                     work_queue.push(Work::Write(hash, Box::new(layer)));
                     for child in children {
@@ -109,7 +118,7 @@ impl<App: KolmeApp> Kolme<App> {
         Ok(())
     }
 
-    pub async fn import_blocks_from<P: AsRef<Path>>(&self, src: P) -> Result<()> {
+    pub async fn import_blocks_from<P: AsRef<Path>>(&self, src: P) -> Result<(), KolmeError> {
         let src = tokio::fs::File::open(src).await?;
         let mut src = tokio::io::BufReader::new(src);
         let mut hashes = HashSet::new();
@@ -187,13 +196,17 @@ async fn write_layer(
     hash: Sha256Hash,
     layer: &MerkleLayerContents,
     written_layers: &mut HashSet<Sha256Hash>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     dest.write_u8(0).await?;
-    dest.write_u32(u32::try_from(layer.payload.len()).context("Payload is too large")?)
-        .await?;
+    dest.write_u32(
+        u32::try_from(layer.payload.len()).map_err(|_| KolmeImportExportError::PayloadTooLarge)?,
+    )
+    .await?;
     dest.write_all(layer.payload.bytes()).await?;
-    dest.write_u32(u32::try_from(layer.children.len()).context("Too many children")?)
-        .await?;
+    dest.write_u32(
+        u32::try_from(layer.children.len()).map_err(|_| KolmeImportExportError::TooManyChildren)?,
+    )
+    .await?;
     for child in &layer.children {
         if !written_layers.contains(child) {
             return Err(KolmeImportExportError::LogicChildNotYetWritten {
@@ -211,7 +224,7 @@ async fn write_layer(
 async fn write_block<AppMessage>(
     dest: &mut BufWriter<tokio::fs::File>,
     block: &SignedBlock<AppMessage>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let serialized = serde_json::to_vec(block)?;
     dest.write_u8(1).await?;
     dest.write_u32(u32::try_from(serialized.len())?).await?;

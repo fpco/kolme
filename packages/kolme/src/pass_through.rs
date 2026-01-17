@@ -89,7 +89,7 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload: &str,
-) -> Result<String> {
+) -> Result<String, KolmeError> {
     let url = format!("http://localhost:{port}/actions");
     tracing::debug!("Sending bridge action to {url}");
     let resp = client
@@ -101,7 +101,7 @@ pub async fn execute(
         })
         .send()
         .await?;
-    resp.error_for_status()?;
+    resp.error_for_status().map_err(KolmeError::from)?;
     Ok("no-tx-hash-for-pass-through".to_string())
 }
 
@@ -158,7 +158,11 @@ pub async fn listen<App: KolmeApp>(
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
 
     loop {
-        let message = ws.next().await.context("WebSocket stream terminated")??; //receiver.recv().await?;
+        let message = ws
+            .next()
+            .await
+            .ok_or(KolmeError::WebSocketClosed)?
+            .map_err(KolmeError::from)?;
         let message = serde_json::from_slice::<BridgeEventMessage>(&message.into_data())?;
         tracing::debug!("Received {}", serde_json::to_string(&message).unwrap());
         let message = to_kolme_message::<App::Message>(

@@ -2,8 +2,11 @@ use crate::api_server::KolmeApiError;
 use crate::listener::{cosmos::CosmosListenerError, solana::ListenerSolanaError};
 use crate::{core::*, submitter::SubmitterError};
 use cosmos::error::{AddressError, WalletError};
+use cosmos::{error::BuilderError, CosmosConfigError};
 use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
 use kolme_store::KolmeStoreError;
+use solana_signature::ParseSignatureError;
+use tokio::sync::watch::error::RecvError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeError {
@@ -236,11 +239,32 @@ pub enum KolmeError {
     #[error("JSON error")]
     Json(#[from] serde_json::Error),
 
+    #[error(transparent)]
+    ReqwestError(#[from] reqwest::Error),
+
+    #[error(transparent)]
+    RecvError(#[from] RecvError),
+
+    #[error(transparent)]
+    CosmosConfigError(#[from] CosmosConfigError),
+
+    #[error(transparent)]
+    BuilderError(#[from] BuilderError),
+
+    #[error(transparent)]
+    AxumError(#[from] axum::Error),
+
+    #[error(transparent)]
+    ParseSignatureError(#[from] ParseSignatureError),
+
     #[error("TryFromInt error")]
     TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error("Base64 decode error")]
     Base64(#[from] base64::DecodeError),
+
+    #[error("WebSocket stream terminated")]
+    WebSocketClosed,
 
     #[error("WebSocket error")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
@@ -250,6 +274,12 @@ pub enum KolmeError {
 
     #[error("{0}")]
     Other(String),
+
+    #[error("Latest block height is {height}, but it wasn't found in the data store")]
+    BlockMissingInStore { height: BlockHeight },
+
+    #[error("Emit latest block: no blocks available")]
+    NoBlocksAvailable,
 }
 
 impl From<anyhow::Error> for KolmeError {
