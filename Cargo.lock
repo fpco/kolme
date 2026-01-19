@@ -3947,7 +3947,6 @@ name = "kolme"
 version = "0.1.0"
 dependencies = [
  "absurd-future",
- "anyhow",
  "axum 0.8.4",
  "base64 0.22.1",
  "borsh 1.5.7",
@@ -4047,7 +4046,6 @@ dependencies = [
 name = "kolme-store"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "enum_dispatch",
  "fjall",
  "merkle-map",

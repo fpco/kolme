@@ -111,7 +111,7 @@ impl KolmeApp for SampleKolmeApp {
         _ctx: &mut ExecutionContext<'_, Self>,
         _msg: &Self::Message,
     ) -> Result<(), KolmeError> {
-        Err(KolmeError::from(anyhow::anyhow!("execute not implemented")))
+        Err(KolmeError::other("execute not implemented"))
     }
 }
 

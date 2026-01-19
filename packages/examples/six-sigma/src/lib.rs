@@ -212,21 +212,21 @@ impl KolmeApp for SixSigmaApp {
             AppMessage::SendFunds { asset_id, amount } => {
                 ctx.state_mut()
                     .send_funds(*asset_id, *amount)
-                    .map_err(KolmeError::from)?;
+                    .map_err(KolmeError::other)?;
                 Ok(())
             }
             AppMessage::Init => {
                 let signing_key = ctx.get_signing_key();
                 ctx.state_mut()
                     .initialize(signing_key)
-                    .map_err(KolmeError::from)?;
+                    .map_err(KolmeError::other)?;
                 Ok(())
             }
             AppMessage::AddMarket { id, asset_id, name } => {
                 let signing_key = ctx.get_signing_key();
                 ctx.state_mut()
                     .add_market(signing_key, *id, *asset_id, name)
-                    .map_err(KolmeError::from)?;
+                    .map_err(KolmeError::other)?;
                 Ok(())
             }
             AppMessage::PlaceBet {
@@ -240,22 +240,26 @@ impl KolmeApp for SixSigmaApp {
                     .get_account_balances(&sender)
                     .map_or(Default::default(), Clone::clone);
                 let odds = ctx.load_data(OddsSource).await?;
-                let change = ctx.state_mut().place_bet(
-                    sender,
-                    balances,
-                    *market_id,
-                    Wallet(wallet.clone()),
-                    *amount,
-                    *outcome,
-                    odds,
-                )?;
+                let change = ctx
+                    .state_mut()
+                    .place_bet(
+                        sender,
+                        balances,
+                        *market_id,
+                        Wallet(wallet.clone()),
+                        *amount,
+                        *outcome,
+                        odds,
+                    )
+                    .map_err(KolmeError::other)?;
                 change_balance(ctx, &change)
             }
             AppMessage::SettleMarket { market_id, outcome } => {
                 let signing_key = ctx.get_signing_key();
-                let balance_changes =
-                    ctx.state_mut()
-                        .settle_market(signing_key, *market_id, *outcome)?;
+                let balance_changes = ctx
+                    .state_mut()
+                    .settle_market(signing_key, *market_id, *outcome)
+                    .map_err(KolmeError::other)?;
                 for change in balance_changes {
                     change_balance(ctx, &change)?
                 }

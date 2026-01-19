@@ -7,7 +7,6 @@ license = "MIT"
 resolver = "2"
 
 [dependencies]
-anyhow = { workspace = true }
 axum = { workspace = true, features = ["ws"] }
 base64 = { workspace = true }
 borsh = { workspace = true }

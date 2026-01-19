@@ -282,13 +282,9 @@ pub enum KolmeError {
     NoBlocksAvailable,
 }
 
-impl From<anyhow::Error> for KolmeError {
-    fn from(e: anyhow::Error) -> Self {
-        let other = format!("Error from Anyhow: {e}");
-        if let Ok(inner) = e.downcast::<KolmeError>() {
-            return inner;
-        }
-        KolmeError::Other(other)
+impl KolmeError {
+    pub fn other<E: std::fmt::Display>(e: E) -> Self {
+        Self::Other(e.to_string())
     }
 }
 

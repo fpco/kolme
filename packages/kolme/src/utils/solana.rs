@@ -3,7 +3,7 @@
 use solana_rpc_client_api::client_error;
 
 /// Helper function to redact and wrap Solana RPC errors to hide sensitive information
-pub fn redact_solana_error(mut error: client_error::Error) -> anyhow::Error {
+pub fn redact_solana_error(mut error: client_error::Error) -> client_error::Error {
     if let client_error::ErrorKind::Reqwest(mut reqwest_error) = error.kind {
         let url = reqwest_error.url_mut();
         if let Some(url) = url {
@@ -11,7 +11,7 @@ pub fn redact_solana_error(mut error: client_error::Error) -> anyhow::Error {
         }
         error.kind = client_error::ErrorKind::Reqwest(reqwest_error);
     }
-    anyhow::Error::new(error)
+    error
 }
 
 #[cfg(test)]
