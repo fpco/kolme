@@ -330,10 +330,7 @@ impl<App: KolmeApp> Kolme<App> {
         .await
         {
             Ok(res) => Ok(res?),
-            Err(e) => Err(TransactionError::TimeoutProposingTx {
-                txhash,
-                elapsed: e.to_string(),
-            }),
+            Err(_) => Err(TransactionError::TimeoutProposingTx { txhash }),
         }
     }
 
@@ -496,8 +493,8 @@ impl<App: KolmeApp> Kolme<App> {
         let block_parent = signed_block.0.message.as_inner().parent;
         if actual_parent != block_parent {
             return Err(KolmeError::BlockParentMismatch {
-                actual: Box::new(actual_parent),
-                expected: Box::new(block_parent),
+                actual: actual_parent,
+                expected: block_parent,
             });
         }
 

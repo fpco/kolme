@@ -72,7 +72,7 @@ impl KolmeBackingStore for Store {
                     backend: StorageBackend::Fjall,
                     txhash,
                     bytes: height.to_vec(),
-                    reason: e.to_string(),
+                    reason: e,
                 });
             }
         };
@@ -86,7 +86,7 @@ impl KolmeBackingStore for Store {
         let (key, _hash_bytes) = latest.map_err(KolmeStoreError::custom)?;
         let key = (*key)
             .strip_prefix(b"block:")
-            .ok_or_else(|| KolmeStoreError::Custom("Fjall key missing block: prefix".to_owned()))?;
+            .ok_or_else(|| KolmeStoreError::custom("Fjall key missing block: prefix"))?;
         let height = <[u8; 8]>::try_from(key).map_err(KolmeStoreError::custom)?;
         Ok(Some(u64::from_be_bytes(height)))
     }
@@ -206,7 +206,11 @@ impl KolmeBackingStore for Store {
         self.merkle
             .handle
             .insert(LATEST_ARCHIVED_HEIGHT_KEY, height.to_be_bytes())
-            .map_err(KolmeStoreError::custom)?;
+            .map_err(|e| {
+                KolmeStoreError::custom(format!(
+                    "Unable to update partition with given height: {e}"
+                ))
+            })?;
 
         Ok(())
     }
@@ -216,7 +220,7 @@ impl KolmeBackingStore for Store {
             .merkle
             .handle
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
-            .map_err(KolmeStoreError::custom)?
+            .map_err(|e| KolmeStoreError::Custom(format!("Unable to retrieve latest height: {e}")))?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
     }
 

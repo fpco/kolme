@@ -49,13 +49,15 @@ impl Store {
             .connect_with(connect)
             .await
             .inspect_err(|err| tracing::error!("{err:?}"))
-            .map_err(KolmeStoreError::custom)?;
+            .map_err(|e| {
+                KolmeStoreError::custom(format!("Could not connect to the database: {e}"))
+            })?;
 
         sqlx::migrate!()
             .run(&pool)
             .await
             .inspect_err(|err| tracing::error!("{err:?}"))
-            .map_err(KolmeStoreError::custom)?;
+            .map_err(|e| KolmeStoreError::custom(format!("Unable to execute migrations: {e}")))?;
 
         Ok(Self {
             pool,
@@ -194,7 +196,7 @@ impl KolmeBackingStore for Store {
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(KolmeStoreError::custom)?;
+                .map_err(|e| KolmeStoreError::custom(format!("Unable to query tx height: {e}")))?;
         match height {
             None => Ok(None),
             Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
@@ -399,7 +401,10 @@ impl KolmeBackingStore for Store {
         .fetch_optional(&self.pool)
         .await
         .map_err(KolmeStoreError::custom)?
-        .map(|x| u64::try_from(x).map_err(KolmeStoreError::custom))
+        .map(|x| {
+            u64::try_from(x)
+                .map_err(|e| KolmeStoreError::custom(format!("Unable to start database: {e}")))
+        })
         .transpose()
     }
 
@@ -417,7 +422,9 @@ impl KolmeBackingStore for Store {
         )
         .execute(&mut *tx)
         .await
-        .map_err(KolmeStoreError::custom)?;
+        .map_err(|e| {
+            KolmeStoreError::custom(format!("Unable to store latest archived block height: {e}"))
+        })?;
 
         sqlx::query!(
             r#"
@@ -426,9 +433,15 @@ impl KolmeBackingStore for Store {
         )
         .execute(&mut *tx)
         .await
-        .map_err(KolmeStoreError::custom)?;
+        .map_err(|e| {
+            KolmeStoreError::custom(format!("Unable to refresh materialized view: {e}"))
+        })?;
 
-        tx.commit().await.map_err(KolmeStoreError::custom)?;
+        tx.commit().await.map_err(|e| {
+            KolmeStoreError::custom(format!(
+                "Unable to commit archive block height changes: {e}"
+            ))
+        })?;
         Ok(())
     }
 

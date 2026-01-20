@@ -141,7 +141,7 @@ pub enum MerkleSerialError {
     UnexpectedVersion {
         highest_supported: usize,
         actual: usize,
-        type_name: String,
+        type_name: &'static str,
         offset: usize,
     },
 

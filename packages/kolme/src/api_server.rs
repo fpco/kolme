@@ -388,12 +388,9 @@ async fn find_last_block<App: KolmeApp>(
         }
     }
 
-    match last_block {
-        Some(block_height) => Ok(block_height),
-        None => Err(KolmeError::from(KolmeApiError::LastBlockNotFound(
-            chain_version.to_string(),
-        ))),
-    }
+    last_block.ok_or_else(|| {
+        KolmeError::from(KolmeApiError::LastBlockNotFound(chain_version.to_string()))
+    })
 }
 
 #[derive(serde::Deserialize)]

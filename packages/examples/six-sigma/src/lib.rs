@@ -353,10 +353,7 @@ impl Tasks {
         let chain = self.kolme.get_app().chain;
         let listener = Listener::new(self.kolme.clone(), my_secret_key().clone());
 
-        self.listener = Some(
-            self.set
-                .spawn(async move { listener.run(chain.name()).await }),
-        );
+        self.listener = Some(self.set.spawn(listener.run(chain.name())));
     }
 
     pub fn spawn_approver(&mut self) {
@@ -374,7 +371,7 @@ impl Tasks {
     pub fn spawn_api_server(&mut self) {
         let api_server = ApiServer::new(self.kolme.clone());
         let bind = self.bind;
-        self.api_server = Some(self.set.spawn(async move { api_server.run(bind).await }));
+        self.api_server = Some(self.set.spawn(api_server.run(bind)));
     }
 }
 

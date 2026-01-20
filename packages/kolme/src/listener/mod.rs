@@ -4,6 +4,7 @@ pub mod cosmos;
 pub mod solana;
 
 use crate::*;
+use futures_util::TryFutureExt;
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {
@@ -42,8 +43,6 @@ impl<App: KolmeApp> Listener<App> {
                 {
                     let contracts = self.wait_for_contracts(name).await?;
                     for (chain, contract) in contracts {
-                        use futures_util::TryFutureExt;
-
                         set.spawn(
                             cosmos::listen(
                                 self.kolme.clone(),

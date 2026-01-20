@@ -27,35 +27,6 @@ pub use error::KolmeError;
 pub use error::KolmeExecutionError;
 pub use error::TransactionError;
 
-#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum KolmeTypesError {
-    #[error("Block signed by invalid processor: expected {expected}, got {actual}")]
-    InvalidBlockProcessorSignature {
-        expected: Box<PublicKey>,
-        actual: Box<PublicKey>,
-    },
-
-    #[error("Transaction signed by invalid key: expected {expected}, got {actual}")]
-    InvalidTransactionSignature {
-        expected: Box<PublicKey>,
-        actual: Box<PublicKey>,
-    },
-
-    #[error("Genesis transaction format invalid")]
-    InvalidGenesisTransaction,
-
-    #[error("Failed to verify transaction signature")]
-    SignatureVerificationFailed,
-
-    #[error("Overflow while depositing asset {asset_id}, amount == {amount}")]
-    OverflowWhileDepositing { asset_id: AssetId, amount: Decimal },
-
-    #[error("Insufficient funds while withdrawing asset {asset_id}, amount == {amount}")]
-    InsufficientFundsWhileWithdrawing { asset_id: AssetId, amount: Decimal },
-    #[error("Unsupported asset ID")]
-    UnsupportedAssetId,
-}
-
 #[cfg(feature = "solana")]
 /// Wrapper around the Solana RPC client to hide sensitive information.
 pub struct SolanaClient(SolanaRpcClient);
@@ -383,7 +354,7 @@ impl ChainState {
         let old = self.assets.entry(asset_id).or_default();
         *old = old
             .checked_add(amount)
-            .ok_or(KolmeTypesError::OverflowWhileDepositing { asset_id, amount })?;
+            .ok_or(KolmeError::OverflowWhileDepositing { asset_id, amount })?;
         Ok(())
     }
 
@@ -395,7 +366,7 @@ impl ChainState {
         let old = self.assets.entry(asset_id).or_default();
         *old = old
             .checked_sub(amount)
-            .ok_or(KolmeTypesError::InsufficientFundsWhileWithdrawing { asset_id, amount })?;
+            .ok_or(KolmeError::InsufficientFundsWhileWithdrawing { asset_id, amount })?;
         Ok(())
     }
 }
@@ -952,11 +923,10 @@ impl<AppMessage> SignedBlock<AppMessage> {
         let pubkey = self.0.verify_signature()?;
         let expected = self.0.message.as_inner().processor;
         if pubkey != expected {
-            return Err(KolmeTypesError::InvalidBlockProcessorSignature {
+            return Err(KolmeError::InvalidBlockProcessorSignature {
                 expected: Box::new(expected),
                 actual: Box::new(pubkey),
-            }
-            .into());
+            });
         }
 
         Ok(())
@@ -1070,14 +1040,14 @@ pub struct Block<AppMessage> {
 pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMessage>>);
 
 impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
-    pub fn validate_signature(&self) -> Result<(), KolmeTypesError> {
+    pub fn validate_signature(&self) -> Result<(), KolmeError> {
         let pubkey = self
             .0
             .verify_signature()
-            .map_err(|_| KolmeTypesError::SignatureVerificationFailed)?;
+            .map_err(|_| KolmeError::SignatureVerificationFailed)?;
         let expected = self.0.message.as_inner().pubkey;
         if pubkey != expected {
-            return Err(KolmeTypesError::InvalidTransactionSignature {
+            return Err(KolmeError::InvalidTransactionSignature {
                 expected: Box::new(expected),
                 actual: Box::new(pubkey),
             });
@@ -1095,21 +1065,21 @@ impl<AppMessage> SignedTransaction<AppMessage> {
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
-    pub fn ensure_is_genesis(&self) -> Result<(), KolmeTypesError> {
+    pub fn ensure_is_genesis(&self) -> Result<(), KolmeError> {
         if self.messages.len() != 1 {
-            return Err(KolmeTypesError::InvalidGenesisTransaction);
+            return Err(KolmeError::InvalidGenesisTransaction);
         }
 
         if !matches!(self.messages[0], Message::Genesis(_)) {
-            return Err(KolmeTypesError::InvalidGenesisTransaction);
+            return Err(KolmeError::InvalidGenesisTransaction);
         }
         Ok(())
     }
 
-    pub fn ensure_no_genesis(&self) -> Result<(), KolmeTypesError> {
+    pub fn ensure_no_genesis(&self) -> Result<(), KolmeError> {
         for msg in &self.messages {
             if matches!(msg, Message::Genesis(_)) {
-                return Err(KolmeTypesError::InvalidGenesisTransaction);
+                return Err(KolmeError::InvalidGenesisTransaction);
             }
         }
         Ok(())
@@ -1636,7 +1606,7 @@ impl ExecAction {
                                 .assets
                                 .iter()
                                 .find(|(_name, config)| config.asset_id == *id)
-                                .ok_or(KolmeTypesError::UnsupportedAssetId)?
+                                .ok_or(KolmeError::UnsupportedAssetId)?
                                 .0;
 
                             let denom = denom.0.clone();
@@ -1668,7 +1638,7 @@ impl ExecAction {
                                 .assets
                                 .iter()
                                 .find(|(_name, config)| config.asset_id == coin.id)
-                                .ok_or(KolmeTypesError::UnsupportedAssetId)?;
+                                .ok_or(KolmeError::UnsupportedAssetId)?;
                             coins.push((&asset.0 .0, coin.amount));
                         }
 

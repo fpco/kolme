@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 
 use crate::*;
 
-#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(thiserror::Error, Debug)]
 pub enum KolmeImportExportError {
     #[error("Child hash {child} was not previously written")]
     ChildHashNotPreviouslyWritten { child: Sha256Hash },

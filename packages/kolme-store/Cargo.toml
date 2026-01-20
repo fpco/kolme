@@ -17,6 +17,7 @@ sqlx = { workspace = true, features = [
   "runtime-tokio",
   "tls-rustls",
 ] }
+strum = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio.workspace = true
 tracing = { workspace = true }

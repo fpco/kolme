@@ -43,7 +43,7 @@ pub async fn listen<App: KolmeApp>(
     let kolme_r = kolme.read();
 
     let cosmos = kolme_r.get_cosmos(chain).await?;
-    let contract = cosmos.make_contract(contract.parse().map_err(KolmeError::from)?);
+    let contract = cosmos.make_contract(contract.parse()?);
 
     let mut next_bridge_event_id =
         get_next_bridge_event_id(&kolme_r, secret.public_key(), chain.into());

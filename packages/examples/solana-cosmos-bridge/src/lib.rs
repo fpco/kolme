@@ -177,10 +177,10 @@ pub async fn serve(
     set.spawn(absurd_future::absurd_future(processor.run()));
 
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(async move { listener.run(ChainName::Cosmos).await });
+    set.spawn(listener.run(ChainName::Cosmos));
 
     let listener = Listener::new(kolme.clone(), my_secret_key().clone());
-    set.spawn(async move { listener.run(ChainName::Solana).await });
+    set.spawn(listener.run(ChainName::Solana));
 
     let approver = Approver::new(kolme.clone(), my_secret_key().clone());
     set.spawn(approver.run());
@@ -192,7 +192,7 @@ pub async fn serve(
     set.spawn(submitter.run());
 
     let api_server = ApiServer::new(kolme);
-    set.spawn(async move { api_server.run(bind).await });
+    set.spawn(api_server.run(bind));
 
     while let Some(res) = set.join_next().await {
         match res {

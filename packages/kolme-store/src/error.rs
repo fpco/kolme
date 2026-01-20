@@ -1,20 +1,10 @@
 use merkle_map::{MerkleSerialError, Sha256Hash};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, strum::Display)]
 pub enum StorageBackend {
     Fjall,
     Postgres,
     InMemory,
-}
-
-impl std::fmt::Display for StorageBackend {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StorageBackend::Fjall => write!(f, "Fjall"),
-            StorageBackend::Postgres => write!(f, "Postgres"),
-            StorageBackend::InMemory => write!(f, "InMemory"),
-        }
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -50,7 +40,8 @@ pub enum KolmeStoreError {
         backend: StorageBackend,
         txhash: Sha256Hash,
         bytes: Vec<u8>,
-        reason: String,
+        #[source]
+        reason: std::array::TryFromSliceError,
     },
 
     #[error("Merkle validation error: child hash {child} not found")]

@@ -10,7 +10,7 @@ use utils::trigger::Trigger;
 
 use crate::*;
 
-#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(thiserror::Error, Debug)]
 pub enum SubmitterError {
     #[error("Pass-through submission attempted on wrong chain: expected PassThrough, got {chain}")]
     InvalidPassThroughChain { chain: ExternalChain },

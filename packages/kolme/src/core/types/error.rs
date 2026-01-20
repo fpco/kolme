@@ -94,8 +94,8 @@ pub enum KolmeError {
 
     #[error("Block parent mismatch: actual {actual}, expected {expected}")]
     BlockParentMismatch {
-        actual: Box<BlockHash>,
-        expected: Box<BlockHash>,
+        actual: BlockHash,
+        expected: BlockHash,
     },
 
     #[error("Action ID mismatch: expected {expected}, found {found}")]
@@ -142,9 +142,6 @@ pub enum KolmeError {
 
     #[error("Import/export error: {0}")]
     ImportExport(#[from] KolmeImportExportError),
-
-    #[error("Types error: {0}")]
-    TypesError(#[from] KolmeTypesError),
 
     #[error("Core error: {0}")]
     CoreError(#[from] KolmeCoreError),
@@ -280,6 +277,32 @@ pub enum KolmeError {
 
     #[error("Emit latest block: no blocks available")]
     NoBlocksAvailable,
+
+    #[error("Block signed by invalid processor: expected {expected}, got {actual}")]
+    InvalidBlockProcessorSignature {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Transaction signed by invalid key: expected {expected}, got {actual}")]
+    InvalidTransactionSignature {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Genesis transaction format invalid")]
+    InvalidGenesisTransaction,
+
+    #[error("Failed to verify transaction signature")]
+    SignatureVerificationFailed,
+
+    #[error("Overflow while depositing asset {asset_id}, amount == {amount}")]
+    OverflowWhileDepositing { asset_id: AssetId, amount: Decimal },
+
+    #[error("Insufficient funds while withdrawing asset {asset_id}, amount == {amount}")]
+    InsufficientFundsWhileWithdrawing { asset_id: AssetId, amount: Decimal },
+    #[error("Unsupported asset ID")]
+    UnsupportedAssetId,
 }
 
 impl KolmeError {
@@ -330,8 +353,8 @@ pub enum TransactionError {
         proposed_height: BlockHeight,
     },
 
-    #[error("Timed out proposing transaction")]
-    TimeoutProposingTx { txhash: TxHash, elapsed: String },
+    #[error("Timed out proposing transaction {txhash}")]
+    TimeoutProposingTx { txhash: TxHash },
 
     #[error("Invalid nonce provided for pubkey {pubkey}, account {account_id}. Expected: {expected}. Received: {actual}.")]
     InvalidNonce {
@@ -365,7 +388,7 @@ impl From<KolmeError> for TransactionError {
     }
 }
 
-#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(thiserror::Error, Debug)]
 pub enum KolmeExecutionError {
     #[error("Mismatched bridge event")]
     MismatchedBridgeEvent,
