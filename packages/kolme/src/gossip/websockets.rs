@@ -281,7 +281,7 @@ impl WebSocketWrapper for WebSocket {
         payload: GossipMessage<App>,
         _: &str,
     ) -> Result<(), KolmeError> {
-        let payload = serde_json::to_string(&payload).map_err(KolmeError::from)?;
+        let payload = serde_json::to_string(&payload)?;
         self.send(axum::extract::ws::Message::text(payload)).await?;
         Ok(())
     }

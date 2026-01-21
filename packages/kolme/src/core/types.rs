@@ -1808,10 +1808,10 @@ impl ExecAction {
 
 #[cfg(feature = "solana")]
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String, KolmeError> {
-    let len = borsh::object_length(&payload).map_err(KolmeError::from)?;
+    let len = borsh::object_length(&payload)?;
 
     let mut buf = Vec::with_capacity(len);
-    borsh::BorshSerialize::serialize(&payload, &mut buf).map_err(KolmeError::from)?;
+    borsh::BorshSerialize::serialize(&payload, &mut buf)?;
 
     let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
 

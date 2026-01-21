@@ -101,7 +101,7 @@ pub async fn execute(
         })
         .send()
         .await?;
-    resp.error_for_status().map_err(KolmeError::from)?;
+    resp.error_for_status()?;
     Ok("no-tx-hash-for-pass-through".to_string())
 }
 
@@ -158,11 +158,8 @@ pub async fn listen<App: KolmeApp>(
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
 
     loop {
-        let message = ws
-            .next()
-            .await
-            .ok_or(KolmeError::WebSocketClosed)?
-            .map_err(KolmeError::from)?;
+        let message = ws.next().await.ok_or(KolmeError::WebSocketClosed)??;
+
         let message = serde_json::from_slice::<BridgeEventMessage>(&message.into_data())?;
         tracing::debug!("Received {}", serde_json::to_string(&message).unwrap());
         let message = to_kolme_message::<App::Message>(

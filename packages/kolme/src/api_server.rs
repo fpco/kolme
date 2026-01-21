@@ -469,7 +469,7 @@ async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocke
         latest: &mut tokio::sync::watch::Receiver<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
     ) -> Result<Arc<SignedTaggedJson<LatestBlock>>, KolmeError> {
         loop {
-            latest.changed().await.map_err(KolmeError::from)?;
+            latest.changed().await?;
             if let Some(latest) = latest.borrow().clone().as_ref() {
                 break Ok(latest.clone());
             }

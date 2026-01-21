@@ -22,11 +22,11 @@ pub enum KolmeError {
     BridgeAlreadyDeployed { chain: ExternalChain },
 
     #[error(
-        "Signing public key {signer} is not a member of the {role} set and cannot self-replace"
+        "Signing public key {signer} is not a member of the {role:?} set and cannot self-replace"
     )]
     NotInValidatorSet {
         signer: Box<PublicKey>,
-        role: String,
+        role: ValidatorRole,
     },
 
     #[error("Signing public key {signer} is not the current processor and cannot self-replace")]
@@ -171,10 +171,10 @@ pub enum KolmeError {
     TxAlreadyInBlock(BlockHeight),
 
     #[error("Failed to serialize Solana payload to Borsh")]
-    SolanaPayloadSerializationError(std::io::Error),
+    SolanaPayloadSerializationError(#[source] std::io::Error),
 
     #[error("Failed to build Solana initialization transaction")]
-    SolanaInitTxBuildFailed(std::io::Error),
+    SolanaInitTxBuildFailed(#[source] std::io::Error),
 
     #[error("Failed to create Solana pubsub client")]
     SolanaPubsubError(#[from] solana_client::nonblocking::pubsub_client::PubsubClientError),
@@ -222,7 +222,7 @@ pub enum KolmeError {
     Asset(#[from] AssetError),
 
     #[error("Accounts error")]
-    Accounts(#[from] Box<AccountsError>),
+    Accounts(#[from] AccountsError),
 
     #[error("Validator set error")]
     ValidatorSet(#[from] ValidatorSetError),
@@ -333,7 +333,7 @@ pub enum TransactionError {
     #[error("Core error: {0}")]
     CoreError(String),
 
-    #[error("Conflicting block in DB")]
+    #[error("Block with height {height} in database with different hash {existing}, trying to add {adding}")]
     ConflictingBlockInDb {
         height: u64,
         adding: Sha256Hash,

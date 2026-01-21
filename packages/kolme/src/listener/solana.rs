@@ -222,7 +222,7 @@ async fn catch_up<App: KolmeApp>(
             continue;
         }
 
-        let sig = Signature::from_str(&tx.signature).map_err(KolmeError::from)?;
+        let sig = Signature::from_str(&tx.signature)?;
         let tx = client
             .get_transaction(&sig, UiTransactionEncoding::Binary)
             .await?

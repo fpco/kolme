@@ -121,7 +121,7 @@ impl<App: KolmeApp> Processor<App> {
     pub async fn create_genesis_event(&self) -> Result<(), KolmeError> {
         let info = self.kolme.get_app().genesis_info().clone();
         let kolme = self.kolme.read();
-        let secret = self.get_correct_secret(&kolme).map_err(KolmeError::from)?;
+        let secret = self.get_correct_secret(&kolme)?;
         let signed = self
             .kolme
             .read()
@@ -194,9 +194,7 @@ impl<App: KolmeApp> Processor<App> {
                         error: e.clone(),
                     };
                     let failed = TaggedJson::new(failed)?;
-                    let key = self
-                        .get_correct_secret(&self.kolme.read())
-                        .map_err(KolmeError::from)?;
+                    let key = self.get_correct_secret(&self.kolme.read())?;
                     failed.sign(key)
                 })();
 
@@ -322,7 +320,7 @@ impl<App: KolmeApp> Processor<App> {
         // approve an action, it produces a new block, which will allow us to check if we
         // need to approve anything else.
         let kolme = self.kolme.read();
-        let secret = self.get_correct_secret(&kolme).map_err(KolmeError::from)?;
+        let secret = self.get_correct_secret(&kolme)?;
 
         let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());
@@ -353,9 +351,7 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
 
-        let processor = secret
-            .sign_recoverable(&action.payload)
-            .map_err(KolmeError::from)?;
+        let processor = secret.sign_recoverable(&action.payload)?;
 
         let tx = kolme.create_signed_transaction(
             secret,
@@ -386,7 +382,7 @@ impl<App: KolmeApp> Processor<App> {
         };
         let json = TaggedJson::new(latest)?;
         let kolme = self.kolme.read();
-        let secret = self.get_correct_secret(&kolme).map_err(KolmeError::from)?;
+        let secret = self.get_correct_secret(&kolme)?;
         let signed = json.sign(secret)?;
         self.kolme.update_latest_block(Arc::new(signed));
         Ok(())

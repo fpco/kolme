@@ -93,7 +93,7 @@ pub enum KolmeExecuteError {
     },
 
     #[error(transparent)]
-    Accounts(#[from] Box<AccountsError>),
+    Accounts(#[from] AccountsError),
 
     #[error("Cannot report on an action when no pending actions are present")]
     NoPendingActionsToReport,
@@ -106,6 +106,12 @@ pub enum KolmeExecuteError {
 
     #[error("Specified an unknown proposal ID {admin_proposal_id}")]
     UnknownAdminProposalId { admin_proposal_id: AdminProposalId },
+}
+
+#[derive(Debug)]
+pub enum ValidatorRole {
+    Approver,
+    Listener,
 }
 
 /// Execution context for a single message.
@@ -339,7 +345,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .listeners
             .contains(&self.pubkey)
         {
-            return Err(KolmeExecuteError::InvalidListenerPubkey.into());
+            return Err(KolmeError::NotInValidatorSet {
+                signer: Box::new(self.pubkey),
+                role: ValidatorRole::Listener,
+            });
         }
 
         let state = self.framework_state.chains.get_mut(chain)?;
@@ -476,7 +485,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         self.framework_state
                             .accounts
                             .mint(account_id, asset_config.asset_id, amount)
-                            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
+                            .map_err(KolmeError::Accounts)?;
                         self.framework_state
                             .chains
                             .get_mut(chain)?
@@ -744,7 +753,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state
             .accounts
             .burn(source, asset_id, amount_dec)
-            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
+            .map_err(KolmeError::Accounts)?;
         self.framework_state
             .chains
             .get_mut(chain)?
@@ -786,7 +795,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state
             .accounts
             .mint(recipient, asset_id, amount)
-            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
+            .map_err(KolmeError::Accounts)?;
         Ok(())
     }
 
@@ -802,7 +811,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         self.framework_state
             .accounts
             .burn(owner, asset_id, amount)
-            .map_err(|e| KolmeError::Accounts(Box::new(e)))?;
+            .map_err(KolmeError::Accounts)?;
         Ok(())
     }
 
@@ -872,7 +881,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 self.framework_state
                     .accounts
                     .add_pubkey_to_account_error_overlap(self.get_sender_id(), *key)
-                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
+                    .map_err(KolmeExecuteError::Accounts)?;
             }
             AuthMessage::RemovePublicKey { key } => {
                 if key == &self.signing_key {
@@ -885,19 +894,19 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 self.framework_state
                     .accounts
                     .remove_pubkey_from_account(self.get_sender_id(), *key)
-                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
+                    .map_err(KolmeExecuteError::Accounts)?;
             }
             AuthMessage::AddWallet { wallet } => {
                 self.framework_state
                     .accounts
                     .add_wallet_to_account(self.get_sender_id(), wallet)
-                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
+                    .map_err(KolmeExecuteError::Accounts)?;
             }
             AuthMessage::RemoveWallet { wallet } => {
                 self.framework_state
                     .accounts
                     .remove_wallet_from_account(self.get_sender_id(), wallet)
-                    .map_err(|e| KolmeExecuteError::Accounts(Box::new(e)))?;
+                    .map_err(KolmeExecuteError::Accounts)?;
             }
         }
         Ok(())
@@ -924,7 +933,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     if !set.remove(&sender) {
                         return Err(KolmeError::NotInValidatorSet {
                             signer: Box::new(sender),
-                            role: if is_approver { "approver" } else { "listener" }.to_string(),
+                            role: if is_approver {
+                                ValidatorRole::Approver
+                            } else {
+                                ValidatorRole::Listener
+                            },
                         });
                     }
                     set.insert(replacement);

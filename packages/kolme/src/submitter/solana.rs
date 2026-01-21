@@ -5,7 +5,7 @@ use kolme_solana_bridge_client::{
     ComputeBudgetInstruction,
 };
 use shared::solana::{InitializeIxData, Payload, SignedAction, SignedMsgIxData};
-use std::error::Error;
+use solana_rpc_client_api::client_error::ErrorKind;
 use std::str::FromStr;
 
 use super::*;
@@ -22,7 +22,7 @@ pub async fn instantiate(
 
     let program_pubkey = Pubkey::from_str(program_id)?;
     let blockhash = client.get_latest_blockhash().await?;
-    let tx = init_tx(program_pubkey, blockhash, keypair, &data).map_err(KolmeError::from)?;
+    let tx = init_tx(program_pubkey, blockhash, keypair, &data)?;
 
     client.send_and_confirm_transaction(&tx).await?;
 
@@ -86,19 +86,28 @@ pub async fn execute(
         keypair,
         &data,
         &metas,
-    )
-    .map_err(KolmeError::from)?;
+    )?;
 
     match client.send_and_confirm_transaction(&tx).await {
         Ok(sig) => Ok(sig.to_string()),
         Err(e) => {
-            tracing::error!(
-                "Solana submitter failed to execute signed transaction: {}, error kind: {:?}",
-                e,
-                e.source()
-                    .and_then(|s| s.downcast_ref::<solana_rpc_client_api::client_error::Error>())
-                    .map(|e| &e.kind)
-            );
+            match &e {
+                KolmeError::SolanaClient(client_err) => match &client_err.kind {
+                    ErrorKind::RpcError(rpc) => {
+                        tracing::error!("Solana RPC error on {program_id}: {:?}", rpc);
+                    }
+                    ErrorKind::TransactionError(tx) => {
+                        tracing::error!("Solana TX error on {program_id}: {:?}", tx);
+                    }
+                    other => {
+                        tracing::error!("Solana client error on {program_id}: {:?}", other);
+                    }
+                },
+                other => {
+                    tracing::error!("Execution failed on {program_id}: {:?}", other);
+                }
+            }
+
             Err(e)
         }
     }

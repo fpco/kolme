@@ -73,12 +73,10 @@ async fn listen_once<App: KolmeApp>(
         .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
         })
-        .await
-        .map_err(KolmeError::from)?
+        .await?
     {
         GetEventResp::Found { message } => {
-            let message =
-                serde_json::from_slice::<BridgeEventMessage>(&message).map_err(KolmeError::from)?;
+            let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
             let message =
                 to_kolme_message::<App::Message>(message, chain.into(), *next_bridge_event_id);
 

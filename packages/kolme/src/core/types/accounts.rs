@@ -24,7 +24,7 @@ pub enum AccountsError {
     },
 
     #[error("Pubkey {key} already in use")]
-    PubkeyAlreadyInUse { key: PublicKey },
+    PubkeyAlreadyInUse { key: Box<PublicKey> },
 
     #[error("Wallet {wallet} already in use")]
     WalletAlreadyInUse { wallet: Wallet },
@@ -33,7 +33,7 @@ pub enum AccountsError {
         "Cannot remove pubkey {key} from account {id}, it's actually connected to {actual_id}"
     )]
     PubkeyAccountMismatch {
-        key: PublicKey,
+        key: Box<PublicKey>,
         id: AccountId,
         actual_id: AccountId,
     },
@@ -51,7 +51,7 @@ pub enum AccountsError {
         "New account for pubkey {pubkey} expects an initial nonce of {expected}, received {actual}"
     )]
     InvalidInitialNonce {
-        pubkey: PublicKey,
+        pubkey: Box<PublicKey>,
         expected: AccountNonce,
         actual: AccountNonce,
     },
@@ -60,7 +60,7 @@ pub enum AccountsError {
     AccountNotFound { account_id: AccountId },
 
     #[error("Pubkey {key} not found")]
-    PubkeyNotFound { key: PublicKey },
+    PubkeyNotFound { key: Box<PublicKey> },
 
     #[error("Wallet {wallet} not found")]
     WalletNotFound { wallet: Wallet },
@@ -197,7 +197,7 @@ impl Accounts {
         key: PublicKey,
     ) -> Result<(), AccountsError> {
         if self.pubkeys.contains_key(&key) {
-            return Err(AccountsError::PubkeyAlreadyInUse { key });
+            return Err(AccountsError::PubkeyAlreadyInUse { key: Box::new(key) });
         }
         let account = self
             .accounts
@@ -278,9 +278,13 @@ impl Accounts {
         let (_, actual_id) = self
             .pubkeys
             .remove(&key)
-            .ok_or(AccountsError::PubkeyNotFound { key })?;
+            .ok_or(AccountsError::PubkeyNotFound { key: Box::new(key) })?;
         if id != actual_id {
-            return Err(AccountsError::PubkeyAccountMismatch { key, id, actual_id });
+            return Err(AccountsError::PubkeyAccountMismatch {
+                key: Box::new(key),
+                id,
+                actual_id,
+            });
         }
 
         let was_present = self.accounts.get_mut(&id).unwrap().pubkeys.remove(&key);
@@ -360,13 +364,11 @@ impl Accounts {
                 self.pubkeys.insert(pubkey, account_id);
                 account.pubkeys.insert(pubkey);
                 if nonce != account.next_nonce {
-                    return Err(KolmeError::Accounts(Box::new(
-                        AccountsError::InvalidInitialNonce {
-                            pubkey,
-                            expected: account.next_nonce,
-                            actual: nonce,
-                        },
-                    )));
+                    return Err(KolmeError::Accounts(AccountsError::InvalidInitialNonce {
+                        pubkey: Box::new(pubkey),
+                        expected: account.next_nonce,
+                        actual: nonce,
+                    }));
                 }
                 account.next_nonce = account.next_nonce.next();
                 Ok(account_id)
