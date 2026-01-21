@@ -142,12 +142,12 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub async fn load_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>, KolmeError> {
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>, KolmeStoreError> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.clone()));
         }
 
-        Ok(self.inner.load_block(height.0).await?)
+        self.inner.load_block(height.0).await
     }
 
     pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {

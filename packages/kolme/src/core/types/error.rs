@@ -188,12 +188,6 @@ pub enum KolmeError {
     #[error("Error deserializing Solana bridge message from logs: {details}")]
     InvalidSolanaBridgeLogMessage { details: String },
 
-    #[error("Start height {start} is greater than {end} height")]
-    InvalidBlockHeight {
-        start: BlockHeight,
-        end: BlockHeight,
-    },
-
     #[error(transparent)]
     Transaction(#[from] TransactionError),
 

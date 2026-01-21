@@ -1283,11 +1283,14 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn get_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>, KolmeError> {
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>, KolmeStoreError> {
         self.inner.store.load_block(height).await
     }
 
-    pub async fn get_framework(&self, hash: Sha256Hash) -> Result<FrameworkState, KolmeError> {
+    pub async fn get_framework(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<FrameworkState, MerkleSerialError> {
         let result = self.inner.store.load(hash).await?;
         Ok(result)
     }

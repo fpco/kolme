@@ -796,6 +796,15 @@ impl TryFrom<i64> for AccountNonce {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum BlockHeightError {
+    #[error("Invalid block height: start={start}, end={end}")]
+    InvalidBlockHeight {
+        start: BlockHeight,
+        end: BlockHeight,
+    },
+}
+
 /// Height of a block
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
@@ -818,9 +827,12 @@ impl BlockHeight {
         self.0 == 0
     }
 
-    pub fn increasing_middle(&self, block_height: BlockHeight) -> Result<BlockHeight, KolmeError> {
+    pub fn increasing_middle(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<BlockHeight, BlockHeightError> {
         if self.0 >= block_height.0 {
-            return Err(KolmeError::InvalidBlockHeight {
+            return Err(BlockHeightError::InvalidBlockHeight {
                 start: *self,
                 end: block_height,
             });
