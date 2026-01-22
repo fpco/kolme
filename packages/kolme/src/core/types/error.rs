@@ -312,20 +312,26 @@ impl<T> From<ProposeTransactionError<T>> for KolmeError {
 
             ProposeTransactionError::InBlock(block) => KolmeError::TxAlreadyInBlock(block.height()),
 
-            ProposeTransactionError::Failed(failed) => {
-                KolmeError::Transaction(failed.message.as_inner().error.clone())
-            }
+            ProposeTransactionError::Failed(failed) => KolmeError::Transaction(
+                TransactionError::Other(failed.message.as_inner().error.clone()),
+            ),
         }
     }
 }
 
-#[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(thiserror::Error, Debug)]
 pub enum TransactionError {
-    #[error("Store error: {0}")]
-    StoreError(String),
+    #[error("{0}")]
+    Other(String),
 
-    #[error("Core error: {0}")]
-    CoreError(String),
+    #[error(transparent)]
+    StoreError(#[from] KolmeStoreError),
+
+    #[error(transparent)]
+    CoreError(#[from] KolmeCoreError),
+
+    #[error(transparent)]
+    MerkleError(#[from] MerkleSerialError),
 
     #[error("Block with height {height} in database with different hash {existing}, trying to add {adding}")]
     ConflictingBlockInDb {
@@ -365,7 +371,8 @@ impl From<KolmeError> for TransactionError {
             KolmeError::ExecutedHeightMismatch { expected, actual } => {
                 TransactionError::ExecutedHeightMismatch { expected, actual }
             }
-            KolmeError::StoreError(e) => TransactionError::StoreError(e.to_string()),
+            KolmeError::StoreError(e) => TransactionError::StoreError(e),
+            KolmeError::CoreError(e) => TransactionError::CoreError(e),
             KolmeError::InvalidNonce {
                 pubkey,
                 account_id,
@@ -377,7 +384,7 @@ impl From<KolmeError> for TransactionError {
                 expected,
                 actual,
             },
-            _ => TransactionError::CoreError(err.to_string()),
+            _ => TransactionError::Other(err.to_string()),
         }
     }
 }

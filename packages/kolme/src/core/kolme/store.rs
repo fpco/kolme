@@ -186,7 +186,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(super) async fn add_block(
         &self,
         block: StorableBlock<SignedBlock<App::Message>>,
-    ) -> Result<(), KolmeError> {
+    ) -> Result<(), KolmeStoreError> {
         let insertion_result = self.inner.add_block(&block).await;
         match insertion_result {
             Err(KolmeStoreError::MatchingBlockAlreadyInserted { .. }) | Ok(_) => {
@@ -198,7 +198,7 @@ impl<App: KolmeApp> KolmeStore<App> {
 
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         }
     }
 

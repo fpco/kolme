@@ -112,7 +112,7 @@ impl<App: KolmeApp> Processor<App> {
         let pubkey = &kolme.get_framework_state().get_validator_set().processor;
         self.secrets.get(pubkey).ok_or_else(|| {
             let pubkeys = self.secrets.keys().collect::<Vec<_>>();
-            TransactionError::CoreError(format!(
+            TransactionError::Other(format!(
                 "Current processor pubkey is {pubkey}, but we don't have the matching secret key, we have: {pubkeys:?}"
             ))
         })
@@ -191,7 +191,7 @@ impl<App: KolmeApp> Processor<App> {
                     let failed = FailedTransaction {
                         txhash,
                         proposed_height,
-                        error: e.clone(),
+                        error: e.to_string(),
                     };
                     let failed = TaggedJson::new(failed)?;
                     let key = self.get_correct_secret(&self.kolme.read())?;
@@ -236,10 +236,10 @@ impl<App: KolmeApp> Processor<App> {
         if kolme
             .get_tx_height(txhash)
             .await
-            .map_err(|e| TransactionError::CoreError(e.to_string()))?
+            .map_err(TransactionError::StoreError)?
             .is_some()
         {
-            return Err(TransactionError::StoreError(format!(
+            return Err(TransactionError::Other(format!(
                 "TxAlreadyInDb: {}",
                 txhash.0
             )));
@@ -282,22 +282,22 @@ impl<App: KolmeApp> Processor<App> {
             height: proposed_height,
             parent: kolme.get_current_block_hash(),
             framework_state: merkle_map::api::serialize(&framework_state)
-                .map_err(|e| TransactionError::CoreError(e.to_string()))?
+                .map_err(TransactionError::MerkleError)?
                 .hash(),
             app_state: merkle_map::api::serialize(&app_state)
-                .map_err(|e| TransactionError::CoreError(e.to_string()))?
+                .map_err(TransactionError::MerkleError)?
                 .hash(),
             loads,
             logs: merkle_map::api::serialize(&logs)
-                .map_err(|e| TransactionError::CoreError(e.to_string()))?
+                .map_err(TransactionError::MerkleError)?
                 .hash(),
         };
-        let block = TaggedJson::new(approved_block)
-            .map_err(|e| TransactionError::CoreError(e.to_string()))?;
+        let block =
+            TaggedJson::new(approved_block).map_err(|e| TransactionError::Other(e.to_string()))?;
         let signed_block = Arc::new(SignedBlock(
             block
                 .sign(secret)
-                .map_err(|e| TransactionError::CoreError(e.to_string()))?,
+                .map_err(|e| TransactionError::Other(e.to_string()))?,
         ));
         Ok(ExecutedBlock {
             signed_block,

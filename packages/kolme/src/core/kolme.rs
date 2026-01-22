@@ -337,7 +337,7 @@ impl<App: KolmeApp> Kolme<App> {
     async fn propose_and_await_transaction_inner(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
-    ) -> Result<Arc<SignedBlock<App::Message>>, TransactionError> {
+    ) -> Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         let mut new_block = self.subscribe_new_block();
         let mut failed_tx = self.subscribe_failed_txs();
         let txhash = tx.hash();
@@ -354,7 +354,7 @@ impl<App: KolmeApp> Kolme<App> {
                 }
                 Err(ProposeTransactionError::Failed(failed)) => {
                     debug_assert_eq!(failed.message.as_inner().txhash, txhash);
-                    break Err(failed.message.as_inner().error.clone());
+                    break Err(KolmeError::other(failed.message.as_inner().error.clone()));
                 }
             }
 
@@ -407,7 +407,7 @@ impl<App: KolmeApp> Kolme<App> {
             match self.propose_and_await_transaction_inner(tx).await {
                 Ok(block) => return Ok(block),
                 Err(e) => {
-                    if let TransactionError::InvalidNonce {
+                    if let KolmeError::InvalidNonce {
                         pubkey: _,
                         account_id: _,
                         expected,
@@ -425,7 +425,7 @@ impl<App: KolmeApp> Kolme<App> {
                             continue;
                         }
                     }
-                    return Err(crate::KolmeError::Transaction(e));
+                    return Err(e);
                 }
             }
         }
@@ -587,7 +587,7 @@ impl<App: KolmeApp> Kolme<App> {
             .store
             .save(&framework_state)
             .await
-            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
+            .map_err(TransactionError::StoreError)?;
         let expected_fw = signed_block.0.message.as_inner().framework_state;
 
         if framework_state_hash != expected_fw {
@@ -595,8 +595,7 @@ impl<App: KolmeApp> Kolme<App> {
                 KolmeCoreError::FrameworkStateHash {
                     expected: expected_fw,
                     actual: framework_state_hash,
-                }
-                .to_string(),
+                },
             ));
         }
 
@@ -605,17 +604,14 @@ impl<App: KolmeApp> Kolme<App> {
             .store
             .save(&app_state)
             .await
-            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
+            .map_err(TransactionError::StoreError)?;
         let expected_app = signed_block.0.message.as_inner().app_state;
 
         if app_state_hash != expected_app {
-            return Err(TransactionError::CoreError(
-                KolmeCoreError::AppStateHash {
-                    expected: expected_app,
-                    actual: app_state_hash,
-                }
-                .to_string(),
-            ));
+            return Err(TransactionError::CoreError(KolmeCoreError::AppStateHash {
+                expected: expected_app,
+                actual: app_state_hash,
+            }));
         }
 
         let logs_hash = self
@@ -623,17 +619,14 @@ impl<App: KolmeApp> Kolme<App> {
             .store
             .save(&logs)
             .await
-            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
+            .map_err(TransactionError::StoreError)?;
         let expected_logs = signed_block.0.message.as_inner().logs;
 
         if logs_hash != expected_logs {
-            return Err(TransactionError::CoreError(
-                KolmeCoreError::LogsHash {
-                    expected: expected_logs,
-                    actual: logs_hash,
-                }
-                .to_string(),
-            ));
+            return Err(TransactionError::CoreError(KolmeCoreError::LogsHash {
+                expected: expected_logs,
+                actual: logs_hash,
+            }));
         }
 
         self.inner
@@ -645,7 +638,7 @@ impl<App: KolmeApp> Kolme<App> {
                 block: signed_block.clone(),
             })
             .await
-            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
+            .map_err(TransactionError::StoreError)?;
 
         self.inner.mempool.add_signed_block(signed_block.clone());
         if let Some(tx) = self.inner.landed_txs.get() {
@@ -677,7 +670,7 @@ impl<App: KolmeApp> Kolme<App> {
         if self
             .get_next_to_archive()
             .await
-            .map_err(|e| TransactionError::StoreError(e.to_string()))?
+            .map_err(TransactionError::StoreError)?
             == height
         {
             if let Err(e) = self.inner.store.archive_block(height).await {
@@ -1342,13 +1335,12 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Obtains the latest block synced by the Archiver, if it exists
-    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>, KolmeError> {
+    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
         Ok(self
             .inner
             .store
             .get_latest_archived_block_height()
-            .await
-            .map_err(|e| KolmeCoreError::GetLatestArchivedBlockFailed { source: e })?
+            .await?
             .map(BlockHeight))
     }
 
@@ -1356,7 +1348,7 @@ impl<App: KolmeApp> Kolme<App> {
     ///
     /// This will report errors during data load and then return the earliest
     /// block height, essentially restarting the archive process.
-    pub async fn get_next_to_archive(&self) -> Result<BlockHeight, KolmeError> {
+    pub async fn get_next_to_archive(&self) -> Result<BlockHeight, KolmeStoreError> {
         let mut next = self
             .get_latest_archived_block()
             .await?

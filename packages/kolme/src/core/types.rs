@@ -1841,7 +1841,7 @@ pub struct FailedTransaction {
     pub txhash: TxHash,
     /// Block height we attempted to generate.
     pub proposed_height: BlockHeight,
-    pub error: TransactionError,
+    pub error: String,
 }
 
 impl Display for FailedTransaction {
