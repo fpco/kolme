@@ -36,22 +36,24 @@ impl<App: KolmeApp> From<KolmeStoreInner> for KolmeStore<App> {
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
-    pub async fn new_postgres(url: &str) -> Result<Self> {
+    pub async fn new_postgres(url: &str) -> Result<Self, KolmeError> {
         KolmeStoreInner::new_postgres(url)
             .await
             .map(KolmeStore::from)
+            .map_err(KolmeError::from)
     }
 
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         KolmeStoreInner::new_postgres_with_options(connect, options)
             .await
             .map(KolmeStore::from)
+            .map_err(KolmeError::from)
     }
 
-    pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self> {
+    pub fn new_fjall(dir: impl AsRef<Path>) -> Result<Self, KolmeStoreError> {
         KolmeStoreInner::new_fjall(dir).map(KolmeStore::from)
     }
 
@@ -60,25 +62,32 @@ impl<App: KolmeApp> KolmeStore<App> {
     }
 
     /// Ensures that either we have no blocks yet, or the first block has matching genesis info.
-    pub(super) async fn validate_genesis_info(&self, expected: &GenesisInfo) -> Result<()> {
+    pub(super) async fn validate_genesis_info(
+        &self,
+        expected: &GenesisInfo,
+    ) -> Result<(), KolmeError> {
         if let Some(actual) = self.load_genesis_info().await? {
-            anyhow::ensure!(
-                &actual == expected,
-                "Mismatched genesis info.\nActual:   {actual:?}\nExpected: {expected:?}"
-            );
+            if &actual != expected {
+                return Err(KolmeError::MismatchedGenesisInfo {
+                    actual,
+                    expected: expected.clone(),
+                });
+            }
         }
         Ok(())
     }
 
-    async fn load_genesis_info(&self) -> Result<Option<GenesisInfo>> {
+    async fn load_genesis_info(&self) -> Result<Option<GenesisInfo>, KolmeError> {
         let Some(block) = self.load_signed_block(BlockHeight::start()).await? else {
             return Ok(None);
         };
         let messages = &block.tx().0.message.as_inner().messages;
-        anyhow::ensure!(messages.len() == 1);
+        if messages.len() != 1 {
+            return Err(KolmeError::InvalidGenesisMessageCount);
+        }
         match messages.first().unwrap() {
             Message::Genesis(genesis_info) => Ok(Some(genesis_info.clone())),
-            _ => Err(anyhow::anyhow!("Invalid messages in first block")),
+            _ => Err(KolmeError::InvalidFirstBlockMessageType),
         }
     }
 
@@ -88,7 +97,7 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.inner.clear_blocks().await
     }
 
-    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
+    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock, KolmeError> {
         Ok(self.inner.take_construct_lock().await?)
     }
 
@@ -101,37 +110,44 @@ impl<App: KolmeApp> KolmeStore<App> {
         self.inner.has_merkle_hash(hash).await
     }
 
-    pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
+    pub(crate) async fn add_merkle_layer(
+        &self,
+        layer: &MerkleLayerContents,
+    ) -> Result<(), KolmeStoreError> {
         for child in &layer.children {
-            anyhow::ensure!(self.has_merkle_hash(*child).await?);
+            if !self.has_merkle_hash(*child).await? {
+                return Err(KolmeStoreError::MissingMerkleChild { child: *child });
+            }
         }
 
         self.inner.add_merkle_layer(layer).await
     }
 
-    pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<()> {
+    pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<(), KolmeStoreError> {
         self.inner.archive_block(height.0).await
     }
 
-    pub(crate) async fn get_latest_archived_block_height(&self) -> Result<Option<u64>> {
+    pub(crate) async fn get_latest_archived_block_height(
+        &self,
+    ) -> Result<Option<u64>, KolmeStoreError> {
         self.inner.get_latest_archived_block_height().await
     }
 }
 
 impl<App: KolmeApp> KolmeStore<App> {
-    pub async fn load_latest_block(&self) -> Result<Option<BlockHeight>> {
+    pub async fn load_latest_block(&self) -> Result<Option<BlockHeight>, KolmeError> {
         Ok(self.inner.load_latest_block().await?.map(BlockHeight))
     }
 
     pub async fn load_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>> {
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>, KolmeStoreError> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.clone()));
         }
 
-        Ok(self.inner.load_block(height.0).await?)
+        self.inner.load_block(height.0).await
     }
 
     pub async fn has_block(&self, height: BlockHeight) -> Result<bool, KolmeStoreError> {
@@ -145,7 +161,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub async fn load_signed_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
+    ) -> Result<Option<Arc<SignedBlock<App::Message>>>, KolmeError> {
         if let Some(storable) = self.block_cache.read().peek(&height) {
             return Ok(Some(storable.block.clone()));
         }
@@ -156,7 +172,10 @@ impl<App: KolmeApp> KolmeStore<App> {
             .await?)
     }
 
-    pub(super) async fn get_height_for_tx(&self, txhash: TxHash) -> Result<Option<BlockHeight>> {
+    pub(super) async fn get_height_for_tx(
+        &self,
+        txhash: TxHash,
+    ) -> Result<Option<BlockHeight>, KolmeStoreError> {
         Ok(self
             .inner
             .get_height_for_tx(txhash.0)
@@ -167,7 +186,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(super) async fn add_block(
         &self,
         block: StorableBlock<SignedBlock<App::Message>>,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeStoreError> {
         let insertion_result = self.inner.add_block(&block).await;
         match insertion_result {
             Err(KolmeStoreError::MatchingBlockAlreadyInserted { .. }) | Ok(_) => {
@@ -179,12 +198,15 @@ impl<App: KolmeApp> KolmeStore<App> {
 
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         }
     }
 
     /// Save data to the merkle store.
-    pub async fn save<T: MerkleSerializeRaw>(&self, value: &T) -> Result<Sha256Hash> {
+    pub async fn save<T: MerkleSerializeRaw>(
+        &self,
+        value: &T,
+    ) -> Result<Sha256Hash, KolmeStoreError> {
         self.inner.save(value).await
     }
 

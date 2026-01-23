@@ -31,6 +31,5 @@ pub use shared::{cryptography::*, types::*};
 pub use submitter::Submitter;
 pub use upgrader::Upgrader;
 
-pub(crate) use anyhow::{Context, Result};
 pub(crate) use std::collections::{BTreeMap, BTreeSet};
 pub(crate) use std::sync::Arc;

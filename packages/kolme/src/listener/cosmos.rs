@@ -3,15 +3,43 @@ use std::mem;
 use super::get_next_bridge_event_id;
 use crate::*;
 use ::cosmos::{Contract, Cosmos};
+use cosmos::error::AddressError;
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
+
+#[derive(thiserror::Error, Debug)]
+pub enum CosmosListenerError {
+    #[error("Code ID mismatch: expected {expected}, actual {actual}")]
+    CodeId { expected: u64, actual: u64 },
+
+    #[error("Processor mismatch")]
+    Processor,
+
+    #[error("Listeners mismatch")]
+    Listeners,
+
+    #[error("Needed listeners mismatch")]
+    NeededListeners,
+
+    #[error("Approvers mismatch")]
+    Approvers,
+
+    #[error("Needed approvers mismatch")]
+    NeededApprovers,
+
+    #[error("Invalid contract address: {0}")]
+    InvalidAddress(#[from] AddressError),
+
+    #[error(transparent)]
+    CosmosError(#[from] cosmos::Error),
+}
 
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
     chain: CosmosChain,
     contract: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let kolme_r = kolme.read();
 
     let cosmos = kolme_r.get_cosmos(chain).await?;
@@ -40,7 +68,7 @@ async fn listen_once<App: KolmeApp>(
     chain: CosmosChain,
     contract: &Contract,
     next_bridge_event_id: &mut BridgeEventId,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     match contract
         .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
@@ -69,14 +97,24 @@ pub async fn sanity_check_contract(
     contract: &str,
     expected_code_id: u64,
     info: &GenesisInfo,
-) -> Result<()> {
-    let contract = cosmos.make_contract(contract.parse()?);
-    let actual_code_id = contract.info().await?.code_id;
-
-    anyhow::ensure!(
-        actual_code_id == expected_code_id,
-        "Code ID mismatch, expected {expected_code_id}, but {contract} has {actual_code_id}"
+) -> Result<(), CosmosListenerError> {
+    let contract = cosmos.make_contract(
+        contract
+            .parse::<cosmos::Address>()
+            .map_err(CosmosListenerError::InvalidAddress)?,
     );
+    let actual_code_id = contract
+        .info()
+        .await
+        .map_err(CosmosListenerError::from)?
+        .code_id;
+
+    if actual_code_id != expected_code_id {
+        return Err(CosmosListenerError::CodeId {
+            expected: expected_code_id,
+            actual: actual_code_id,
+        });
+    }
 
     let shared::cosmos::State {
         set:
@@ -89,13 +127,29 @@ pub async fn sanity_check_contract(
             },
         next_event_id: _,
         next_action_id: _,
-    } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
+    } = contract
+        .query(shared::cosmos::QueryMsg::Config {})
+        .await
+        .map_err(CosmosListenerError::from)?;
 
-    anyhow::ensure!(info.validator_set.processor == processor);
-    anyhow::ensure!(listeners == info.validator_set.listeners);
-    anyhow::ensure!(needed_listeners == info.validator_set.needed_listeners);
-    anyhow::ensure!(approvers == info.validator_set.approvers);
-    anyhow::ensure!(needed_approvers == info.validator_set.needed_approvers);
+    if info.validator_set.processor != processor {
+        return Err(CosmosListenerError::Processor);
+    }
+    if listeners != info.validator_set.listeners {
+        return Err(CosmosListenerError::Listeners);
+    }
+
+    if needed_listeners != info.validator_set.needed_listeners {
+        return Err(CosmosListenerError::NeededListeners);
+    }
+
+    if approvers != info.validator_set.approvers {
+        return Err(CosmosListenerError::Approvers);
+    }
+
+    if needed_approvers != info.validator_set.needed_approvers {
+        return Err(CosmosListenerError::NeededApprovers);
+    }
 
     Ok(())
 }

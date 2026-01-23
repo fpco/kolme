@@ -69,7 +69,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         payload: ProposalPayload,
         pubkey: PublicKey,
         sigrec: SignatureWithRecovery,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         // Check to ensure we don't already have this proposal.
         for (id, existing) in &self
             .framework_state()
@@ -77,10 +77,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .as_ref()
             .proposals
         {
-            anyhow::ensure!(
-                existing.payload != payload,
-                "Identical proposal {id} already exists"
-            );
+            if existing.payload == payload {
+                return Err(KolmeError::DuplicateAdminProposal { id: *id });
+            }
         }
 
         let state = self.framework_state_mut().admin_proposal_state.as_mut();

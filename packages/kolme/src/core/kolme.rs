@@ -3,6 +3,8 @@ mod import_export;
 mod mempool;
 mod store;
 
+pub use import_export::KolmeImportExportError;
+
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{BackingRemoteDataListener, KolmeConstructLock, KolmeStoreError, StorableBlock};
@@ -21,6 +23,66 @@ use mempool::Mempool;
 pub use mempool::ProposeTransactionError;
 
 use crate::core::*;
+
+#[derive(thiserror::Error, Debug)]
+pub enum KolmeCoreError {
+    #[error("Executed height mismatch: expected {expected}, actual {actual}")]
+    ExecutedHeight {
+        expected: BlockHeight,
+        actual: BlockHeight,
+    },
+
+    #[error("Executed loads mismatch")]
+    ExecutedLoads {
+        expected: Vec<BlockDataLoad>,
+        actual: Vec<BlockDataLoad>,
+    },
+
+    #[error("Framework state hash mismatch")]
+    FrameworkStateHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("App state hash mismatch")]
+    AppStateHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("Logs hash mismatch")]
+    LogsHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("Missing framework merkle layer {hash}")]
+    MissingFrameworkMerkleLayer { hash: Sha256Hash },
+
+    #[error("Missing app merkle layer {hash}")]
+    MissingAppMerkleLayer { hash: Sha256Hash },
+
+    #[error("Missing logs merkle layer {hash}")]
+    MissingLogMerkleLayer { hash: Sha256Hash },
+
+    #[error("Expected block {height} not found during resync")]
+    BlockNotFoundDuringResync { height: BlockHeight },
+
+    #[error("Block {height} not available")]
+    BlockNotFound { height: BlockHeight },
+
+    #[error("Missing merkle layer {hash} in source store")]
+    MissingMerkleLayer { hash: Sha256Hash },
+
+    #[error("Unable to mark block {height} as archived: {source}")]
+    ArchiveBlockFailed {
+        height: BlockHeight,
+        source: KolmeStoreError,
+    },
+
+    #[error("Unable to retrieve latest archived block height: {source}")]
+    GetLatestArchivedBlockFailed { source: KolmeStoreError },
+}
 
 /// A running instance of Kolme for the given application.
 ///
@@ -186,7 +248,10 @@ impl<App: KolmeApp> Kolme<App> {
         self.inner.mempool.add(tx)
     }
 
-    fn verify_processor_signature<T>(&self, signed: &SignedTaggedJson<T>) -> Result<()> {
+    fn verify_processor_signature<T>(
+        &self,
+        signed: &SignedTaggedJson<T>,
+    ) -> Result<(), KolmeError> {
         // Note that during a key rotation, we will have a switch in the
         // processor, and during that period some signatures will be
         // incorrectly excluded. That's acceptable, we expect the new block data
@@ -204,9 +269,10 @@ impl<App: KolmeApp> Kolme<App> {
         if pubkey == processor {
             Ok(())
         } else {
-            Err(anyhow::anyhow!(
-                "Latest block was signed by {pubkey}, but processor is {processor}"
-            ))
+            Err(KolmeError::InvalidBlockProcessor {
+                expected_processor: Box::new(processor),
+                actual_processor: Box::new(pubkey),
+            })
         }
     }
 
@@ -255,7 +321,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn propose_and_await_transaction(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> Result<Arc<SignedBlock<App::Message>>, TransactionError> {
         let txhash = tx.hash();
         match tokio::time::timeout(
             self.tx_await_duration,
@@ -263,17 +329,15 @@ impl<App: KolmeApp> Kolme<App> {
         )
         .await
         {
-            Ok(res) => res,
-            Err(e) => Err(anyhow::Error::from(e).context(format!(
-                "Timed out proposing and awaiting transaction {txhash}"
-            ))),
+            Ok(res) => Ok(res?),
+            Err(_) => Err(TransactionError::TimeoutProposingTx { txhash }),
         }
     }
 
     async fn propose_and_await_transaction_inner(
         &self,
         tx: Arc<SignedTransaction<App::Message>>,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> Result<Arc<SignedBlock<App::Message>>, TransactionError> {
         let mut new_block = self.subscribe_new_block();
         let mut failed_tx = self.subscribe_failed_txs();
         let txhash = tx.hash();
@@ -290,7 +354,7 @@ impl<App: KolmeApp> Kolme<App> {
                 }
                 Err(ProposeTransactionError::Failed(failed)) => {
                     debug_assert_eq!(failed.message.as_inner().txhash, txhash);
-                    break Err(failed.message.as_inner().error.clone().into());
+                    break Err(failed.message.as_inner().error.clone());
                 }
             }
 
@@ -314,7 +378,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         secret: &SecretKey,
         tx_builder: T,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         self.sign_propose_await_transaction_inner(secret, tx_builder.into())
             .await
     }
@@ -323,7 +387,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         secret: &SecretKey,
         tx_builder: TxBuilder<App::Message>,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         let pubkey = secret.public_key();
         let (next_block_height, mut nonce) = {
             let kolme_r = self.read();
@@ -341,30 +405,34 @@ impl<App: KolmeApp> Kolme<App> {
                 nonce,
             )?);
             match self.propose_and_await_transaction_inner(tx).await {
-                Ok(block) => break Ok(block),
+                Ok(block) => return Ok(block),
                 Err(e) => {
-                    if let Some(KolmeError::InvalidNonce {
+                    if let TransactionError::InvalidNonce {
                         pubkey: _,
                         account_id: _,
                         expected,
                         actual,
-                    }) = e.downcast_ref()
+                    } = e
                     {
                         if actual < expected && attempt < MAX_NONCE_ATTEMPTS {
-                            tracing::warn!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}. Retrieved attempted nonce from framework state with next_block_height {next_block_height}. Error: {e}");
+                            tracing::warn!(
+                                "Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}. \
+                                Retrieved attempted nonce from framework state with next_block_height {next_block_height}. \
+                                Error: {e}"
+                            );
                             attempt += 1;
-                            nonce = *expected;
+                            nonce = expected;
                             continue;
                         }
                     }
-                    break Err(e);
+                    return Err(KolmeError::Transaction(e));
                 }
             }
         }
     }
 
     /// Resync with the database.
-    pub async fn resync(&self) -> Result<()> {
+    pub async fn resync(&self) -> Result<(), KolmeError> {
         if let Some(height) = self.inner.store.load_latest_block().await? {
             if self.read().get_next_height() < height.next() {
                 let block = self
@@ -372,7 +440,7 @@ impl<App: KolmeApp> Kolme<App> {
                     .store
                     .load_signed_block(height)
                     .await?
-                    .with_context(|| format!("Expected block {height} not found during resync"))?;
+                    .ok_or_else(|| KolmeCoreError::BlockNotFoundDuringResync { height })?;
 
                 let (framework_state, app_state) = tokio::try_join!(
                     self.load_framework_state(block.as_inner().framework_state),
@@ -398,7 +466,10 @@ impl<App: KolmeApp> Kolme<App> {
     /// Validate and append the given block.
     ///
     /// Responsible for validating signatures and state transitions.
-    pub async fn add_block(&self, signed_block: Arc<SignedBlock<App::Message>>) -> Result<()> {
+    pub async fn add_block(
+        &self,
+        signed_block: Arc<SignedBlock<App::Message>>,
+    ) -> Result<(), KolmeError> {
         self.add_block_with(signed_block, DataLoadValidation::ValidateDataLoads)
             .await
     }
@@ -407,42 +478,43 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         signed_block: Arc<SignedBlock<App::Message>>,
         data_load_validation: DataLoadValidation,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         // Make sure we're at the right height for this and the correct processor is signing this.
         let kolme = self.read();
         // FIXME add support for adding old blocks instead
         if kolme.get_next_height() != signed_block.height() {
-            anyhow::bail!(
-                "Tried to add block with height {}, but next expected height is {}",
-                signed_block.height(),
-                kolme.get_next_height()
-            );
+            return Err(KolmeError::UnexpectedBlockHeight {
+                received: signed_block.height(),
+                expected: kolme.get_next_height(),
+            });
         }
 
         let actual_parent = kolme.get_current_block_hash();
         let block_parent = signed_block.0.message.as_inner().parent;
-        anyhow::ensure!(
-            actual_parent == block_parent,
-            "Tried to add block height {}, but actual parent has block hash {actual_parent} and block specifies {block_parent}",
-            signed_block.height()
-        );
+        if actual_parent != block_parent {
+            return Err(KolmeError::BlockParentMismatch {
+                actual: actual_parent,
+                expected: block_parent,
+            });
+        }
 
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
-        anyhow::ensure!(
-            expected_processor == actual_processor,
-            "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
-        );
+        if expected_processor != actual_processor {
+            return Err(KolmeError::InvalidBlockProcessor {
+                expected_processor: Box::new(expected_processor),
+                actual_processor: Box::new(actual_processor),
+            });
+        }
 
         // Ensure the max height is respected if present
         if let Some(max_height) = signed_block.tx().0.message.as_inner().max_height {
             if max_height < signed_block.height() {
-                return Err(KolmeError::PastMaxHeight {
+                return Err(KolmeError::Transaction(TransactionError::PastMaxHeight {
                     txhash: signed_block.tx().hash(),
                     max_height,
                     proposed_height: signed_block.height(),
-                }
-                .into());
+                }));
             }
         }
 
@@ -465,8 +537,22 @@ impl<App: KolmeApp> Kolme<App> {
                 },
             )
             .await?;
-        anyhow::ensure!(height == signed_block.height());
-        anyhow::ensure!(loads == block.loads);
+
+        if height != signed_block.height() {
+            return Err(KolmeCoreError::ExecutedHeight {
+                expected: signed_block.height(),
+                actual: height,
+            }
+            .into());
+        }
+
+        if loads != block.loads {
+            return Err(KolmeCoreError::ExecutedLoads {
+                expected: block.loads.clone(),
+                actual: loads.clone(),
+            }
+            .into());
+        }
 
         self.add_executed_block(ExecutedBlock {
             signed_block,
@@ -475,6 +561,7 @@ impl<App: KolmeApp> Kolme<App> {
             logs,
         })
         .await
+        .map_err(KolmeError::from)
     }
 
     /// Add a block that has already been executed.
@@ -483,7 +570,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub(crate) async fn add_executed_block(
         &self,
         executed_block: ExecutedBlock<App>,
-    ) -> Result<()> {
+    ) -> Result<(), TransactionError> {
         let ExecutedBlock {
             signed_block,
             framework_state,
@@ -495,14 +582,59 @@ impl<App: KolmeApp> Kolme<App> {
         let logs: Arc<[_]> = logs.into();
         let height = signed_block.height();
 
-        let framework_state_hash = self.inner.store.save(&framework_state).await?;
-        anyhow::ensure!(framework_state_hash == signed_block.0.message.as_inner().framework_state);
+        let framework_state_hash = self
+            .inner
+            .store
+            .save(&framework_state)
+            .await
+            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
+        let expected_fw = signed_block.0.message.as_inner().framework_state;
 
-        let app_state_hash = self.inner.store.save(&app_state).await?;
-        anyhow::ensure!(app_state_hash == signed_block.0.message.as_inner().app_state);
+        if framework_state_hash != expected_fw {
+            return Err(TransactionError::CoreError(
+                KolmeCoreError::FrameworkStateHash {
+                    expected: expected_fw,
+                    actual: framework_state_hash,
+                }
+                .to_string(),
+            ));
+        }
 
-        let logs_hash = self.inner.store.save(&logs).await?;
-        anyhow::ensure!(logs_hash == signed_block.0.message.as_inner().logs);
+        let app_state_hash = self
+            .inner
+            .store
+            .save(&app_state)
+            .await
+            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
+        let expected_app = signed_block.0.message.as_inner().app_state;
+
+        if app_state_hash != expected_app {
+            return Err(TransactionError::CoreError(
+                KolmeCoreError::AppStateHash {
+                    expected: expected_app,
+                    actual: app_state_hash,
+                }
+                .to_string(),
+            ));
+        }
+
+        let logs_hash = self
+            .inner
+            .store
+            .save(&logs)
+            .await
+            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
+        let expected_logs = signed_block.0.message.as_inner().logs;
+
+        if logs_hash != expected_logs {
+            return Err(TransactionError::CoreError(
+                KolmeCoreError::LogsHash {
+                    expected: expected_logs,
+                    actual: logs_hash,
+                }
+                .to_string(),
+            ));
+        }
 
         self.inner
             .store
@@ -512,7 +644,8 @@ impl<App: KolmeApp> Kolme<App> {
                 txhash: signed_block.tx().hash().0,
                 block: signed_block.clone(),
             })
-            .await?;
+            .await
+            .map_err(|e| TransactionError::StoreError(e.to_string()))?;
 
         self.inner.mempool.add_signed_block(signed_block.clone());
         if let Some(tx) = self.inner.landed_txs.get() {
@@ -541,7 +674,12 @@ impl<App: KolmeApp> Kolme<App> {
         }
 
         // Update the archive if appropriate
-        if self.get_next_to_archive().await? == height {
+        if self
+            .get_next_to_archive()
+            .await
+            .map_err(|e| TransactionError::StoreError(e.to_string()))?
+            == height
+        {
             if let Err(e) = self.inner.store.archive_block(height).await {
                 tracing::warn!("Unable to mark block {height} as archived: {e}");
             }
@@ -565,40 +703,40 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn add_block_with_state(
         &self,
         signed_block: Arc<SignedBlock<App::Message>>,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         // Don't accept blocks we already have
         if self.has_block(signed_block.height()).await? {
-            anyhow::bail!(
-                "Tried to add block with height {}, but it's already present in the store.",
-                signed_block.height()
-            );
+            return Err(KolmeError::BlockAlreadyExists {
+                height: signed_block.height(),
+            });
         }
         let kolme = self.read();
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
-        anyhow::ensure!(
-            expected_processor == actual_processor,
-            "Received block signed by processor {actual_processor}, but the real processor is {expected_processor}"
-        );
+        if expected_processor != actual_processor {
+            return Err(KolmeError::InvalidBlockProcessor {
+                expected_processor: Box::new(expected_processor),
+                actual_processor: Box::new(actual_processor),
+            });
+        }
 
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
 
-        anyhow::ensure!(
-            self.has_merkle_hash(block.framework_state).await?,
-            "Framework state {} not written to Merkle store",
-            block.framework_state
-        );
-        anyhow::ensure!(
-            self.has_merkle_hash(block.app_state).await?,
-            "App state {} not written to Merkle store",
-            block.app_state
-        );
-        anyhow::ensure!(
-            self.has_merkle_hash(block.logs).await?,
-            "Logs {} not written to Merkle store",
-            block.logs
-        );
+        let fw_hash = block.framework_state;
+        if !self.has_merkle_hash(fw_hash).await? {
+            return Err(KolmeCoreError::MissingFrameworkMerkleLayer { hash: fw_hash }.into());
+        }
+
+        let app_hash = block.app_state;
+        if !self.has_merkle_hash(app_hash).await? {
+            return Err(KolmeCoreError::MissingAppMerkleLayer { hash: app_hash }.into());
+        }
+
+        let logs_hash = block.logs;
+        if !self.has_merkle_hash(logs_hash).await? {
+            return Err(KolmeCoreError::MissingLogMerkleLayer { hash: logs_hash }.into());
+        }
 
         self.inner
             .store
@@ -645,7 +783,7 @@ impl<App: KolmeApp> Kolme<App> {
         app: App,
         code_version: impl Into<String>,
         store: KolmeStore<App>,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         let current_block = MaybeBlockInfo::<App>::load(&store, &app).await?;
         let inner = KolmeInner {
             store,
@@ -718,7 +856,7 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn wait_for_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Arc<SignedBlock<App::Message>>> {
+    ) -> Result<Arc<SignedBlock<App::Message>>, KolmeError> {
         // Optimization for the common case.
         if let Some(storable_block) = self.get_block(height).await? {
             return Ok(storable_block.block);
@@ -773,7 +911,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait until the given transaction is published
-    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<BlockHeight> {
+    pub async fn wait_for_tx(&self, tx: TxHash) -> Result<BlockHeight, KolmeError> {
         let mut new_block = self.subscribe_new_block();
         loop {
             if let Some(height) = self.get_tx_height(tx).await? {
@@ -805,7 +943,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait for the given public key to have an account ID and then return it.
-    pub async fn wait_account_for_key(&self, pubkey: PublicKey) -> Result<AccountId> {
+    pub async fn wait_account_for_key(&self, pubkey: PublicKey) -> Result<AccountId, KolmeError> {
         loop {
             let kolme = self.read();
             if let Some((id, _)) = kolme
@@ -821,7 +959,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Wait for the given wallet to have an account ID and then return it.
-    pub async fn wait_account_for_wallet(&self, wallet: &Wallet) -> Result<AccountId> {
+    pub async fn wait_account_for_wallet(&self, wallet: &Wallet) -> Result<AccountId, KolmeError> {
         loop {
             let kolme = self.read();
             if let Some((id, _)) = kolme
@@ -841,7 +979,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         chain: ExternalChain,
         event_id: BridgeEventId,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         loop {
             let kolme = self.read();
             let state = kolme.get_framework_state().chains.get(chain)?;
@@ -862,7 +1000,7 @@ impl<App: KolmeApp> Kolme<App> {
         &self,
         chain: ExternalChain,
         action_id: BridgeActionId,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         loop {
             let kolme = self.read();
             let state = kolme.get_framework_state().chains.get(chain)?;
@@ -880,11 +1018,14 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    pub async fn get_log_events_for(&self, height: BlockHeight) -> Result<Vec<LogEvent>> {
+    pub async fn get_log_events_for(
+        &self,
+        height: BlockHeight,
+    ) -> Result<Vec<LogEvent>, KolmeError> {
         let block = self
             .get_block(height)
             .await?
-            .with_context(|| format!("get_log_events_for({height}: block not available"))?;
+            .ok_or_else(|| KolmeCoreError::BlockNotFound { height })?;
         let logs = self.load_logs(block.block.as_inner().logs).await?;
         Ok(logs
             .iter()
@@ -912,7 +1053,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     #[cfg(feature = "cosmwasm")]
-    pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos> {
+    pub async fn get_cosmos(&self, chain: CosmosChain) -> Result<cosmos::Cosmos, KolmeError> {
         if let Some(cosmos) = self.inner.cosmos_conns.read().await.get(&chain) {
             return Ok(cosmos.clone());
         }
@@ -981,7 +1122,10 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     #[cfg(feature = "solana")]
-    pub async fn get_solana_pubsub_client(&self, chain: SolanaChain) -> Result<PubsubClient> {
+    pub async fn get_solana_pubsub_client(
+        &self,
+        chain: SolanaChain,
+    ) -> Result<PubsubClient, KolmeError> {
         // TODO do we need caching here?
 
         let endpoint = self
@@ -1005,7 +1149,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Take a lock on constructing new blocks.
-    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock> {
+    pub(crate) async fn take_construct_lock(&self) -> Result<KolmeConstructLock, KolmeError> {
         self.inner.store.take_construct_lock().await
     }
 
@@ -1017,7 +1161,7 @@ impl<App: KolmeApp> Kolme<App> {
     /// Returns a hash of the genesis info.
     ///
     /// Purpose: this provides a unique identifier for a chain.
-    pub fn get_genesis_hash(&self) -> Result<Sha256Hash> {
+    pub fn get_genesis_hash(&self) -> Result<Sha256Hash, KolmeError> {
         let info = self.inner.app.genesis_info();
         let info = serde_json::to_vec(info)?;
         Ok(Sha256Hash::hash(&info))
@@ -1049,7 +1193,10 @@ impl<App: KolmeApp> Kolme<App> {
     /// Add a Merkle layer for this hash.
     ///
     /// Invariant: you must ensure that all children are already stored.
-    pub(crate) async fn add_merkle_layer(&self, layer: &MerkleLayerContents) -> Result<()> {
+    pub(crate) async fn add_merkle_layer(
+        &self,
+        layer: &MerkleLayerContents,
+    ) -> Result<(), KolmeStoreError> {
         self.inner.store.add_merkle_layer(layer).await
     }
 
@@ -1062,7 +1209,7 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Ingest all blocks from the given Kolme into this one.
-    pub async fn ingest_blocks_from(&self, other: &Self) -> Result<()> {
+    pub async fn ingest_blocks_from(&self, other: &Self) -> Result<(), KolmeError> {
         loop {
             let to_archive = self.get_next_to_archive().await?;
             let Some(block) = other.get_block(to_archive).await? else {
@@ -1079,7 +1226,7 @@ impl<App: KolmeApp> Kolme<App> {
         }
     }
 
-    async fn ingest_layer_from(&self, other: &Self, hash: Sha256Hash) -> Result<()> {
+    async fn ingest_layer_from(&self, other: &Self, hash: Sha256Hash) -> Result<(), KolmeError> {
         enum Work {
             Process(Sha256Hash),
             Write(Box<MerkleLayerContents>),
@@ -1094,7 +1241,7 @@ impl<App: KolmeApp> Kolme<App> {
                     let layer = other
                         .get_merkle_layer(hash)
                         .await?
-                        .with_context(|| format!("Missing layer {hash} in source store"))?;
+                        .ok_or_else(|| KolmeCoreError::MissingMerkleLayer { hash })?;
                     let children = layer.children.clone();
                     work_queue.push(Work::Write(Box::new(layer)));
                     for child in children {
@@ -1136,11 +1283,14 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn get_block(
         &self,
         height: BlockHeight,
-    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>> {
+    ) -> Result<Option<StorableBlock<SignedBlock<App::Message>>>, KolmeStoreError> {
         self.inner.store.load_block(height).await
     }
 
-    pub async fn get_framework(&self, hash: Sha256Hash) -> Result<FrameworkState> {
+    pub async fn get_framework(
+        &self,
+        hash: Sha256Hash,
+    ) -> Result<FrameworkState, MerkleSerialError> {
         let result = self.inner.store.load(hash).await?;
         Ok(result)
     }
@@ -1156,12 +1306,15 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Get the block height for the given transaction, if present.
-    pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>> {
+    pub async fn get_tx_height(&self, tx: TxHash) -> Result<Option<BlockHeight>, KolmeStoreError> {
         self.inner.store.get_height_for_tx(tx).await
     }
 
     /// Get the block containing the given transaction, if present.
-    pub async fn get_tx_block(&self, tx: TxHash) -> Result<Option<Arc<SignedBlock<App::Message>>>> {
+    pub async fn get_tx_block(
+        &self,
+        tx: TxHash,
+    ) -> Result<Option<Arc<SignedBlock<App::Message>>>, KolmeError> {
         let Some(height) = self.get_tx_height(tx).await? else {
             return Ok(None);
         };
@@ -1172,29 +1325,29 @@ impl<App: KolmeApp> Kolme<App> {
     pub async fn load_block(
         &self,
         height: BlockHeight,
-    ) -> Result<StorableBlock<SignedBlock<App::Message>>> {
+    ) -> Result<StorableBlock<SignedBlock<App::Message>>, KolmeError> {
         self.get_block(height)
             .await?
             .ok_or(KolmeStoreError::BlockNotFound { height: height.0 }.into())
     }
 
     /// Marks the current block to not be resynced by the Archiver
-    pub async fn archive_block(&self, height: BlockHeight) -> Result<()> {
-        self.inner
+    pub async fn archive_block(&self, height: BlockHeight) -> Result<(), KolmeError> {
+        Ok(self
+            .inner
             .store
             .archive_block(height)
             .await
-            .with_context(|| format!("Unable to mark block {} as archived", height.0))
+            .map_err(|e| KolmeCoreError::ArchiveBlockFailed { height, source: e })?)
     }
 
     /// Obtains the latest block synced by the Archiver, if it exists
-    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>> {
+    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
         Ok(self
             .inner
             .store
             .get_latest_archived_block_height()
-            .await
-            .context("Unable to retrieve latest archived block height")?
+            .await?
             .map(BlockHeight))
     }
 
@@ -1202,7 +1355,7 @@ impl<App: KolmeApp> Kolme<App> {
     ///
     /// This will report errors during data load and then return the earliest
     /// block height, essentially restarting the archive process.
-    pub async fn get_next_to_archive(&self) -> Result<BlockHeight> {
+    pub async fn get_next_to_archive(&self) -> Result<BlockHeight, KolmeStoreError> {
         let mut next = self
             .get_latest_archived_block()
             .await?
@@ -1217,7 +1370,7 @@ impl<App: KolmeApp> Kolme<App> {
         Ok(next)
     }
 
-    async fn init_remote_data_listener(&self) -> Result<()> {
+    async fn init_remote_data_listener(&self) -> Result<(), KolmeError> {
         let Some(mut listener) = self.inner.store.listen_remote_data().await? else {
             return Ok(());
         };
@@ -1282,7 +1435,7 @@ impl<App: KolmeApp> KolmeRead<App> {
     pub fn get_next_bridge_action(
         &self,
         chain: ExternalChain,
-    ) -> Result<Option<(BridgeActionId, &PendingBridgeAction)>> {
+    ) -> Result<Option<(BridgeActionId, &PendingBridgeAction)>, KolmeError> {
         Ok(self
             .get_framework_state()
             .chains
@@ -1338,7 +1491,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         &self,
         secret: &SecretKey,
         tx_builder: T,
-    ) -> Result<SignedTransaction<App::Message>> {
+    ) -> Result<SignedTransaction<App::Message>, KolmeError> {
         let pubkey = secret.public_key();
         let nonce = self.get_next_nonce(pubkey).1;
         self.create_signed_transaction_with(secret, tx_builder, pubkey, nonce)
@@ -1350,7 +1503,7 @@ impl<App: KolmeApp> KolmeRead<App> {
         tx_builder: T,
         pubkey: PublicKey,
         nonce: AccountNonce,
-    ) -> Result<SignedTransaction<App::Message>> {
+    ) -> Result<SignedTransaction<App::Message>, KolmeError> {
         let TxBuilder {
             messages,
             max_height,

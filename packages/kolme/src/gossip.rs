@@ -144,7 +144,7 @@ impl GossipBuilder {
         self
     }
 
-    pub fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>> {
+    pub fn build<App: KolmeApp>(self, kolme: Kolme<App>) -> Result<Gossip<App>, KolmeError> {
         // Create the Gossipsub topics
         tracing::info!(
             "Genesis info: {}",

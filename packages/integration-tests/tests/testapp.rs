@@ -1,12 +1,11 @@
 use anyhow::{Context, Result};
 use futures_util::future::join_all;
 use futures_util::StreamExt;
-use kolme::ApiNotification;
 use kolme::{
-    testtasks::TestTasks, AccountNonce, ApiServer, AssetId, BankMessage, BlockHeight,
-    ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeStore, MerkleDeserialize,
-    MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer, Message, Processor,
-    Transaction, ValidatorSet,
+    testtasks::TestTasks, AccountNonce, ApiNotification, ApiServer, AssetId, BankMessage,
+    BlockHeight, ExecutionContext, GenesisInfo, Kolme, KolmeApp, KolmeError, KolmeStore,
+    MerkleDeserialize, MerkleDeserializer, MerkleSerialError, MerkleSerialize, MerkleSerializer,
+    Message, Processor, Transaction, ValidatorSet,
 };
 use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
@@ -89,7 +88,7 @@ impl KolmeApp for TestApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(TestState { counter: 0 })
     }
 
@@ -97,7 +96,7 @@ impl KolmeApp for TestApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             TestMessage::Increment => {
                 ctx.state_mut().counter += 1;

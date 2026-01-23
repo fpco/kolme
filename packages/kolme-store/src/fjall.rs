@@ -1,8 +1,7 @@
 use crate::{
-    r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError, RemoteDataListener,
-    StorableBlock,
+    error::StorageBackend, r#trait::KolmeBackingStore, KolmeConstructLock, KolmeStoreError,
+    RemoteDataListener, StorableBlock,
 };
-use anyhow::Context;
 use merkle_map::{MerkleDeserializeRaw, MerkleSerializeRaw, MerkleStore as _, Sha256Hash};
 use std::path::Path;
 
@@ -16,7 +15,7 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub fn new(fjall_dir: impl AsRef<Path>) -> Result<Self, KolmeStoreError> {
         let merkle = merkle::MerkleFjallStore::new(fjall_dir)?;
 
         Ok(Self { merkle })
@@ -41,7 +40,9 @@ impl KolmeBackingStore for Store {
     }
 
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation("Fjall"))
+        Err(KolmeStoreError::UnsupportedDeleteOperation {
+            backend: StorageBackend::Fjall,
+        })
     }
 
     async fn take_construct_lock(&self) -> Result<crate::KolmeConstructLock, KolmeStoreError> {
@@ -55,13 +56,25 @@ impl KolmeBackingStore for Store {
         self.merkle.clone().load_by_hash(hash)
     }
 
-    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> anyhow::Result<Option<u64>> {
-        let Some(height) = self.merkle.handle.get(tx_key(txhash))? else {
+    async fn get_height_for_tx(&self, txhash: Sha256Hash) -> Result<Option<u64>, KolmeStoreError> {
+        let Some(height) = self
+            .merkle
+            .handle
+            .get(tx_key(txhash))
+            .map_err(KolmeStoreError::custom)?
+        else {
             return Ok(None);
         };
         let height = match <[u8; 8]>::try_from(&*height) {
             Ok(height) => u64::from_be_bytes(height),
-            Err(e) => anyhow::bail!("get_height_for_tx: invalid height in Fjall store: {e}"),
+            Err(e) => {
+                return Err(KolmeStoreError::InvalidHeight {
+                    backend: StorageBackend::Fjall,
+                    txhash,
+                    bytes: height.to_vec(),
+                    reason: e,
+                });
+            }
         };
         Ok(Some(height))
     }
@@ -73,7 +86,7 @@ impl KolmeBackingStore for Store {
         let (key, _hash_bytes) = latest.map_err(KolmeStoreError::custom)?;
         let key = (*key)
             .strip_prefix(b"block:")
-            .ok_or_else(|| KolmeStoreError::Other("Fjall key missing block: prefix".to_owned()))?;
+            .ok_or_else(|| KolmeStoreError::custom("Fjall key missing block: prefix"))?;
         let height = <[u8; 8]>::try_from(key).map_err(KolmeStoreError::custom)?;
         Ok(Some(u64::from_be_bytes(height)))
     }
@@ -166,13 +179,13 @@ impl KolmeBackingStore for Store {
     async fn add_merkle_layer(
         &self,
         layer: &merkle_map::MerkleLayerContents,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), KolmeStoreError> {
         let mut merkle = self.merkle.clone();
         merkle.save_by_hash(layer).await?;
         Ok(())
     }
 
-    async fn save<T>(&self, value: &T) -> anyhow::Result<Sha256Hash>
+    async fn save<T>(&self, value: &T) -> Result<Sha256Hash, KolmeStoreError>
     where
         T: merkle_map::MerkleSerializeRaw,
     {
@@ -189,21 +202,25 @@ impl KolmeBackingStore for Store {
         merkle_map::load(&mut store, hash).await
     }
 
-    async fn archive_block(&self, height: u64) -> anyhow::Result<()> {
+    async fn archive_block(&self, height: u64) -> Result<(), KolmeStoreError> {
         self.merkle
             .handle
             .insert(LATEST_ARCHIVED_HEIGHT_KEY, height.to_be_bytes())
-            .context("Unable to update partition with given height")?;
+            .map_err(|e| {
+                KolmeStoreError::custom(format!(
+                    "Unable to update partition with given height: {e}"
+                ))
+            })?;
 
         Ok(())
     }
 
-    async fn get_latest_archived_block_height(&self) -> anyhow::Result<Option<u64>> {
+    async fn get_latest_archived_block_height(&self) -> Result<Option<u64>, KolmeStoreError> {
         Ok(self
             .merkle
             .handle
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
-            .context("Unable to retrieve latest height")?
+            .map_err(|e| KolmeStoreError::Custom(format!("Unable to retrieve latest height: {e}")))?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
     }
 

@@ -199,7 +199,7 @@ impl KolmeApp for SixSigmaApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(State::new([admin_secret_key().public_key()]))
     }
 
@@ -207,19 +207,27 @@ impl KolmeApp for SixSigmaApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             AppMessage::SendFunds { asset_id, amount } => {
-                ctx.state_mut().send_funds(*asset_id, *amount)
+                ctx.state_mut()
+                    .send_funds(*asset_id, *amount)
+                    .map_err(KolmeError::other)?;
+                Ok(())
             }
             AppMessage::Init => {
                 let signing_key = ctx.get_signing_key();
-                ctx.state_mut().initialize(signing_key)
+                ctx.state_mut()
+                    .initialize(signing_key)
+                    .map_err(KolmeError::other)?;
+                Ok(())
             }
             AppMessage::AddMarket { id, asset_id, name } => {
                 let signing_key = ctx.get_signing_key();
                 ctx.state_mut()
                     .add_market(signing_key, *id, *asset_id, name)
+                    .map_err(KolmeError::other)?;
+                Ok(())
             }
             AppMessage::PlaceBet {
                 wallet,
@@ -232,22 +240,26 @@ impl KolmeApp for SixSigmaApp {
                     .get_account_balances(&sender)
                     .map_or(Default::default(), Clone::clone);
                 let odds = ctx.load_data(OddsSource).await?;
-                let change = ctx.state_mut().place_bet(
-                    sender,
-                    balances,
-                    *market_id,
-                    Wallet(wallet.clone()),
-                    *amount,
-                    *outcome,
-                    odds,
-                )?;
+                let change = ctx
+                    .state_mut()
+                    .place_bet(
+                        sender,
+                        balances,
+                        *market_id,
+                        Wallet(wallet.clone()),
+                        *amount,
+                        *outcome,
+                        odds,
+                    )
+                    .map_err(KolmeError::other)?;
                 change_balance(ctx, &change)
             }
             AppMessage::SettleMarket { market_id, outcome } => {
                 let signing_key = ctx.get_signing_key();
-                let balance_changes =
-                    ctx.state_mut()
-                        .settle_market(signing_key, *market_id, *outcome)?;
+                let balance_changes = ctx
+                    .state_mut()
+                    .settle_market(signing_key, *market_id, *outcome)
+                    .map_err(KolmeError::other)?;
                 for change in balance_changes {
                     change_balance(ctx, &change)?
                 }
@@ -269,7 +281,7 @@ impl fmt::Debug for SixSigmaApp {
 fn change_balance(
     ctx: &mut ExecutionContext<'_, SixSigmaApp>,
     change: &BalanceChange,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     match change {
         BalanceChange::Mint {
             asset_id,
@@ -310,18 +322,18 @@ struct OddsSource;
 impl<App> KolmeDataRequest<App> for OddsSource {
     type Response = Odds;
 
-    async fn load(self, _: &App) -> Result<Self::Response> {
+    async fn load(self, _: &App) -> Result<Self::Response, KolmeDataError> {
         Ok([dec!(1.8), dec!(2.5), dec!(6.5)])
     }
 
-    async fn validate(self, _: &App, _: &Self::Response) -> Result<()> {
+    async fn validate(self, _: &App, _: &Self::Response) -> Result<(), KolmeDataError> {
         // No validation possible
         Ok(())
     }
 }
 
 pub struct Tasks {
-    pub set: JoinSet<Result<()>>,
+    pub set: JoinSet<Result<(), KolmeError>>,
     pub processor: Option<AbortHandle>,
     pub listener: Option<AbortHandle>,
     pub approver: Option<AbortHandle>,
@@ -358,7 +370,8 @@ impl Tasks {
 
     pub fn spawn_api_server(&mut self) {
         let api_server = ApiServer::new(self.kolme.clone());
-        self.api_server = Some(self.set.spawn(api_server.run(self.bind)));
+        let bind = self.bind;
+        self.api_server = Some(self.set.spawn(api_server.run(bind)));
     }
 }
 
@@ -386,7 +399,7 @@ pub async fn serve(
             }
             Ok(Err(e)) => {
                 tasks.set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }
@@ -478,7 +491,7 @@ impl TxLogger {
         Self { kolme, path }
     }
 
-    async fn run(self) -> Result<()> {
+    async fn run(self) -> Result<(), KolmeError> {
         let mut file = File::create(self.path)?;
         let mut height = BlockHeight::start();
         loop {
