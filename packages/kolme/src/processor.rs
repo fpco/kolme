@@ -191,7 +191,7 @@ impl<App: KolmeApp> Processor<App> {
                     let failed = FailedTransaction {
                         txhash,
                         proposed_height,
-                        error: e.to_string(),
+                        error: e.clone(),
                     };
                     let failed = TaggedJson::new(failed)?;
                     let key = self.get_correct_secret(&self.kolme.read())?;
@@ -236,7 +236,7 @@ impl<App: KolmeApp> Processor<App> {
         if kolme
             .get_tx_height(txhash)
             .await
-            .map_err(TransactionError::StoreError)?
+            .map_err(|e| TransactionError::StoreError(e.to_string()))?
             .is_some()
         {
             return Err(TransactionError::Other(format!(
@@ -282,14 +282,14 @@ impl<App: KolmeApp> Processor<App> {
             height: proposed_height,
             parent: kolme.get_current_block_hash(),
             framework_state: merkle_map::api::serialize(&framework_state)
-                .map_err(TransactionError::MerkleError)?
+                .map_err(|e| TransactionError::MerkleError(e.to_string()))?
                 .hash(),
             app_state: merkle_map::api::serialize(&app_state)
-                .map_err(TransactionError::MerkleError)?
+                .map_err(|e| TransactionError::MerkleError(e.to_string()))?
                 .hash(),
             loads,
             logs: merkle_map::api::serialize(&logs)
-                .map_err(TransactionError::MerkleError)?
+                .map_err(|e| TransactionError::MerkleError(e.to_string()))?
                 .hash(),
         };
         let block =
