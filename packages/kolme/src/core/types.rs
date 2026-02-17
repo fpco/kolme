@@ -55,6 +55,9 @@ pub enum ExternalChain {
     SolanaTestnet,
     SolanaDevnet,
     SolanaLocal,
+    EthereumMainnet,
+    EthereumSepolia,
+    EthereumLocal,
     #[cfg(feature = "pass_through")]
     PassThrough,
 }
@@ -115,10 +118,31 @@ pub enum CosmosChain {
     OsmosisLocal,
 }
 
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    Hash,
+    strum::AsRefStr,
+)]
+#[strum(serialize_all = "kebab-case")]
+pub enum EthereumChain {
+    Mainnet,
+    Sepolia,
+    Local,
+}
+
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum ChainName {
     Cosmos,
     Solana,
+    Ethereum,
     #[cfg(feature = "pass_through")]
     PassThrough,
 }
@@ -127,6 +151,7 @@ pub enum ChainName {
 pub enum ChainKind {
     Cosmos(CosmosChain),
     Solana(SolanaChain),
+    Ethereum(EthereumChain),
     #[cfg(feature = "pass_through")]
     PassThrough,
 }
@@ -212,11 +237,18 @@ impl SolanaChain {
     }
 }
 
+impl EthereumChain {
+    pub const fn name() -> ChainName {
+        ChainName::Ethereum
+    }
+}
+
 impl ExternalChain {
     pub fn name(self) -> ChainName {
         match ChainKind::from(self) {
             ChainKind::Cosmos(_) => CosmosChain::name(),
             ChainKind::Solana(_) => SolanaChain::name(),
+            ChainKind::Ethereum(_) => EthereumChain::name(),
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => ChainName::PassThrough,
         }
@@ -226,6 +258,7 @@ impl ExternalChain {
         match ChainKind::from(self) {
             ChainKind::Cosmos(chain) => Some(chain),
             ChainKind::Solana(_) => None,
+            ChainKind::Ethereum(_) => None,
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => None,
         }
@@ -235,6 +268,17 @@ impl ExternalChain {
         match ChainKind::from(self) {
             ChainKind::Cosmos(_) => None,
             ChainKind::Solana(chain) => Some(chain),
+            ChainKind::Ethereum(_) => None,
+            #[cfg(feature = "pass_through")]
+            ChainKind::PassThrough => None,
+        }
+    }
+
+    pub fn to_ethereum_chain(self) -> Option<EthereumChain> {
+        match ChainKind::from(self) {
+            ChainKind::Cosmos(_) => None,
+            ChainKind::Solana(_) => None,
+            ChainKind::Ethereum(chain) => Some(chain),
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => None,
         }
@@ -262,6 +306,16 @@ impl From<SolanaChain> for ExternalChain {
     }
 }
 
+impl From<EthereumChain> for ExternalChain {
+    fn from(c: EthereumChain) -> ExternalChain {
+        match c {
+            EthereumChain::Mainnet => ExternalChain::EthereumMainnet,
+            EthereumChain::Sepolia => ExternalChain::EthereumSepolia,
+            EthereumChain::Local => ExternalChain::EthereumLocal,
+        }
+    }
+}
+
 impl From<ExternalChain> for ChainKind {
     fn from(c: ExternalChain) -> ChainKind {
         match c {
@@ -272,6 +326,9 @@ impl From<ExternalChain> for ChainKind {
             ExternalChain::SolanaTestnet => ChainKind::Solana(SolanaChain::Testnet),
             ExternalChain::SolanaDevnet => ChainKind::Solana(SolanaChain::Devnet),
             ExternalChain::SolanaLocal => ChainKind::Solana(SolanaChain::Local),
+            ExternalChain::EthereumMainnet => ChainKind::Ethereum(EthereumChain::Mainnet),
+            ExternalChain::EthereumSepolia => ChainKind::Ethereum(EthereumChain::Sepolia),
+            ExternalChain::EthereumLocal => ChainKind::Ethereum(EthereumChain::Local),
             #[cfg(feature = "pass_through")]
             ExternalChain::PassThrough => ChainKind::PassThrough,
         }
@@ -1508,6 +1565,38 @@ impl ConfiguredChains {
             ))
         }
     }
+
+    pub fn insert_ethereum(&mut self, chain: EthereumChain, config: ChainConfig) -> Result<()> {
+        match &config.bridge {
+            BridgeContract::NeededCosmosBridge { .. } => {
+                return Err(anyhow::anyhow!(
+                    "Trying to configure a Cosmos contract as an Ethereum bridge."
+                ))
+            }
+            BridgeContract::NeededSolanaBridge { .. } => {
+                return Err(anyhow::anyhow!(
+                    "Trying to configure a Solana program as an Ethereum bridge."
+                ))
+            }
+            BridgeContract::Deployed(address) => {
+                anyhow::ensure!(
+                    is_valid_evm_address(address),
+                    "Invalid Ethereum bridge contract address: {address}"
+                );
+            }
+        }
+
+        self.0.insert(chain.into(), config);
+
+        Ok(())
+    }
+}
+
+fn is_valid_evm_address(address: &str) -> bool {
+    let Some(hex) = address.strip_prefix("0x") else {
+        return false;
+    };
+    hex.len() == 40 && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Input and output for a single data load while processing a block.
@@ -1643,6 +1732,9 @@ impl ExecAction {
                         })?;
                         Ok(payload)
                     }
+                    ChainName::Ethereum => {
+                        anyhow::bail!("Ethereum payload generation is not implemented yet")
+                    }
                 }
             }
             ExecAction::SelfReplace(self_replace) => match chain.name() {
@@ -1682,6 +1774,9 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
+                ChainName::Ethereum => {
+                    anyhow::bail!("Ethereum payload generation is not implemented yet")
+                }
             },
             ExecAction::NewSet {
                 validator_set,
@@ -1717,6 +1812,9 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
+                ChainName::Ethereum => {
+                    anyhow::bail!("Ethereum payload generation is not implemented yet")
+                }
             },
             ExecAction::MigrateContract { migrate_contract } => {
                 let contract_addr = match &config.bridge {
@@ -1914,6 +2012,7 @@ mod tests {
     use super::*;
     use quickcheck::quickcheck;
     use rust_decimal::dec;
+    use std::collections::BTreeMap;
 
     #[test]
     fn increasing_middle_with_difference_of_one() {
@@ -2004,6 +2103,97 @@ mod tests {
             config_eight.to_u128(dec!(12.3456789)).unwrap(),
             (dec!(12.3456789), 1234567890)
         );
+    }
+
+    #[test]
+    fn parse_external_chain_ethereum_variants() {
+        assert_eq!(
+            "ethereum-mainnet".parse::<ExternalChain>().unwrap(),
+            ExternalChain::EthereumMainnet
+        );
+        assert_eq!(
+            "ethereum-sepolia".parse::<ExternalChain>().unwrap(),
+            ExternalChain::EthereumSepolia
+        );
+        assert_eq!(
+            "ethereum-local".parse::<ExternalChain>().unwrap(),
+            ExternalChain::EthereumLocal
+        );
+    }
+
+    #[test]
+    fn ethereum_chain_conversions() {
+        assert_eq!(
+            ExternalChain::from(EthereumChain::Mainnet),
+            ExternalChain::EthereumMainnet
+        );
+        assert_eq!(
+            ExternalChain::from(EthereumChain::Sepolia),
+            ExternalChain::EthereumSepolia
+        );
+        assert_eq!(
+            ExternalChain::from(EthereumChain::Local),
+            ExternalChain::EthereumLocal
+        );
+        assert_eq!(
+            ExternalChain::EthereumMainnet.to_ethereum_chain(),
+            Some(EthereumChain::Mainnet)
+        );
+        assert_eq!(
+            ExternalChain::EthereumSepolia.to_ethereum_chain(),
+            Some(EthereumChain::Sepolia)
+        );
+        assert_eq!(
+            ExternalChain::EthereumLocal.to_ethereum_chain(),
+            Some(EthereumChain::Local)
+        );
+    }
+
+    #[test]
+    fn insert_ethereum_accepts_deployed_evm_address() {
+        let mut chains = ConfiguredChains::default();
+        let local_config = ChainConfig {
+            assets: BTreeMap::new(),
+            bridge: BridgeContract::Deployed(
+                "0x0123456789abcdef0123456789abcdef01234567".to_owned(),
+            ),
+        };
+        let mainnet_config = ChainConfig {
+            assets: BTreeMap::new(),
+            bridge: BridgeContract::Deployed(
+                "0x89abcdef0123456789abcdef0123456789abcdef".to_owned(),
+            ),
+        };
+
+        chains
+            .insert_ethereum(EthereumChain::Local, local_config)
+            .unwrap();
+        chains
+            .insert_ethereum(EthereumChain::Mainnet, mainnet_config)
+            .unwrap();
+
+        assert!(chains.0.contains_key(&ExternalChain::EthereumLocal));
+        assert!(chains.0.contains_key(&ExternalChain::EthereumMainnet));
+    }
+
+    #[test]
+    fn insert_ethereum_rejects_invalid_bridge_config() {
+        let mut chains = ConfiguredChains::default();
+        let invalid_address = ChainConfig {
+            assets: BTreeMap::new(),
+            bridge: BridgeContract::Deployed("not-an-address".to_owned()),
+        };
+        let wrong_contract_kind = ChainConfig {
+            assets: BTreeMap::new(),
+            bridge: BridgeContract::NeededCosmosBridge { code_id: 1 },
+        };
+
+        assert!(chains
+            .insert_ethereum(EthereumChain::Sepolia, invalid_address)
+            .is_err());
+        assert!(chains
+            .insert_ethereum(EthereumChain::Sepolia, wrong_contract_kind)
+            .is_err());
     }
 
     #[tokio::main]

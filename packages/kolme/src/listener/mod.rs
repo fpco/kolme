@@ -65,6 +65,11 @@ impl<App: KolmeApp> Listener<App> {
                     }
                 }
             }
+            ChainName::Ethereum => {
+                tracing::warn!(
+                    "Ethereum listener requested, but Ethereum listener support is not implemented yet."
+                );
+            }
             #[cfg(feature = "pass_through")]
             ChainName::PassThrough => {
                 let contracts = self.wait_for_contracts(name).await?;
@@ -178,6 +183,9 @@ impl<App: KolmeApp> Listener<App> {
             }
             #[cfg(not(feature = "solana"))]
             ChainKind::Solana(_) => Ok(()),
+            ChainKind::Ethereum(_) => {
+                anyhow::bail!("Ethereum listener contract checks are not implemented yet")
+            }
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => {
                 anyhow::bail!("No wait for pass-through contract is expected")
