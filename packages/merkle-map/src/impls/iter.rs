@@ -20,7 +20,7 @@ impl<'a, K, V> IntoIterator for &'a Node<K, V> {
 }
 
 impl<K, V> Node<K, V> {
-    pub(crate) fn iter(&self) -> Iter<K, V> {
+    pub(crate) fn iter(&self) -> Iter<'_, K, V> {
         self.into_iter()
     }
 }
