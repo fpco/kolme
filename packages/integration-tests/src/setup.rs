@@ -123,7 +123,7 @@ pub async fn deploy_solana_bridge() -> Result<()> {
 }
 
 pub async fn make_osmo_token(client: Arc<SolanaClient>) -> Result<SolanaToken> {
-    make_token(client, Keypair::try_from(OSMO_SEED_BYTES).unwrap(), 6).await
+    make_token(client, Keypair::from_bytes(OSMO_SEED_BYTES).unwrap(), 6).await
 }
 
 pub async fn make_token(
@@ -131,7 +131,7 @@ pub async fn make_token(
     token_signer: Keypair,
     decimals: u8,
 ) -> Result<SolanaToken> {
-    let authority = Keypair::try_from(AUTHORITY_SEED_BYTES).unwrap();
+    let authority = Keypair::from_bytes(AUTHORITY_SEED_BYTES).unwrap();
     airdrop(&client, &authority.pubkey(), 10_000000).await?;
 
     let client = ProgramRpcClient::new(client, ProgramRpcClientSendTransaction);
@@ -361,7 +361,7 @@ pub async fn solana_mint_to(token: &SolanaToken, to: &Pubkey, amount: u64) -> Re
     assert_eq!(acc.owner, *to);
     assert_eq!(acc.mint, *token.get_address());
 
-    let authority = Keypair::try_from(AUTHORITY_SEED_BYTES).unwrap();
+    let authority = Keypair::from_bytes(AUTHORITY_SEED_BYTES).unwrap();
 
     let info = token.get_mint_info().await?.base;
     tracing::info!(
