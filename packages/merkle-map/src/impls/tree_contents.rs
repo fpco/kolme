@@ -33,7 +33,7 @@ impl<K: Clone, V: Clone> TreeContents<K, V> {
     pub(crate) fn insert(&mut self, depth: u16, entry: LeafEntry<K, V>) -> Option<(K, V)> {
         let Some(index) = entry.key_bytes.get_index_for_depth(depth) else {
             debug_assert!(depth == 0 || entry.key_bytes.get_index_for_depth(depth - 1).is_some());
-            let v = std::mem::replace(&mut self.leaf, Some(entry));
+            let v = self.leaf.replace(entry);
             if v.is_none() {
                 self.len += 1;
             }
