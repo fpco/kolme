@@ -1,0 +1,26 @@
+# Project metadata
+.git
+.github
+.gitmodules
+
+# Build and dependency outputs
+cache/
+out/
+node_modules/
+target/
+dist/
+build/
+
+# Local/editor/system artifacts
+.DS_Store
+*.log
+*.sqlite3
+
+# Ignore most E2E resources by default, but keep container runtime files available
+e2e/*
+!e2e/README.md
+!e2e/compose.yaml
+!e2e/bridgev1/
+!e2e/bridgev1/Dockerfile
+!e2e/bridgev1/entrypoint.sh
+!e2e/bridgev1/bootstrap-state.sh
