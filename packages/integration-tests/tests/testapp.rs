@@ -155,9 +155,7 @@ async fn setup_postgres() -> Result<(Kolme<TestApp>, SocketAddr)> {
         KolmeStore::new_postgres_with_options(options, PgPoolOptions::new().max_connections(3))
             .await?;
     let code_version = app.genesis.version.clone();
-    let kolme = Kolme::new(app, code_version, store)
-        .await?
-        .set_tx_await_duration(Duration::from_secs(15));
+    let kolme = Kolme::new(app, code_version, store).await?;
 
     let read = kolme.read();
     assert_eq!(read.get_next_height(), BlockHeight(0));
