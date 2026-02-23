@@ -1,5 +1,7 @@
 #[cfg(feature = "cosmwasm")]
 mod cosmos;
+#[cfg(feature = "ethereum")]
+mod ethereum;
 #[cfg(feature = "solana")]
 mod solana;
 
@@ -66,8 +68,21 @@ impl<App: KolmeApp> Listener<App> {
                 }
             }
             ChainName::Ethereum => {
+                #[cfg(feature = "ethereum")]
+                {
+                    let contracts = self.wait_for_contracts(name).await?;
+                    for (chain, contract) in contracts {
+                        set.spawn(ethereum::listen(
+                            self.kolme.clone(),
+                            self.secret.clone(),
+                            chain.to_ethereum_chain().unwrap(),
+                            contract,
+                        ));
+                    }
+                }
+                #[cfg(not(feature = "ethereum"))]
                 tracing::warn!(
-                    "Ethereum listener requested, but Ethereum listener support is not implemented yet."
+                    "Ethereum listener requested, but `ethereum` feature is not enabled."
                 );
             }
             #[cfg(feature = "pass_through")]
