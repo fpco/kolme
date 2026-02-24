@@ -9,6 +9,8 @@ use kolme_store::{BlockHashes, HasBlockHashes};
 #[cfg(feature = "cosmwasm")]
 use cosmwasm_std::{Binary, CosmosMsg, Uint128};
 
+#[cfg(feature = "ethereum")]
+use alloy::providers::{DynProvider, ProviderBuilder};
 #[cfg(feature = "solana")]
 use {
     base64::Engine,
@@ -240,6 +242,21 @@ impl SolanaChain {
 impl EthereumChain {
     pub const fn name() -> ChainName {
         ChainName::Ethereum
+    }
+
+    pub const fn default_rpc_url(self) -> &'static str {
+        match self {
+            EthereumChain::Mainnet => "https://ethereum-rpc.publicnode.com",
+            EthereumChain::Sepolia => "https://ethereum-sepolia-rpc.publicnode.com",
+            EthereumChain::Local => "http://localhost:8545",
+        }
+    }
+
+    #[cfg(feature = "ethereum")]
+    pub fn make_client(self) -> Result<DynProvider> {
+        let url = reqwest::Url::parse(self.default_rpc_url())
+            .with_context(|| format!("Invalid default Ethereum RPC URL for {self:?}"))?;
+        Ok(DynProvider::new(ProviderBuilder::new().connect_http(url)))
     }
 }
 
