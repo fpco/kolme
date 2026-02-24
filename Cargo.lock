@@ -4705,6 +4705,7 @@ name = "integration-tests"
 version = "0.1.0"
 dependencies = [
  "absurd-future",
+ "alloy",
  "anyhow",
  "axum 0.8.4",
  "backon",

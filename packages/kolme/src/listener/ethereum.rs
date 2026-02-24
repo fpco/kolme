@@ -81,7 +81,12 @@ pub async fn listen<App: KolmeApp>(
         get_next_bridge_event_id(&kolme_r, secret.public_key(), chain)
     };
 
-    let mut next_block = contract.provider().get_block_number().await?;
+    // Start from the next block to avoid replaying already-mined tip logs on listener restarts.
+    let mut next_block = contract
+        .provider()
+        .get_block_number()
+        .await?
+        .saturating_add(1);
 
     tracing::info!(
         "Beginning Ethereum listener loop on chain {chain:?}, contract {:#x}, next event ID: {next_bridge_event_id}, next block: {next_block}",
