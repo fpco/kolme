@@ -37,9 +37,20 @@ localosmosis:
     -just stop-localosmosis
     docker run --name localosmosis -d -it --cpus="1" --memory="512m" -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 9091:9091 ghcr.io/fpco/cosmos-images/localosmosis:a013a07d2bbff37bb72b6c3134854c7622666d84
 
+[working-directory("contracts/ethereum/e2e")]
+stop-anvil:
+    docker compose down
+
+[working-directory("contracts/ethereum/e2e")]
+anvil:
+    -just stop-anvil
+    docker compose up -d anvil
+
+
 test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
     just postgres
     just localosmosis
+    just anvil
     just cargo-test
     just cargo-contract-tests
 

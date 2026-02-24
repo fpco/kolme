@@ -80,6 +80,8 @@ jobs:
         run: just cargo-test
       - name: Start localosmosis
         run: just localosmosis
+      - name: Start anvil
+        run: just anvil
       - name: Contract tests
         run: just cargo-contract-tests
 
