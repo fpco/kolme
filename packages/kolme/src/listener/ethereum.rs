@@ -4,7 +4,7 @@ use alloy::{
     json_abi::JsonAbi,
     primitives::{Address, U256},
     providers::Provider,
-    rpc::types::eth::{Filter, Log},
+    rpc::types::eth::{BlockNumberOrTag, Filter, Log},
     sol,
     sol_types::SolEvent,
 };
@@ -81,15 +81,11 @@ pub async fn listen<App: KolmeApp>(
         get_next_bridge_event_id(&kolme_r, secret.public_key(), chain)
     };
 
-    // Start from the next block to avoid replaying already-mined tip logs on listener restarts.
-    let mut next_block = contract
-        .provider()
-        .get_block_number()
-        .await?
-        .saturating_add(1);
+    let (mut next_block, mut first_log_index) =
+        get_resume_cursor(&contract, next_bridge_event_id).await?;
 
     tracing::info!(
-        "Beginning Ethereum listener loop on chain {chain:?}, contract {:#x}, next event ID: {next_bridge_event_id}, next block: {next_block}",
+        "Beginning Ethereum listener loop on chain {chain:?}, contract {:#x}, next event ID: {next_bridge_event_id}, next block: {next_block}, first log index: {first_log_index:?}",
         contract.address()
     );
 
@@ -101,6 +97,7 @@ pub async fn listen<App: KolmeApp>(
             &contract,
             &mut next_bridge_event_id,
             &mut next_block,
+            &mut first_log_index,
         )
         .await?;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -114,6 +111,7 @@ async fn listen_once<App: KolmeApp, P: Provider>(
     contract: &ContractInstance<P>,
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
+    first_log_index: &mut Option<u64>,
 ) -> Result<()> {
     let latest = contract.provider().get_block_number().await?;
     if *next_block > latest {
@@ -130,11 +128,60 @@ async fn listen_once<App: KolmeApp, P: Provider>(
             continue;
         }
 
+        if let Some(min_log_index) = *first_log_index {
+            if log.block_number == Some(*next_block)
+                && log
+                    .log_index
+                    .is_some_and(|log_index| log_index < min_log_index)
+            {
+                continue;
+            }
+        }
+
         process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
     }
 
     *next_block = latest.saturating_add(1);
+    *first_log_index = None;
     Ok(())
+}
+
+async fn get_resume_cursor<P: Provider>(
+    contract: &ContractInstance<P>,
+    next_bridge_event_id: BridgeEventId,
+) -> Result<(u64, Option<u64>)> {
+    // On listener connecting, we need to find a point of synchronization between
+    // the sidechain and main blockchain (Ethereum).
+    // The simplest way is to scan all the blocks starting from genesis - thats the way
+    //   how it works now.
+    // CAUTION: being this way it is not ready for mainnet!
+    // A bit more optimal would be to scan since contract deployment.
+    // But best option would be to store the last block on the sidechain.
+    let latest = contract.provider().get_block_number().await?;
+
+    if next_bridge_event_id == BridgeEventId::start() {
+        return Ok((0, None));
+    }
+
+    let filter = Filter::new()
+        .from_block(BlockNumberOrTag::Earliest)
+        .to_block(latest)
+        .address(*contract.address());
+
+    let mut chain_event_id = BridgeEventId::start();
+    for log in contract.provider().get_logs(&filter).await? {
+        if log.removed || EthereumBridgeEvent::from_log(&log)?.is_none() {
+            continue;
+        }
+
+        if chain_event_id == next_bridge_event_id {
+            return Ok((log.block_number.unwrap_or(0), log.log_index));
+        }
+
+        chain_event_id = chain_event_id.next();
+    }
+
+    Ok((latest.saturating_add(1), None))
 }
 
 async fn process_event<App: KolmeApp>(
