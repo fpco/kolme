@@ -5,6 +5,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider, ProviderBuilder},
     rpc::types::eth::TransactionRequest,
+    sol,
 };
 use anyhow::Result;
 use kolme::*;
@@ -18,6 +19,24 @@ const TEST_ADMIN_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
+
+sol! {
+    #[sol(rpc)]
+    interface IBridgeV1Integration {
+        function get_config()
+            external
+            view
+            returns (
+                bytes processor,
+                bytes[] listeners,
+                uint16 neededListeners,
+                bytes[] approvers,
+                uint16 neededApprovers,
+                uint64 configNextEventId,
+                uint64 configNextActionId
+            );
+    }
+}
 
 #[derive(Clone)]
 struct EthereumBridgeTestApp {
@@ -114,6 +133,51 @@ impl KolmeApp for EthereumBridgeTestApp {
 async fn ethereum_listener_ingests_local_deposit() {
     init_logger(true, None);
     TestTasks::start(ethereum_listener_ingests_local_deposit_inner, ()).await;
+}
+
+#[tokio::test]
+async fn ethereum_bridge_get_config_is_readable() {
+    let provider = anvil_provider().expect("failed to build anvil provider");
+
+    assert_anvil_identifiers_match(&provider)
+        .await
+        .expect("local anvil setup does not match expected deterministic identifiers");
+
+    let bridge: Address = TEST_BRIDGE_ADDRESS
+        .parse()
+        .expect("hardcoded bridge address is invalid");
+    let contract = IBridgeV1Integration::new(bridge, provider.clone());
+    let cfg = contract
+        .get_config()
+        .call()
+        .await
+        .expect("bridge get_config call failed");
+
+    assert_eq!(cfg.processor.len(), 33, "invalid processor key length");
+    assert!(
+        !cfg.listeners.is_empty(),
+        "bridge returned empty listeners in config"
+    );
+    assert!(
+        !cfg.approvers.is_empty(),
+        "bridge returned empty approvers in config"
+    );
+    assert!(
+        cfg.neededListeners > 0,
+        "listener quorum should be non-zero"
+    );
+    assert!(
+        cfg.neededApprovers > 0,
+        "approver quorum should be non-zero"
+    );
+    assert!(
+        usize::from(cfg.neededListeners) <= cfg.listeners.len(),
+        "listener quorum exceeds listeners length"
+    );
+    assert!(
+        usize::from(cfg.neededApprovers) <= cfg.approvers.len(),
+        "approver quorum exceeds approvers length"
+    );
 }
 
 async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, (): ()) {
