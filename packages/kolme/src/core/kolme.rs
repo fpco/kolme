@@ -3,6 +3,8 @@ mod import_export;
 mod mempool;
 mod store;
 
+#[cfg(feature = "ethereum")]
+use alloy::providers::DynProvider;
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
 use kolme_store::{BackingRemoteDataListener, KolmeConstructLock, KolmeStoreError, StorableBlock};
@@ -13,7 +15,7 @@ pub use store::KolmeStore;
 use tokio::task::JoinSet;
 use utils::trigger::TriggerSubscriber;
 
-#[cfg(any(feature = "solana", feature = "cosmwasm"))]
+#[cfg(any(feature = "solana", feature = "cosmwasm", feature = "ethereum"))]
 use std::collections::HashMap;
 use std::{num::NonZero, ops::Deref, sync::OnceLock, time::Duration};
 
@@ -49,6 +51,8 @@ pub(super) struct KolmeInner<App: KolmeApp> {
     pub(super) cosmos_conns: tokio::sync::RwLock<HashMap<CosmosChain, cosmos::Cosmos>>,
     #[cfg(feature = "solana")]
     pub(super) solana_conns: tokio::sync::RwLock<HashMap<SolanaChain, Arc<SolanaClient>>>,
+    #[cfg(feature = "ethereum")]
+    pub(super) ethereum_conns: tokio::sync::RwLock<HashMap<EthereumChain, DynProvider>>,
     #[cfg(feature = "solana")]
     pub(super) solana_endpoints: parking_lot::RwLock<SolanaEndpoints>,
     #[cfg(feature = "pass_through")]
@@ -654,6 +658,8 @@ impl<App: KolmeApp> Kolme<App> {
             cosmos_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "solana")]
             solana_conns: tokio::sync::RwLock::new(HashMap::new()),
+            #[cfg(feature = "ethereum")]
+            ethereum_conns: tokio::sync::RwLock::new(HashMap::new()),
             #[cfg(feature = "pass_through")]
             pass_through_conn: OnceLock::new(),
             // In the future, maybe have a Builder interface for configuring things like this
@@ -976,6 +982,23 @@ impl<App: KolmeApp> Kolme<App> {
                 guard.insert(chain, Arc::clone(&client));
 
                 client
+            }
+        }
+    }
+
+    #[cfg(feature = "ethereum")]
+    pub async fn get_ethereum_client(&self, chain: EthereumChain) -> Result<DynProvider> {
+        if let Some(client) = self.inner.ethereum_conns.read().await.get(&chain) {
+            return Ok(client.clone());
+        }
+
+        let mut guard = self.inner.ethereum_conns.write().await;
+        match guard.get(&chain) {
+            Some(client) => Ok(client.clone()),
+            None => {
+                let client = chain.make_client()?;
+                guard.insert(chain, client.clone());
+                Ok(client)
             }
         }
     }

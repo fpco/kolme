@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install depdendencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
@@ -80,6 +82,8 @@ jobs:
         run: just cargo-test
       - name: Start localosmosis
         run: just localosmosis
+      - name: Start anvil
+        run: just anvil
       - name: Contract tests
         run: just cargo-contract-tests
 
@@ -89,6 +93,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install depdendencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
