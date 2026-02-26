@@ -6,7 +6,7 @@ import {
 } from "openzeppelin-contracts/contracts/access/AccessControl.sol";
 
 interface IBridgeV1 {
-    event FundsReceived(address indexed sender, uint256 amount);
+    event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
     event AdminPinged(address indexed admin);
 
     function adminPing() external;
@@ -89,7 +89,8 @@ contract BridgeV1 is AccessControl, IBridgeV1 {
     }
 
     receive() external payable {
-        emit FundsReceived(msg.sender, msg.value);
+        emit FundsReceived(nextEventId, msg.sender, msg.value);
+        nextEventId += 1;
     }
 
     function adminPing() external onlyRole(DEFAULT_ADMIN_ROLE) {

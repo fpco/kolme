@@ -13,13 +13,19 @@ use super::get_next_bridge_event_id;
 
 const ETH_NATIVE_DENOM: &str = "eth";
 
-sol! { event FundsReceived(address indexed sender, uint256 amount); }
+sol! { event FundsReceived(uint64 eventId, address indexed sender, uint256 amount); }
 
 enum EthereumBridgeEvent {
     FundsReceived(FundsReceived),
 }
 
 impl EthereumBridgeEvent {
+    fn event_id(&self) -> BridgeEventId {
+        match self {
+            Self::FundsReceived(FundsReceived { eventId, .. }) => BridgeEventId(*eventId),
+        }
+    }
+
     fn from_log(log: &Log) -> Result<Option<Self>> {
         let Some(topic) = log.topic0().copied() else {
             return Ok(None);
@@ -29,9 +35,7 @@ impl EthereumBridgeEvent {
             FundsReceived::SIGNATURE_HASH => Some(Self::FundsReceived(
                 log.log_decode()
                     .map(|decoded| decoded.inner.data)
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to decode FundsReceived(address,uint256): {e}")
-                    })?,
+                    .map_err(|e| anyhow::anyhow!("Failed to decode FundsReceived: {e}"))?,
             )),
             _ => None,
         })
@@ -43,7 +47,7 @@ impl EthereumBridgeEvent {
         event_id: BridgeEventId,
     ) -> Result<Message<AppMessage>> {
         let event = match self {
-            Self::FundsReceived(FundsReceived { sender, amount }) => BridgeEvent::Regular {
+            Self::FundsReceived(FundsReceived { sender, amount, .. }) => BridgeEvent::Regular {
                 wallet: Wallet(format!("{:#x}", sender)),
                 funds: vec![BridgedAssetAmount {
                     denom: ETH_NATIVE_DENOM.to_owned(),
@@ -168,17 +172,18 @@ async fn get_resume_cursor<P: Provider>(
         .to_block(latest)
         .address(*contract.address());
 
-    let mut chain_event_id = BridgeEventId::start();
     for log in contract.provider().get_logs(&filter).await? {
-        if log.removed || EthereumBridgeEvent::from_log(&log)?.is_none() {
+        if log.removed {
             continue;
         }
 
-        if chain_event_id == next_bridge_event_id {
+        let Some(event) = EthereumBridgeEvent::from_log(&log)? else {
+            continue;
+        };
+
+        if event.event_id() == next_bridge_event_id {
             return Ok((log.block_number.unwrap_or(0), log.log_index));
         }
-
-        chain_event_id = chain_event_id.next();
     }
 
     Ok((latest.saturating_add(1), None))
@@ -194,8 +199,15 @@ async fn process_event<App: KolmeApp>(
     let Some(event) = EthereumBridgeEvent::from_log(log)? else {
         return Ok(());
     };
+    let actual_event_id = event.event_id();
+    anyhow::ensure!(
+        actual_event_id == *next_bridge_event_id,
+        "Unexpected Ethereum bridge event ID. Expected {}, got {}",
+        *next_bridge_event_id,
+        actual_event_id
+    );
 
-    let message = event.to_kolme_message::<App::Message>(chain, *next_bridge_event_id)?;
+    let message = event.to_kolme_message::<App::Message>(chain, actual_event_id)?;
     kolme
         .sign_propose_await_transaction(secret, vec![message])
         .await?;
@@ -220,7 +232,7 @@ mod tests {
     #[test]
     fn funds_received_topic_hash_matches_constant() {
         const FUNDS_RECEIVED_EVENT_TOPIC0_HEX: &str =
-            "0x8e47b87b0ef542cdfa1659c551d88bad38aa7f452d2bbb349ab7530dfec8be8f";
+            "0x4ade6a296f99f38f840a2a880cc9a27cec9ee56ce8d56cd80d3350e3419ed44c";
         let expected = FUNDS_RECEIVED_EVENT_TOPIC0_HEX.parse::<B256>().unwrap();
         assert_eq!(FundsReceived::SIGNATURE_HASH, expected);
     }
@@ -236,9 +248,11 @@ mod tests {
         let mut sender_topic = [0u8; 32];
         sender_topic[12..].copy_from_slice(sender.as_slice());
 
+        let event_id = 7u64;
         let amount = U256::from(42u64);
-        let mut data = [0u8; 32];
-        amount.to_be_bytes::<32>().clone_into(&mut data);
+        let mut data = [0u8; 64];
+        data[24..32].copy_from_slice(&event_id.to_be_bytes());
+        data[32..64].copy_from_slice(&amount.to_be_bytes::<32>());
 
         let log_data = LogData::new(
             vec![FundsReceived::SIGNATURE_HASH, B256::from(sender_topic)],
@@ -255,6 +269,7 @@ mod tests {
 
         let decoded = log.log_decode::<FundsReceived>().unwrap().inner.data;
 
+        assert_eq!(decoded.eventId, event_id);
         assert_eq!(decoded.sender, sender);
         assert_eq!(decoded.amount, amount);
     }
