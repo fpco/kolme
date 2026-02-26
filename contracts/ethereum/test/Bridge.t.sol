@@ -2,14 +2,14 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {BridgeV1} from "../src/Bridge.sol";
+import {Bridge} from "../src/Bridge.sol";
 
-contract BridgeV1Test is Test {
+contract BridgeTest is Test {
     event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
     bytes constant TEST_VALIDATOR_KEY =
         hex"021111111111111111111111111111111111111111111111111111111111111111";
 
-    BridgeV1 public bridge;
+    Bridge public bridge;
     address public admin = address(0xA11CE);
     address public nonAdmin = address(0xB0B);
 
@@ -20,7 +20,7 @@ contract BridgeV1Test is Test {
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY;
 
-        bridge = new BridgeV1(
+        bridge = new Bridge(
             admin,
             TEST_VALIDATOR_KEY,
             listeners,
