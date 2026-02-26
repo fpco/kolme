@@ -13,6 +13,19 @@ interface IBridgeV1 {
 }
 
 contract BridgeV1 is AccessControl, IBridgeV1 {
+    struct ValidatorSet {
+        // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
+        bytes processor;
+        bytes[] listeners;
+        uint16 neededListeners;
+        bytes[] approvers;
+        uint16 neededApprovers;
+    }
+
+    ValidatorSet internal validatorSet;
+    uint64 internal nextEventId;
+    uint64 internal nextActionId;
+
     // `DEFAULT_ADMIN_ROLE` is the only role in v1.
     // It is granted during setup and used for admin-restricted calls.
     constructor(address admin) {
