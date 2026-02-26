@@ -6,13 +6,30 @@ import {BridgeV1} from "../src/BridgeV1.sol";
 
 contract BridgeV1Test is Test {
     event FundsReceived(address indexed sender, uint256 amount);
+    bytes constant TEST_VALIDATOR_KEY =
+        hex"021111111111111111111111111111111111111111111111111111111111111111";
 
     BridgeV1 public bridge;
     address public admin = address(0xA11CE);
     address public nonAdmin = address(0xB0B);
 
     function setUp() public {
-        bridge = new BridgeV1(admin);
+        bytes[] memory listeners = new bytes[](1);
+        listeners[0] = TEST_VALIDATOR_KEY;
+
+        bytes[] memory approvers = new bytes[](1);
+        approvers[0] = TEST_VALIDATOR_KEY;
+
+        bridge = new BridgeV1(
+            admin,
+            TEST_VALIDATOR_KEY,
+            listeners,
+            1,
+            approvers,
+            1,
+            0,
+            0
+        );
     }
 
     function test_AdminRoleAssigned() public view {
