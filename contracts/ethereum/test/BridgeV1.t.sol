@@ -61,4 +61,26 @@ contract BridgeV1Test is Test {
         vm.expectRevert();
         bridge.adminPing();
     }
+
+    function test_GetConfigReturnsInitializedState() public view {
+        (
+            bytes memory processor,
+            bytes[] memory listeners,
+            uint16 neededListeners,
+            bytes[] memory approvers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        ) = bridge.get_config();
+
+        assertEq(processor, TEST_VALIDATOR_KEY);
+        assertEq(listeners.length, 1);
+        assertEq(listeners[0], TEST_VALIDATOR_KEY);
+        assertEq(neededListeners, 1);
+        assertEq(approvers.length, 1);
+        assertEq(approvers[0], TEST_VALIDATOR_KEY);
+        assertEq(neededApprovers, 1);
+        assertEq(configNextEventId, 0);
+        assertEq(configNextActionId, 0);
+    }
 }
