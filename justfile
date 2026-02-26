@@ -44,7 +44,7 @@ stop-anvil:
 [working-directory("contracts/ethereum/e2e")]
 anvil:
     -just stop-anvil
-    docker compose up -d anvil
+    docker compose up --build -d anvil
 
 
 test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
