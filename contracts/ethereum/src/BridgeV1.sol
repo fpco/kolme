@@ -10,6 +10,18 @@ interface IBridgeV1 {
     event AdminPinged(address indexed admin);
 
     function adminPing() external;
+    function get_config()
+        external
+        view
+        returns (
+            bytes memory processor,
+            bytes[] memory listeners,
+            uint16 neededListeners,
+            bytes[] memory approvers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        );
 }
 
 contract BridgeV1 is AccessControl, IBridgeV1 {
@@ -82,5 +94,30 @@ contract BridgeV1 is AccessControl, IBridgeV1 {
 
     function adminPing() external onlyRole(DEFAULT_ADMIN_ROLE) {
         emit AdminPinged(msg.sender);
+    }
+
+    function get_config()
+        external
+        view
+        returns (
+            bytes memory processor,
+            bytes[] memory listeners,
+            uint16 neededListeners,
+            bytes[] memory approvers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        )
+    {
+        ValidatorSet storage set = validatorSet;
+        return (
+            set.processor,
+            set.listeners,
+            set.neededListeners,
+            set.approvers,
+            set.neededApprovers,
+            nextEventId,
+            nextActionId
+        );
     }
 }
