@@ -22,7 +22,7 @@ const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
 
 sol! {
     #[sol(rpc)]
-    interface IBridgeV1Integration {
+    interface IBridgeIntegration {
         function get_config()
             external
             view
@@ -146,7 +146,7 @@ async fn ethereum_bridge_get_config_is_readable() {
     let bridge: Address = TEST_BRIDGE_ADDRESS
         .parse()
         .expect("hardcoded bridge address is invalid");
-    let contract = IBridgeV1Integration::new(bridge, provider.clone());
+    let contract = IBridgeIntegration::new(bridge, provider.clone());
     let cfg = contract
         .get_config()
         .call()

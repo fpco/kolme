@@ -20,7 +20,7 @@ DEPLOYER_ADDRESS="$(cast wallet address --mnemonic "$MNEMONIC" --mnemonic-index 
 DEPLOYER_PRIVATE_KEY="$(cast wallet private-key --mnemonic "$MNEMONIC" --mnemonic-index 0)"
 VALIDATOR_KEY="0x021111111111111111111111111111111111111111111111111111111111111111"
 
-BYTECODE="$(jq -r '.bytecode.object' out/BridgeV1.sol/BridgeV1.json)"
+BYTECODE="$(jq -r '.bytecode.object' out/Bridge.sol/Bridge.json)"
 CTOR_ARGS="$(
   cast abi-encode \
     "constructor(address,bytes,bytes[],uint16,bytes[],uint16,uint64,uint64)" \
@@ -33,8 +33,8 @@ CTOR_ARGS="$(
     "0" \
     "0"
 )"
-echo -n "${BYTECODE}${CTOR_ARGS#0x}" > /tmp/bridgev1.initcode
-cast compute-address --nonce 0 "$DEPLOYER_ADDRESS" > /bootstrap/bridgev1.address
+echo -n "${BYTECODE}${CTOR_ARGS#0x}" > /tmp/bridge.initcode
+cast compute-address --nonce 0 "$DEPLOYER_ADDRESS" > /bootstrap/bridge.address
 
 anvil \
   --host 127.0.0.1 \
@@ -52,7 +52,7 @@ sleep 5
 cast send \
   --rpc-url http://127.0.0.1:8545 \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
-  --create "$(cat /tmp/bridgev1.initcode)"
+  --create "$(cat /tmp/bridge.initcode)"
 
 sleep 2
 kill -INT "$ANVIL_PID" || true
