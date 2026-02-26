@@ -1,4 +1,3 @@
-use crate::api_server::KolmeApiError;
 use crate::listener::{cosmos::CosmosListenerError, solana::ListenerSolanaError};
 use crate::{core::*, submitter::SubmitterError};
 use cosmos::error::{AddressError, WalletError};
@@ -10,14 +9,6 @@ use tokio::sync::watch::error::RecvError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeError {
-    #[error("Invalid nonce provided for pubkey {pubkey}, account {account_id}. Expected: {expected}. Received: {actual}.")]
-    InvalidNonce {
-        pubkey: Box<PublicKey>,
-        account_id: AccountId,
-        expected: AccountNonce,
-        actual: AccountNonce,
-    },
-
     #[error("Already have a bridge contract for {chain:?}, just received another from a listener")]
     BridgeAlreadyDeployed { chain: ExternalChain },
 
@@ -143,23 +134,11 @@ pub enum KolmeError {
     #[error("Import/export error: {0}")]
     ImportExport(#[from] KolmeImportExportError),
 
-    #[error("Core error: {0}")]
-    CoreError(#[from] KolmeCoreError),
-
     #[error("Listener error: {0}")]
     ListenerError(#[from] CosmosListenerError),
 
-    #[error("Execution error: {0}")]
-    ExecuteError(#[from] KolmeExecuteError),
-
-    #[error("Execution error: {0}")]
-    Execution(#[from] KolmeExecutionError),
-
     #[error("Store error: {0}")]
     StoreError(#[from] KolmeStoreError),
-
-    #[error("API server error")]
-    ApiError(#[from] KolmeApiError),
 
     #[error(transparent)]
     Secretkey(#[from] SecretKeyError),
@@ -188,8 +167,14 @@ pub enum KolmeError {
     #[error("Error deserializing Solana bridge message from logs: {details}")]
     InvalidSolanaBridgeLogMessage { details: String },
 
+    #[error("Start height {start} is greater than {end} height")]
+    InvalidBlockHeight {
+        start: BlockHeight,
+        end: BlockHeight,
+    },
+
     #[error(transparent)]
-    Transaction(#[from] TransactionError),
+    Transaction(TransactionError),
 
     #[error("Broadcast receive error")]
     BroadcastRecv(#[from] tokio::sync::broadcast::error::RecvError),
@@ -263,9 +248,6 @@ pub enum KolmeError {
     #[error("Solana client error")]
     SolanaClient(#[from] solana_client::client_error::ClientError),
 
-    #[error("{0}")]
-    Other(String),
-
     #[error("Latest block height is {height}, but it wasn't found in the data store")]
     BlockMissingInStore { height: BlockHeight },
 
@@ -297,6 +279,199 @@ pub enum KolmeError {
     InsufficientFundsWhileWithdrawing { asset_id: AssetId, amount: Decimal },
     #[error("Unsupported asset ID")]
     UnsupportedAssetId,
+
+    #[error("Timed out proposing and awaiting transaction {txhash}")]
+    TimeoutProposingTx { txhash: TxHash, #[source] elapsed: tokio::time::error::Elapsed },
+
+    #[error("Current processor pubkey is {pubkey}, but we don't have the matching secret key, we have: {pubkeys:?}")]
+    MissingProcessorSecret {
+        pubkey: PublicKey,
+        pubkeys: Vec<PublicKey>,
+    },
+
+    #[error("Block {0} not found")]
+    BlockNotFound(BlockHeight),
+
+    #[error("No blocks in chain")]
+    NoBlocksInChain,
+
+    #[error("Invalid chain version: {0}")]
+    InvalidChainVersion(String),
+
+    #[error("Chain version {requested} not found, earliest is {earliest}")]
+    ChainVersionNotFound { requested: String, earliest: String },
+
+    #[error("Underflow in prev() operation")]
+    UnderflowInPrev,
+
+    #[error("Unable to compare chain versions")]
+    VersionComparisonFailed,
+
+    #[error("Could not find any block with chain version {0}")]
+    BlockNotFoundOnChainVersion(String),
+
+    #[error("Could not find first block for chain version {0}")]
+    FirstBlockNotFound(String),
+
+    #[error("Could not find last block for chain version {0}")]
+    LastBlockNotFound(String),
+
+    #[error("Timeout waiting for block {0}")]
+    BlockTimeout(BlockHeight),
+
+    #[error("Failed to load block {0}")]
+    BlockLoadFailed(BlockHeight),
+
+    #[error("Expected block {height} not found during resync")]
+    BlockNotFoundDuringResync { height: BlockHeight },
+
+    #[error("Executed height mismatch: expected {expected}, actual {actual}")]
+    ExecutedHeight {
+        expected: BlockHeight,
+        actual: BlockHeight,
+    },
+
+    #[error("Executed loads mismatch")]
+    ExecutedLoads {
+        expected: Vec<BlockDataLoad>,
+        actual: Vec<BlockDataLoad>,
+    },
+
+    #[error("Framework state hash mismatch")]
+    FrameworkStateHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("App state hash mismatch")]
+    AppStateHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("Logs hash mismatch")]
+    LogsHash {
+        expected: Sha256Hash,
+        actual: Sha256Hash,
+    },
+
+    #[error("Missing merkle layer {hash} in source store")]
+    MissingMerkleLayer { hash: Sha256Hash },
+
+    #[error("Missing app merkle layer {hash}")]
+    MissingAppMerkleLayer { hash: Sha256Hash },
+
+    #[error("Unable to mark block {height} as archived: {source}")]
+    ArchiveBlockFailed {
+        height: BlockHeight,
+        source: KolmeStoreError,
+    },
+
+    #[error("Missing framework merkle layer {hash}")]
+    MissingFrameworkMerkleLayer { hash: Sha256Hash },
+
+    #[error("Missing logs merkle layer {hash}")]
+    MissingLogMerkleLayer { hash: Sha256Hash },
+
+    #[error("Listener pubkey not allowed for this event")]
+    InvalidListenerPubkey,
+
+    #[error("Listener has already signed this event")]
+    DuplicateListenerSignature,
+
+    #[error("Genesis message must be signed by the processor")]
+    InvalidGenesisPubkey {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Chain code version mismatch: code={code}, chain={chain}")]
+    VersionMismatch {
+        code: String,
+        chain: String,
+        txhash: TxHash,
+    },
+
+    #[error("Unexpected extra data loads during block validation")]
+    ExtraDataLoads,
+
+    #[error("Genesis message does not match expected value")]
+    GenesisMismatch,
+
+    #[error("Not enough approver signatures: needed {needed}, got {actual}")]
+    NotEnoughApprovers { needed: u16, actual: usize },
+
+    #[error("Processor approval already exists for this action")]
+    ProcessorAlreadyApproved,
+
+    #[error("Duplicate approver signatures found")]
+    DuplicateApproverEntries,
+
+    #[error("Cannot approve bridge action with a non-approver pubkey: {pubkey}")]
+    NonApproverSignature { pubkey: Box<PublicKey> },
+
+    #[error("Bridge action already approved with pubkey {pubkey}")]
+    DuplicateApproverSignature {
+        action_id: BridgeActionId,
+        chain: ExternalChain,
+        pubkey: Box<PublicKey>,
+    },
+
+    #[error("Processor signature invalid")]
+    InvalidProcessorSignature {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
+
+    #[error("Approver signature invalid: signer {pubkey}")]
+    InvalidApproverSignature { pubkey: Box<PublicKey> },
+
+    #[error("Mismatch in prior data loads")]
+    DataLoadMismatch,
+
+    #[error("Cannot remove signing key from account")]
+    CannotRemoveSigningKey {
+        key: Box<PublicKey>,
+        account: AccountId,
+    },
+
+    #[error("Invalid data load request: expected {expected}, got {actual}. Parse expected: {prev_req}, parse actual: {req}")]
+    InvalidDataLoadRequest {
+        expected: String,
+        actual: String,
+        prev_req: String,
+        req: String,
+    },
+
+    #[error(transparent)]
+    Data(#[from] KolmeDataError),
+
+    #[error("Cannot approve missing bridge action {action_id} for chain {chain}")]
+    MissingBridgeAction {
+        chain: ExternalChain,
+        action_id: BridgeActionId,
+    },
+
+    #[error("Cannot report on an action when no pending actions are present")]
+    NoPendingActionsToReport,
+
+    #[error("No pending action {action_id} found for {chain}")]
+    NoPendingActionsOnChain {
+        action_id: BridgeActionId,
+        chain: ExternalChain,
+    },
+
+    #[error("Specified an unknown proposal ID {admin_proposal_id}")]
+    UnknownAdminProposalId { admin_proposal_id: AdminProposalId },
+
+    #[error("Mismatched bridge event")]
+    MismatchedBridgeEvent,
+
+    #[error("Unexpected bridge event ID")]
+    UnexpectedBridgeEventId,
+
+    #[error("{0}")]
+    Other(String),
 }
 
 impl KolmeError {
@@ -320,41 +495,14 @@ impl<T> From<ProposeTransactionError<T>> for KolmeError {
 }
 
 #[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// Errors that need to be serialized on order to report through Gossip.
 pub enum TransactionError {
-    #[error("{0}")]
-    Other(String),
-
-    #[error("KolmeStoreError: {0}")]
-    StoreError(String),
-
-    #[error("KolmeCoreError: {0}")]
-    CoreError(String),
-
-    #[error("KolmeMerkleSerialError: {0}")]
-    MerkleError(String),
-
-    #[error("Block with height {height} in database with different hash {existing}, trying to add {adding}")]
-    ConflictingBlockInDb {
-        height: u64,
-        adding: Sha256Hash,
-        existing: Sha256Hash,
-    },
-
-    #[error("Executed height mismatch: expected {expected}, got {actual}")]
-    ExecutedHeightMismatch {
-        expected: BlockHeight,
-        actual: BlockHeight,
-    },
-
     #[error("Transaction {txhash} has max height of {max_height}, but proposed block height is {proposed_height}")]
     PastMaxHeight {
         txhash: TxHash,
         max_height: BlockHeight,
         proposed_height: BlockHeight,
     },
-
-    #[error("Timed out proposing transaction {txhash}")]
-    TimeoutProposingTx { txhash: TxHash },
 
     #[error("Invalid nonce provided for pubkey {pubkey}, account {account_id}. Expected: {expected}. Received: {actual}.")]
     InvalidNonce {
@@ -363,38 +511,10 @@ pub enum TransactionError {
         expected: AccountNonce,
         actual: AccountNonce,
     },
-}
 
-impl From<KolmeError> for TransactionError {
-    fn from(err: KolmeError) -> Self {
-        match err {
-            KolmeError::ExecutedHeightMismatch { expected, actual } => {
-                TransactionError::ExecutedHeightMismatch { expected, actual }
-            }
-            KolmeError::StoreError(e) => TransactionError::StoreError(e.to_string()),
-            KolmeError::CoreError(e) => TransactionError::CoreError(e.to_string()),
-            KolmeError::MerkleSerial(e) => TransactionError::MerkleError(e.to_string()),
-            KolmeError::InvalidNonce {
-                pubkey,
-                account_id,
-                expected,
-                actual,
-            } => TransactionError::InvalidNonce {
-                pubkey: pubkey.clone(),
-                account_id,
-                expected,
-                actual,
-            },
-            _ => TransactionError::Other(err.to_string()),
-        }
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum KolmeExecutionError {
-    #[error("Mismatched bridge event")]
-    MismatchedBridgeEvent,
-
-    #[error("Unexpected bridge event ID")]
-    UnexpectedBridgeEventId,
+    #[error("{0}")]
+    /// Any other errors are stringified here
+    //
+    /// This variant should not be constructed directly.
+    Other(String),
 }

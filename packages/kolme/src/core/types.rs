@@ -24,7 +24,6 @@ use crate::*;
 
 pub use accounts::{Account, Accounts, AccountsError};
 pub use error::KolmeError;
-pub use error::KolmeExecutionError;
 pub use error::TransactionError;
 
 #[cfg(feature = "solana")]
@@ -69,11 +68,10 @@ impl ToMerkleKey for ExternalChain {
 
 impl FromMerkleKey for ExternalChain {
     fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
-        let s = std::str::from_utf8(bytes)?;
-        s.parse()
-            .map_err(|_| MerkleSerialError::InvalidExternalChain {
-                value: s.to_string(),
-            })
+        std::str::from_utf8(bytes)
+            .map_err(MerkleSerialError::custom)?
+            .parse()
+            .map_err(MerkleSerialError::custom)
     }
 }
 
@@ -295,11 +293,10 @@ impl MerkleDeserialize for ExternalChain {
         deserializer: &mut MerkleDeserializer,
         _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        let s = deserializer.load_str()?;
-        s.parse()
-            .map_err(|_| MerkleSerialError::InvalidExternalChain {
-                value: s.to_string(),
-            })
+        deserializer
+            .load_str()?
+            .parse()
+            .map_err(MerkleSerialError::custom)
     }
 }
 
@@ -796,15 +793,6 @@ impl TryFrom<i64> for AccountNonce {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum BlockHeightError {
-    #[error("Invalid block height: start={start}, end={end}")]
-    InvalidBlockHeight {
-        start: BlockHeight,
-        end: BlockHeight,
-    },
-}
-
 /// Height of a block
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
@@ -827,12 +815,9 @@ impl BlockHeight {
         self.0 == 0
     }
 
-    pub fn increasing_middle(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<BlockHeight, BlockHeightError> {
+    pub fn increasing_middle(&self, block_height: BlockHeight) -> Result<BlockHeight, KolmeError> {
         if self.0 >= block_height.0 {
-            return Err(BlockHeightError::InvalidBlockHeight {
+            return Err(KolmeError::InvalidBlockHeight {
                 start: *self,
                 end: block_height,
             });

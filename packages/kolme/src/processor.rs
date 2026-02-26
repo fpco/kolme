@@ -1,6 +1,7 @@
 use crate::*;
 use std::{collections::HashMap, convert::Infallible, time::Instant};
 
+use kolme_store::KolmeStoreError;
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
     secrets: HashMap<PublicKey, SecretKey>,
@@ -108,13 +109,14 @@ impl<App: KolmeApp> Processor<App> {
     /// Get the correct secret key for the current validator set.
     ///
     /// If we don't have it, returns an error.
-    fn get_correct_secret(&self, kolme: &KolmeRead<App>) -> Result<&SecretKey, TransactionError> {
+    fn get_correct_secret(&self, kolme: &KolmeRead<App>) -> Result<&SecretKey, KolmeError> {
         let pubkey = &kolme.get_framework_state().get_validator_set().processor;
         self.secrets.get(pubkey).ok_or_else(|| {
-            let pubkeys = self.secrets.keys().collect::<Vec<_>>();
-            TransactionError::Other(format!(
-                "Current processor pubkey is {pubkey}, but we don't have the matching secret key, we have: {pubkeys:?}"
-            ))
+            let pubkeys = self.secrets.keys().copied().collect::<Vec<_>>();
+            KolmeError::MissingProcessorSecret {
+                pubkey: *pubkey,
+                pubkeys,
+            }
         })
     }
 
@@ -132,10 +134,10 @@ impl<App: KolmeApp> Processor<App> {
             .await?;
         if let Err(e) = self.kolme.add_executed_block(executed_block).await {
             // kolme#144 - Discard unneeded fields
-            if let TransactionError::ConflictingBlockInDb { .. } = &e {
+            if let KolmeError::StoreError(KolmeStoreError::ConflictingBlockInDb { .. }) = &e {
                 self.kolme.resync().await?;
             }
-            Err(KolmeError::Transaction(e))
+            Err(e)
         } else {
             self.emit_latest().ok();
             Ok(())
@@ -176,11 +178,11 @@ impl<App: KolmeApp> Processor<App> {
         .await;
         if let Err(e) = &res {
             // kolme#144 - Discard unneeded fields
-            if let TransactionError::ConflictingBlockInDb {
+            if let KolmeError::StoreError(KolmeStoreError::ConflictingBlockInDb {
                 height,
                 adding,
                 existing,
-            } = e
+            }) = e
             {
                 tracing::warn!(
                     "Unexpected BlockAlreadyInDb while adding transaction, construction lock should have prevented this. Height: {height}. Adding: {adding}. Existing: {existing}."
@@ -191,7 +193,10 @@ impl<App: KolmeApp> Processor<App> {
                     let failed = FailedTransaction {
                         txhash,
                         proposed_height,
-                        error: e.clone(),
+                        error: match e {
+                            KolmeError::Transaction(e) => e.clone(),
+                            _ => TransactionError::Other(e.to_string()),
+                        },
                     };
                     let failed = TaggedJson::new(failed)?;
                     let key = self.get_correct_secret(&self.kolme.read())?;
@@ -227,22 +232,14 @@ impl<App: KolmeApp> Processor<App> {
         &self,
         tx: SignedTransaction<App::Message>,
         proposed_height: BlockHeight,
-    ) -> Result<ExecutedBlock<App>, TransactionError> {
+    ) -> Result<ExecutedBlock<App>, KolmeError> {
         // Stop any changes from happening while we're processing.
         let kolme = self.kolme.read();
         let secret = self.get_correct_secret(&kolme)?;
 
         let txhash = tx.hash();
-        if kolme
-            .get_tx_height(txhash)
-            .await
-            .map_err(|e| TransactionError::StoreError(e.to_string()))?
-            .is_some()
-        {
-            return Err(TransactionError::Other(format!(
-                "TxAlreadyInDb: {}",
-                txhash.0
-            )));
+        if kolme.get_tx_height(txhash).await?.is_some() {
+            return Err(KolmeStoreError::TxAlreadyInDb { txhash: txhash.0 }.into());
         }
 
         let now = Timestamp::now();
@@ -255,11 +252,10 @@ impl<App: KolmeApp> Processor<App> {
             height,
         } = kolme
             .execute_transaction(&tx, now, BlockDataHandling::NoPriorData)
-            .await
-            .map_err(TransactionError::from)?;
+            .await?;
 
         if height != proposed_height {
-            return Err(TransactionError::ExecutedHeightMismatch {
+            return Err(KolmeError::ExecutedHeightMismatch {
                 expected: proposed_height,
                 actual: height,
             });
@@ -267,11 +263,11 @@ impl<App: KolmeApp> Processor<App> {
 
         if let Some(max_height) = tx.0.message.as_inner().max_height {
             if max_height < proposed_height {
-                return Err(TransactionError::PastMaxHeight {
+                return Err(KolmeError::Transaction(TransactionError::PastMaxHeight {
                     txhash,
                     max_height,
                     proposed_height,
-                });
+                }));
             }
         }
 
@@ -281,24 +277,13 @@ impl<App: KolmeApp> Processor<App> {
             processor: secret.public_key(),
             height: proposed_height,
             parent: kolme.get_current_block_hash(),
-            framework_state: merkle_map::api::serialize(&framework_state)
-                .map_err(|e| TransactionError::MerkleError(e.to_string()))?
-                .hash(),
-            app_state: merkle_map::api::serialize(&app_state)
-                .map_err(|e| TransactionError::MerkleError(e.to_string()))?
-                .hash(),
+            framework_state: merkle_map::api::serialize(&framework_state)?.hash(),
+            app_state: merkle_map::api::serialize(&app_state)?.hash(),
             loads,
-            logs: merkle_map::api::serialize(&logs)
-                .map_err(|e| TransactionError::MerkleError(e.to_string()))?
-                .hash(),
+            logs: merkle_map::api::serialize(&logs)?.hash(),
         };
-        let block =
-            TaggedJson::new(approved_block).map_err(|e| TransactionError::Other(e.to_string()))?;
-        let signed_block = Arc::new(SignedBlock(
-            block
-                .sign(secret)
-                .map_err(|e| TransactionError::Other(e.to_string()))?,
-        ));
+        let block = TaggedJson::new(approved_block)?;
+        let signed_block = Arc::new(SignedBlock(block.sign(secret)?));
         Ok(ExecutedBlock {
             signed_block,
             framework_state,

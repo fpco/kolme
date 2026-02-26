@@ -78,7 +78,7 @@ impl MerkleDeserializer {
     /// Load bytes and then UTF-8 decode them.
     pub fn load_str(&mut self) -> Result<&str, MerkleSerialError> {
         let bytes = self.load_bytes()?;
-        Ok(std::str::from_utf8(bytes)?)
+        std::str::from_utf8(bytes).map_err(MerkleSerialError::custom)
     }
 
     pub fn load_usize(&mut self) -> Result<usize, MerkleSerialError> {
@@ -129,7 +129,7 @@ impl MerkleDeserializer {
 
     pub fn load_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, MerkleSerialError> {
         let bytes = self.load_bytes()?;
-        Ok(serde_json::from_slice(bytes)?)
+        serde_json::from_slice(bytes).map_err(MerkleSerialError::custom)
     }
 
     pub(crate) fn get_position(&self) -> usize {

@@ -1,7 +1,6 @@
 use crate::*;
-use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum AccountsError {
     #[error("Insufficient balance for account {account_id}, asset {asset_id}. Requested: {requested}. Available: {available}.")]
     InsufficientBalance {
@@ -348,12 +347,12 @@ impl Accounts {
             Some(account_id) => {
                 let account = self.accounts.get_mut(account_id).unwrap();
                 if account.next_nonce != nonce {
-                    return Err(KolmeError::InvalidNonce {
+                    return Err(KolmeError::Transaction(TransactionError::InvalidNonce {
                         pubkey: Box::new(pubkey),
                         account_id: *account_id,
                         expected: account.next_nonce,
                         actual: nonce,
-                    });
+                    }));
                 }
                 account.next_nonce = account.next_nonce.next();
                 Ok(*account_id)
@@ -398,21 +397,17 @@ impl MerkleDeserialize for Accounts {
             for wallet in &account.wallets {
                 let x = wallets.insert(wallet.clone(), *id);
                 if let Some((_, id2)) = x {
-                    return Err(MerkleSerialError::WalletUsedInMultipleAccounts {
-                        wallet: wallet.to_string(),
-                        id: id.to_string(),
-                        other_id: id2.to_string(),
-                    });
+                    return Err(MerkleSerialError::Other(format!(
+                        "Wallet {wallet} used in both account {id} and {id2}"
+                    )));
                 }
             }
             for pubkey in &account.pubkeys {
                 let x = pubkeys.insert(*pubkey, *id);
                 if let Some((_, id2)) = x {
-                    return Err(MerkleSerialError::PubkeyUsedInMultipleAccounts {
-                        pubkey: pubkey.to_string(),
-                        id: id.to_string(),
-                        other_id: id2.to_string(),
-                    });
+                    return Err(MerkleSerialError::Other(format!(
+                        "Pubkey {pubkey} used in both account {id} and {id2}"
+                    )));
                 }
             }
         }

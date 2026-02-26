@@ -40,9 +40,9 @@ impl KolmeBackingStore for Store {
     }
 
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation {
-            backend: StorageBackend::Fjall,
-        })
+        Err(KolmeStoreError::UnsupportedDeleteOperation(
+            StorageBackend::Fjall,
+        ))
     }
 
     async fn take_construct_lock(&self) -> Result<crate::KolmeConstructLock, KolmeStoreError> {
@@ -68,12 +68,10 @@ impl KolmeBackingStore for Store {
         let height = match <[u8; 8]>::try_from(&*height) {
             Ok(height) => u64::from_be_bytes(height),
             Err(e) => {
-                return Err(KolmeStoreError::InvalidHeight {
-                    backend: StorageBackend::Fjall,
-                    txhash,
-                    bytes: height.to_vec(),
-                    reason: e,
-                });
+                return Err(KolmeStoreError::custom_context(
+                    "get_height_for_tx: invalid height in Fjall store",
+                    e,
+                ))
             }
         };
         Ok(Some(height))
@@ -86,7 +84,7 @@ impl KolmeBackingStore for Store {
         let (key, _hash_bytes) = latest.map_err(KolmeStoreError::custom)?;
         let key = (*key)
             .strip_prefix(b"block:")
-            .ok_or_else(|| KolmeStoreError::custom("Fjall key missing block: prefix"))?;
+            .ok_or_else(|| KolmeStoreError::Other("Fjall key missing block: prefix".to_owned()))?;
         let height = <[u8; 8]>::try_from(key).map_err(KolmeStoreError::custom)?;
         Ok(Some(u64::from_be_bytes(height)))
     }
@@ -158,7 +156,9 @@ impl KolmeBackingStore for Store {
 
         let mut store = self.merkle.clone();
         let hash = contents.hash();
-        merkle_map::api::save_merkle_contents(&mut store, contents).await?;
+        merkle_map::api::save_merkle_contents(&mut store, contents)
+            .await
+            .map_err(KolmeStoreError::custom)?;
 
         self.merkle
             .handle
@@ -181,7 +181,10 @@ impl KolmeBackingStore for Store {
         layer: &merkle_map::MerkleLayerContents,
     ) -> Result<(), KolmeStoreError> {
         let mut merkle = self.merkle.clone();
-        merkle.save_by_hash(layer).await?;
+        merkle
+            .save_by_hash(layer)
+            .await
+            .map_err(KolmeStoreError::custom)?;
         Ok(())
     }
 
@@ -190,7 +193,10 @@ impl KolmeBackingStore for Store {
         T: merkle_map::MerkleSerializeRaw,
     {
         let mut store = self.merkle.clone();
-        let hash = merkle_map::save(&mut store, value).await?;
+
+        let hash = merkle_map::save(&mut store, value)
+            .await
+            .map_err(KolmeStoreError::custom)?;
         Ok(hash)
     }
 
@@ -207,9 +213,7 @@ impl KolmeBackingStore for Store {
             .handle
             .insert(LATEST_ARCHIVED_HEIGHT_KEY, height.to_be_bytes())
             .map_err(|e| {
-                KolmeStoreError::custom(format!(
-                    "Unable to update partition with given height: {e}"
-                ))
+                KolmeStoreError::custom_context("Unable to update partition with given height", e)
             })?;
 
         Ok(())
@@ -220,7 +224,7 @@ impl KolmeBackingStore for Store {
             .merkle
             .handle
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
-            .map_err(|e| KolmeStoreError::Custom(format!("Unable to retrieve latest height: {e}")))?
+            .map_err(|e| KolmeStoreError::custom_context("Unable to retrieve latest height", e))?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
     }
 

@@ -7,7 +7,9 @@ use crate::*;
 
 impl FromMerkleKey for String {
     fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
-        Ok(std::str::from_utf8(bytes)?.to_string())
+        std::str::from_utf8(bytes)
+            .map(String::from)
+            .map_err(MerkleSerialError::custom)
     }
 }
 
@@ -20,30 +22,20 @@ impl FromMerkleKey for u8 {
         }
     }
 }
-
 impl FromMerkleKey for u32 {
     fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
-        let arr: [u8; 4] =
-            bytes
-                .try_into()
-                .map_err(|_| MerkleSerialError::InvalidMerkleKeyLength {
-                    expected: 4,
-                    actual: bytes.len(),
-                })?;
-        Ok(u32::from_be_bytes(arr))
+        bytes
+            .try_into()
+            .map(u32::from_be_bytes)
+            .map_err(MerkleSerialError::custom)
     }
 }
-
 impl FromMerkleKey for u64 {
     fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
-        let arr: [u8; 8] =
-            bytes
-                .try_into()
-                .map_err(|_| MerkleSerialError::InvalidMerkleKeyLength {
-                    expected: 8,
-                    actual: bytes.len(),
-                })?;
-        Ok(u64::from_be_bytes(arr))
+        bytes
+            .try_into()
+            .map(u64::from_be_bytes)
+            .map_err(MerkleSerialError::custom)
     }
 }
 

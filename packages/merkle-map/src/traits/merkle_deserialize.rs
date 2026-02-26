@@ -65,7 +65,9 @@ impl MerkleDeserializeRaw for String {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let bytes = deserializer.load_bytes()?;
-        Ok(std::str::from_utf8(bytes)?.to_owned())
+        std::str::from_utf8(bytes)
+            .map(ToOwned::to_owned)
+            .map_err(MerkleSerialError::custom)
     }
 }
 
@@ -84,7 +86,9 @@ impl<T: MerkleDeserializeRaw> MerkleDeserializeRaw for Option<T> {
         match deserializer.pop_byte()? {
             0 => Ok(None),
             1 => T::merkle_deserialize_raw(deserializer).map(Some),
-            x => Err(MerkleSerialError::InvalidOptionByte { byte: x }),
+            x => Err(MerkleSerialError::Other(format!(
+                "When deserializing an Option, invalid byte {x}"
+            ))),
         }
     }
 }
@@ -237,7 +241,7 @@ impl MerkleDeserializeRaw for RecoveryId {
         deserializer: &mut MerkleDeserializer,
     ) -> Result<Self, MerkleSerialError> {
         let byte = deserializer.pop_byte()?;
-        RecoveryId::from_byte(byte).map_err(|_| MerkleSerialError::InvalidRecoveryId { byte })
+        RecoveryId::from_byte(byte).map_err(MerkleSerialError::custom)
     }
 }
 
@@ -288,7 +292,7 @@ impl MerkleDeserializeRaw for Timestamp {
     ) -> Result<Self, MerkleSerialError> {
         let as_bytes: [u8; 128 / 8] = deserializer.load_array()?;
         Timestamp::from_nanosecond(i128::from_le_bytes(as_bytes))
-            .map_err(MerkleSerialError::InvalidTimestamp)
+            .map_err(|e| MerkleSerialError::Other(format!("When deserializing Timestamp: {e}")))
     }
 }
 
