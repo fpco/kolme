@@ -5,7 +5,7 @@ import {
     AccessControl
 } from "openzeppelin-contracts/contracts/access/AccessControl.sol";
 
-interface IBridgeV1 {
+interface IBridge {
     event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
     event AdminPinged(address indexed admin);
 
@@ -24,7 +24,7 @@ interface IBridgeV1 {
         );
 }
 
-contract BridgeV1 is AccessControl, IBridgeV1 {
+contract Bridge is AccessControl, IBridge {
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
         bytes processor;
@@ -48,31 +48,31 @@ contract BridgeV1 is AccessControl, IBridgeV1 {
         uint64 initialNextEventId,
         uint64 initialNextActionId
     ) {
-        require(admin != address(0), "BridgeV1: zero admin");
-        require(processor.length == 33, "BridgeV1: invalid processor key");
-        require(listeners.length > 0, "BridgeV1: no listeners");
+        require(admin != address(0), "Bridge: zero admin");
+        require(processor.length == 33, "Bridge: invalid processor key");
+        require(listeners.length > 0, "Bridge: no listeners");
         for (uint256 i = 0; i < listeners.length; i++) {
             require(
                 listeners[i].length == 33,
-                "BridgeV1: invalid listener key length"
+                "Bridge: invalid listener key length"
             );
         }
-        require(neededListeners > 0, "BridgeV1: zero listener quorum");
+        require(neededListeners > 0, "Bridge: zero listener quorum");
         require(
             neededListeners <= listeners.length,
-            "BridgeV1: listener quorum too high"
+            "Bridge: listener quorum too high"
         );
-        require(approvers.length > 0, "BridgeV1: no approvers");
+        require(approvers.length > 0, "Bridge: no approvers");
         for (uint256 i = 0; i < approvers.length; i++) {
             require(
                 approvers[i].length == 33,
-                "BridgeV1: invalid approver key length"
+                "Bridge: invalid approver key length"
             );
         }
-        require(neededApprovers > 0, "BridgeV1: zero approver quorum");
+        require(neededApprovers > 0, "Bridge: zero approver quorum");
         require(
             neededApprovers <= approvers.length,
-            "BridgeV1: approver quorum too high"
+            "Bridge: approver quorum too high"
         );
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);

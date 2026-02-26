@@ -12,8 +12,8 @@ fi
 
 if [[ "$1" == "show" ]]
 then
-  if [ -f /bootstrap/bridgev1.address ]; then
-    echo "BridgeV1 deployed address: $(cat /bootstrap/bridgev1.address)"
+  if [ -f /bootstrap/bridge.address ]; then
+    echo "Bridge deployed address: $(cat /bootstrap/bridge.address)"
   fi
 
   echo "Mnemonic source: ${MNEMONIC_FILE}"

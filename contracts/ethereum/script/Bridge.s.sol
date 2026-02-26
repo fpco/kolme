@@ -2,13 +2,13 @@
 pragma solidity ^0.8.30;
 
 import {Script} from "forge-std/Script.sol";
-import {BridgeV1} from "../src/Bridge.sol";
+import {Bridge} from "../src/Bridge.sol";
 
-contract BridgeV1Script is Script {
+contract BridgeScript is Script {
     bytes constant DEFAULT_VALIDATOR_KEY =
         hex"021111111111111111111111111111111111111111111111111111111111111111";
 
-    BridgeV1 public bridge;
+    Bridge public bridge;
 
     function setUp() public {}
 
@@ -20,7 +20,7 @@ contract BridgeV1Script is Script {
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = DEFAULT_VALIDATOR_KEY;
 
-        bridge = new BridgeV1(
+        bridge = new Bridge(
             msg.sender,
             DEFAULT_VALIDATOR_KEY,
             listeners,
