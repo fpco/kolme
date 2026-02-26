@@ -281,11 +281,15 @@ pub enum KolmeError {
     UnsupportedAssetId,
 
     #[error("Timed out proposing and awaiting transaction {txhash}")]
-    TimeoutProposingTx { txhash: TxHash, #[source] elapsed: tokio::time::error::Elapsed },
+    TimeoutProposingTx {
+        txhash: TxHash,
+        #[source]
+        elapsed: tokio::time::error::Elapsed,
+    },
 
     #[error("Current processor pubkey is {pubkey}, but we don't have the matching secret key, we have: {pubkeys:?}")]
     MissingProcessorSecret {
-        pubkey: PublicKey,
+        pubkey: Box<PublicKey>,
         pubkeys: Vec<PublicKey>,
     },
 

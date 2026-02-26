@@ -510,8 +510,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .contains(&pubkey)
                 {
                     return Err(KolmeError::InvalidApproverSignature {
-                            pubkey: Box::new(pubkey),
-                        });
+                        pubkey: Box::new(pubkey),
+                    });
                 }
                 Ok(pubkey)
             })
@@ -707,9 +707,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let request_str = serde_json::to_string(&req)?;
         let res = match &mut self.block_data_handling {
             BlockDataHandling::PriorData { loads, validation } => {
-                let BlockDataLoad { request, response } = loads
-                    .pop_front()
-                    .ok_or(KolmeError::DataLoadMismatch)?;
+                let BlockDataLoad { request, response } =
+                    loads.pop_front().ok_or(KolmeError::DataLoadMismatch)?;
                 let prev_req = serde_json::from_str::<Req>(&request)?;
                 let prev_res = serde_json::from_str(&response)?;
                 if prev_req != req {

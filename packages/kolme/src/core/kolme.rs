@@ -501,7 +501,6 @@ impl<App: KolmeApp> Kolme<App> {
             logs,
         })
         .await
-        .map_err(KolmeError::from)
     }
 
     /// Add a block that has already been executed.
@@ -1243,12 +1242,12 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Marks the current block to not be resynced by the Archiver
     pub async fn archive_block(&self, height: BlockHeight) -> Result<(), KolmeError> {
-        Ok(self
+        self
             .inner
             .store
             .archive_block(height)
             .await
-            .map_err(|e| KolmeError::ArchiveBlockFailed { height, source: e })?)
+            .map_err(|e| KolmeError::ArchiveBlockFailed { height, source: e })
     }
 
     /// Obtains the latest block synced by the Archiver, if it exists

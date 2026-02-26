@@ -114,7 +114,7 @@ impl<App: KolmeApp> Processor<App> {
         self.secrets.get(pubkey).ok_or_else(|| {
             let pubkeys = self.secrets.keys().copied().collect::<Vec<_>>();
             KolmeError::MissingProcessorSecret {
-                pubkey: *pubkey,
+                pubkey: Box::new(*pubkey),
                 pubkeys,
             }
         })
@@ -225,7 +225,7 @@ impl<App: KolmeApp> Processor<App> {
             );
         }
         self.emit_latest().ok();
-        Ok(res?)
+        res
     }
 
     async fn construct_block(
