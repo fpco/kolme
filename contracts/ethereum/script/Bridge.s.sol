@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Script} from "forge-std/Script.sol";
-import {BridgeV1} from "../src/BridgeV1.sol";
+import {BridgeV1} from "../src/Bridge.sol";
 
 contract BridgeV1Script is Script {
     bytes constant DEFAULT_VALIDATOR_KEY =

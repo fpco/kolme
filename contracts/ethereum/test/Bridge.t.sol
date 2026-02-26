@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {BridgeV1} from "../src/BridgeV1.sol";
+import {BridgeV1} from "../src/Bridge.sol";
 
 contract BridgeV1Test is Test {
     event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
