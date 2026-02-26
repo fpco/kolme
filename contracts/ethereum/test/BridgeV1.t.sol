@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {BridgeV1} from "../src/BridgeV1.sol";
 
 contract BridgeV1Test is Test {
-    event FundsReceived(address indexed sender, uint256 amount);
+    event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
     bytes constant TEST_VALIDATOR_KEY =
         hex"021111111111111111111111111111111111111111111111111111111111111111";
 
@@ -49,11 +49,21 @@ contract BridgeV1Test is Test {
         vm.deal(nonAdmin, 1 ether);
 
         vm.expectEmit(true, false, false, true, address(bridge));
-        emit FundsReceived(nonAdmin, 0.1 ether);
+        emit FundsReceived(0, nonAdmin, 0.1 ether);
 
         vm.prank(nonAdmin);
         (bool ok,) = address(bridge).call{value: 0.1 ether}("");
         assertTrue(ok);
+    }
+
+    function test_ReceiveEthIncrementsNextEventId() public {
+        vm.deal(nonAdmin, 1 ether);
+        vm.prank(nonAdmin);
+        (bool ok,) = address(bridge).call{value: 0.1 ether}("");
+        assertTrue(ok);
+
+        (,,,,, uint64 configNextEventId,) = bridge.get_config();
+        assertEq(configNextEventId, 1);
     }
 
     function test_NonAdminCannotCallAdminFunction() public {
