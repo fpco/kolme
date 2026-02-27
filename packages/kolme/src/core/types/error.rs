@@ -1,6 +1,4 @@
 use crate::core::*;
-use kolme_store::KolmeStoreError;
-use tokio::sync::watch::error::RecvError;
 #[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
 use crate::submitter::SubmitterError;
 #[cfg(feature = "cosmwasm")]
@@ -8,9 +6,11 @@ use cosmos::error::{AddressError, WalletError};
 #[cfg(feature = "cosmwasm")]
 use cosmos::{error::BuilderError, CosmosConfigError};
 #[cfg(feature = "solana")]
-use solana_signature::ParseSignatureError;
-#[cfg(feature = "solana")]
 use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
+use kolme_store::KolmeStoreError;
+#[cfg(feature = "solana")]
+use solana_signature::ParseSignatureError;
+use tokio::sync::watch::error::RecvError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeError {

@@ -177,7 +177,6 @@ impl<App: KolmeApp> Listener<App> {
                     self.kolme.get_app().genesis_info(),
                 )
                 .await
-                .map_err(KolmeError::from)
             }
             #[cfg(not(feature = "cosmwasm"))]
             ChainKind::Cosmos(_) => Ok(()),

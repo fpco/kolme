@@ -70,14 +70,8 @@ pub async fn sanity_check_contract(
     expected_code_id: u64,
     info: &GenesisInfo,
 ) -> Result<(), KolmeError> {
-    let contract = cosmos.make_contract(
-        contract
-            .parse::<cosmos::Address>()?,
-    );
-    let actual_code_id = contract
-        .info()
-        .await?
-        .code_id;
+    let contract = cosmos.make_contract(contract.parse::<cosmos::Address>()?);
+    let actual_code_id = contract.info().await?.code_id;
 
     if actual_code_id != expected_code_id {
         return Err(KolmeError::CodeIdMismatch {
@@ -97,9 +91,7 @@ pub async fn sanity_check_contract(
             },
         next_event_id: _,
         next_action_id: _,
-    } = contract
-        .query(shared::cosmos::QueryMsg::Config {})
-        .await?;
+    } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
 
     if info.validator_set.processor != processor {
         return Err(KolmeError::ProcessorMismatch);
