@@ -1242,8 +1242,7 @@ impl<App: KolmeApp> Kolme<App> {
 
     /// Marks the current block to not be resynced by the Archiver
     pub async fn archive_block(&self, height: BlockHeight) -> Result<(), KolmeError> {
-        self
-            .inner
+        self.inner
             .store
             .archive_block(height)
             .await
