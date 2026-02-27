@@ -370,8 +370,7 @@ impl Tasks {
 
     pub fn spawn_api_server(&mut self) {
         let api_server = ApiServer::new(self.kolme.clone());
-        let bind = self.bind;
-        self.api_server = Some(self.set.spawn(api_server.run(bind)));
+        self.api_server = Some(self.set.spawn(api_server.run(self.bind)));
     }
 }
 

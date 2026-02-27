@@ -3,36 +3,8 @@ use std::mem;
 use super::get_next_bridge_event_id;
 use crate::*;
 use ::cosmos::{Contract, Cosmos};
-use cosmos::error::AddressError;
 use cosmwasm_std::Coin;
 use shared::cosmos::{BridgeEventMessage, GetEventResp, QueryMsg};
-
-#[derive(thiserror::Error, Debug)]
-pub enum CosmosListenerError {
-    #[error("Code ID mismatch: expected {expected}, actual {actual}")]
-    CodeId { expected: u64, actual: u64 },
-
-    #[error("Processor mismatch")]
-    Processor,
-
-    #[error("Listeners mismatch")]
-    Listeners,
-
-    #[error("Needed listeners mismatch")]
-    NeededListeners,
-
-    #[error("Approvers mismatch")]
-    Approvers,
-
-    #[error("Needed approvers mismatch")]
-    NeededApprovers,
-
-    #[error("Invalid contract address: {0}")]
-    InvalidAddress(#[from] AddressError),
-
-    #[error(transparent)]
-    CosmosError(#[from] cosmos::Error),
-}
 
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
@@ -97,20 +69,18 @@ pub async fn sanity_check_contract(
     contract: &str,
     expected_code_id: u64,
     info: &GenesisInfo,
-) -> Result<(), CosmosListenerError> {
+) -> Result<(), KolmeError> {
     let contract = cosmos.make_contract(
         contract
-            .parse::<cosmos::Address>()
-            .map_err(CosmosListenerError::InvalidAddress)?,
+            .parse::<cosmos::Address>()?,
     );
     let actual_code_id = contract
         .info()
-        .await
-        .map_err(CosmosListenerError::from)?
+        .await?
         .code_id;
 
     if actual_code_id != expected_code_id {
-        return Err(CosmosListenerError::CodeId {
+        return Err(KolmeError::CodeIdMismatch {
             expected: expected_code_id,
             actual: actual_code_id,
         });
@@ -129,26 +99,25 @@ pub async fn sanity_check_contract(
         next_action_id: _,
     } = contract
         .query(shared::cosmos::QueryMsg::Config {})
-        .await
-        .map_err(CosmosListenerError::from)?;
+        .await?;
 
     if info.validator_set.processor != processor {
-        return Err(CosmosListenerError::Processor);
+        return Err(KolmeError::ProcessorMismatch);
     }
     if listeners != info.validator_set.listeners {
-        return Err(CosmosListenerError::Listeners);
+        return Err(KolmeError::ListenersMismatch);
     }
 
     if needed_listeners != info.validator_set.needed_listeners {
-        return Err(CosmosListenerError::NeededListeners);
+        return Err(KolmeError::NeededListenersMismatch);
     }
 
     if approvers != info.validator_set.approvers {
-        return Err(CosmosListenerError::Approvers);
+        return Err(KolmeError::ApproversMismatch);
     }
 
     if needed_approvers != info.validator_set.needed_approvers {
-        return Err(CosmosListenerError::NeededApprovers);
+        return Err(KolmeError::NeededApproversMismatch);
     }
 
     Ok(())

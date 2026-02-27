@@ -1,11 +1,16 @@
-use crate::listener::{cosmos::CosmosListenerError, solana::ListenerSolanaError};
-use crate::{core::*, submitter::SubmitterError};
-use cosmos::error::{AddressError, WalletError};
-use cosmos::{error::BuilderError, CosmosConfigError};
-use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
+use crate::core::*;
 use kolme_store::KolmeStoreError;
-use solana_signature::ParseSignatureError;
 use tokio::sync::watch::error::RecvError;
+#[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
+use crate::submitter::SubmitterError;
+#[cfg(feature = "cosmwasm")]
+use cosmos::error::{AddressError, WalletError};
+#[cfg(feature = "cosmwasm")]
+use cosmos::{error::BuilderError, CosmosConfigError};
+#[cfg(feature = "solana")]
+use solana_signature::ParseSignatureError;
+#[cfg(feature = "solana")]
+use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeError {
@@ -101,8 +106,9 @@ pub enum KolmeError {
         proposal_id: AdminProposalId,
     },
 
+    #[cfg(feature = "cosmwasm")]
     #[error("Failed to execute signed Cosmos bridge transaction: {0}")]
-    CosmosExecutionFailed(#[from] cosmos::Error),
+    CosmosExecutionFailed(#[source] cosmos::Error),
 
     #[error("API server error")]
     ApiServerError(#[from] std::io::Error),
@@ -128,14 +134,12 @@ pub enum KolmeError {
         actual: BlockHeight,
     },
 
+    #[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
     #[error("Submitter error: {0}")]
     Submitter(#[from] SubmitterError),
 
     #[error("Import/export error: {0}")]
     ImportExport(#[from] KolmeImportExportError),
-
-    #[error("Listener error: {0}")]
-    ListenerError(#[from] CosmosListenerError),
 
     #[error("Store error: {0}")]
     StoreError(#[from] KolmeStoreError),
@@ -155,6 +159,7 @@ pub enum KolmeError {
     #[error("Failed to build Solana initialization transaction")]
     SolanaInitTxBuildFailed(#[source] std::io::Error),
 
+    #[cfg(feature = "solana")]
     #[error("Failed to create Solana pubsub client")]
     SolanaPubsubError(#[from] solana_client::nonblocking::pubsub_client::PubsubClientError),
 
@@ -179,18 +184,18 @@ pub enum KolmeError {
     #[error("Broadcast receive error")]
     BroadcastRecv(#[from] tokio::sync::broadcast::error::RecvError),
 
-    #[error("Solana listener error: {0}")]
-    ListenerSolanaError(#[from] ListenerSolanaError),
-
+    #[cfg(feature = "cosmwasm")]
     #[error("Address error")]
     Address(#[from] AddressError),
 
     #[error("Action error")]
     ActionError(String),
 
+    #[cfg(feature = "cosmwasm")]
     #[error("Wallet error")]
     Wallet(#[from] WalletError),
 
+    #[cfg(feature = "solana")]
     #[error("Parse pubkey error")]
     ParsePubkey(#[from] ParsePubkeyError),
 
@@ -221,15 +226,18 @@ pub enum KolmeError {
     #[error(transparent)]
     RecvError(#[from] RecvError),
 
+    #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
     CosmosConfigError(#[from] CosmosConfigError),
 
+    #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
     BuilderError(#[from] BuilderError),
 
     #[error(transparent)]
     AxumError(#[from] axum::Error),
 
+    #[cfg(feature = "solana")]
     #[error(transparent)]
     ParseSignatureError(#[from] ParseSignatureError),
 
@@ -245,6 +253,7 @@ pub enum KolmeError {
     #[error("WebSocket error")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
 
+    #[cfg(feature = "solana")]
     #[error("Solana client error")]
     SolanaClient(#[from] solana_client::client_error::ClientError),
 
@@ -473,6 +482,28 @@ pub enum KolmeError {
 
     #[error("Unexpected bridge event ID")]
     UnexpectedBridgeEventId,
+
+    #[error("Processor mismatch between genesis info and on-chain state")]
+    ProcessorMismatch,
+
+    #[error("Listeners mismatch between genesis info and on-chain state")]
+    ListenersMismatch,
+
+    #[error("Approvers mismatch between genesis info and on-chain state")]
+    ApproversMismatch,
+
+    #[error("Needed listeners mismatch between genesis info and on-chain state")]
+    NeededListenersMismatch,
+
+    #[error("Needed approvers mismatch between genesis info and on-chain state")]
+    NeededApproversMismatch,
+
+    #[error("Code ID mismatch: expected {expected}, actual {actual}")]
+    CodeIdMismatch { expected: u64, actual: u64 },
+
+    #[cfg(feature = "cosmwasm")]
+    #[error(transparent)]
+    CosmosError(#[from] cosmos::Error),
 
     #[error("{0}")]
     Other(String),

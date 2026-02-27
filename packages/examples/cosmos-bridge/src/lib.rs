@@ -159,7 +159,7 @@ impl KolmeApp for CosmosBridgeApp {
                 let chain = match address.get_address_hrp().as_str() {
                     "osmo" => ExternalChain::OsmosisTestnet,
                     "neutron" => ExternalChain::NeutronTestnet,
-                    _ => return Err(KolmeError::other("Unsupported wallet address")),
+                    _ => return Err(KolmeError::other(format!("Unsupported wallet address: {address}"))),
                 };
                 ctx.withdraw_asset(
                     AssetId(1),

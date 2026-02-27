@@ -15,24 +15,6 @@ use tokio::time;
 
 use super::*;
 
-#[derive(thiserror::Error, Debug)]
-pub enum ListenerSolanaError {
-    #[error("Processor mismatch between genesis info and on-chain state")]
-    Processor,
-
-    #[error("Listeners mismatch between genesis info and on-chain state")]
-    Listeners,
-
-    #[error("Approvers mismatch between genesis info and on-chain state")]
-    Approvers,
-
-    #[error("Needed listeners mismatch between genesis info and on-chain state")]
-    NeededListeners,
-
-    #[error("Needed approvers mismatch between genesis info and on-chain state")]
-    NeededApprovers,
-}
-
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
@@ -73,32 +55,22 @@ pub async fn sanity_check_contract(
     })?;
 
     if info.validator_set.processor != state.set.processor {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::Processor,
-        ));
+        return Err(KolmeError::ProcessorMismatch);
     }
     if info.validator_set.listeners != state.set.listeners {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::Listeners,
-        ));
+        return Err(KolmeError::ListenersMismatch);
     }
 
     if info.validator_set.approvers != state.set.approvers {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::Approvers,
-        ));
+        return Err(KolmeError::ApproversMismatch);
     }
 
     if info.validator_set.needed_listeners != state.set.needed_listeners {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::NeededListeners,
-        ));
+        return Err(KolmeError::NeededListenersMismatch);
     }
 
     if info.validator_set.needed_approvers != state.set.needed_approvers {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::NeededApprovers,
-        ));
+        return Err(KolmeError::NeededApproversMismatch);
     }
 
     Ok(())

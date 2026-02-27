@@ -35,6 +35,7 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
 }
 
 #[derive(thiserror::Error, Debug)]
+//@@@ DO WE NEED THIS ERROR TYPE?  PROBABLY KEEP, BUT MAYBE RENAME TO KolmeDataRequestError (AND SIMILAR FOR ITS KolmeError VARIANT)
 pub enum KolmeDataError {
     #[error("Data validation failed")]
     ValidationFailed,
