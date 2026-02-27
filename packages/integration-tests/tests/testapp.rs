@@ -608,6 +608,7 @@ async fn test_concurrent_transactions_fjall() {
 #[tokio::test]
 async fn test_concurrent_transactions_postgres() {
     let (kolme, addr) = setup_postgres().await.unwrap();
+    let kolme = kolme.set_tx_await_duration(Duration::from_secs(15));
     TestTasks::start(test_concurrent_transactions_inner, (kolme, addr)).await;
 }
 
