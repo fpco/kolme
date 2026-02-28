@@ -5,14 +5,31 @@ import {Test} from "forge-std/Test.sol";
 import {BridgeV1} from "../src/BridgeV1.sol";
 
 contract BridgeV1Test is Test {
-    event FundsReceived(address indexed sender, uint256 amount);
+    event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
+    bytes constant TEST_VALIDATOR_KEY =
+        hex"021111111111111111111111111111111111111111111111111111111111111111";
 
     BridgeV1 public bridge;
     address public admin = address(0xA11CE);
     address public nonAdmin = address(0xB0B);
 
     function setUp() public {
-        bridge = new BridgeV1(admin);
+        bytes[] memory listeners = new bytes[](1);
+        listeners[0] = TEST_VALIDATOR_KEY;
+
+        bytes[] memory approvers = new bytes[](1);
+        approvers[0] = TEST_VALIDATOR_KEY;
+
+        bridge = new BridgeV1(
+            admin,
+            TEST_VALIDATOR_KEY,
+            listeners,
+            1,
+            approvers,
+            1,
+            0,
+            0
+        );
     }
 
     function test_AdminRoleAssigned() public view {
@@ -32,16 +49,48 @@ contract BridgeV1Test is Test {
         vm.deal(nonAdmin, 1 ether);
 
         vm.expectEmit(true, false, false, true, address(bridge));
-        emit FundsReceived(nonAdmin, 0.1 ether);
+        emit FundsReceived(0, nonAdmin, 0.1 ether);
 
         vm.prank(nonAdmin);
         (bool ok,) = address(bridge).call{value: 0.1 ether}("");
         assertTrue(ok);
     }
 
+    function test_ReceiveEthIncrementsNextEventId() public {
+        vm.deal(nonAdmin, 1 ether);
+        vm.prank(nonAdmin);
+        (bool ok,) = address(bridge).call{value: 0.1 ether}("");
+        assertTrue(ok);
+
+        (,,,,, uint64 configNextEventId,) = bridge.get_config();
+        assertEq(configNextEventId, 1);
+    }
+
     function test_NonAdminCannotCallAdminFunction() public {
         vm.prank(nonAdmin);
         vm.expectRevert();
         bridge.adminPing();
+    }
+
+    function test_GetConfigReturnsInitializedState() public view {
+        (
+            bytes memory processor,
+            bytes[] memory listeners,
+            uint16 neededListeners,
+            bytes[] memory approvers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        ) = bridge.get_config();
+
+        assertEq(processor, TEST_VALIDATOR_KEY);
+        assertEq(listeners.length, 1);
+        assertEq(listeners[0], TEST_VALIDATOR_KEY);
+        assertEq(neededListeners, 1);
+        assertEq(approvers.length, 1);
+        assertEq(approvers[0], TEST_VALIDATOR_KEY);
+        assertEq(neededApprovers, 1);
+        assertEq(configNextEventId, 0);
+        assertEq(configNextActionId, 0);
     }
 }
