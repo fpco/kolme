@@ -145,7 +145,12 @@ impl CosmosChain {
             Self::OsmosisLocal => cosmos::CosmosNetwork::OsmosisLocal,
         };
 
-        Ok(network.builder_with_config().await?.build()?)
+        Ok(network
+            .builder_with_config()
+            .await
+            .map_err(Box::new)?
+            .build()
+            .map_err(Box::new)?)
     }
 }
 
@@ -203,7 +208,7 @@ impl SolanaClientEndpoint {
             SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
             SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
         }
-        .map_err(KolmeError::SolanaPubsubError)
+        .map_err(|e| KolmeError::SolanaPubsubError(Box::new(e)))
     }
 }
 
@@ -1900,7 +1905,10 @@ impl SolanaClient {
         F: FnOnce(&'client SolanaRpcClient) -> Fut,
         Fut: std::future::Future<Output = std::result::Result<T, client_error::Error>> + 'client,
     {
-        Ok(func(&self.0).await.map_err(redact_solana_error)?)
+        Ok(func(&self.0)
+            .await
+            .map_err(redact_solana_error)
+            .map_err(Box::new)?)
     }
 
     pub async fn get_account(

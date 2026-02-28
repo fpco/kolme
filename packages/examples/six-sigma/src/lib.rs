@@ -278,6 +278,7 @@ impl fmt::Debug for SixSigmaApp {
     }
 }
 
+#[allow(clippy::result_large_err)] //@@@ I DON'T UNDERSTAND WHY CLIPPY IS ONLY COMPLAINING ABOUT THIS SPECIFIC FUNCTION
 fn change_balance(
     ctx: &mut ExecutionContext<'_, SixSigmaApp>,
     change: &BalanceChange,

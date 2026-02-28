@@ -45,7 +45,8 @@ async fn listen_once<App: KolmeApp>(
         .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
         })
-        .await?
+        .await
+        .map_err(Box::new)?
     {
         GetEventResp::Found { message } => {
             let message = serde_json::from_slice::<BridgeEventMessage>(&message)?;
@@ -71,7 +72,7 @@ pub async fn sanity_check_contract(
     info: &GenesisInfo,
 ) -> Result<(), KolmeError> {
     let contract = cosmos.make_contract(contract.parse::<cosmos::Address>()?);
-    let actual_code_id = contract.info().await?.code_id;
+    let actual_code_id = contract.info().await.map_err(Box::new)?.code_id;
 
     if actual_code_id != expected_code_id {
         return Err(KolmeError::CodeIdMismatch {
@@ -91,7 +92,10 @@ pub async fn sanity_check_contract(
             },
         next_event_id: _,
         next_action_id: _,
-    } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
+    } = contract
+        .query(shared::cosmos::QueryMsg::Config {})
+        .await
+        .map_err(Box::new)?;
 
     if info.validator_set.processor != processor {
         return Err(KolmeError::ProcessorMismatch);

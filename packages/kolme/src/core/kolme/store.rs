@@ -69,8 +69,8 @@ impl<App: KolmeApp> KolmeStore<App> {
         if let Some(actual) = self.load_genesis_info().await? {
             if &actual != expected {
                 return Err(KolmeError::MismatchedGenesisInfo {
-                    actual,
-                    expected: expected.clone(),
+                    actual: Box::new(actual),
+                    expected: Box::new(expected.clone()),
                 });
             }
         }

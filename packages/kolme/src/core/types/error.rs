@@ -108,15 +108,15 @@ pub enum KolmeError {
 
     #[cfg(feature = "cosmwasm")]
     #[error("Failed to execute signed Cosmos bridge transaction: {0}")]
-    CosmosExecutionFailed(#[source] cosmos::Error),
+    CosmosExecutionFailed(#[source] Box<cosmos::Error>),
 
     #[error("API server error")]
     ApiServerError(#[from] std::io::Error),
 
     #[error("Mismatched genesis info: actual {actual:?}, expected {expected:?}")]
     MismatchedGenesisInfo {
-        actual: GenesisInfo,
-        expected: GenesisInfo,
+        actual: Box<GenesisInfo>,
+        expected: Box<GenesisInfo>,
     },
 
     #[error("Identical proposal {id} already exists")]
@@ -161,7 +161,7 @@ pub enum KolmeError {
 
     #[cfg(feature = "solana")]
     #[error("Failed to create Solana pubsub client")]
-    SolanaPubsubError(#[from] solana_client::nonblocking::pubsub_client::PubsubClientError),
+    SolanaPubsubError(#[from] Box<solana_client::nonblocking::pubsub_client::PubsubClientError>),
 
     #[error("Bridge program {program} hasn't been initialized yet")]
     UninitializedSolanaBridge { program: String },
@@ -228,11 +228,11 @@ pub enum KolmeError {
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
-    CosmosConfigError(#[from] CosmosConfigError),
+    CosmosConfigError(#[from] Box<CosmosConfigError>),
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
-    BuilderError(#[from] BuilderError),
+    BuilderError(#[from] Box<BuilderError>),
 
     #[error(transparent)]
     AxumError(#[from] axum::Error),
@@ -251,11 +251,11 @@ pub enum KolmeError {
     WebSocketClosed,
 
     #[error("WebSocket error")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
 
     #[cfg(feature = "solana")]
     #[error("Solana client error")]
-    SolanaClient(#[from] solana_client::client_error::ClientError),
+    SolanaClient(#[from] Box<solana_client::client_error::ClientError>),
 
     #[error("Latest block height is {height}, but it wasn't found in the data store")]
     BlockMissingInStore { height: BlockHeight },
@@ -503,7 +503,7 @@ pub enum KolmeError {
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
-    CosmosError(#[from] cosmos::Error),
+    CosmosError(#[from] Box<cosmos::Error>),
 
     #[error("{0}")]
     Other(String),

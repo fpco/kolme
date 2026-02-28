@@ -21,14 +21,16 @@ pub async fn instantiate(
             &msg,
             ContractAdmin::Sender,
         )
-        .await?;
+        .await
+        .map_err(Box::new)?;
 
     tracing::info!("Instantiate new contract: {contract}");
 
     let res = TxBuilder::default()
         .add_update_contract_admin(&contract, &wallet, &contract)
         .sign_and_broadcast(cosmos, &wallet)
-        .await?;
+        .await
+        .map_err(Box::new)?;
 
     tracing::info!(
         "Updated admin on {contract} to its own address in tx {}",
@@ -70,7 +72,7 @@ pub async fn execute(
                 "Cosmos submitter failed to execute signed transaction: {}",
                 e
             );
-            Err(KolmeError::CosmosExecutionFailed(e))
+            Err(KolmeError::CosmosExecutionFailed(Box::new(e)))
         }
     }
 }
