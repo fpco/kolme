@@ -172,7 +172,7 @@ async fn client(
             guard.insert(txhash);
             let count = guard.len();
             std::mem::drop(guard);
-            if count % 50 == 0 {
+            if count.is_multiple_of(50) {
                 println!("In client, total transactions logged: {count}");
             }
         }
