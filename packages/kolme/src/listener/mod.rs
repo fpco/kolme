@@ -1,5 +1,7 @@
 #[cfg(feature = "cosmwasm")]
-pub mod cosmos;
+mod cosmos;
+#[cfg(feature = "ethereum")]
+mod ethereum;
 #[cfg(feature = "solana")]
 pub mod solana;
 
@@ -68,6 +70,24 @@ impl<App: KolmeApp> Listener<App> {
                         )));
                     }
                 }
+            }
+            ChainName::Ethereum => {
+                #[cfg(feature = "ethereum")]
+                {
+                    let contracts = self.wait_for_contracts(name).await?;
+                    for (chain, contract) in contracts {
+                        set.spawn(ethereum::listen(
+                            self.kolme.clone(),
+                            self.secret.clone(),
+                            chain.to_ethereum_chain().unwrap(),
+                            contract,
+                        ));
+                    }
+                }
+                #[cfg(not(feature = "ethereum"))]
+                tracing::warn!(
+                    "Ethereum listener requested, but `ethereum` feature is not enabled."
+                );
             }
             #[cfg(feature = "pass_through")]
             ChainName::PassThrough => {
@@ -193,6 +213,9 @@ impl<App: KolmeApp> Listener<App> {
             }
             #[cfg(not(feature = "solana"))]
             ChainKind::Solana(_) => Ok(()),
+            ChainKind::Ethereum(_) => {
+                anyhow::bail!("Ethereum listener contract checks are not implemented yet")
+            }
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => {
                 return Err(KolmeError::UnexpectedPassThroughContract);

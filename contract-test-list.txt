@@ -2,3 +2,4 @@ test_balances
 test_cosmos_migrate
 test_cosmos_contract_update_self
 test_cosmos_contract_update_set
+ethereum_listener_ingests_local_deposit

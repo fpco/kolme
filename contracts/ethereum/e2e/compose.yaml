@@ -1,0 +1,9 @@
+services:
+  anvil:
+    build:
+      context: ..
+      dockerfile: e2e/bridgev1/Dockerfile
+    container_name: bridgev1-anvil
+    ports:
+      - "8545:8545"
+    restart: unless-stopped
