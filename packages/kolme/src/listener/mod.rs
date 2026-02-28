@@ -214,7 +214,7 @@ impl<App: KolmeApp> Listener<App> {
             #[cfg(not(feature = "solana"))]
             ChainKind::Solana(_) => Ok(()),
             ChainKind::Ethereum(_) => {
-                anyhow::bail!("Ethereum listener contract checks are not implemented yet")
+                return Err(KolmeError::EthereumListenerContractChecksNotImplemented);
             }
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => {

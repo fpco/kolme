@@ -505,6 +505,53 @@ pub enum KolmeError {
     #[error(transparent)]
     CosmosError(#[from] Box<cosmos::Error>),
 
+    #[cfg(feature = "ethereum")]
+    #[error("Failed to decode FundsReceived(address,uint256): {0}")]
+    FailedToDecodeFundsReceived(#[source] alloy::sol_types::Error),
+
+    #[cfg(feature = "ethereum")]
+    #[error("Invalid Ethereum contract address: {contract}: {error}")]
+    InvalidEthereumContractAddress {
+        contract: String,
+        #[source]
+        error: const_hex::FromHexError,
+    },
+
+    #[error("Invalid Ethereum bridge contract address: {0}")]
+    InvalidEthereumBridgeContractAddress(String),
+
+    #[cfg(feature = "ethereum")]
+    #[error("Invalid default Ethereum RPC URL for {chain:?}: #{error}")]
+    InvalidDefaultEthereumRpcUrl {
+        chain: EthereumChain,
+        #[source]
+        error: url::ParseError,
+    },
+
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum listener contract checks are not implemented yet")]
+    EthereumListenerContractChecksNotImplemented,
+
+    #[error("Ethereum payload generation is not implemented yet")]
+    EthereumPayloadGenerationNotImplemented,
+
+    #[error("Trying to configure a Cosmos contract as an Ethereum bridge.")]
+    TryingToConfigureCosmosContractAsEthereumBridge,
+
+    #[error("Trying to configure a Solana program as an Ethereum bridge.")]
+    TryingToConfigureSolanaProgramAsEthereumBridge,
+
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum value {0} does not fit into u128")]
+    EthereumValueDoesNotFitIntoU128(alloy::primitives::U256),
+
+    #[cfg(feature = "ethereum")]
+    #[error(transparent)]
+    AlloyRpcError(
+        #[from]
+        alloy::providers::transport::RpcError<alloy::providers::transport::TransportErrorKind>,
+    ),
+
     #[error("{0}")]
     Other(String),
 }

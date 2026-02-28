@@ -259,9 +259,13 @@ impl EthereumChain {
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn make_client(self) -> Result<DynProvider> {
-        let url = reqwest::Url::parse(self.default_rpc_url())
-            .with_context(|| format!("Invalid default Ethereum RPC URL for {self:?}"))?;
+    pub fn make_client(self) -> Result<DynProvider, KolmeError> {
+        let url = reqwest::Url::parse(self.default_rpc_url()).map_err(|e| {
+            KolmeError::InvalidDefaultEthereumRpcUrl {
+                chain: self,
+                error: e,
+            }
+        })?;
         Ok(DynProvider::new(ProviderBuilder::new().connect_http(url)))
     }
 }
@@ -1620,23 +1624,24 @@ impl ConfiguredChains {
         }
     }
 
-    pub fn insert_ethereum(&mut self, chain: EthereumChain, config: ChainConfig) -> Result<()> {
+    pub fn insert_ethereum(
+        &mut self,
+        chain: EthereumChain,
+        config: ChainConfig,
+    ) -> Result<(), KolmeError> {
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Cosmos contract as an Ethereum bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureCosmosContractAsEthereumBridge);
             }
             BridgeContract::NeededSolanaBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Solana program as an Ethereum bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureSolanaProgramAsEthereumBridge);
             }
             BridgeContract::Deployed(address) => {
-                anyhow::ensure!(
-                    is_valid_evm_address(address),
-                    "Invalid Ethereum bridge contract address: {address}"
-                );
+                if !is_valid_evm_address(address) {
+                    return Err(KolmeError::InvalidEthereumBridgeContractAddress(
+                        address.to_owned(),
+                    ));
+                }
             }
         }
 
@@ -1785,9 +1790,7 @@ impl ExecAction {
                         })?;
                         Ok(payload)
                     }
-                    ChainName::Ethereum => {
-                        anyhow::bail!("Ethereum payload generation is not implemented yet")
-                    }
+                    ChainName::Ethereum => Err(KolmeError::EthereumPayloadGenerationNotImplemented),
                 }
             }
             ExecAction::SelfReplace(self_replace) => match chain.name() {
@@ -1827,9 +1830,7 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
-                ChainName::Ethereum => {
-                    anyhow::bail!("Ethereum payload generation is not implemented yet")
-                }
+                ChainName::Ethereum => Err(KolmeError::EthereumPayloadGenerationNotImplemented),
             },
             ExecAction::NewSet {
                 validator_set,
@@ -1865,9 +1866,7 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
-                ChainName::Ethereum => {
-                    anyhow::bail!("Ethereum payload generation is not implemented yet")
-                }
+                ChainName::Ethereum => Err(KolmeError::EthereumPayloadGenerationNotImplemented),
             },
             ExecAction::MigrateContract { migrate_contract } => {
                 let contract_addr = match &config.bridge {

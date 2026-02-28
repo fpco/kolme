@@ -1037,7 +1037,10 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     #[cfg(feature = "ethereum")]
-    pub async fn get_ethereum_client(&self, chain: EthereumChain) -> Result<DynProvider> {
+    pub async fn get_ethereum_client(
+        &self,
+        chain: EthereumChain,
+    ) -> Result<DynProvider, KolmeError> {
         if let Some(client) = self.inner.ethereum_conns.read().await.get(&chain) {
             return Ok(client.clone());
         }
