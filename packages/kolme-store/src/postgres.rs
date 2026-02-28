@@ -14,7 +14,6 @@ use sqlx::{
     Executor, Postgres,
 };
 use std::{collections::HashMap, sync::Arc};
-
 pub mod merkle;
 
 pub struct ConstructLock {
@@ -37,7 +36,7 @@ pub struct Store {
 
 impl Store {
     pub async fn new(url: &str) -> Result<Self, KolmeStoreError> {
-        let connect_options = url.parse().map_err(KolmeStoreError::custom)?;
+        let connect_options = url.parse()?;
         Self::new_with_options(connect_options, PoolOptions::new().max_connections(5)).await
     }
 
@@ -48,14 +47,14 @@ impl Store {
         let pool = options
             .connect_with(connect)
             .await
-            .inspect_err(|err| tracing::error!("{err:?}"))
-            .map_err(|e| KolmeStoreError::custom_context("Could not connect to the database", e))?;
+            .map_err(KolmeStoreError::CouldNotConnectToDatabase)
+            .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         sqlx::migrate!()
             .run(&pool)
             .await
-            .inspect_err(|err| tracing::error!("{err:?}"))
-            .map_err(|e| KolmeStoreError::custom_context("Unable to execute migrations", e))?;
+            .map_err(KolmeStoreError::UnableToExecuteMigrations)
+            .inspect_err(|err| tracing::error!("{err:?}"))?;
 
         Ok(Self {
             pool,
@@ -141,7 +140,6 @@ impl KolmeBackingStore for Store {
             .map_err(KolmeStoreError::custom)
             .inspect_err(|err| tracing::error!("{err:?}"))
     }
-
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
         Err(KolmeStoreError::UnsupportedDeleteOperation(
             StorageBackend::Postgres,
@@ -194,7 +192,8 @@ impl KolmeBackingStore for Store {
             sqlx::query_scalar!("SELECT height FROM blocks WHERE txhash=$1 LIMIT 1", txhash)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(|e| KolmeStoreError::custom_context("Unable to query tx height", e))?;
+                .map_err(KolmeStoreError::UnableToQueryTxHeight)
+                .inspect_err(|err| tracing::error!("{err:?}"))?;
         match height {
             None => Ok(None),
             Some(height) => Ok(Some(height.try_into().map_err(KolmeStoreError::custom)?)),
@@ -397,14 +396,17 @@ impl KolmeBackingStore for Store {
             "#
         )
         .fetch_optional(&self.pool)
-        .await
-        .map_err(KolmeStoreError::custom)?
-        .map(|x| u64::try_from(x).map_err(KolmeStoreError::custom))
+        .await?
+        .map(|x| u64::try_from(x).map_err(KolmeStoreError::from))
         .transpose()
     }
 
     async fn archive_block(&self, height: u64) -> Result<(), KolmeStoreError> {
-        let mut tx = self.pool.begin().await.map_err(KolmeStoreError::custom)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(KolmeStoreError::UnableToStartDatabase)?;
 
         sqlx::query!(
             r#"
@@ -417,9 +419,7 @@ impl KolmeBackingStore for Store {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            KolmeStoreError::custom_context("Unable to store latest archived block height", e)
-        })?;
+        .map_err(KolmeStoreError::UnableToStoreLatestArchivedBlockHeight)?;
 
         sqlx::query!(
             r#"
@@ -428,11 +428,11 @@ impl KolmeBackingStore for Store {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| KolmeStoreError::custom_context("Unable to refresh materialized view", e))?;
+        .map_err(KolmeStoreError::UnableToRefreshMaterializedView)?;
 
-        tx.commit().await.map_err(|e| {
-            KolmeStoreError::custom_context("Unable to commit archive block height changes", e)
-        })?;
+        tx.commit()
+            .await
+            .map_err(KolmeStoreError::UnableToCommitArchiveBlockHeightChanges)?;
         Ok(())
     }
 
