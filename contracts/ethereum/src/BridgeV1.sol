@@ -44,9 +44,7 @@ contract BridgeV1 is AccessControl, IBridgeV1 {
         bytes[] memory listeners,
         uint16 neededListeners,
         bytes[] memory approvers,
-        uint16 neededApprovers,
-        uint64 initialNextEventId,
-        uint64 initialNextActionId
+        uint16 neededApprovers
     ) {
         require(admin != address(0), "BridgeV1: zero admin");
         require(processor.length == 33, "BridgeV1: invalid processor key");
@@ -84,8 +82,8 @@ contract BridgeV1 is AccessControl, IBridgeV1 {
             approvers: approvers,
             neededApprovers: neededApprovers
         });
-        nextEventId = initialNextEventId;
-        nextActionId = initialNextActionId;
+        nextEventId = 0;
+        nextActionId = 0;
     }
 
     receive() external payable {

@@ -26,9 +26,7 @@ contract BridgeV1Script is Script {
             listeners,
             1,
             approvers,
-            1,
-            0,
-            0
+            1
         );
 
         vm.stopBroadcast();

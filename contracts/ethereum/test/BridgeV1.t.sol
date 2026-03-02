@@ -26,9 +26,7 @@ contract BridgeV1Test is Test {
             listeners,
             1,
             approvers,
-            1,
-            0,
-            0
+            1
         );
     }
 
