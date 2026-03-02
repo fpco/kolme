@@ -152,31 +152,53 @@ async fn ethereum_bridge_get_config_is_readable() {
         .call()
         .await
         .expect("bridge get_config call failed");
+    let expected_validator_key = {
+        let mut key = vec![0x02];
+        key.extend(vec![0x11; 32]);
+        key
+    };
 
     assert_eq!(cfg.processor.len(), 33, "invalid processor key length");
-    assert!(
-        !cfg.listeners.is_empty(),
-        "bridge returned empty listeners in config"
+    assert_eq!(
+        cfg.processor.as_ref(),
+        expected_validator_key.as_slice(),
+        "unexpected processor key in bridge config"
     );
-    assert!(
-        !cfg.approvers.is_empty(),
-        "bridge returned empty approvers in config"
+    assert_eq!(
+        cfg.listeners.len(),
+        1,
+        "unexpected number of listeners in bridge config"
     );
-    assert!(
-        cfg.neededListeners > 0,
-        "listener quorum should be non-zero"
+    assert_eq!(
+        cfg.listeners[0].as_ref(),
+        expected_validator_key.as_slice(),
+        "unexpected listener key in bridge config"
     );
-    assert!(
-        cfg.neededApprovers > 0,
-        "approver quorum should be non-zero"
+    assert_eq!(
+        cfg.approvers.len(),
+        1,
+        "unexpected number of approvers in bridge config"
     );
-    assert!(
-        usize::from(cfg.neededListeners) <= cfg.listeners.len(),
-        "listener quorum exceeds listeners length"
+    assert_eq!(
+        cfg.approvers[0].as_ref(),
+        expected_validator_key.as_slice(),
+        "unexpected approver key in bridge config"
     );
-    assert!(
-        usize::from(cfg.neededApprovers) <= cfg.approvers.len(),
-        "approver quorum exceeds approvers length"
+    assert_eq!(
+        cfg.neededListeners, 1,
+        "unexpected listener quorum in bridge config"
+    );
+    assert_eq!(
+        cfg.neededApprovers, 1,
+        "unexpected approver quorum in bridge config"
+    );
+    assert_eq!(
+        cfg.configNextEventId, 0,
+        "unexpected initial value for configNextEventId"
+    );
+    assert_eq!(
+        cfg.configNextActionId, 0,
+        "unexpected initial value for configNextActionId"
     );
 }
 
