@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_funds_received_log_extracts_sender_and_amount() {
+    fn decode_funds_received_log_fields() {
         use alloy::primitives::{Bytes, Log as PrimitiveLog, LogData};
 
         let sender = "0x1111111111111111111111111111111111111111"
