@@ -25,6 +25,11 @@ interface IBridge {
 }
 
 contract Bridge is AccessControl, IBridge {
+    error ZeroAdmin();
+    error EmptyListeners();
+    error EmptyApprovers();
+    error InvalidListenerQuorum(uint16 needed, uint256 total);
+    error InvalidApproverQuorum(uint16 needed, uint256 total);
     error InvalidProcessorKey(bytes key);
     error InvalidValidatorKey(uint256 index, bytes key);
     error DuplicateValidatorKey(uint256 firstIndex, uint256 secondIndex, bytes key);
@@ -64,34 +69,36 @@ contract Bridge is AccessControl, IBridge {
         bytes[] memory approvers,
         uint16 neededApprovers
     ) {
-        require(admin != address(0), "Bridge: zero admin");
+        if (admin == address(0)) {
+            revert ZeroAdmin();
+        }
         if (!_isValidValidatorKey(processor)) {
             revert InvalidProcessorKey(processor);
         }
-        require(listeners.length > 0, "Bridge: no listeners");
+        if (listeners.length == 0) {
+            revert EmptyListeners();
+        }
         for (uint256 i = 0; i < listeners.length; i++) {
             if (!_isValidValidatorKey(listeners[i])) {
                 revert InvalidValidatorKey(i, listeners[i]);
             }
         }
         _requireUniqueKeys(listeners);
-        require(neededListeners > 0, "Bridge: zero listener quorum");
-        require(
-            neededListeners <= listeners.length,
-            "Bridge: listener quorum too high"
-        );
-        require(approvers.length > 0, "Bridge: no approvers");
+        if (neededListeners == 0 || neededListeners > listeners.length) {
+            revert InvalidListenerQuorum(neededListeners, listeners.length);
+        }
+        if (approvers.length == 0) {
+            revert EmptyApprovers();
+        }
         for (uint256 i = 0; i < approvers.length; i++) {
             if (!_isValidValidatorKey(approvers[i])) {
                 revert InvalidValidatorKey(i, approvers[i]);
             }
         }
         _requireUniqueKeys(approvers);
-        require(neededApprovers > 0, "Bridge: zero approver quorum");
-        require(
-            neededApprovers <= approvers.length,
-            "Bridge: approver quorum too high"
-        );
+        if (neededApprovers == 0 || neededApprovers > approvers.length) {
+            revert InvalidApproverQuorum(neededApprovers, approvers.length);
+        }
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
 
