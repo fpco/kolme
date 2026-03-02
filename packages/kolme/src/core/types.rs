@@ -391,6 +391,42 @@ impl ChainConfig {
     }
 }
 
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug,
+)]
+pub struct LastEventLocation {
+    pub event_id: BridgeEventId,
+    pub block_height: u64,
+    pub log_index: Option<u64>,
+}
+
+impl MerkleSerialize for LastEventLocation {
+    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
+        let Self {
+            event_id,
+            block_height,
+            log_index,
+        } = self;
+        serializer.store(event_id)?;
+        serializer.store(block_height)?;
+        serializer.store(log_index)?;
+        Ok(())
+    }
+}
+
+impl MerkleDeserialize for LastEventLocation {
+    fn merkle_deserialize(
+        deserializer: &mut MerkleDeserializer,
+        _version: usize,
+    ) -> Result<Self, MerkleSerialError> {
+        Ok(Self {
+            event_id: deserializer.load()?,
+            block_height: deserializer.load()?,
+            log_index: deserializer.load()?,
+        })
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ChainState {
     pub config: ChainConfig,
