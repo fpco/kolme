@@ -20,14 +20,7 @@ contract BridgeScript is Script {
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = DEFAULT_VALIDATOR_KEY;
 
-        bridge = new Bridge(
-            msg.sender,
-            DEFAULT_VALIDATOR_KEY,
-            listeners,
-            1,
-            approvers,
-            1
-        );
+        bridge = new Bridge(DEFAULT_VALIDATOR_KEY, listeners, 1, approvers, 1);
 
         vm.stopBroadcast();
     }

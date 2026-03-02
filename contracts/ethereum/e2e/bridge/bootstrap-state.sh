@@ -23,8 +23,7 @@ VALIDATOR_KEY="0x021111111111111111111111111111111111111111111111111111111111111
 BYTECODE="$(jq -r '.bytecode.object' out/Bridge.sol/Bridge.json)"
 CTOR_ARGS="$(
   cast abi-encode \
-    "constructor(address,bytes,bytes[],uint16,bytes[],uint16)" \
-    "$DEPLOYER_ADDRESS" \
+    "constructor(bytes,bytes[],uint16,bytes[],uint16)" \
     "$VALIDATOR_KEY" \
     "[$VALIDATOR_KEY]" \
     "1" \

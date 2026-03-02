@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {
-    AccessControl
-} from "openzeppelin-contracts/contracts/access/AccessControl.sol";
-
 interface IBridge {
     event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
-    event AdminPinged(address indexed admin);
-
-    function adminPing() external;
     function get_config()
         external
         view
@@ -24,8 +17,7 @@ interface IBridge {
         );
 }
 
-contract Bridge is AccessControl, IBridge {
-    error ZeroAdmin();
+contract Bridge is IBridge {
     error EmptyListeners();
     error EmptyApprovers();
     error InvalidListenerQuorum(uint16 needed, uint256 total);
@@ -62,16 +54,12 @@ contract Bridge is AccessControl, IBridge {
     }
 
     constructor(
-        address admin,
         bytes memory processor,
         bytes[] memory listeners,
         uint16 neededListeners,
         bytes[] memory approvers,
         uint16 neededApprovers
     ) {
-        if (admin == address(0)) {
-            revert ZeroAdmin();
-        }
         if (!_isValidValidatorKey(processor)) {
             revert InvalidProcessorKey(processor);
         }
@@ -100,8 +88,6 @@ contract Bridge is AccessControl, IBridge {
             revert InvalidApproverQuorum(neededApprovers, approvers.length);
         }
 
-        _grantRole(DEFAULT_ADMIN_ROLE, admin);
-
         validatorSet = ValidatorSet({
             processor: processor,
             listeners: listeners,
@@ -116,10 +102,6 @@ contract Bridge is AccessControl, IBridge {
     receive() external payable {
         emit FundsReceived(nextEventId, msg.sender, msg.value);
         nextEventId += 1;
-    }
-
-    function adminPing() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        emit AdminPinged(msg.sender);
     }
 
     function get_config()

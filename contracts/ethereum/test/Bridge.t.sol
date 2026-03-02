@@ -16,7 +16,6 @@ contract BridgeTest is Test {
         hex"041111111111111111111111111111111111111111111111111111111111111111";
 
     Bridge public bridge;
-    address public admin = address(0xA11CE);
     address public nonAdmin = address(0xB0B);
 
     function setUp() public {
@@ -26,18 +25,7 @@ contract BridgeTest is Test {
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY;
 
-        bridge = new Bridge(
-            admin,
-            TEST_VALIDATOR_KEY,
-            listeners,
-            1,
-            approvers,
-            1
-        );
-    }
-
-    function test_AdminRoleAssigned() public view {
-        assertTrue(bridge.hasRole(bridge.DEFAULT_ADMIN_ROLE(), admin));
+        bridge = new Bridge(TEST_VALIDATOR_KEY, listeners, 1, approvers, 1);
     }
 
     function test_ReceiveEth() public {
@@ -68,12 +56,6 @@ contract BridgeTest is Test {
 
         (,,,,, uint64 configNextEventId,) = bridge.get_config();
         assertEq(configNextEventId, 1);
-    }
-
-    function test_NonAdminCannotCallAdminFunction() public {
-        vm.prank(nonAdmin);
-        vm.expectRevert();
-        bridge.adminPing();
     }
 
     function test_GetConfigReturnsInitializedState() public view {
@@ -108,7 +90,7 @@ contract BridgeTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(Bridge.InvalidProcessorKey.selector, shortKey)
         );
-        new Bridge(admin, shortKey, listeners, 1, approvers, 1);
+        new Bridge(shortKey, listeners, 1, approvers, 1);
     }
 
     function test_RevertWhenProcessorKeyHasInvalidPrefix() public {
@@ -123,7 +105,7 @@ contract BridgeTest is Test {
                 TEST_INVALID_PREFIX_KEY
             )
         );
-        new Bridge(admin, TEST_INVALID_PREFIX_KEY, listeners, 1, approvers, 1);
+        new Bridge(TEST_INVALID_PREFIX_KEY, listeners, 1, approvers, 1);
     }
 
     function test_RevertWhenListenerKeyInvalid() public {
@@ -139,7 +121,7 @@ contract BridgeTest is Test {
                 TEST_INVALID_PREFIX_KEY
             )
         );
-        new Bridge(admin, TEST_VALIDATOR_KEY, listeners, 1, approvers, 1);
+        new Bridge(TEST_VALIDATOR_KEY, listeners, 1, approvers, 1);
     }
 
     function test_RevertWhenApproverKeyInvalid() public {
@@ -155,7 +137,7 @@ contract BridgeTest is Test {
                 TEST_INVALID_PREFIX_KEY
             )
         );
-        new Bridge(admin, TEST_VALIDATOR_KEY_2, listeners, 1, approvers, 1);
+        new Bridge(TEST_VALIDATOR_KEY_2, listeners, 1, approvers, 1);
     }
 
     function test_RevertWhenListenerKeysDuplicate() public {
@@ -173,7 +155,7 @@ contract BridgeTest is Test {
                 TEST_VALIDATOR_KEY
             )
         );
-        new Bridge(admin, TEST_VALIDATOR_KEY_3, listeners, 1, approvers, 1);
+        new Bridge(TEST_VALIDATOR_KEY_3, listeners, 1, approvers, 1);
     }
 
     function test_RevertWhenApproverKeysDuplicate() public {
@@ -191,7 +173,7 @@ contract BridgeTest is Test {
                 TEST_VALIDATOR_KEY_2
             )
         );
-        new Bridge(admin, TEST_VALIDATOR_KEY_3, listeners, 1, approvers, 1);
+        new Bridge(TEST_VALIDATOR_KEY_3, listeners, 1, approvers, 1);
     }
 
     function test_AllowsCrossRoleKeyReuse() public view {
@@ -229,6 +211,6 @@ contract BridgeTest is Test {
                 TEST_INVALID_PREFIX_KEY
             )
         );
-        new Bridge(admin, TEST_VALIDATOR_KEY, listeners, 1, approvers, 1);
+        new Bridge(TEST_VALIDATOR_KEY, listeners, 1, approvers, 1);
     }
 }
