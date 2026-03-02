@@ -25,6 +25,8 @@ interface IBridge {
 }
 
 contract Bridge is AccessControl, IBridge {
+    error InvalidValidatorKey(uint256 index, bytes key);
+
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
         bytes processor;
@@ -38,6 +40,18 @@ contract Bridge is AccessControl, IBridge {
     uint64 internal nextEventId;
     uint64 internal nextActionId;
 
+    function _isValidValidatorKey(bytes memory key) internal pure returns (bool) {
+        return key.length == 33 && (key[0] == 0x02 || key[0] == 0x03);
+    }
+
+    function _requireUniqueKeys(bytes[] memory keys, string memory error) internal pure {
+        for (uint256 i = 0; i < keys.length; i++) {
+            for (uint256 j = i + 1; j < keys.length; j++) {
+                require(keccak256(keys[i]) != keccak256(keys[j]), error);
+            }
+        }
+    }
+
     constructor(
         address admin,
         bytes memory processor,
@@ -47,14 +61,17 @@ contract Bridge is AccessControl, IBridge {
         uint16 neededApprovers
     ) {
         require(admin != address(0), "Bridge: zero admin");
-        require(processor.length == 33, "Bridge: invalid processor key");
+        require(
+            _isValidValidatorKey(processor),
+            "Bridge: invalid processor key"
+        );
         require(listeners.length > 0, "Bridge: no listeners");
         for (uint256 i = 0; i < listeners.length; i++) {
-            require(
-                listeners[i].length == 33,
-                "Bridge: invalid listener key length"
-            );
+            if (!_isValidValidatorKey(listeners[i])) {
+                revert InvalidValidatorKey(i, listeners[i]);
+            }
         }
+        _requireUniqueKeys(listeners, "Bridge: duplicate listener key");
         require(neededListeners > 0, "Bridge: zero listener quorum");
         require(
             neededListeners <= listeners.length,
@@ -62,11 +79,11 @@ contract Bridge is AccessControl, IBridge {
         );
         require(approvers.length > 0, "Bridge: no approvers");
         for (uint256 i = 0; i < approvers.length; i++) {
-            require(
-                approvers[i].length == 33,
-                "Bridge: invalid approver key length"
-            );
+            if (!_isValidValidatorKey(approvers[i])) {
+                revert InvalidValidatorKey(i, approvers[i]);
+            }
         }
+        _requireUniqueKeys(approvers, "Bridge: duplicate approver key");
         require(neededApprovers > 0, "Bridge: zero approver quorum");
         require(
             neededApprovers <= approvers.length,
