@@ -1,7 +1,7 @@
-# BridgeV1 E2E (Anvil)
+# Bridge E2E (Anvil)
 
 This setup runs a deterministic local Ethereum JSON-RPC node for end-to-end testing.
-During image build, `BridgeV1` is deployed and Anvil state is snapshotted.
+During image build, `Bridge` is deployed and Anvil state is snapshotted.
 Container startup loads that snapshot, so the contract is already deployed.
 
 ## Start
