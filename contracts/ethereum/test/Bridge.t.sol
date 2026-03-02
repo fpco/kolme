@@ -105,7 +105,9 @@ contract BridgeTest is Test {
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY_2;
 
-        vm.expectRevert("Bridge: invalid processor key");
+        vm.expectRevert(
+            abi.encodeWithSelector(Bridge.InvalidProcessorKey.selector, shortKey)
+        );
         new Bridge(admin, shortKey, listeners, 1, approvers, 1);
     }
 
@@ -115,7 +117,12 @@ contract BridgeTest is Test {
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY_2;
 
-        vm.expectRevert("Bridge: invalid processor key");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidProcessorKey.selector,
+                TEST_INVALID_PREFIX_KEY
+            )
+        );
         new Bridge(admin, TEST_INVALID_PREFIX_KEY, listeners, 1, approvers, 1);
     }
 
@@ -158,7 +165,14 @@ contract BridgeTest is Test {
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY_2;
 
-        vm.expectRevert("Bridge: duplicate listener key");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.DuplicateValidatorKey.selector,
+                uint256(0),
+                uint256(1),
+                TEST_VALIDATOR_KEY
+            )
+        );
         new Bridge(admin, TEST_VALIDATOR_KEY_3, listeners, 1, approvers, 1);
     }
 
@@ -169,7 +183,14 @@ contract BridgeTest is Test {
         approvers[0] = TEST_VALIDATOR_KEY_2;
         approvers[1] = TEST_VALIDATOR_KEY_2;
 
-        vm.expectRevert("Bridge: duplicate approver key");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.DuplicateValidatorKey.selector,
+                uint256(0),
+                uint256(1),
+                TEST_VALIDATOR_KEY_2
+            )
+        );
         new Bridge(admin, TEST_VALIDATOR_KEY_3, listeners, 1, approvers, 1);
     }
 
