@@ -5,6 +5,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider, ProviderBuilder},
     rpc::types::eth::TransactionRequest,
+    sol,
 };
 use anyhow::Result;
 use kolme::*;
@@ -18,6 +19,24 @@ const TEST_ADMIN_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
+
+sol! {
+    #[sol(rpc)]
+    interface IBridgeV1Integration {
+        function get_config()
+            external
+            view
+            returns (
+                bytes processor,
+                bytes[] listeners,
+                uint16 neededListeners,
+                bytes[] approvers,
+                uint16 neededApprovers,
+                uint64 configNextEventId,
+                uint64 configNextActionId
+            );
+    }
+}
 
 #[derive(Clone)]
 struct EthereumBridgeTestApp {
@@ -114,6 +133,73 @@ impl KolmeApp for EthereumBridgeTestApp {
 async fn ethereum_listener_ingests_local_deposit() {
     init_logger(true, None);
     TestTasks::start(ethereum_listener_ingests_local_deposit_inner, ()).await;
+}
+
+#[tokio::test]
+async fn ethereum_bridge_get_config_is_readable() {
+    let provider = anvil_provider().expect("failed to build anvil provider");
+
+    assert_anvil_identifiers_match(&provider)
+        .await
+        .expect("local anvil setup does not match expected deterministic identifiers");
+
+    let bridge: Address = TEST_BRIDGE_ADDRESS
+        .parse()
+        .expect("hardcoded bridge address is invalid");
+    let contract = IBridgeV1Integration::new(bridge, provider.clone());
+    let cfg = contract
+        .get_config()
+        .call()
+        .await
+        .expect("bridge get_config call failed");
+    let expected_validator_key = {
+        let mut key = vec![0x02];
+        key.extend(vec![0x11; 32]);
+        key
+    };
+
+    assert_eq!(cfg.processor.len(), 33, "invalid processor key length");
+    assert_eq!(
+        cfg.processor.as_ref(),
+        expected_validator_key.as_slice(),
+        "unexpected processor key in bridge config"
+    );
+    assert_eq!(
+        cfg.listeners.len(),
+        1,
+        "unexpected number of listeners in bridge config"
+    );
+    assert_eq!(
+        cfg.listeners[0].as_ref(),
+        expected_validator_key.as_slice(),
+        "unexpected listener key in bridge config"
+    );
+    assert_eq!(
+        cfg.approvers.len(),
+        1,
+        "unexpected number of approvers in bridge config"
+    );
+    assert_eq!(
+        cfg.approvers[0].as_ref(),
+        expected_validator_key.as_slice(),
+        "unexpected approver key in bridge config"
+    );
+    assert_eq!(
+        cfg.neededListeners, 1,
+        "unexpected listener quorum in bridge config"
+    );
+    assert_eq!(
+        cfg.neededApprovers, 1,
+        "unexpected approver quorum in bridge config"
+    );
+    assert_eq!(
+        cfg.configNextEventId, 0,
+        "unexpected initial value for configNextEventId"
+    );
+    assert_eq!(
+        cfg.configNextActionId, 0,
+        "unexpected initial value for configNextActionId"
+    );
 }
 
 async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, (): ()) {
