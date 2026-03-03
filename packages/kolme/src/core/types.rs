@@ -446,6 +446,8 @@ pub struct ChainState {
     /// sufficient signatures, but an earlier event hasn't, they
     /// will both remain pending.
     pub pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
+    /// Last known location of an external-chain event log for this chain.
+    pub last_event_location: Option<LastEventLocation>,
     /// Balance of different assets in the bridge contract.
     ///
     /// This field is used to ensure that sufficient balances are available
@@ -481,6 +483,7 @@ impl MerkleSerialize for ChainState {
             pending_actions,
             next_event_id,
             pending_events,
+            last_event_location,
             assets,
         } = self;
         serializer.store(config)?;
@@ -488,15 +491,20 @@ impl MerkleSerialize for ChainState {
         serializer.store(pending_actions)?;
         serializer.store(next_event_id)?;
         serializer.store(pending_events)?;
+        serializer.store(last_event_location)?;
         serializer.store(assets)?;
         Ok(())
+    }
+
+    fn merkle_version() -> usize {
+        1
     }
 }
 
 impl MerkleDeserialize for ChainState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
+        version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(ChainState {
             config: deserializer.load()?,
@@ -504,6 +512,12 @@ impl MerkleDeserialize for ChainState {
             pending_actions: deserializer.load()?,
             next_event_id: deserializer.load()?,
             pending_events: deserializer.load()?,
+            last_event_location: match version {
+                0 => None,
+                // version 1 is the current one
+                // version mismatch is handled at blanket MerkleDeserializeRaw::merkle_deserialize_raw()
+                _ => deserializer.load()?,
+            },
             assets: deserializer.load()?,
         })
     }
