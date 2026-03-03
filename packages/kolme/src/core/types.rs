@@ -566,6 +566,7 @@ impl MerkleDeserialize for PendingBridgeAction {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PendingBridgeEvent {
     pub event: BridgeEvent,
+    pub location: Option<LastEventLocation>,
     /// Attestations from the listeners
     pub attestations: BTreeSet<PublicKey>,
 }
@@ -574,21 +575,33 @@ impl MerkleSerialize for PendingBridgeEvent {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let Self {
             event,
+            location,
             attestations,
         } = self;
         serializer.store_json(event)?;
+        serializer.store(location)?;
         serializer.store(attestations)?;
         Ok(())
+    }
+
+    fn merkle_version() -> usize {
+        1
     }
 }
 
 impl MerkleDeserialize for PendingBridgeEvent {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
+        version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             event: deserializer.load_json()?,
+            location: match version {
+                0 => None,
+                // current version is 1
+                // version mismatch is handled at MerkleDeserializeRaw blanket impl
+                _ => deserializer.load()?,
+            },
             attestations: deserializer.load()?,
         })
     }
