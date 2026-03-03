@@ -28,6 +28,11 @@ impl EthereumBridgeEvent {
 
     fn from_log(log: &Log) -> Result<Option<Self>> {
         let Some(topic) = log.topic0().copied() else {
+            // having `topic0` as None would be unusual given our filters
+            tracing::debug!(
+                "Ignoring Ethereum log without topic0 at address {:#x}",
+                log.address()
+            );
             return Ok(None);
         };
 
@@ -37,7 +42,13 @@ impl EthereumBridgeEvent {
                     .map(|decoded| decoded.inner.data)
                     .map_err(|e| anyhow::anyhow!("Failed to decode FundsReceived: {e}"))?,
             )),
-            _ => None,
+            _ => {
+                tracing::debug!(
+                    "Ignoring Ethereum log with unsupported topic {topic:#x} at address {:#x}",
+                    log.address()
+                );
+                None
+            }
         })
     }
 
