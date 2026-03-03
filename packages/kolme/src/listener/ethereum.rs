@@ -225,7 +225,12 @@ async fn process_event<App: KolmeApp>(
         actual_event_id
     );
 
-    let message = event.to_kolme_message::<App::Message>(chain, actual_event_id)?;
+    let location = LastEventLocation {
+        event_id: actual_event_id,
+        block_height: log.block_number.unwrap_or(0),
+        log_index: log.log_index,
+    };
+    let message = event.to_kolme_message::<App::Message>(chain, actual_event_id, location)?;
     kolme
         .sign_propose_await_transaction(secret, vec![message])
         .await?;
