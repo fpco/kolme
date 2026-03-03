@@ -210,11 +210,28 @@ async fn get_resume_cursor<P: Provider>(
             continue;
         };
 
-        if event.event_id() == next_bridge_event_id {
+        let event_id = event.event_id();
+        if event_id == next_bridge_event_id {
             return Ok((log.block_number.unwrap_or(0), log.log_index));
+        }
+        if event_id > next_bridge_event_id {
+            tracing::warn!(
+                "Ethereum resume scan reached event ID {} before expected {}; state may be out of sync or an event is missing",
+                event_id,
+                next_bridge_event_id
+            );
+            anyhow::bail!(
+                "Ethereum resume scan reached event ID {event_id} before expected {next_bridge_event_id}"
+            );
         }
     }
 
+    tracing::warn!(
+        "Ethereum resume scan did not find expected event ID {} on contract {:#x}; scanned blocks 0..={} and will resume from latest+1",
+        next_bridge_event_id,
+        contract.address(),
+        latest
+    );
     Ok((latest.saturating_add(1), None))
 }
 
