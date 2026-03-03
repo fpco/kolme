@@ -195,6 +195,7 @@ fn to_kolme_message<T>(
                 funds,
                 keys,
             },
+            location: None,
         },
         BridgeEventMessage::Signed { wallet, action_id } => Message::Listener {
             chain,
@@ -203,6 +204,7 @@ fn to_kolme_message<T>(
                 wallet: Wallet(wallet),
                 action_id,
             },
+            location: None,
         },
     }
 }

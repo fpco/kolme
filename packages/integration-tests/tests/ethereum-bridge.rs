@@ -296,6 +296,7 @@ async fn wait_for_expected_listener_message_in_new_blocks(
                             funds,
                             keys,
                         },
+                    ..
                 } = message
                 {
                     *chain == target_chain

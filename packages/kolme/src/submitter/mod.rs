@@ -263,6 +263,7 @@ impl<App: KolmeApp> Submitter<App> {
                 chain,
                 event_id: BridgeEventId::start(),
                 event: BridgeEvent::Instantiated { contract: addr },
+                location: None,
             }],
             max_height: None,
         };

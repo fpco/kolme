@@ -45,6 +45,7 @@ impl EthereumBridgeEvent {
         &self,
         chain: ExternalChain,
         event_id: BridgeEventId,
+        location: LastEventLocation,
     ) -> Result<Message<AppMessage>> {
         let event = match self {
             Self::FundsReceived(FundsReceived { sender, amount, .. }) => BridgeEvent::Regular {
@@ -61,6 +62,7 @@ impl EthereumBridgeEvent {
             chain,
             event_id,
             event,
+            location: Some(location),
         })
     }
 }

@@ -1262,6 +1262,8 @@ pub enum Message<AppMessage> {
         chain: ExternalChain,
         event_id: BridgeEventId,
         event: BridgeEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        location: Option<LastEventLocation>,
     },
     /// Approval from a single approver for a bridge action
     #[serde(alias = "Approve")]
