@@ -386,6 +386,7 @@ impl ChainConfig {
             pending_actions: MerkleMap::new(),
             next_event_id: BridgeEventId::start(),
             pending_events: MerkleMap::new(),
+            last_event_location: None,
             assets: BTreeMap::new(),
         }
     }
