@@ -2095,7 +2095,7 @@ mod tests {
     use super::*;
     use quickcheck::quickcheck;
     use rust_decimal::dec;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn increasing_middle_with_difference_of_one() {
@@ -2277,6 +2277,95 @@ mod tests {
         assert!(chains
             .insert_ethereum(EthereumChain::Sepolia, wrong_contract_kind)
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn chain_state_v0_deserializes_with_empty_last_event_location() {
+        #[derive(Clone)]
+        struct OldChainState {
+            config: ChainConfig,
+            next_action_id: BridgeActionId,
+            pending_actions: MerkleMap<BridgeActionId, PendingBridgeAction>,
+            next_event_id: BridgeEventId,
+            pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
+            assets: BTreeMap<AssetId, Decimal>,
+        }
+
+        impl MerkleSerialize for OldChainState {
+            fn merkle_serialize(
+                &self,
+                serializer: &mut MerkleSerializer,
+            ) -> Result<(), MerkleSerialError> {
+                serializer.store(&self.config)?;
+                serializer.store(&self.next_action_id)?;
+                serializer.store(&self.pending_actions)?;
+                serializer.store(&self.next_event_id)?;
+                serializer.store(&self.pending_events)?;
+                serializer.store(&self.assets)?;
+                Ok(())
+            }
+        }
+
+        let mut store = MerkleMemoryStore::default();
+        let old_state = OldChainState {
+            config: ChainConfig {
+                assets: BTreeMap::new(),
+                bridge: BridgeContract::Deployed(
+                    "0x0123456789abcdef0123456789abcdef01234567".to_owned(),
+                ),
+            },
+            next_action_id: BridgeActionId::start(),
+            pending_actions: MerkleMap::new(),
+            next_event_id: BridgeEventId(3),
+            pending_events: MerkleMap::new(),
+            assets: BTreeMap::new(),
+        };
+
+        let hash = merkle_map::save(&mut store, &old_state).await.unwrap();
+        let new_state = merkle_map::load::<ChainState, _>(&mut store, hash)
+            .await
+            .unwrap();
+
+        assert_eq!(new_state.last_event_location, None);
+        assert_eq!(new_state.next_event_id, BridgeEventId(3));
+    }
+
+    #[tokio::test]
+    async fn pending_bridge_event_v0_deserializes_with_empty_location() {
+        #[derive(Clone)]
+        struct OldPendingBridgeEvent {
+            event: BridgeEvent,
+            attestations: BTreeSet<PublicKey>,
+        }
+
+        impl MerkleSerialize for OldPendingBridgeEvent {
+            fn merkle_serialize(
+                &self,
+                serializer: &mut MerkleSerializer,
+            ) -> Result<(), MerkleSerialError> {
+                serializer.store_json(&self.event)?;
+                serializer.store(&self.attestations)?;
+                Ok(())
+            }
+        }
+
+        let mut store = MerkleMemoryStore::default();
+        let old_pending = OldPendingBridgeEvent {
+            event: BridgeEvent::Regular {
+                wallet: Wallet("0xabc".to_owned()),
+                funds: vec![],
+                keys: vec![],
+            },
+            attestations: BTreeSet::new(),
+        };
+
+        let hash = merkle_map::save(&mut store, &old_pending).await.unwrap();
+        let new_pending = merkle_map::load::<PendingBridgeEvent, _>(&mut store, hash)
+            .await
+            .unwrap();
+
+        assert_eq!(new_pending.location, None);
+        assert_eq!(new_pending.event, old_pending.event);
     }
 
     #[tokio::main]
