@@ -82,13 +82,20 @@ pub async fn listen<App: KolmeApp>(
     let contract: ContractInstance<_> =
         ContractInstance::new(contract, provider, Interface::new(JsonAbi::default()));
 
-    let mut next_bridge_event_id = {
+    let (mut next_bridge_event_id, last_event_location) = {
         let kolme_r = kolme.read();
-        get_next_bridge_event_id(&kolme_r, secret.public_key(), chain)
+        let next_bridge_event_id = get_next_bridge_event_id(&kolme_r, secret.public_key(), chain);
+        let state = kolme_r.get_bridge_contracts().get(chain)?;
+        let location = state
+            .pending_events
+            .get(&next_bridge_event_id)
+            .and_then(|pending| pending.location)
+            .or(state.last_event_location);
+        (next_bridge_event_id, location)
     };
 
     let (mut next_block, mut first_log_index) =
-        get_resume_cursor(&contract, next_bridge_event_id).await?;
+        get_resume_cursor(&contract, next_bridge_event_id, last_event_location).await?;
 
     tracing::info!(
         "Beginning Ethereum listener loop on chain {chain:?}, contract {:#x}, next event ID: {next_bridge_event_id}, next block: {next_block}, first log index: {first_log_index:?}",
@@ -152,24 +159,33 @@ async fn listen_once<App: KolmeApp, P: Provider>(
     Ok(())
 }
 
+/// Returns the block height and optional log index to resume Ethereum log polling
+/// for the next expected bridge event, avoiding full history scans when state
+/// already has event location metadata.
 async fn get_resume_cursor<P: Provider>(
     contract: &ContractInstance<P>,
     next_bridge_event_id: BridgeEventId,
+    last_event_location: Option<LastEventLocation>,
 ) -> Result<(u64, Option<u64>)> {
-    // On listener connecting, we need to find a point of synchronization between
-    // the sidechain and main blockchain (Ethereum).
-    // The simplest way is to scan all the blocks starting from genesis - thats the way
-    //   how it works now.
-    // CAUTION: being this way it is not ready for mainnet!
-    // A bit more optimal would be to scan since contract deployment.
-    // But best option would be to store the last block on the sidechain.
-    let latest = contract.provider().get_block_number().await?;
-
     if next_bridge_event_id == BridgeEventId::start() {
         return Ok((0, None));
     }
 
+    if let Some(last_event_location) = last_event_location {
+        let first_log_index = match last_event_location.event_id == next_bridge_event_id {
+            true => last_event_location.log_index,
+            false => last_event_location
+                .log_index
+                .map(|log_index| log_index.saturating_add(1)),
+        };
+        return Ok((last_event_location.block_height, first_log_index));
+    }
+
+    let latest = contract.provider().get_block_number().await?;
+
     let filter = Filter::new()
+        // TODO: once Ethereum contract deployment is implemented in submitter
+        // we can start from contract deployment block instead of genesis block
         .from_block(BlockNumberOrTag::Earliest)
         .to_block(latest)
         .address(*contract.address());
