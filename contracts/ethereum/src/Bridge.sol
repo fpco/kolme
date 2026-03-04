@@ -25,6 +25,7 @@ contract Bridge is IBridge {
     error InvalidProcessorKey(bytes key);
     error InvalidValidatorKey(uint256 index, bytes key);
     error DuplicateValidatorKey(uint256 firstIndex, uint256 secondIndex, bytes key);
+    error InvalidCurvePoint(bytes key);
     error InvalidSignatureLength(uint256 length);
     error InvalidSignatureV(uint8 v);
 
@@ -40,6 +41,11 @@ contract Bridge is IBridge {
     ValidatorSet internal validatorSet;
     uint64 internal nextEventId;
     uint64 internal nextActionId;
+
+    uint256 internal constant SECP256K1_P =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
+    uint256 internal constant SECP256K1_SQRT_EXP =
+        0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF0C;
 
     function _isValidValidatorKey(bytes memory key) internal pure returns (bool) {
         return key.length == 33 && (key[0] == 0x02 || key[0] == 0x03);
@@ -127,6 +133,78 @@ contract Bridge is IBridge {
             revert InvalidSignatureV(v);
         }
         return ecrecover(payloadHash, v, r, s);
+    }
+
+    // Kolme validators don't really have Ethereum addresses (as they are identified
+    // by secp256k1 public keys), but we can derive (cryptographically) EVM addresses
+    // from these public keys to use them for verifying their signatures by comparing
+    // to _recoverSigner() output, which is EVM address derived from
+    // payload hash + signature.
+    function _validatorAddress(
+        bytes memory key
+    ) internal view returns (address) {
+        if (!_isValidValidatorKey(key)) {
+            revert InvalidCurvePoint(key);
+        }
+        uint256 x = 0;
+        for (uint256 i = 1; i < 33; i++) {
+            x = (x << 8) | uint8(key[i]);
+        }
+        if (x >= SECP256K1_P) {
+            revert InvalidCurvePoint(key);
+        }
+
+        uint256 ySquared = addmod(
+            mulmod(mulmod(x, x, SECP256K1_P), x, SECP256K1_P),
+            7,
+            SECP256K1_P
+        );
+        uint256 y = _modExp(ySquared, SECP256K1_SQRT_EXP, SECP256K1_P);
+        if (mulmod(y, y, SECP256K1_P) != ySquared) {
+            revert InvalidCurvePoint(key);
+        }
+
+        bool expectedOdd = key[0] == 0x03;
+        bool yOdd = (y & 1) == 1;
+        if (yOdd != expectedOdd) {
+            y = SECP256K1_P - y;
+        }
+
+        return
+            address(
+                uint160(
+                    uint256(keccak256(abi.encodePacked(bytes32(x), bytes32(y))))
+                )
+            );
+    }
+
+    function _modExp(
+        uint256 base,
+        uint256 exponent,
+        uint256 modulus
+    ) internal view returns (uint256 result) {
+        bytes memory input = abi.encode(
+            uint256(32),
+            uint256(32),
+            uint256(32),
+            base,
+            exponent,
+            modulus
+        );
+        bytes memory output = new bytes(32);
+        bool success;
+        assembly {
+            success := staticcall(
+                gas(),
+                0x05,
+                add(input, 0x20),
+                mload(input),
+                add(output, 0x20),
+                0x20
+            )
+        }
+        assert(success);
+        return abi.decode(output, (uint256));
     }
 
     function get_config()

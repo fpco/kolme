@@ -19,6 +19,10 @@ contract BridgeRecoverHarness is Bridge {
     ) external pure returns (address) {
         return _recoverSigner(payloadHash, signature);
     }
+
+    function validatorAddress(bytes memory key) external view returns (address) {
+        return _validatorAddress(key);
+    }
 }
 
 contract BridgeTest is Test {
@@ -117,6 +121,21 @@ contract BridgeTest is Test {
             abi.encodeWithSelector(Bridge.InvalidSignatureV.selector, uint8(0))
         );
         recoverHarness.recoverSigner(payloadHash, signature);
+    }
+
+    function test_ValidatorAddressDerivation() public view {
+        address derived = recoverHarness.validatorAddress(TEST_VALIDATOR_KEY);
+        assertEq(derived, vm.addr(PROCESSOR_PRIVATE_KEY));
+    }
+
+    function test_ValidatorAddressRevertsWhenCurvePointInvalid() public {
+        // x == secp256k1 field modulus (p) is invalid and should be rejected.
+        bytes memory invalidKey = hex"02fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f";
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Bridge.InvalidCurvePoint.selector, invalidKey)
+        );
+        recoverHarness.validatorAddress(invalidKey);
     }
 
     function test_GetConfigReturnsInitializedState() public view {
