@@ -41,6 +41,8 @@ contract Bridge is IBridge {
     ValidatorSet internal validatorSet;
     uint64 internal nextEventId;
     uint64 internal nextActionId;
+    address internal processorSigner;
+    mapping(address => bool) internal approverSigners;
 
     uint256 internal constant SECP256K1_P =
         0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
@@ -103,6 +105,10 @@ contract Bridge is IBridge {
             approvers: approvers,
             neededApprovers: neededApprovers
         });
+        processorSigner = _validatorAddress(processor);
+        for (uint256 i = 0; i < approvers.length; i++) {
+            approverSigners[_validatorAddress(approvers[i])] = true;
+        }
         nextEventId = 0;
         nextActionId = 0;
     }
