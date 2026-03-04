@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 interface IBridge {
     event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
+    event Signed(uint64 eventId, address indexed sender, uint64 actionId);
     function get_config()
         external
         view
@@ -26,8 +27,13 @@ contract Bridge is IBridge {
     error InvalidValidatorKey(uint256 index, bytes key);
     error DuplicateValidatorKey(uint256 firstIndex, uint256 secondIndex, bytes key);
     error InvalidCurvePoint(bytes key);
+    error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidSignatureLength(uint256 length);
     error InvalidSignatureV(uint8 v);
+    error InvalidProcessorSignature(address expected, address received);
+    error InvalidApproverSignature(address signer);
+    error DuplicateApproverSignature(address signer);
+    error InsufficientApproverSignatures(uint16 needed, uint256 provided);
 
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
@@ -116,6 +122,57 @@ contract Bridge is IBridge {
     receive() external payable {
         emit FundsReceived(nextEventId, msg.sender, msg.value);
         nextEventId += 1;
+    }
+
+    function execute(
+        bytes calldata payload,
+        bytes calldata processor,
+        bytes[] calldata approvers
+    ) external {
+        (uint64 actionId, ) = abi.decode(payload, (uint64, bytes));
+
+        if (actionId != nextActionId) {
+            revert IncorrectActionId(nextActionId, actionId);
+        }
+
+        bytes32 payloadHash = sha256(payload);
+        address processorSignerRecovered = _recoverSigner(
+            payloadHash,
+            processor
+        );
+        if (processorSignerRecovered != processorSigner) {
+            revert InvalidProcessorSignature(
+                processorSigner,
+                processorSignerRecovered
+            );
+        }
+
+        uint256 approverCount = approvers.length;
+        address[] memory seen = new address[](approverCount);
+        uint256 uniqueApprovers = 0;
+        for (uint256 i = 0; i < approverCount; i++) {
+            address signer = _recoverSigner(payloadHash, approvers[i]);
+            if (!approverSigners[signer]) {
+                revert InvalidApproverSignature(signer);
+            }
+            for (uint256 j = 0; j < uniqueApprovers; j++) {
+                if (seen[j] == signer) {
+                    revert DuplicateApproverSignature(signer);
+                }
+            }
+            seen[uniqueApprovers] = signer;
+            uniqueApprovers += 1;
+        }
+        if (uniqueApprovers < validatorSet.neededApprovers) {
+            revert InsufficientApproverSignatures(
+                validatorSet.neededApprovers,
+                uniqueApprovers
+            );
+        }
+
+        emit Signed(nextEventId, msg.sender, actionId);
+        nextEventId += 1;
+        nextActionId += 1;
     }
 
     // Returns signer's address recovered from a payload hash and ECDSA signature.
