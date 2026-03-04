@@ -138,6 +138,19 @@ contract BridgeTest is Test {
         recoverHarness.validatorAddress(invalidKey);
     }
 
+    function testFuzz_RecoverSignerMatchesValidatorAddress(
+        bytes memory actionData
+    ) public view {
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory signature = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
+        bytes32 payloadHash = sha256(payload);
+
+        address fromSignature = recoverHarness.recoverSigner(payloadHash, signature);
+        address fromValidatorKey = recoverHarness.validatorAddress(TEST_VALIDATOR_KEY);
+
+        assertEq(fromSignature, fromValidatorKey);
+    }
+
     function test_GetConfigReturnsInitializedState() public view {
         (
             bytes memory processor,
