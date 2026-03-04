@@ -25,6 +25,8 @@ contract Bridge is IBridge {
     error InvalidProcessorKey(bytes key);
     error InvalidValidatorKey(uint256 index, bytes key);
     error DuplicateValidatorKey(uint256 firstIndex, uint256 secondIndex, bytes key);
+    error InvalidSignatureLength(uint256 length);
+    error InvalidSignatureV(uint8 v);
 
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
@@ -102,6 +104,29 @@ contract Bridge is IBridge {
     receive() external payable {
         emit FundsReceived(nextEventId, msg.sender, msg.value);
         nextEventId += 1;
+    }
+
+    // Returns signer's address recovered from a payload hash and ECDSA signature.
+    // Used for verifying processor/approvers signatures.
+    function _recoverSigner(
+        bytes32 payloadHash,
+        bytes calldata signature
+    ) internal pure returns (address) {
+        if (signature.length != 65) {
+            revert InvalidSignatureLength(signature.length);
+        }
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 0x20))
+            v := byte(0, calldataload(add(signature.offset, 0x40)))
+        }
+        if (v != 27 && v != 28) {
+            revert InvalidSignatureV(v);
+        }
+        return ecrecover(payloadHash, v, r, s);
     }
 
     function get_config()

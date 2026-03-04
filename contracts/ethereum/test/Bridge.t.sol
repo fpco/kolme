@@ -4,18 +4,38 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {Bridge} from "../src/Bridge.sol";
 
+contract BridgeRecoverHarness is Bridge {
+    constructor(
+        bytes memory processor,
+        bytes[] memory listeners,
+        uint16 neededListeners,
+        bytes[] memory approvers,
+        uint16 neededApprovers
+    ) Bridge(processor, listeners, neededListeners, approvers, neededApprovers) {}
+
+    function recoverSigner(
+        bytes32 payloadHash,
+        bytes calldata signature
+    ) external pure returns (address) {
+        return _recoverSigner(payloadHash, signature);
+    }
+}
+
 contract BridgeTest is Test {
     event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
     bytes constant TEST_VALIDATOR_KEY =
-        hex"021111111111111111111111111111111111111111111111111111111111111111";
+        hex"038318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75";
     bytes constant TEST_VALIDATOR_KEY_2 =
         hex"032222222222222222222222222222222222222222222222222222222222222222";
     bytes constant TEST_VALIDATOR_KEY_3 =
         hex"023333333333333333333333333333333333333333333333333333333333333333";
     bytes constant TEST_INVALID_PREFIX_KEY =
         hex"041111111111111111111111111111111111111111111111111111111111111111";
+    uint256 constant PROCESSOR_PRIVATE_KEY =
+        0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
 
     Bridge public bridge;
+    BridgeRecoverHarness public recoverHarness;
     address public nonAdmin = address(0xB0B);
 
     function setUp() public {
@@ -23,9 +43,16 @@ contract BridgeTest is Test {
         listeners[0] = TEST_VALIDATOR_KEY;
 
         bytes[] memory approvers = new bytes[](1);
-        approvers[0] = TEST_VALIDATOR_KEY;
+        approvers[0] = TEST_VALIDATOR_KEY_2;
 
         bridge = new Bridge(TEST_VALIDATOR_KEY, listeners, 1, approvers, 1);
+        recoverHarness = new BridgeRecoverHarness(
+            TEST_VALIDATOR_KEY,
+            listeners,
+            1,
+            approvers,
+            1
+        );
     }
 
     function test_ReceiveEth() public {
@@ -58,6 +85,40 @@ contract BridgeTest is Test {
         assertEq(configNextEventId, 1);
     }
 
+    function test_RecoverSigner() public view {
+        bytes memory payload = abi.encode(uint64(0), bytes("noop"));
+        bytes memory signature = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
+        bytes32 payloadHash = sha256(payload);
+
+        address recovered = recoverHarness.recoverSigner(payloadHash, signature);
+        assertEq(recovered, vm.addr(PROCESSOR_PRIVATE_KEY));
+    }
+
+    function test_RecoverSignerRevertsWhenSignatureLengthInvalid() public {
+        bytes32 payloadHash = sha256(abi.encode(uint64(0), bytes("noop")));
+        bytes memory signature = hex"0102";
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidSignatureLength.selector,
+                signature.length
+            )
+        );
+        recoverHarness.recoverSigner(payloadHash, signature);
+    }
+
+    function test_RecoverSignerRevertsWhenVInvalid() public {
+        bytes memory payload = abi.encode(uint64(0), bytes("noop"));
+        bytes memory signature = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
+        signature[64] = 0x00;
+        bytes32 payloadHash = sha256(payload);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Bridge.InvalidSignatureV.selector, uint8(0))
+        );
+        recoverHarness.recoverSigner(payloadHash, signature);
+    }
+
     function test_GetConfigReturnsInitializedState() public view {
         (
             bytes memory processor,
@@ -74,7 +135,7 @@ contract BridgeTest is Test {
         assertEq(listeners[0], TEST_VALIDATOR_KEY);
         assertEq(neededListeners, 1);
         assertEq(approvers.length, 1);
-        assertEq(approvers[0], TEST_VALIDATOR_KEY);
+        assertEq(approvers[0], TEST_VALIDATOR_KEY_2);
         assertEq(neededApprovers, 1);
         assertEq(configNextEventId, 0);
         assertEq(configNextActionId, 0);
@@ -176,7 +237,13 @@ contract BridgeTest is Test {
         new Bridge(TEST_VALIDATOR_KEY_3, listeners, 1, approvers, 1);
     }
 
-    function test_AllowsCrossRoleKeyReuse() public view {
+    function test_AllowsCrossRoleKeyReuse() public {
+        bytes[] memory listeners2 = new bytes[](1);
+        listeners2[0] = TEST_VALIDATOR_KEY;
+        bytes[] memory approvers2 = new bytes[](1);
+        approvers2[0] = TEST_VALIDATOR_KEY;
+        Bridge bridge2 = new Bridge(TEST_VALIDATOR_KEY, listeners2, 1, approvers2, 1);
+
         (
             bytes memory processor,
             bytes[] memory listeners,
@@ -185,7 +252,7 @@ contract BridgeTest is Test {
             uint16 neededApprovers,
             uint64 configNextEventId,
             uint64 configNextActionId
-        ) = bridge.get_config();
+        ) = bridge2.get_config();
 
         assertEq(processor, TEST_VALIDATOR_KEY);
         assertEq(listeners[0], TEST_VALIDATOR_KEY);
@@ -212,5 +279,14 @@ contract BridgeTest is Test {
             )
         );
         new Bridge(TEST_VALIDATOR_KEY, listeners, 1, approvers, 1);
+    }
+
+    function _signPayload(
+        uint256 privateKey,
+        bytes memory payload
+    ) internal pure returns (bytes memory) {
+        bytes32 hash = sha256(payload);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, hash);
+        return abi.encodePacked(r, s, v);
     }
 }
