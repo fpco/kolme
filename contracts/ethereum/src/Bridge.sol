@@ -25,7 +25,11 @@ contract Bridge is IBridge {
     error InvalidApproverQuorum(uint16 needed, uint256 total);
     error InvalidProcessorKey(bytes key);
     error InvalidValidatorKey(uint256 index, bytes key);
-    error DuplicateValidatorKey(uint256 firstIndex, uint256 secondIndex, bytes key);
+    error DuplicateValidatorKey(
+        uint256 firstIndex,
+        uint256 secondIndex,
+        bytes key
+    );
     error InvalidCurvePoint(bytes key);
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidSignatureLength(uint256 length);
@@ -55,7 +59,9 @@ contract Bridge is IBridge {
     uint256 internal constant SECP256K1_SQRT_EXP =
         0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF0C;
 
-    function _isValidValidatorKey(bytes memory key) internal pure returns (bool) {
+    function _isValidValidatorKey(
+        bytes memory key
+    ) internal pure returns (bool) {
         return key.length == 33 && (key[0] == 0x02 || key[0] == 0x03);
     }
 
