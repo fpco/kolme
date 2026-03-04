@@ -104,7 +104,7 @@ contract BridgeTest is Test {
         emit Signed(0, nonAdmin, 0);
 
         vm.prank(nonAdmin);
-        bridge.execute(payload, processorSig, approverSigs);
+        bridge.execute_signed(payload, processorSig, approverSigs);
 
         (,,,,, uint64 configNextEventId, uint64 configNextActionId) = bridge.get_config();
         assertEq(configNextEventId, 1);
@@ -120,7 +120,7 @@ contract BridgeTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(Bridge.IncorrectActionId.selector, uint64(0), uint64(1))
         );
-        bridge.execute(payload, processorSig, approverSigs);
+        bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_RevertWhenProcessorSignatureInvalid() public {
@@ -138,7 +138,7 @@ contract BridgeTest is Test {
                 received
             )
         );
-        bridge.execute(payload, processorSig, approverSigs);
+        bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_RevertWhenApproverSignatureInvalid() public {
@@ -153,7 +153,7 @@ contract BridgeTest is Test {
                 vm.addr(NON_APPROVER_PRIVATE_KEY)
             )
         );
-        bridge.execute(payload, processorSig, approverSigs);
+        bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_RevertWhenApproverSignatureDuplicated() public {
@@ -170,7 +170,7 @@ contract BridgeTest is Test {
                 vm.addr(APPROVER_PRIVATE_KEY)
             )
         );
-        bridge.execute(payload, processorSig, approverSigs);
+        bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_RevertWhenApproverSignatureMissing() public {
@@ -185,7 +185,7 @@ contract BridgeTest is Test {
                 uint256(0)
             )
         );
-        bridge.execute(payload, processorSig, approverSigs);
+        bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_RecoverSigner() public view {

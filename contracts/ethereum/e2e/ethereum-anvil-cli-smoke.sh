@@ -41,7 +41,7 @@ approver_sig="$(cast wallet sign --mnemonic "${MNEMONIC}" --mnemonic-index 1 --n
 execute_tx_hash="$(
   cast send \
     "${BRIDGE_ADDRESS}" \
-    "execute(bytes,bytes,bytes[])" \
+    "execute_signed(bytes,bytes,bytes[])" \
     "${payload}" \
     "${processor_sig}" \
     "[${approver_sig}]" \
@@ -58,7 +58,7 @@ fi
 echo "Verify replay of same action is rejected"
 if cast send \
   "${BRIDGE_ADDRESS}" \
-  "execute(bytes,bytes,bytes[])" \
+  "execute_signed(bytes,bytes,bytes[])" \
   "${payload}" \
   "${processor_sig}" \
   "[${approver_sig}]" \

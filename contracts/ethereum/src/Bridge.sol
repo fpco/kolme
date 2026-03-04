@@ -130,7 +130,7 @@ contract Bridge is IBridge {
         nextEventId += 1;
     }
 
-    function execute(
+    function execute_signed(
         bytes calldata payload,
         bytes calldata processor,
         bytes[] calldata approvers
