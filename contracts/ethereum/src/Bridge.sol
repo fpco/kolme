@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {
-    AccessControl
-} from "openzeppelin-contracts/contracts/access/AccessControl.sol";
-
 interface IBridge {
     event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
-    event AdminPinged(address indexed admin);
-
-    function adminPing() external;
     function get_config()
         external
         view
@@ -24,7 +17,15 @@ interface IBridge {
         );
 }
 
-contract Bridge is AccessControl, IBridge {
+contract Bridge is IBridge {
+    error EmptyListeners();
+    error EmptyApprovers();
+    error InvalidListenerQuorum(uint16 needed, uint256 total);
+    error InvalidApproverQuorum(uint16 needed, uint256 total);
+    error InvalidProcessorKey(bytes key);
+    error InvalidValidatorKey(uint256 index, bytes key);
+    error DuplicateValidatorKey(uint256 firstIndex, uint256 secondIndex, bytes key);
+
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
         bytes processor;
@@ -38,42 +39,54 @@ contract Bridge is AccessControl, IBridge {
     uint64 internal nextEventId;
     uint64 internal nextActionId;
 
+    function _isValidValidatorKey(bytes memory key) internal pure returns (bool) {
+        return key.length == 33 && (key[0] == 0x02 || key[0] == 0x03);
+    }
+
+    function _requireUniqueKeys(bytes[] memory keys) internal pure {
+        for (uint256 i = 0; i < keys.length; i++) {
+            for (uint256 j = i + 1; j < keys.length; j++) {
+                if (keccak256(keys[i]) == keccak256(keys[j])) {
+                    revert DuplicateValidatorKey(i, j, keys[i]);
+                }
+            }
+        }
+    }
+
     constructor(
-        address admin,
         bytes memory processor,
         bytes[] memory listeners,
         uint16 neededListeners,
         bytes[] memory approvers,
         uint16 neededApprovers
     ) {
-        require(admin != address(0), "Bridge: zero admin");
-        require(processor.length == 33, "Bridge: invalid processor key");
-        require(listeners.length > 0, "Bridge: no listeners");
+        if (!_isValidValidatorKey(processor)) {
+            revert InvalidProcessorKey(processor);
+        }
+        if (listeners.length == 0) {
+            revert EmptyListeners();
+        }
         for (uint256 i = 0; i < listeners.length; i++) {
-            require(
-                listeners[i].length == 33,
-                "Bridge: invalid listener key length"
-            );
+            if (!_isValidValidatorKey(listeners[i])) {
+                revert InvalidValidatorKey(i, listeners[i]);
+            }
         }
-        require(neededListeners > 0, "Bridge: zero listener quorum");
-        require(
-            neededListeners <= listeners.length,
-            "Bridge: listener quorum too high"
-        );
-        require(approvers.length > 0, "Bridge: no approvers");
+        _requireUniqueKeys(listeners);
+        if (neededListeners == 0 || neededListeners > listeners.length) {
+            revert InvalidListenerQuorum(neededListeners, listeners.length);
+        }
+        if (approvers.length == 0) {
+            revert EmptyApprovers();
+        }
         for (uint256 i = 0; i < approvers.length; i++) {
-            require(
-                approvers[i].length == 33,
-                "Bridge: invalid approver key length"
-            );
+            if (!_isValidValidatorKey(approvers[i])) {
+                revert InvalidValidatorKey(i, approvers[i]);
+            }
         }
-        require(neededApprovers > 0, "Bridge: zero approver quorum");
-        require(
-            neededApprovers <= approvers.length,
-            "Bridge: approver quorum too high"
-        );
-
-        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _requireUniqueKeys(approvers);
+        if (neededApprovers == 0 || neededApprovers > approvers.length) {
+            revert InvalidApproverQuorum(neededApprovers, approvers.length);
+        }
 
         validatorSet = ValidatorSet({
             processor: processor,
@@ -89,10 +102,6 @@ contract Bridge is AccessControl, IBridge {
     receive() external payable {
         emit FundsReceived(nextEventId, msg.sender, msg.value);
         nextEventId += 1;
-    }
-
-    function adminPing() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        emit AdminPinged(msg.sender);
     }
 
     function get_config()
