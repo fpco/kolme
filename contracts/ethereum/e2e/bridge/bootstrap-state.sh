@@ -18,20 +18,21 @@ if ! cast wallet address --mnemonic "$MNEMONIC" --mnemonic-index 0 >/dev/null 2>
 fi
 DEPLOYER_ADDRESS="$(cast wallet address --mnemonic "$MNEMONIC" --mnemonic-index 0)"
 DEPLOYER_PRIVATE_KEY="$(cast wallet private-key --mnemonic "$MNEMONIC" --mnemonic-index 0)"
-VALIDATOR_KEY="0x021111111111111111111111111111111111111111111111111111111111111111"
+PROCESSOR_KEY="0x038318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75"
+APPROVER_KEY="0x02ba5734d8f7091719471e7f7ed6b9df170dc70cc661ca05e688601ad984f068b0"
 
 BYTECODE="$(jq -r '.bytecode.object' out/Bridge.sol/Bridge.json)"
 CTOR_ARGS="$(
   cast abi-encode \
     "constructor(bytes,bytes[],uint16,bytes[],uint16)" \
-    "$VALIDATOR_KEY" \
-    "[$VALIDATOR_KEY]" \
+    "$PROCESSOR_KEY" \
+    "[$PROCESSOR_KEY]" \
     "1" \
-    "[$VALIDATOR_KEY]" \
+    "[$APPROVER_KEY]" \
     "1"
 )"
 echo -n "${BYTECODE}${CTOR_ARGS#0x}" > /tmp/bridge.initcode
-cast compute-address --nonce 0 "$DEPLOYER_ADDRESS" > /bootstrap/bridge.address
+cast compute-address --nonce 0 "$DEPLOYER_ADDRESS" | awk '{print $NF}' > /bootstrap/bridge.address
 
 anvil \
   --host 127.0.0.1 \

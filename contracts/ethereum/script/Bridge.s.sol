@@ -5,8 +5,10 @@ import {Script} from "forge-std/Script.sol";
 import {Bridge} from "../src/Bridge.sol";
 
 contract BridgeScript is Script {
-    bytes constant DEFAULT_VALIDATOR_KEY =
-        hex"021111111111111111111111111111111111111111111111111111111111111111";
+    bytes constant DEFAULT_PROCESSOR_KEY =
+        hex"038318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75";
+    bytes constant DEFAULT_APPROVER_KEY =
+        hex"02ba5734d8f7091719471e7f7ed6b9df170dc70cc661ca05e688601ad984f068b0";
 
     Bridge public bridge;
 
@@ -16,11 +18,11 @@ contract BridgeScript is Script {
         vm.startBroadcast();
 
         bytes[] memory listeners = new bytes[](1);
-        listeners[0] = DEFAULT_VALIDATOR_KEY;
+        listeners[0] = DEFAULT_PROCESSOR_KEY;
         bytes[] memory approvers = new bytes[](1);
-        approvers[0] = DEFAULT_VALIDATOR_KEY;
+        approvers[0] = DEFAULT_APPROVER_KEY;
 
-        bridge = new Bridge(DEFAULT_VALIDATOR_KEY, listeners, 1, approvers, 1);
+        bridge = new Bridge(DEFAULT_PROCESSOR_KEY, listeners, 1, approvers, 1);
 
         vm.stopBroadcast();
     }

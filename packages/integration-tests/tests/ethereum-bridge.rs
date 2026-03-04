@@ -19,6 +19,10 @@ const TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
+const TEST_PROCESSOR_KEY_HEX: &str =
+    "038318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75";
+const TEST_APPROVER_KEY_HEX: &str =
+    "02ba5734d8f7091719471e7f7ed6b9df170dc70cc661ca05e688601ad984f068b0";
 
 sol! {
     #[sol(rpc)]
@@ -152,16 +156,11 @@ async fn ethereum_bridge_get_config_is_readable() {
         .call()
         .await
         .expect("bridge get_config call failed");
-    let expected_validator_key = {
-        let mut key = vec![0x02];
-        key.extend(vec![0x11; 32]);
-        key
-    };
 
     assert_eq!(cfg.processor.len(), 33, "invalid processor key length");
     assert_eq!(
-        cfg.processor.as_ref(),
-        expected_validator_key.as_slice(),
+        hex::encode(cfg.processor.as_ref()),
+        TEST_PROCESSOR_KEY_HEX,
         "unexpected processor key in bridge config"
     );
     assert_eq!(
@@ -170,8 +169,8 @@ async fn ethereum_bridge_get_config_is_readable() {
         "unexpected number of listeners in bridge config"
     );
     assert_eq!(
-        cfg.listeners[0].as_ref(),
-        expected_validator_key.as_slice(),
+        hex::encode(cfg.listeners[0].as_ref()),
+        TEST_PROCESSOR_KEY_HEX,
         "unexpected listener key in bridge config"
     );
     assert_eq!(
@@ -180,8 +179,8 @@ async fn ethereum_bridge_get_config_is_readable() {
         "unexpected number of approvers in bridge config"
     );
     assert_eq!(
-        cfg.approvers[0].as_ref(),
-        expected_validator_key.as_slice(),
+        hex::encode(cfg.approvers[0].as_ref()),
+        TEST_APPROVER_KEY_HEX,
         "unexpected approver key in bridge config"
     );
     assert_eq!(
