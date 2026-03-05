@@ -176,9 +176,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                 chain,
                 event,
                 event_id,
-                location,
             } => {
-                self.listener(*chain, event, *event_id, *location)?;
+                self.listener(*chain, event, *event_id)?;
             }
             Message::Approve {
                 chain,
@@ -205,7 +204,6 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         chain: ExternalChain,
         event: &BridgeEvent,
         event_id: BridgeEventId,
-        location: Option<LastEventLocation>,
     ) -> Result<()> {
         anyhow::ensure!(self
             .framework_state
@@ -219,29 +217,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         let state = self.framework_state.chains.get_mut(chain)?;
 
-        if let Some(location) = location {
-            anyhow::ensure!(
-                location.event_id == event_id,
-                "Listener location/event_id mismatch: location has {}, message has {}",
-                location.event_id,
-                event_id
-            );
-        }
-
         let attestations = match state.pending_events.get_mut(&event_id) {
             Some(pending) => {
                 anyhow::ensure!(pending.event == *event);
-                match (pending.location, location) {
-                    (Some(existing), Some(actual)) => anyhow::ensure!(
-                        existing == actual,
-                        "Pending event location mismatch for event {}: existing {:?}, got {:?}",
-                        event_id,
-                        existing,
-                        actual
-                    ),
-                    (None, Some(actual)) => pending.location = Some(actual),
-                    _ => (),
-                }
                 &mut pending.attestations
             }
             None => {
@@ -251,7 +229,6 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     event_id,
                     PendingBridgeEvent {
                         event: event.clone(),
-                        location,
                         attestations: BTreeSet::new(),
                     },
                 );
@@ -262,15 +239,6 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     .attestations
             }
         };
-
-        if let Some(location) = location {
-            let should_update = state
-                .last_event_location
-                .is_none_or(|existing| existing.event_id <= location.event_id);
-            if should_update {
-                state.last_event_location = Some(location);
-            }
-        }
 
         let was_inserted = attestations.insert(self.pubkey);
 

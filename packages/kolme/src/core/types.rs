@@ -386,45 +386,8 @@ impl ChainConfig {
             pending_actions: MerkleMap::new(),
             next_event_id: BridgeEventId::start(),
             pending_events: MerkleMap::new(),
-            last_event_location: None,
             assets: BTreeMap::new(),
         }
-    }
-}
-
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug,
-)]
-pub struct LastEventLocation {
-    pub event_id: BridgeEventId,
-    pub block_height: u64,
-    pub log_index: Option<u64>,
-}
-
-impl MerkleSerialize for LastEventLocation {
-    fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        let Self {
-            event_id,
-            block_height,
-            log_index,
-        } = self;
-        serializer.store(event_id)?;
-        serializer.store(block_height)?;
-        serializer.store(log_index)?;
-        Ok(())
-    }
-}
-
-impl MerkleDeserialize for LastEventLocation {
-    fn merkle_deserialize(
-        deserializer: &mut MerkleDeserializer,
-        _version: usize,
-    ) -> Result<Self, MerkleSerialError> {
-        Ok(Self {
-            event_id: deserializer.load()?,
-            block_height: deserializer.load()?,
-            log_index: deserializer.load()?,
-        })
     }
 }
 
@@ -447,8 +410,6 @@ pub struct ChainState {
     /// sufficient signatures, but an earlier event hasn't, they
     /// will both remain pending.
     pub pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
-    /// Last known location of an external-chain event log for this chain.
-    pub last_event_location: Option<LastEventLocation>,
     /// Balance of different assets in the bridge contract.
     ///
     /// This field is used to ensure that sufficient balances are available
@@ -484,7 +445,6 @@ impl MerkleSerialize for ChainState {
             pending_actions,
             next_event_id,
             pending_events,
-            last_event_location,
             assets,
         } = self;
         serializer.store(config)?;
@@ -492,20 +452,15 @@ impl MerkleSerialize for ChainState {
         serializer.store(pending_actions)?;
         serializer.store(next_event_id)?;
         serializer.store(pending_events)?;
-        serializer.store(last_event_location)?;
         serializer.store(assets)?;
         Ok(())
-    }
-
-    fn merkle_version() -> usize {
-        1
     }
 }
 
 impl MerkleDeserialize for ChainState {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
-        version: usize,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(ChainState {
             config: deserializer.load()?,
@@ -513,12 +468,6 @@ impl MerkleDeserialize for ChainState {
             pending_actions: deserializer.load()?,
             next_event_id: deserializer.load()?,
             pending_events: deserializer.load()?,
-            last_event_location: match version {
-                0 => None,
-                // version 1 is the current one
-                // version mismatch is handled at blanket MerkleDeserializeRaw::merkle_deserialize_raw()
-                _ => deserializer.load()?,
-            },
             assets: deserializer.load()?,
         })
     }
@@ -566,7 +515,6 @@ impl MerkleDeserialize for PendingBridgeAction {
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PendingBridgeEvent {
     pub event: BridgeEvent,
-    pub location: Option<LastEventLocation>,
     /// Attestations from the listeners
     pub attestations: BTreeSet<PublicKey>,
 }
@@ -575,33 +523,21 @@ impl MerkleSerialize for PendingBridgeEvent {
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
         let Self {
             event,
-            location,
             attestations,
         } = self;
         serializer.store_json(event)?;
-        serializer.store(location)?;
         serializer.store(attestations)?;
         Ok(())
-    }
-
-    fn merkle_version() -> usize {
-        1
     }
 }
 
 impl MerkleDeserialize for PendingBridgeEvent {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
-        version: usize,
+        _version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             event: deserializer.load_json()?,
-            location: match version {
-                0 => None,
-                // current version is 1
-                // version mismatch is handled at MerkleDeserializeRaw blanket impl
-                _ => deserializer.load()?,
-            },
             attestations: deserializer.load()?,
         })
     }
@@ -1262,8 +1198,6 @@ pub enum Message<AppMessage> {
         chain: ExternalChain,
         event_id: BridgeEventId,
         event: BridgeEvent,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        location: Option<LastEventLocation>,
     },
     /// Approval from a single approver for a bridge action
     #[serde(alias = "Approve")]
@@ -2095,7 +2029,7 @@ mod tests {
     use super::*;
     use quickcheck::quickcheck;
     use rust_decimal::dec;
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
 
     #[test]
     fn increasing_middle_with_difference_of_one() {
@@ -2277,95 +2211,6 @@ mod tests {
         assert!(chains
             .insert_ethereum(EthereumChain::Sepolia, wrong_contract_kind)
             .is_err());
-    }
-
-    #[tokio::test]
-    async fn chain_state_v0_deserializes_with_empty_last_event_location() {
-        #[derive(Clone)]
-        struct OldChainState {
-            config: ChainConfig,
-            next_action_id: BridgeActionId,
-            pending_actions: MerkleMap<BridgeActionId, PendingBridgeAction>,
-            next_event_id: BridgeEventId,
-            pending_events: MerkleMap<BridgeEventId, PendingBridgeEvent>,
-            assets: BTreeMap<AssetId, Decimal>,
-        }
-
-        impl MerkleSerialize for OldChainState {
-            fn merkle_serialize(
-                &self,
-                serializer: &mut MerkleSerializer,
-            ) -> Result<(), MerkleSerialError> {
-                serializer.store(&self.config)?;
-                serializer.store(&self.next_action_id)?;
-                serializer.store(&self.pending_actions)?;
-                serializer.store(&self.next_event_id)?;
-                serializer.store(&self.pending_events)?;
-                serializer.store(&self.assets)?;
-                Ok(())
-            }
-        }
-
-        let mut store = MerkleMemoryStore::default();
-        let old_state = OldChainState {
-            config: ChainConfig {
-                assets: BTreeMap::new(),
-                bridge: BridgeContract::Deployed(
-                    "0x0123456789abcdef0123456789abcdef01234567".to_owned(),
-                ),
-            },
-            next_action_id: BridgeActionId::start(),
-            pending_actions: MerkleMap::new(),
-            next_event_id: BridgeEventId(3),
-            pending_events: MerkleMap::new(),
-            assets: BTreeMap::new(),
-        };
-
-        let hash = merkle_map::save(&mut store, &old_state).await.unwrap();
-        let new_state = merkle_map::load::<ChainState, _>(&mut store, hash)
-            .await
-            .unwrap();
-
-        assert_eq!(new_state.last_event_location, None);
-        assert_eq!(new_state.next_event_id, BridgeEventId(3));
-    }
-
-    #[tokio::test]
-    async fn pending_bridge_event_v0_deserializes_with_empty_location() {
-        #[derive(Clone)]
-        struct OldPendingBridgeEvent {
-            event: BridgeEvent,
-            attestations: BTreeSet<PublicKey>,
-        }
-
-        impl MerkleSerialize for OldPendingBridgeEvent {
-            fn merkle_serialize(
-                &self,
-                serializer: &mut MerkleSerializer,
-            ) -> Result<(), MerkleSerialError> {
-                serializer.store_json(&self.event)?;
-                serializer.store(&self.attestations)?;
-                Ok(())
-            }
-        }
-
-        let mut store = MerkleMemoryStore::default();
-        let old_pending = OldPendingBridgeEvent {
-            event: BridgeEvent::Regular {
-                wallet: Wallet("0xabc".to_owned()),
-                funds: vec![],
-                keys: vec![],
-            },
-            attestations: BTreeSet::new(),
-        };
-
-        let hash = merkle_map::save(&mut store, &old_pending).await.unwrap();
-        let new_pending = merkle_map::load::<PendingBridgeEvent, _>(&mut store, hash)
-            .await
-            .unwrap();
-
-        assert_eq!(new_pending.location, None);
-        assert_eq!(new_pending.event, old_pending.event);
     }
 
     #[tokio::main]

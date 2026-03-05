@@ -139,7 +139,6 @@ impl<App: KolmeApp> Listener<App> {
                     chain,
                     event_id,
                     event: BridgeEvent::Instantiated { contract },
-                    ..
                 } = msg
                 {
                     if chain.name() != name || *event_id != BridgeEventId::start() {
@@ -221,7 +220,6 @@ impl<App: KolmeApp> Listener<App> {
                         contract: contract.to_owned(),
                     },
                     event_id: BridgeEventId::start(),
-                    location: None,
                 }],
             )
             .await?;

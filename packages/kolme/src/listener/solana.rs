@@ -301,6 +301,5 @@ fn to_kolme_message<T>(msg: BridgeMessage, chain: SolanaChain) -> Message<T> {
         chain: chain.into(),
         event_id,
         event,
-        location: None,
     }
 }
