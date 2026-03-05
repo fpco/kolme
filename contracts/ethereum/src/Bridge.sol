@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 interface IBridge {
-    event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
+    event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
     function get_config()
         external
         view
