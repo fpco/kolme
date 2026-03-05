@@ -38,6 +38,7 @@ contract Bridge is IBridge {
     error InvalidApproverSignature(address signer);
     error DuplicateApproverSignature(address signer);
     error InsufficientApproverSignatures(uint16 needed, uint256 provided);
+    error ModExpFailed();
 
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
@@ -291,7 +292,9 @@ contract Bridge is IBridge {
                 0x20
             )
         }
-        assert(success);
+        if (!success) {
+            revert ModExpFailed();
+        }
         return abi.decode(output, (uint256));
     }
 
