@@ -51,8 +51,6 @@ contract Bridge is IBridge {
     ValidatorSet internal validatorSet;
     uint64 internal nextEventId;
     uint64 internal nextActionId;
-    address internal processorSigner;
-    mapping(address => bool) internal approverSigners;
 
     uint256 internal constant SECP256K1_P =
         0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
@@ -117,10 +115,6 @@ contract Bridge is IBridge {
             approvers: approvers,
             neededApprovers: neededApprovers
         });
-        processorSigner = _validatorAddress(processor);
-        for (uint256 i = 0; i < approvers.length; i++) {
-            approverSigners[_validatorAddress(approvers[i])] = true;
-        }
         nextEventId = 0;
         nextActionId = 0;
     }
@@ -142,14 +136,27 @@ contract Bridge is IBridge {
         }
 
         bytes32 payloadHash = sha256(payload);
+        address expectedProcessorSigner = _validatorAddress(
+            validatorSet.processor
+        );
         address processorSignerRecovered = _recoverSigner(
             payloadHash,
             processor
         );
-        if (processorSignerRecovered != processorSigner) {
+        if (processorSignerRecovered != expectedProcessorSigner) {
             revert InvalidProcessorSignature(
-                processorSigner,
+                expectedProcessorSigner,
                 processorSignerRecovered
+            );
+        }
+
+        uint256 configuredApproverCount = validatorSet.approvers.length;
+        address[] memory configuredApproverSigners = new address[](
+            configuredApproverCount
+        );
+        for (uint256 i = 0; i < configuredApproverCount; i++) {
+            configuredApproverSigners[i] = _validatorAddress(
+                validatorSet.approvers[i]
             );
         }
 
@@ -158,9 +165,18 @@ contract Bridge is IBridge {
         uint256 uniqueApprovers = 0;
         for (uint256 i = 0; i < approverCount; i++) {
             address signer = _recoverSigner(payloadHash, approvers[i]);
-            if (!approverSigners[signer]) {
+
+            bool isConfiguredApprover = false;
+            for (uint256 j = 0; j < configuredApproverCount; j++) {
+                if (configuredApproverSigners[j] == signer) {
+                    isConfiguredApprover = true;
+                    break;
+                }
+            }
+            if (!isConfiguredApprover) {
                 revert InvalidApproverSignature(signer);
             }
+
             for (uint256 j = 0; j < uniqueApprovers; j++) {
                 if (seen[j] == signer) {
                     revert DuplicateApproverSignature(signer);
