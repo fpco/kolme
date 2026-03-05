@@ -117,7 +117,7 @@ contract BridgeTest is Test {
         bytes[] memory approverSigs = new bytes[](1);
         approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
 
-        vm.expectEmit(true, false, false, true, address(bridge));
+        vm.expectEmit(true, true, false, true, address(bridge));
         emit Signed(0, nonAdmin, 0);
 
         vm.prank(nonAdmin);
