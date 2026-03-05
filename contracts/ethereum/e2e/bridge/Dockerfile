@@ -6,8 +6,10 @@ RUN apt-get update && \
 
 SHELL ["/bin/bash", "-lc"]
 
+ARG FOUNDRY_VERSION=v1.3.1
+
 RUN curl -L https://foundry.paradigm.xyz | bash && \
-    /root/.foundry/bin/foundryup
+    /root/.foundry/bin/foundryup --install "${FOUNDRY_VERSION}"
 
 # Install a fixed solc binary so `forge build` does not depend on external solc mirrors.
 RUN curl -L https://github.com/ethereum/solidity/releases/download/v0.8.30/solc-static-linux \

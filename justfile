@@ -46,6 +46,10 @@ anvil:
     -just stop-anvil
     docker compose up --build -d anvil
 
+[working-directory("contracts/ethereum/e2e")]
+ethereum-anvil-cli-smoke:
+    docker compose exec -T anvil /bootstrap/ethereum-anvil-cli-smoke.sh
+
 
 test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
     just postgres
