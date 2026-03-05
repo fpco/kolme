@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Bridge} from "../src/Bridge.sol";
 
 contract BridgeTest is Test {
-    event FundsReceived(uint64 eventId, address indexed sender, uint256 amount);
+    event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
     bytes constant TEST_VALIDATOR_KEY =
         hex"021111111111111111111111111111111111111111111111111111111111111111";
     bytes constant TEST_VALIDATOR_KEY_2 =
@@ -40,7 +40,7 @@ contract BridgeTest is Test {
     function test_ReceiveEthEmitsEvent() public {
         vm.deal(nonAdmin, 1 ether);
 
-        vm.expectEmit(true, false, false, true, address(bridge));
+        vm.expectEmit(true, true, false, true, address(bridge));
         emit FundsReceived(0, nonAdmin, 0.1 ether);
 
         vm.prank(nonAdmin);

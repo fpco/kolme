@@ -2,7 +2,7 @@ use crate::*;
 use alloy::{
     contract::{ContractInstance, Interface},
     json_abi::JsonAbi,
-    primitives::{Address, U256},
+    primitives::{Address, B256, U256},
     providers::Provider,
     rpc::types::eth::{BlockNumberOrTag, Filter, Log},
     sol,
@@ -13,7 +13,7 @@ use super::get_next_bridge_event_id;
 
 const ETH_NATIVE_DENOM: &str = "eth";
 
-sol! { event FundsReceived(uint64 eventId, address indexed sender, uint256 amount); }
+sol! { event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount); }
 
 enum EthereumBridgeEvent {
     FundsReceived(FundsReceived),
@@ -273,17 +273,23 @@ mod tests {
             .parse::<Address>()
             .unwrap();
 
+        let event_id = 7u64;
+        let mut event_id_topic = [0u8; 32];
+        event_id_topic[24..].copy_from_slice(&event_id.to_be_bytes());
+
         let mut sender_topic = [0u8; 32];
         sender_topic[12..].copy_from_slice(sender.as_slice());
 
-        let event_id = 7u64;
         let amount = U256::from(42u64);
-        let mut data = [0u8; 64];
-        data[24..32].copy_from_slice(&event_id.to_be_bytes());
-        data[32..64].copy_from_slice(&amount.to_be_bytes::<32>());
+        let mut data = [0u8; 32];
+        data[0..32].copy_from_slice(&amount.to_be_bytes::<32>());
 
         let log_data = LogData::new(
-            vec![FundsReceived::SIGNATURE_HASH, B256::from(sender_topic)],
+            vec![
+                FundsReceived::SIGNATURE_HASH,
+                B256::from(event_id_topic),
+                B256::from(sender_topic),
+            ],
             Bytes::copy_from_slice(&data),
         )
         .unwrap();
