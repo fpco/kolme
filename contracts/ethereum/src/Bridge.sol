@@ -83,6 +83,7 @@ contract Bridge is IBridge {
         if (!_isValidValidatorKey(processor)) {
             revert InvalidProcessorKey(processor);
         }
+        _validatorAddress(processor);
         if (listeners.length == 0) {
             revert EmptyListeners();
         }
@@ -90,6 +91,7 @@ contract Bridge is IBridge {
             if (!_isValidValidatorKey(listeners[i])) {
                 revert InvalidValidatorKey(i, listeners[i]);
             }
+            _validatorAddress(listeners[i]);
         }
         _requireUniqueKeys(listeners);
         if (neededListeners == 0 || neededListeners > listeners.length) {
@@ -102,6 +104,7 @@ contract Bridge is IBridge {
             if (!_isValidValidatorKey(approvers[i])) {
                 revert InvalidValidatorKey(i, approvers[i]);
             }
+            _validatorAddress(approvers[i]);
         }
         _requireUniqueKeys(approvers);
         if (neededApprovers == 0 || neededApprovers > approvers.length) {
