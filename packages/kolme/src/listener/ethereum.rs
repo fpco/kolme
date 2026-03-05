@@ -165,13 +165,9 @@ async fn get_resume_cursor<P: Provider>(
     contract: &ContractInstance<P>,
     next_bridge_event_id: BridgeEventId,
 ) -> Result<(u64, Option<u64>)> {
-    // On listener connecting, we need to find a point of synchronization between
-    // the sidechain and main blockchain (Ethereum).
-    // The simplest way is to scan all the blocks starting from genesis - thats the way
-    //   how it works now.
-    // CAUTION: being this way it is not ready for mainnet!
-    // A bit more optimal would be to scan since contract deployment.
-    // But best option would be to store the last block on the sidechain.
+    // On listener startup, we find sync point by scanning from genesis while
+    // filtering by contract address and indexed event ID.
+    // TODO: Switch from "since genesis" to "since contract deployment block".
     let latest = contract.provider().get_block_number().await?;
 
     if next_bridge_event_id == BridgeEventId::start() {
@@ -181,7 +177,9 @@ async fn get_resume_cursor<P: Provider>(
     let filter = Filter::new()
         .from_block(BlockNumberOrTag::Earliest)
         .to_block(latest)
-        .address(*contract.address());
+        .address(*contract.address())
+        .event_signature(FundsReceived::SIGNATURE_HASH)
+        .topic1(event_id_topic(next_bridge_event_id));
 
     for log in contract.provider().get_logs(&filter).await? {
         if log.removed {
@@ -192,20 +190,13 @@ async fn get_resume_cursor<P: Provider>(
             continue;
         };
 
-        let event_id = event.event_id();
-        if event_id == next_bridge_event_id {
-            return Ok((log.block_number.unwrap_or(0), log.log_index));
-        }
-        if event_id > next_bridge_event_id {
-            tracing::warn!(
-                "Ethereum resume scan reached event ID {} before expected {}; state may be out of sync or an event is missing",
-                event_id,
-                next_bridge_event_id
-            );
-            anyhow::bail!(
-                "Ethereum resume scan reached event ID {event_id} before expected {next_bridge_event_id}"
-            );
-        }
+        anyhow::ensure!(
+            event.event_id() == next_bridge_event_id,
+            "Ethereum filtered resume query returned mismatched event ID. Expected {}, got {}",
+            next_bridge_event_id,
+            event.event_id()
+        );
+        return Ok((log.block_number.unwrap_or(0), log.log_index));
     }
 
     tracing::warn!(
@@ -215,6 +206,14 @@ async fn get_resume_cursor<P: Provider>(
         latest
     );
     Ok((latest.saturating_add(1), None))
+}
+
+/// Converts kolme's event id (u64) into 32-byte Ethereum topic value for log filtering
+fn event_id_topic(event_id: BridgeEventId) -> B256 {
+    let BridgeEventId(event_id) = event_id;
+    let mut bytes = [0u8; 32];
+    bytes[24..].copy_from_slice(&event_id.to_be_bytes());
+    B256::from(bytes)
 }
 
 async fn process_event<App: KolmeApp>(
