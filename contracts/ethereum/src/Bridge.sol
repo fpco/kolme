@@ -165,6 +165,7 @@ contract Bridge is IBridge {
         }
 
         uint256 approverCount = approvers.length;
+        uint16 neededApprovers = validatorSet.neededApprovers;
         address[] memory seen = new address[](approverCount);
         uint256 uniqueApprovers = 0;
         for (uint256 i = 0; i < approverCount; i++) {
@@ -188,10 +189,13 @@ contract Bridge is IBridge {
             }
             seen[uniqueApprovers] = signer;
             uniqueApprovers += 1;
+            if (uniqueApprovers == neededApprovers) {
+                break;
+            }
         }
-        if (uniqueApprovers < validatorSet.neededApprovers) {
+        if (uniqueApprovers < neededApprovers) {
             revert InsufficientApproverSignatures(
-                validatorSet.neededApprovers,
+                neededApprovers,
                 uniqueApprovers
             );
         }

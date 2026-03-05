@@ -157,6 +157,19 @@ contract BridgeTest is Test {
     }
 
     function test_RevertWhenApproverSignatureDuplicated() public {
+        bytes[] memory listeners = new bytes[](1);
+        listeners[0] = TEST_VALIDATOR_KEY;
+        bytes[] memory configuredApprovers = new bytes[](2);
+        configuredApprovers[0] = TEST_VALIDATOR_KEY_2;
+        configuredApprovers[1] = TEST_VALIDATOR_KEY_3;
+        Bridge bridge2 = new Bridge(
+            TEST_VALIDATOR_KEY,
+            listeners,
+            1,
+            configuredApprovers,
+            2
+        );
+
         bytes memory payload = abi.encode(uint64(0), bytes("noop"));
         bytes memory processorSig = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
         bytes memory approverSig = _signPayload(APPROVER_PRIVATE_KEY, payload);
@@ -170,7 +183,7 @@ contract BridgeTest is Test {
                 vm.addr(APPROVER_PRIVATE_KEY)
             )
         );
-        bridge.execute_signed(payload, processorSig, approverSigs);
+        bridge2.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_RevertWhenApproverSignatureMissing() public {
