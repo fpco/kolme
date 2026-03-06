@@ -1,6 +1,7 @@
 use crate::core::*;
 #[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
 use crate::submitter::SubmitterError;
+//@@@ REDUCE IMPORTS FOR THESE ERRORS; JUST REFER BY QUALIFIED NAME?
 #[cfg(feature = "cosmwasm")]
 use cosmos::error::{AddressError, WalletError};
 #[cfg(feature = "cosmwasm")]
@@ -11,7 +12,6 @@ use kolme_store::KolmeStoreError;
 #[cfg(feature = "solana")]
 use solana_signature::ParseSignatureError;
 
-//@@@ FOR ALL THE BOXED ERRORS, IMPLEMENT From FOR THE BOXED TYPE AND REMOVE THE map_err(Box::new) CALLS (CHECK OTHER ERROR TYPES TOO)
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeError {
     #[error("Already have a bridge contract for {chain:?}, just received another from a listener")]
@@ -181,9 +181,7 @@ pub enum KolmeError {
 
     #[cfg(feature = "solana")]
     #[error(transparent)]
-    SolanaPubsubClientError(
-        #[from] Box<solana_client::nonblocking::pubsub_client::PubsubClientError>,
-    ),
+    SolanaPubsubClientError(Box<solana_client::nonblocking::pubsub_client::PubsubClientError>),
 
     #[error("Bridge program {program} hasn't been initialized yet")]
     UninitializedSolanaBridge { program: String },
@@ -251,11 +249,11 @@ pub enum KolmeError {
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
-    CosmosConfigError(#[from] Box<CosmosConfigError>),
+    CosmosConfigError(Box<CosmosConfigError>),
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
-    BuilderError(#[from] Box<BuilderError>),
+    BuilderError(Box<BuilderError>),
 
     #[error(transparent)]
     AxumError(#[from] axum::Error),
@@ -274,11 +272,11 @@ pub enum KolmeError {
     WebSocketClosed,
 
     #[error("WebSocket error")]
-    WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
+    WebSocket(#[source] Box<tokio_tungstenite::tungstenite::Error>),
 
     #[cfg(feature = "solana")]
     #[error("Solana client error")]
-    SolanaClient(#[from] Box<solana_client::client_error::ClientError>),
+    SolanaClient(#[source] Box<solana_client::client_error::ClientError>),
 
     #[error("Latest block height is {height}, but it wasn't found in the data store")]
     BlockMissingInStore { height: BlockHeight },
@@ -559,7 +557,7 @@ pub enum KolmeError {
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
-    CosmosError(#[from] Box<cosmos::Error>),
+    CosmosError(Box<cosmos::Error>),
 
     #[cfg(feature = "ethereum")]
     #[error("Failed to decode FundsReceived: {0}")]
@@ -635,6 +633,48 @@ impl KolmeError {
     }
 }
 
+#[cfg(feature = "solana")]
+impl From<solana_client::nonblocking::pubsub_client::PubsubClientError> for KolmeError {
+    fn from(e: solana_client::nonblocking::pubsub_client::PubsubClientError) -> Self {
+        Self::SolanaPubsubClientError(Box::new(e))
+    }
+}
+
+#[cfg(feature = "cosmwasm")]
+impl From<CosmosConfigError> for KolmeError {
+    fn from(e: CosmosConfigError) -> Self {
+        Self::CosmosConfigError(Box::new(e))
+    }
+}
+
+#[cfg(feature = "cosmwasm")]
+impl From<BuilderError> for KolmeError {
+    fn from(e: BuilderError) -> Self {
+        Self::BuilderError(Box::new(e))
+    }
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for KolmeError {
+    fn from(e: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocket(Box::new(e))
+    }
+}
+
+#[cfg(feature = "solana")]
+impl From<solana_client::client_error::ClientError> for KolmeError {
+    fn from(e: solana_client::client_error::ClientError) -> Self {
+        Self::SolanaClient(Box::new(e))
+    }
+}
+
+#[cfg(feature = "cosmwasm")]
+impl From<cosmos::Error> for KolmeError {
+    fn from(e: cosmos::Error) -> Self {
+        Self::CosmosError(Box::new(e))
+    }
+}
+
+//@@@ WHAT IS THIS FOR?
 impl<T> From<ProposeTransactionError<T>> for KolmeError {
     fn from(e: ProposeTransactionError<T>) -> Self {
         match e {
@@ -649,7 +689,7 @@ impl<T> From<ProposeTransactionError<T>> for KolmeError {
     }
 }
 
-// @@@ MAYBE RENAME TO KolmeTransactionError?
+// @@@ MAYBE RENAME TO KolmeTransactionError AND MOVE TO TOP TO REDUCE NUMBER OF DIFFs?
 #[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
 /// Errors that need to be serialized on order to report through Gossip.
 pub enum TransactionError {

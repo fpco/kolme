@@ -147,9 +147,7 @@ async fn launch_client_inner<App: KolmeApp>(
     server: &str,
     latest: Option<Arc<SignedTaggedJson<LatestBlock>>>,
 ) -> Result<(), KolmeError> {
-    let (stream, res) = tokio_tungstenite::connect_async(server)
-        .await
-        .map_err(Box::new)?;
+    let (stream, res) = tokio_tungstenite::connect_async(server).await?;
     tracing::debug!(%local_display_name,"launch_client_inner on {server}: got res {res:?}");
     ws_helper(rx_gossip, tx_message, stream, &local_display_name, latest).await;
     Ok(())
@@ -329,8 +327,7 @@ impl WebSocketWrapper for WebSocketStream<MaybeTlsStream<TcpStream>> {
     ) -> Result<(), KolmeError> {
         let payload = serde_json::to_string(&payload)?;
         self.send(tokio_tungstenite::tungstenite::Message::text(payload))
-            .await
-            .map_err(Box::new)?;
+            .await?;
         Ok(())
     }
 }

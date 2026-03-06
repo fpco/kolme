@@ -21,16 +21,14 @@ pub async fn instantiate(
             &msg,
             ContractAdmin::Sender,
         )
-        .await
-        .map_err(Box::new)?;
+        .await?;
 
     tracing::info!("Instantiate new contract: {contract}");
 
     let res = TxBuilder::default()
         .add_update_contract_admin(&contract, &wallet, &contract)
         .sign_and_broadcast(cosmos, &wallet)
-        .await
-        .map_err(Box::new)?;
+        .await?;
 
     tracing::info!(
         "Updated admin on {contract} to its own address in tx {}",
