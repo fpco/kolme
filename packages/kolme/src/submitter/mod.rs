@@ -10,6 +10,7 @@ use utils::trigger::Trigger;
 
 use crate::*;
 
+//@@@ NEED THIS ERROR TYPE?
 #[derive(thiserror::Error, Debug)]
 pub enum SubmitterError {
     #[error("Pass-through submission attempted on wrong chain: expected PassThrough, got {chain}")]

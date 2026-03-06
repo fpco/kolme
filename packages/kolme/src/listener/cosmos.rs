@@ -71,13 +71,14 @@ pub async fn sanity_check_contract(
     expected_code_id: u64,
     info: &GenesisInfo,
 ) -> Result<(), KolmeError> {
-    let contract = cosmos.make_contract(contract.parse::<cosmos::Address>()?);
+    let contract = cosmos.make_contract(contract.parse()?);
     let actual_code_id = contract.info().await.map_err(Box::new)?.code_id;
 
     if actual_code_id != expected_code_id {
         return Err(KolmeError::CodeIdMismatch {
             expected: expected_code_id,
             actual: actual_code_id,
+            contract: contract.to_string(),
         });
     }
 
@@ -98,22 +99,37 @@ pub async fn sanity_check_contract(
         .map_err(Box::new)?;
 
     if info.validator_set.processor != processor {
-        return Err(KolmeError::ProcessorMismatch);
+        return Err(KolmeError::ProcessorMismatch {
+            expected: Box::new(info.validator_set.processor),
+            actual: Box::new(processor),
+        });
     }
     if listeners != info.validator_set.listeners {
-        return Err(KolmeError::ListenersMismatch);
+        return Err(KolmeError::ListenersMismatch {
+            expected: info.validator_set.listeners.clone(),
+            actual: listeners,
+        });
     }
 
     if needed_listeners != info.validator_set.needed_listeners {
-        return Err(KolmeError::NeededListenersMismatch);
+        return Err(KolmeError::NeededListenersMismatch {
+            expected: info.validator_set.needed_listeners,
+            actual: needed_listeners,
+        });
     }
 
     if approvers != info.validator_set.approvers {
-        return Err(KolmeError::ApproversMismatch);
+        return Err(KolmeError::ApproversMismatch {
+            expected: info.validator_set.approvers.clone(),
+            actual: approvers,
+        });
     }
 
     if needed_approvers != info.validator_set.needed_approvers {
-        return Err(KolmeError::NeededApproversMismatch);
+        return Err(KolmeError::NeededApproversMismatch {
+            expected: info.validator_set.needed_approvers,
+            actual: needed_approvers,
+        });
     }
 
     Ok(())

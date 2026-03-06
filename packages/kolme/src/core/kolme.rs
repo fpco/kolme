@@ -3,12 +3,11 @@ mod import_export;
 mod mempool;
 mod store;
 
-pub use import_export::KolmeImportExportError;
-
 #[cfg(feature = "ethereum")]
 use alloy::providers::DynProvider;
 use block_info::BlockState;
 pub(super) use block_info::{BlockInfo, MaybeBlockInfo};
+pub use import_export::KolmeImportExportError;
 use kolme_store::{BackingRemoteDataListener, KolmeConstructLock, KolmeStoreError, StorableBlock};
 use parking_lot::RwLock;
 #[cfg(feature = "solana")]
@@ -213,9 +212,9 @@ impl<App: KolmeApp> Kolme<App> {
         if pubkey == processor {
             Ok(())
         } else {
-            Err(KolmeError::InvalidBlockProcessor {
-                expected_processor: Box::new(processor),
-                actual_processor: Box::new(pubkey),
+            Err(KolmeError::LatestInvalidBlockProcessor {
+                processor: Box::new(processor),
+                pubkey: Box::new(pubkey),
             })
         }
     }
@@ -298,6 +297,7 @@ impl<App: KolmeApp> Kolme<App> {
                 }
                 Err(ProposeTransactionError::Failed(failed)) => {
                     debug_assert_eq!(failed.message.as_inner().txhash, txhash);
+                    //@@@ IS THERE ANY CHANCE THAT THIS COULD END UP CONTAINING TransactionError::Other?
                     break Err(KolmeError::Transaction(
                         failed.message.as_inner().error.clone(),
                     ));
@@ -351,7 +351,7 @@ impl<App: KolmeApp> Kolme<App> {
                 nonce,
             )?);
             match self.propose_and_await_transaction_inner(tx).await {
-                Ok(block) => return Ok(block),
+                Ok(block) => break Ok(block),
                 Err(e) => {
                     if let KolmeError::Transaction(TransactionError::InvalidNonce {
                         pubkey: _,
@@ -361,17 +361,13 @@ impl<App: KolmeApp> Kolme<App> {
                     }) = e
                     {
                         if actual < expected && attempt < MAX_NONCE_ATTEMPTS {
-                            tracing::warn!(
-                                "Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}. \
-                                Retrieved attempted nonce from framework state with next_block_height {next_block_height}. \
-                                Error: {e}"
-                            );
+                            tracing::warn!("Retrying with new nonce, attempt {attempt}/{MAX_NONCE_ATTEMPTS}. Retrieved attempted nonce from framework state with next_block_height {next_block_height}. Error: {e}");
                             attempt += 1;
                             nonce = expected;
                             continue;
                         }
                     }
-                    return Err(e);
+                    break Err(e);
                 }
             }
         }
@@ -439,15 +435,16 @@ impl<App: KolmeApp> Kolme<App> {
         let block_parent = signed_block.0.message.as_inner().parent;
         if actual_parent != block_parent {
             return Err(KolmeError::BlockParentMismatch {
-                actual: actual_parent,
-                expected: block_parent,
+                height: signed_block.height(),
+                actual_parent,
+                block_parent,
             });
         }
 
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
         if expected_processor != actual_processor {
-            return Err(KolmeError::InvalidBlockProcessor {
+            return Err(KolmeError::ReceivedInvalidBlockProcessor {
                 expected_processor: Box::new(expected_processor),
                 actual_processor: Box::new(actual_processor),
             });
@@ -527,7 +524,6 @@ impl<App: KolmeApp> Kolme<App> {
 
         let framework_state_hash = self.inner.store.save(&framework_state).await?;
         let expected_fw = signed_block.0.message.as_inner().framework_state;
-
         if framework_state_hash != expected_fw {
             return Err(KolmeError::FrameworkStateHash {
                 expected: expected_fw,
@@ -537,7 +533,6 @@ impl<App: KolmeApp> Kolme<App> {
 
         let app_state_hash = self.inner.store.save(&app_state).await?;
         let expected_app = signed_block.0.message.as_inner().app_state;
-
         if app_state_hash != expected_app {
             return Err(KolmeError::AppStateHash {
                 expected: expected_app,
@@ -547,7 +542,6 @@ impl<App: KolmeApp> Kolme<App> {
 
         let logs_hash = self.inner.store.save(&logs).await?;
         let expected_logs = signed_block.0.message.as_inner().logs;
-
         if logs_hash != expected_logs {
             return Err(KolmeError::LogsHash {
                 expected: expected_logs,
@@ -627,7 +621,7 @@ impl<App: KolmeApp> Kolme<App> {
         let expected_processor = kolme.get_framework_state().get_validator_set().processor;
         let actual_processor = signed_block.0.message.as_inner().processor;
         if expected_processor != actual_processor {
-            return Err(KolmeError::InvalidBlockProcessor {
+            return Err(KolmeError::ReceivedInvalidBlockProcessor {
                 expected_processor: Box::new(expected_processor),
                 actual_processor: Box::new(actual_processor),
             });
@@ -636,19 +630,18 @@ impl<App: KolmeApp> Kolme<App> {
         signed_block.validate_signature()?;
         let block = signed_block.0.message.as_inner();
 
-        let fw_hash = block.framework_state;
-        if !self.has_merkle_hash(fw_hash).await? {
-            return Err(KolmeError::MissingFrameworkMerkleLayer { hash: fw_hash });
+        if !self.has_merkle_hash(block.framework_state).await? {
+            return Err(KolmeError::FrameworkStateNotWritten {
+                framework_state: block.framework_state,
+            });
         }
-
-        let app_hash = block.app_state;
-        if !self.has_merkle_hash(app_hash).await? {
-            return Err(KolmeError::MissingAppMerkleLayer { hash: app_hash });
+        if !self.has_merkle_hash(block.app_state).await? {
+            return Err(KolmeError::AppStateNotWritten {
+                app_state: block.app_state,
+            });
         }
-
-        let logs_hash = block.logs;
-        if !self.has_merkle_hash(logs_hash).await? {
-            return Err(KolmeError::MissingLogMerkleLayer { hash: logs_hash });
+        if !self.has_merkle_hash(block.logs).await? {
+            return Err(KolmeError::MissingLogMerkleLayer { logs: block.logs });
         }
 
         self.inner
@@ -1276,12 +1269,13 @@ impl<App: KolmeApp> Kolme<App> {
     }
 
     /// Obtains the latest block synced by the Archiver, if it exists
-    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>, KolmeStoreError> {
+    pub async fn get_latest_archived_block(&self) -> Result<Option<BlockHeight>, KolmeError> {
         Ok(self
             .inner
             .store
             .get_latest_archived_block_height()
-            .await?
+            .await
+            .map_err(KolmeError::UnableToGetLatestArchivedBlock)?
             .map(BlockHeight))
     }
 
@@ -1289,7 +1283,7 @@ impl<App: KolmeApp> Kolme<App> {
     ///
     /// This will report errors during data load and then return the earliest
     /// block height, essentially restarting the archive process.
-    pub async fn get_next_to_archive(&self) -> Result<BlockHeight, KolmeStoreError> {
+    pub async fn get_next_to_archive(&self) -> Result<BlockHeight, KolmeError> {
         let mut next = self
             .get_latest_archived_block()
             .await?

@@ -116,6 +116,7 @@ impl<App: KolmeApp> KolmeStore<App> {
     ) -> Result<(), KolmeStoreError> {
         for child in &layer.children {
             if !self.has_merkle_hash(*child).await? {
+                //@@@ MAYBE THIS SHOULD USE KolmeStoreError::Other?
                 return Err(KolmeStoreError::MissingMerkleChild { child: *child });
             }
         }

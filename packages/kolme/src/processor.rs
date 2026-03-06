@@ -1,7 +1,9 @@
-use crate::*;
 use std::{collections::HashMap, convert::Infallible, time::Instant};
 
 use kolme_store::KolmeStoreError;
+
+use crate::*;
+
 pub struct Processor<App: KolmeApp> {
     kolme: Kolme<App>,
     secrets: HashMap<PublicKey, SecretKey>,
@@ -360,7 +362,7 @@ impl<App: KolmeApp> Processor<App> {
             .read()
             .get_next_height()
             .prev()
-            .ok_or_else(|| KolmeError::NoBlocksAvailable)?;
+            .ok_or(KolmeError::NoBlocksAvailable)?;
         let latest = LatestBlock {
             height,
             when: jiff::Timestamp::now(),

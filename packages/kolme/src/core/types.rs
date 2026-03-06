@@ -235,7 +235,7 @@ impl SolanaClientEndpoint {
             SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
             SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
         }
-        .map_err(|e| KolmeError::SolanaPubsubError(Box::new(e)))
+        .map_err(|e| Box::new(e).into())
     }
 }
 
@@ -1121,10 +1121,7 @@ pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMes
 
 impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
     pub fn validate_signature(&self) -> Result<(), KolmeError> {
-        let pubkey = self
-            .0
-            .verify_signature()
-            .map_err(|_| KolmeError::SignatureVerificationFailed)?;
+        let pubkey = self.0.verify_signature()?;
         let expected = self.0.message.as_inner().pubkey;
         if pubkey != expected {
             return Err(KolmeError::InvalidTransactionSignature {
@@ -1924,10 +1921,12 @@ impl ExecAction {
 
 #[cfg(feature = "solana")]
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String, KolmeError> {
-    let len = borsh::object_length(&payload)?;
+    let len =
+        borsh::object_length(&payload).map_err(KolmeError::SolanaPayloadSerializationError)?;
 
     let mut buf = Vec::with_capacity(len);
-    borsh::BorshSerialize::serialize(&payload, &mut buf)?;
+    borsh::BorshSerialize::serialize(&payload, &mut buf)
+        .map_err(KolmeError::SolanaPayloadSerializationError)?;
 
     let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
 
@@ -2021,8 +2020,7 @@ impl SolanaClient {
     {
         Ok(func(&self.0)
             .await
-            .map_err(redact_solana_error)
-            .map_err(Box::new)?)
+            .map_err(|e| Box::new(redact_solana_error(e)))?)
     }
 
     pub async fn get_account(

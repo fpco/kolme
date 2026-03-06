@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
@@ -9,7 +11,6 @@ use axum::{
     Json, Router,
 };
 use reqwest::{Method, StatusCode};
-use std::time::Duration;
 use tower_http::cors::{Any, CorsLayer};
 use version_compare::Version;
 
@@ -124,7 +125,6 @@ async fn broadcast_inner<App: KolmeApp>(
         .execute_transaction(&tx, Timestamp::now(), BlockDataHandling::NoPriorData)
         .await?;
     kolme.propose_transaction(Arc::new(tx))?;
-
     Ok(txhash)
 }
 
@@ -231,8 +231,9 @@ async fn find_block_height<App: KolmeApp>(
     while start_block.0 <= end_block.0 {
         let middle_block = start_block.increasing_middle(end_block)?;
         let response = block_response(kolme, middle_block).await?;
-        let existing_version = Version::from(&response.chain_version)
-            .ok_or_else(|| KolmeError::InvalidChainVersion(response.chain_version.clone()))?;
+        let existing_version = Version::from(&response.chain_version).ok_or_else(|| {
+            KolmeError::InvalidChainVersionFromResponse(response.chain_version.clone())
+        })?;
         let result = chain_version.compare(existing_version);
         match result {
             version_compare::Cmp::Eq => return Ok(response),
@@ -297,10 +298,7 @@ async fn find_first_block<App: KolmeApp>(
         }
     }
 
-    match first_block {
-        Some(block_height) => Ok(block_height),
-        None => Err(KolmeError::FirstBlockNotFound(chain_version.to_string())),
-    }
+    first_block.ok_or_else(|| KolmeError::FirstBlockNotFound(chain_version.to_string()))
 }
 
 /// Find the last block height with a particular chain version
@@ -491,8 +489,11 @@ async fn to_api_notification<App: KolmeApp>(
                 kolme.wait_for_block(height),
             )
             .await
-            .map_err(|_| KolmeError::BlockTimeout(height))?
-            .map_err(|_| KolmeError::BlockLoadFailed(height))?;
+            .map_err(|error| KolmeError::BlockTimeout { height, error })?
+            .map_err(|error| KolmeError::BlockLoadFailed {
+                height,
+                error: Box::new(error),
+            })?;
 
             let logs = kolme.load_logs(block.as_inner().logs).await?.into();
             Ok(ApiNotification::NewBlock { block, logs })

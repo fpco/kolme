@@ -10,26 +10,39 @@ use kolme_solana_bridge_client::pubkey::ParsePubkeyError;
 use kolme_store::KolmeStoreError;
 #[cfg(feature = "solana")]
 use solana_signature::ParseSignatureError;
-use tokio::sync::watch::error::RecvError;
 
+//@@@ FOR ALL THE BOXED ERRORS, IMPLEMENT From FOR THE BOXED TYPE AND REMOVE THE map_err(Box::new) CALLS (CHECK OTHER ERROR TYPES TOO)
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeError {
     #[error("Already have a bridge contract for {chain:?}, just received another from a listener")]
     BridgeAlreadyDeployed { chain: ExternalChain },
 
     #[error(
+        "Received a listener message for bridge event ID {event_id} on {chain}, but provided pubkey {pubkey} is not part of the listener set {listener_set:?}"
+    )]
+    MessagePubkeyNotInValidatorSet {
+        event_id: BridgeEventId,
+        chain: ExternalChain,
+        pubkey: Box<PublicKey>,
+        listener_set: BTreeSet<PublicKey>,
+    },
+
+    #[error(
         "Signing public key {signer} is not a member of the {role:?} set and cannot self-replace"
     )]
-    NotInValidatorSet {
+    SigningKeyNotInValidatorSet {
         signer: Box<PublicKey>,
         role: ValidatorRole,
     },
 
     #[error("Signing public key {signer} is not the current processor and cannot self-replace")]
-    NotProcessor { signer: Box<PublicKey> },
+    NotCurrentProcessor { signer: Box<PublicKey> },
 
-    #[error("Validator self-replace signature doesn't match the current validator pubkey")]
-    InvalidSelfReplaceSigner,
+    #[error("Validator self-replace signature doesn't match the current validator pubkey: expected {expected}, actual {actual}")]
+    InvalidSelfReplaceSigner {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
 
     #[error("Tried to add block with height {received}, but next expected height is {expected}")]
     UnexpectedBlockHeight {
@@ -40,8 +53,14 @@ pub enum KolmeError {
     #[error("Tried to add block with height {height}, but it's already present in the store")]
     BlockAlreadyExists { height: BlockHeight },
 
+    #[error("Latest block was signed by {pubkey}, but processor is {processor}")]
+    LatestInvalidBlockProcessor {
+        pubkey: Box<PublicKey>,
+        processor: Box<PublicKey>,
+    },
+
     #[error("Received block signed by processor {actual_processor}, but the real processor is {expected_processor}")]
-    InvalidBlockProcessor {
+    ReceivedInvalidBlockProcessor {
         expected_processor: Box<PublicKey>,
         actual_processor: Box<PublicKey>,
     },
@@ -59,11 +78,11 @@ pub enum KolmeError {
     #[error("Persistent task exited unexpectedly")]
     PersistentTaskExited,
 
-    #[error("Task exited with an error: {error}")]
-    TaskErrored { error: String },
+    #[error("Task exited with an error: {0}")]
+    TaskErrored(#[source] Box<KolmeError>),
 
-    #[error("Task panicked: {details}")]
-    TaskPanicked { details: String },
+    #[error("Task panicked: {0}")]
+    TaskPanicked(#[source] tokio::task::JoinError),
 
     #[error("Trying to configure a Cosmos contract as a Solana bridge")]
     CosmosBridgeConfiguredAsSolana,
@@ -86,12 +105,13 @@ pub enum KolmeError {
     InvalidFirstBlockMessageType,
 
     #[error("Listener panicked: {details}")]
-    ListenerPanicked { details: String },
+    ListenerPanicked { details: tokio::task::JoinError },
 
-    #[error("Block parent mismatch: actual {actual}, expected {expected}")]
+    #[error("Tried to add block height {height}, but actual parent has block hash {actual_parent} and block specifies {block_parent}")]
     BlockParentMismatch {
-        actual: BlockHash,
-        expected: BlockHash,
+        height: BlockHeight,
+        actual_parent: BlockHash,
+        block_parent: BlockHash,
     },
 
     #[error("Action ID mismatch: expected {expected}, found {found}")]
@@ -153,25 +173,28 @@ pub enum KolmeError {
     #[error("Transaction already included in block {0}")]
     TxAlreadyInBlock(BlockHeight),
 
-    #[error("Failed to serialize Solana payload to Borsh")]
+    #[error("Error serializing Solana bridge payload: {0}")]
     SolanaPayloadSerializationError(#[source] std::io::Error),
 
     #[error("Failed to build Solana initialization transaction")]
     SolanaInitTxBuildFailed(#[source] std::io::Error),
 
     #[cfg(feature = "solana")]
-    #[error("Failed to create Solana pubsub client")]
-    SolanaPubsubError(#[from] Box<solana_client::nonblocking::pubsub_client::PubsubClientError>),
+    #[error(transparent)]
+    SolanaPubsubClientError(
+        #[from] Box<solana_client::nonblocking::pubsub_client::PubsubClientError>,
+    ),
 
     #[error("Bridge program {program} hasn't been initialized yet")]
     UninitializedSolanaBridge { program: String },
 
-    #[error("Error deserializing Solana bridge state: {details}")]
-    InvalidSolanaBridgeState { details: String },
+    #[error("Error deserializing Solana bridge state: {0}")]
+    InvalidSolanaBridgeState(#[source] std::io::Error),
 
-    #[error("Error deserializing Solana bridge message from logs: {details}")]
-    InvalidSolanaBridgeLogMessage { details: String },
+    #[error("Error deserializing Solana bridge message from logs: {0}")]
+    InvalidSolanaBridgeLogMessage(std::io::Error),
 
+    //@@@ MAYBE MOVE THIS INTO TransactionError SINCE IT WAS IN THE ORIGINAL KolmeError
     #[error("Start height {start} is greater than {end} height")]
     InvalidBlockHeight {
         start: BlockHeight,
@@ -181,8 +204,8 @@ pub enum KolmeError {
     #[error(transparent)]
     Transaction(TransactionError),
 
-    #[error("Broadcast receive error")]
-    BroadcastRecv(#[from] tokio::sync::broadcast::error::RecvError),
+    #[error(transparent)]
+    BroadcastRecvError(#[from] tokio::sync::broadcast::error::RecvError),
 
     #[cfg(feature = "cosmwasm")]
     #[error("Address error")]
@@ -205,14 +228,14 @@ pub enum KolmeError {
     #[error("Asset error")]
     Asset(#[from] AssetError),
 
-    #[error("Accounts error")]
-    Accounts(#[from] AccountsError),
+    #[error(transparent)]
+    AccountsError(#[from] AccountsError),
 
     #[error("Validator set error")]
     ValidatorSet(#[from] ValidatorSetError),
 
-    #[error("Public key error")]
-    PublicKey(#[from] PublicKeyError),
+    #[error(transparent)]
+    PublicKeyError(#[from] PublicKeyError),
 
     #[error("Merkle serialization error")]
     MerkleSerial(#[from] MerkleSerialError),
@@ -224,7 +247,7 @@ pub enum KolmeError {
     ReqwestError(#[from] reqwest::Error),
 
     #[error(transparent)]
-    RecvError(#[from] RecvError),
+    WatchRecvError(#[from] tokio::sync::watch::error::RecvError),
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
@@ -278,14 +301,14 @@ pub enum KolmeError {
     #[error("Genesis transaction format invalid")]
     InvalidGenesisTransaction,
 
-    #[error("Failed to verify transaction signature")]
-    SignatureVerificationFailed,
-
+    //@@@ #[error("Failed to verify transaction signature")]
+    //@@@ SignatureVerificationFailed,
     #[error("Overflow while depositing asset {asset_id}, amount == {amount}")]
     OverflowWhileDepositing { asset_id: AssetId, amount: Decimal },
 
     #[error("Insufficient funds while withdrawing asset {asset_id}, amount == {amount}")]
     InsufficientFundsWhileWithdrawing { asset_id: AssetId, amount: Decimal },
+
     #[error("Unsupported asset ID")]
     UnsupportedAssetId,
 
@@ -311,16 +334,19 @@ pub enum KolmeError {
     #[error("Invalid chain version: {0}")]
     InvalidChainVersion(String),
 
+    #[error("Invalid version from response: {0}")]
+    InvalidChainVersionFromResponse(String),
+
     #[error("Chain version {requested} not found, earliest is {earliest}")]
     ChainVersionNotFound { requested: String, earliest: String },
 
-    #[error("Underflow in prev() operation")]
+    #[error("Underflow in prev")]
     UnderflowInPrev,
 
-    #[error("Unable to compare chain versions")]
+    #[error("Not able to compare version")]
     VersionComparisonFailed,
 
-    #[error("Could not find any block with chain version {0}")]
+    #[error("Could not find a block with chain version {0}")]
     BlockNotFoundOnChainVersion(String),
 
     #[error("Could not find first block for chain version {0}")]
@@ -329,11 +355,19 @@ pub enum KolmeError {
     #[error("Could not find last block for chain version {0}")]
     LastBlockNotFound(String),
 
-    #[error("Timeout waiting for block {0}")]
-    BlockTimeout(BlockHeight),
+    #[error("Timeout waiting for block {height}: {error}")]
+    BlockTimeout {
+        height: BlockHeight,
+        #[source]
+        error: tokio::time::error::Elapsed,
+    },
 
-    #[error("Failed to load block {0}")]
-    BlockLoadFailed(BlockHeight),
+    #[error("Failed to load block {height}: {error}")]
+    BlockLoadFailed {
+        height: BlockHeight,
+        #[source]
+        error: Box<KolmeError>,
+    },
 
     #[error("Expected block {height} not found during resync")]
     BlockNotFoundDuringResync { height: BlockHeight },
@@ -344,25 +378,25 @@ pub enum KolmeError {
         actual: BlockHeight,
     },
 
-    #[error("Executed loads mismatch")]
+    #[error("Executed loads mismatch: expected {expected:?}, actual {actual:?}")]
     ExecutedLoads {
         expected: Vec<BlockDataLoad>,
         actual: Vec<BlockDataLoad>,
     },
 
-    #[error("Framework state hash mismatch")]
+    #[error("Framework state hash mismatch: expected {expected}, actual {actual}")]
     FrameworkStateHash {
         expected: Sha256Hash,
         actual: Sha256Hash,
     },
 
-    #[error("App state hash mismatch")]
+    #[error("App state hash mismatch: expected {expected}, actual {actual}")]
     AppStateHash {
         expected: Sha256Hash,
         actual: Sha256Hash,
     },
 
-    #[error("Logs hash mismatch")]
+    #[error("Logs hash mismatch: expected {expected}, actual {actual}")]
     LogsHash {
         expected: Sha256Hash,
         actual: Sha256Hash,
@@ -371,20 +405,21 @@ pub enum KolmeError {
     #[error("Missing merkle layer {hash} in source store")]
     MissingMerkleLayer { hash: Sha256Hash },
 
-    #[error("Missing app merkle layer {hash}")]
-    MissingAppMerkleLayer { hash: Sha256Hash },
+    #[error("App state {app_state} not written to Merkle store")]
+    AppStateNotWritten { app_state: Sha256Hash },
 
     #[error("Unable to mark block {height} as archived: {source}")]
     ArchiveBlockFailed {
         height: BlockHeight,
+        #[source]
         source: KolmeStoreError,
     },
 
-    #[error("Missing framework merkle layer {hash}")]
-    MissingFrameworkMerkleLayer { hash: Sha256Hash },
+    #[error("Framework state {framework_state} not written to Merkle store")]
+    FrameworkStateNotWritten { framework_state: Sha256Hash },
 
-    #[error("Missing logs merkle layer {hash}")]
-    MissingLogMerkleLayer { hash: Sha256Hash },
+    #[error("Logs {logs} not written to Merkle store")]
+    MissingLogMerkleLayer { logs: Sha256Hash },
 
     #[error("Listener pubkey not allowed for this event")]
     InvalidListenerPubkey,
@@ -392,13 +427,15 @@ pub enum KolmeError {
     #[error("Listener has already signed this event")]
     DuplicateListenerSignature,
 
-    #[error("Genesis message must be signed by the processor")]
+    #[error(
+        "Genesis message must be signed by the processor: actual {actual}, expected {expected}"
+    )]
     InvalidGenesisPubkey {
         expected: Box<PublicKey>,
         actual: Box<PublicKey>,
     },
 
-    #[error("Chain code version mismatch: code={code}, chain={chain}")]
+    #[error("Cannot execute transaction {txhash}, current code version is {code}, but chain is running {chain}")]
     VersionMismatch {
         code: String,
         chain: String,
@@ -408,8 +445,13 @@ pub enum KolmeError {
     #[error("Unexpected extra data loads during block validation")]
     ExtraDataLoads,
 
-    #[error("Genesis message does not match expected value")]
-    GenesisMismatch,
+    #[error(
+        "Genesis message does not match expected value: actual {actual:?}, expected {expected:?}"
+    )]
+    GenesisMismatch {
+        expected: Box<GenesisInfo>,
+        actual: Box<GenesisInfo>,
+    },
 
     #[error("Not enough approver signatures: needed {needed}, got {actual}")]
     NotEnoughApprovers { needed: u16, actual: usize },
@@ -417,20 +459,20 @@ pub enum KolmeError {
     #[error("Processor approval already exists for this action")]
     ProcessorAlreadyApproved,
 
-    #[error("Duplicate approver signatures found")]
-    DuplicateApproverEntries,
+    #[error("Duplicate approver signatures found: actual {actual}, expected {expected}")]
+    DuplicateApproverEntries { actual: usize, expected: usize },
 
     #[error("Cannot approve bridge action with a non-approver pubkey: {pubkey}")]
     NonApproverSignature { pubkey: Box<PublicKey> },
 
-    #[error("Bridge action already approved with pubkey {pubkey}")]
+    #[error("Cannot approve bridge action ID {action_id} for chain {chain} with already-used public key {pubkey}")]
     DuplicateApproverSignature {
         action_id: BridgeActionId,
         chain: ExternalChain,
         pubkey: Box<PublicKey>,
     },
 
-    #[error("Processor signature invalid")]
+    #[error("Processor signature invalid: expected {expected}, actual {actual}")]
     InvalidProcessorSignature {
         expected: Box<PublicKey>,
         actual: Box<PublicKey>,
@@ -439,28 +481,23 @@ pub enum KolmeError {
     #[error("Approver signature invalid: signer {pubkey}")]
     InvalidApproverSignature { pubkey: Box<PublicKey> },
 
-    #[error("Mismatch in prior data loads")]
-    DataLoadMismatch,
+    #[error("Incorrect number of data loads")]
+    IncorrectDataLoads,
 
-    #[error("Cannot remove signing key from account")]
+    #[error("Cannot remove public key {key} from account {account} with a transaction signed by the same key")]
     CannotRemoveSigningKey {
         key: Box<PublicKey>,
         account: AccountId,
     },
 
-    #[error("Invalid data load request: expected {expected}, got {actual}. Parse expected: {prev_req}, parse actual: {req}")]
-    InvalidDataLoadRequest {
-        expected: String,
-        actual: String,
-        prev_req: String,
-        req: String,
-    },
+    #[error("Invalid data load request: expected {expected}, got {actual}")]
+    InvalidDataLoadRequest { expected: String, actual: String },
 
     #[error(transparent)]
     Data(#[from] KolmeDataError),
 
     #[error("Cannot approve missing bridge action {action_id} for chain {chain}")]
-    MissingBridgeAction {
+    CannotApproveMissingBridgeAction {
         chain: ExternalChain,
         action_id: BridgeActionId,
     },
@@ -477,29 +514,48 @@ pub enum KolmeError {
     #[error("Specified an unknown proposal ID {admin_proposal_id}")]
     UnknownAdminProposalId { admin_proposal_id: AdminProposalId },
 
-    #[error("Mismatched bridge event")]
-    MismatchedBridgeEvent,
+    #[error("Mismatched bridge event: actual {actual:?}, expected {expected:?}")]
+    MismatchedBridgeEvent {
+        actual: Box<BridgeEvent>,
+        expected: Box<BridgeEvent>,
+    },
 
-    #[error("Unexpected bridge event ID")]
-    UnexpectedBridgeEventId,
+    #[error("Unexpected bridge event ID: actual {actual}, expected {expected}")]
+    UnexpectedBridgeEventId {
+        actual: BridgeEventId,
+        expected: BridgeEventId,
+    },
 
-    #[error("Processor mismatch between genesis info and on-chain state")]
-    ProcessorMismatch,
+    #[error("Processor mismatch between genesis info and on-chain state: expected {expected}, actual {actual}")]
+    ProcessorMismatch {
+        expected: Box<PublicKey>,
+        actual: Box<PublicKey>,
+    },
 
-    #[error("Listeners mismatch between genesis info and on-chain state")]
-    ListenersMismatch,
+    #[error("Listeners mismatch between genesis info and on-chain state: expected {expected:?}, actual {actual:?}")]
+    ListenersMismatch {
+        expected: BTreeSet<PublicKey>,
+        actual: BTreeSet<PublicKey>,
+    },
 
-    #[error("Approvers mismatch between genesis info and on-chain state")]
-    ApproversMismatch,
+    #[error("Approvers mismatch between genesis info and on-chain state: expected {expected:?}, actual {actual:?}")]
+    ApproversMismatch {
+        expected: BTreeSet<PublicKey>,
+        actual: BTreeSet<PublicKey>,
+    },
 
-    #[error("Needed listeners mismatch between genesis info and on-chain state")]
-    NeededListenersMismatch,
+    #[error("Needed listeners mismatch between genesis info and on-chain state: expected {expected}, actual {actual}")]
+    NeededListenersMismatch { expected: u16, actual: u16 },
 
-    #[error("Needed approvers mismatch between genesis info and on-chain state")]
-    NeededApproversMismatch,
+    #[error("Needed approvers mismatch between genesis info and on-chain state: expected {expected}, actual {actual}")]
+    NeededApproversMismatch { expected: u16, actual: u16 },
 
-    #[error("Code ID mismatch: expected {expected}, actual {actual}")]
-    CodeIdMismatch { expected: u64, actual: u64 },
+    #[error("Code ID mismatch, expected {expected}, but {contract} has {actual}")]
+    CodeIdMismatch {
+        expected: u64,
+        actual: u64,
+        contract: String,
+    },
 
     #[cfg(feature = "cosmwasm")]
     #[error(transparent)]
@@ -521,7 +577,7 @@ pub enum KolmeError {
     InvalidEthereumBridgeContractAddress(String),
 
     #[cfg(feature = "ethereum")]
-    #[error("Invalid default Ethereum RPC URL for {chain:?}: #{error}")]
+    #[error("Invalid default Ethereum RPC URL for {chain:?}: {error}")]
     InvalidDefaultEthereumRpcUrl {
         chain: EthereumChain,
         #[source]
@@ -552,6 +608,10 @@ pub enum KolmeError {
         alloy::providers::transport::RpcError<alloy::providers::transport::TransportErrorKind>,
     ),
 
+    #[error("Unable to get latest archived block: {0}")]
+    UnableToGetLatestArchivedBlock(#[source] KolmeStoreError),
+
+    //@@@ WHAT STILL USES THIS?
     #[error("{0}")]
     Other(String),
 }
@@ -576,6 +636,7 @@ impl<T> From<ProposeTransactionError<T>> for KolmeError {
     }
 }
 
+// @@@ MAYBE RENAME TO KolmeTransactionError?
 #[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
 /// Errors that need to be serialized on order to report through Gossip.
 pub enum TransactionError {

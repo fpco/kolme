@@ -29,7 +29,7 @@ impl EthereumBridgeEvent {
             FundsReceived::SIGNATURE_HASH => Some(Self::FundsReceived(
                 log.log_decode()
                     .map(|decoded| decoded.inner.data)
-                    .map_err(KolmeError::FailedToDecodeFundsReceived)?, //@@@ NEED map_err?
+                    .map_err(KolmeError::FailedToDecodeFundsReceived)?,
             )),
             _ => None,
         })

@@ -1,5 +1,6 @@
 use crate::*;
 
+//@@@ MERGE INTO KolmeError?
 #[derive(thiserror::Error, Debug)]
 pub enum AccountsError {
     #[error("Insufficient balance for account {account_id}, asset {asset_id}. Requested: {requested}. Available: {available}.")]
@@ -21,13 +22,10 @@ pub enum AccountsError {
         asset_id: AssetId,
         to_burn: Decimal,
     },
-
     #[error("Pubkey {key} already in use")]
     PubkeyAlreadyInUse { key: Box<PublicKey> },
-
     #[error("Wallet {wallet} already in use")]
     WalletAlreadyInUse { wallet: Wallet },
-
     #[error(
         "Cannot remove pubkey {key} from account {id}, it's actually connected to {actual_id}"
     )]
@@ -36,7 +34,6 @@ pub enum AccountsError {
         id: AccountId,
         actual_id: AccountId,
     },
-
     #[error(
         "Cannot remove wallet {wallet} from account {id}, it's actually connected to {actual_id}"
     )]
@@ -45,7 +42,6 @@ pub enum AccountsError {
         id: AccountId,
         actual_id: AccountId,
     },
-
     #[error(
         "New account for pubkey {pubkey} expects an initial nonce of {expected}, received {actual}"
     )]
@@ -54,13 +50,10 @@ pub enum AccountsError {
         expected: AccountNonce,
         actual: AccountNonce,
     },
-
     #[error("Account {account_id} not found")]
     AccountNotFound { account_id: AccountId },
-
-    #[error("Pubkey {key} not found")]
-    PubkeyNotFound { key: Box<PublicKey> },
-
+    #[error("Cannot remove unknown pubkey {key}")]
+    CannotRemoveUnknownPubkey { key: Box<PublicKey> },
     #[error("Wallet {wallet} not found")]
     WalletNotFound { wallet: Wallet },
 }
@@ -277,7 +270,7 @@ impl Accounts {
         let (_, actual_id) = self
             .pubkeys
             .remove(&key)
-            .ok_or(AccountsError::PubkeyNotFound { key: Box::new(key) })?;
+            .ok_or(AccountsError::CannotRemoveUnknownPubkey { key: Box::new(key) })?;
         if id != actual_id {
             return Err(AccountsError::PubkeyAccountMismatch {
                 key: Box::new(key),
@@ -363,11 +356,13 @@ impl Accounts {
                 self.pubkeys.insert(pubkey, account_id);
                 account.pubkeys.insert(pubkey);
                 if nonce != account.next_nonce {
-                    return Err(KolmeError::Accounts(AccountsError::InvalidInitialNonce {
-                        pubkey: Box::new(pubkey),
-                        expected: account.next_nonce,
-                        actual: nonce,
-                    }));
+                    return Err(KolmeError::AccountsError(
+                        AccountsError::InvalidInitialNonce {
+                            pubkey: Box::new(pubkey),
+                            expected: account.next_nonce,
+                            actual: nonce,
+                        },
+                    ));
                 }
                 account.next_nonce = account.next_nonce.next();
                 Ok(account_id)

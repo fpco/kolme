@@ -86,11 +86,10 @@ impl<App: KolmeApp> KolmeRead<App> {
         if self.get_next_height().is_start() {
             tx.ensure_is_genesis()?;
             let expected = self.get_processor_pubkey();
-            let actual = tx.pubkey;
-            if actual != expected {
+            if tx.pubkey != expected {
                 return Err(KolmeError::InvalidGenesisPubkey {
                     expected: Box::new(expected),
-                    actual: Box::new(actual),
+                    actual: Box::new(tx.pubkey),
                 });
             }
         } else {
@@ -193,7 +192,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             Message::Genesis(actual) => {
                 let expected = app.genesis_info();
                 if expected != actual {
-                    return Err(KolmeError::GenesisMismatch);
+                    return Err(KolmeError::GenesisMismatch {
+                        expected: Box::new(expected.clone()),
+                        actual: Box::new(actual.clone()),
+                    });
                 }
             }
             Message::App(msg) => {
@@ -238,9 +240,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .listeners
             .contains(&self.pubkey)
         {
-            return Err(KolmeError::NotInValidatorSet {
-                signer: Box::new(self.pubkey),
-                role: ValidatorRole::Listener,
+            return Err(KolmeError::MessagePubkeyNotInValidatorSet {
+                event_id,
+                chain,
+                pubkey: Box::new(self.pubkey),
+                listener_set: self.framework_state.get_validator_set().listeners.clone(),
             });
         }
 
@@ -249,13 +253,19 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let attestations = match state.pending_events.get_mut(&event_id) {
             Some(pending) => {
                 if pending.event != *event {
-                    return Err(KolmeError::MismatchedBridgeEvent);
+                    return Err(KolmeError::MismatchedBridgeEvent {
+                        actual: Box::new(pending.event.clone()),
+                        expected: Box::new(event.clone()),
+                    });
                 }
                 &mut pending.attestations
             }
             None => {
                 if event_id != state.next_event_id {
-                    return Err(KolmeError::UnexpectedBridgeEventId);
+                    return Err(KolmeError::UnexpectedBridgeEventId {
+                        actual: event_id,
+                        expected: state.next_event_id,
+                    });
                 }
                 state.next_event_id = event_id.next();
                 state.pending_events.insert(
@@ -371,10 +381,11 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         };
 
                         let amount = asset_config.to_decimal(*amount)?;
-                        self.framework_state
-                            .accounts
-                            .mint(account_id, asset_config.asset_id, amount)
-                            .map_err(KolmeError::Accounts)?;
+                        self.framework_state.accounts.mint(
+                            account_id,
+                            asset_config.asset_id,
+                            amount,
+                        )?;
                         self.framework_state
                             .chains
                             .get_mut(chain)?
@@ -396,18 +407,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         .keys()
                         .next()
                         .ok_or(KolmeError::NoPendingActionsToReport)?;
-
                     if *next_action_id != action_id {
                         return Err(KolmeError::ActionIdMismatch {
                             expected: *next_action_id,
                             found: action_id,
                         });
                     }
-
-                    let (old_id, _old) = actions
-                        .remove(&action_id)
-                        .expect("pending actions must contain the action_id being completed");
-
+                    let (old_id, _old) = actions.remove(&action_id).unwrap();
                     if old_id != action_id {
                         return Err(KolmeError::ActionIdMismatch {
                             expected: old_id,
@@ -433,7 +439,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .get_mut(chain)?
             .pending_actions
             .get_mut(&action_id)
-            .ok_or(KolmeError::MissingBridgeAction { chain, action_id })?;
+            .ok_or(KolmeError::CannotApproveMissingBridgeAction { chain, action_id })?;
         let key = signature.validate(action.payload.as_bytes())?;
         // Using config.as_ref() instead of framework_state.get_config to work around
         // a borrow conflict with the mutable borrow above
@@ -517,7 +523,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             })
             .collect::<Result<BTreeSet<_>, _>>()?;
         if approvers_checked.len() != approvers.len() {
-            return Err(KolmeError::DuplicateApproverEntries);
+            return Err(KolmeError::DuplicateApproverEntries {
+                actual: approvers_checked.len(),
+                expected: approvers.len(),
+            });
         }
 
         action.processor = Some(*processor);
@@ -637,8 +646,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let (amount_dec, amount_u128) = config.to_u128(amount)?;
         self.framework_state
             .accounts
-            .burn(source, asset_id, amount_dec)
-            .map_err(KolmeError::Accounts)?;
+            .burn(source, asset_id, amount_dec)?;
         self.framework_state
             .chains
             .get_mut(chain)?
@@ -679,8 +687,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     ) -> Result<(), KolmeError> {
         self.framework_state
             .accounts
-            .mint(recipient, asset_id, amount)
-            .map_err(KolmeError::Accounts)?;
+            .mint(recipient, asset_id, amount)?;
         Ok(())
     }
 
@@ -695,8 +702,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
     ) -> Result<(), KolmeError> {
         self.framework_state
             .accounts
-            .burn(owner, asset_id, amount)
-            .map_err(KolmeError::Accounts)?;
+            .burn(owner, asset_id, amount)?;
         Ok(())
     }
 
@@ -708,15 +714,13 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let res = match &mut self.block_data_handling {
             BlockDataHandling::PriorData { loads, validation } => {
                 let BlockDataLoad { request, response } =
-                    loads.pop_front().ok_or(KolmeError::DataLoadMismatch)?;
+                    loads.pop_front().ok_or(KolmeError::IncorrectDataLoads)?;
                 let prev_req = serde_json::from_str::<Req>(&request)?;
                 let prev_res = serde_json::from_str(&response)?;
                 if prev_req != req {
                     return Err(KolmeError::InvalidDataLoadRequest {
-                        expected: request,
-                        actual: request_str.clone(),
-                        prev_req: serde_json::to_string(&prev_req)?,
-                        req: serde_json::to_string(&req)?,
+                        expected: serde_json::to_string(&prev_req)?,
+                        actual: serde_json::to_string(&req)?,
                     });
                 }
                 match validation {
@@ -764,8 +768,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             AuthMessage::AddPublicKey { key } => {
                 self.framework_state
                     .accounts
-                    .add_pubkey_to_account_error_overlap(self.get_sender_id(), *key)
-                    .map_err(KolmeError::Accounts)?;
+                    .add_pubkey_to_account_error_overlap(self.get_sender_id(), *key)?;
             }
             AuthMessage::RemovePublicKey { key } => {
                 if key == &self.signing_key {
@@ -777,20 +780,17 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
                 self.framework_state
                     .accounts
-                    .remove_pubkey_from_account(self.get_sender_id(), *key)
-                    .map_err(KolmeError::Accounts)?;
+                    .remove_pubkey_from_account(self.get_sender_id(), *key)?;
             }
             AuthMessage::AddWallet { wallet } => {
                 self.framework_state
                     .accounts
-                    .add_wallet_to_account(self.get_sender_id(), wallet)
-                    .map_err(KolmeError::Accounts)?;
+                    .add_wallet_to_account(self.get_sender_id(), wallet)?;
             }
             AuthMessage::RemoveWallet { wallet } => {
                 self.framework_state
                     .accounts
-                    .remove_wallet_from_account(self.get_sender_id(), wallet)
-                    .map_err(KolmeError::Accounts)?;
+                    .remove_wallet_from_account(self.get_sender_id(), wallet)?;
             }
         }
         Ok(())
@@ -801,7 +801,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             AdminMessage::SelfReplace(self_replace) => {
                 let signer = self_replace.verify_signature()?;
                 if signer != self.pubkey {
-                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                    return Err(KolmeError::InvalidSelfReplaceSigner {
+                        expected: Box::new(self.pubkey),
+                        actual: Box::new(signer),
+                    });
                 }
                 fn set_helper(
                     validator_set: &mut ValidatorSet,
@@ -815,8 +818,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         &mut validator_set.listeners
                     };
                     if !set.remove(&sender) {
-                        return Err(KolmeError::NotInValidatorSet {
+                        return Err(KolmeError::SigningKeyNotInValidatorSet {
                             signer: Box::new(sender),
+                            //@@@ ADD A METHOD TO ValidatorRole TO CREATE FROM BOOLEAN AND FIND PLACES TO USE IT
                             role: if is_approver {
                                 ValidatorRole::Approver
                             } else {
@@ -835,7 +839,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                         if config.processor == signer {
                             config.processor = replacement;
                         } else {
-                            return Err(KolmeError::NotProcessor {
+                            return Err(KolmeError::NotCurrentProcessor {
                                 signer: Box::new(self.pubkey),
                             });
                         }
@@ -853,7 +857,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             AdminMessage::NewSet { validator_set } => {
                 let signer = validator_set.verify_signature()?;
                 if signer != self.pubkey {
-                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                    return Err(KolmeError::InvalidSelfReplaceSigner {
+                        expected: Box::new(self.pubkey),
+                        actual: Box::new(signer),
+                    });
                 }
                 self.framework_state
                     .validator_set
@@ -870,7 +877,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             AdminMessage::MigrateContract(migrate) => {
                 let signer = migrate.verify_signature()?;
                 if signer != self.pubkey {
-                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                    return Err(KolmeError::InvalidSelfReplaceSigner {
+                        expected: Box::new(self.pubkey),
+                        actual: Box::new(signer),
+                    });
                 }
                 self.framework_state
                     .validator_set
@@ -886,7 +896,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             AdminMessage::Upgrade(upgrade) => {
                 let signer = upgrade.verify_signature()?;
                 if signer != self.pubkey {
-                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                    return Err(KolmeError::InvalidSelfReplaceSigner {
+                        expected: Box::new(self.pubkey),
+                        actual: Box::new(signer),
+                    });
                 }
                 self.framework_state
                     .validator_set
@@ -917,7 +930,10 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
                 let pubkey = signature.validate(pending.payload.as_bytes())?;
                 if pubkey != self.pubkey {
-                    return Err(KolmeError::InvalidSelfReplaceSigner);
+                    return Err(KolmeError::InvalidSelfReplaceSigner {
+                        expected: Box::new(self.pubkey),
+                        actual: Box::new(pubkey),
+                    });
                 }
 
                 let old_value = pending.approvals.insert(pubkey, *signature);

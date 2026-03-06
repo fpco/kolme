@@ -140,12 +140,8 @@ impl TestTasks {
                             None
                         }
                     }
-                    Ok(Err(e)) => Some(KolmeError::TaskErrored {
-                        error: e.to_string(),
-                    }),
-                    Err(e) => Some(KolmeError::TaskPanicked {
-                        details: e.to_string(),
-                    }),
+                    Ok(Err(e)) => Some(KolmeError::TaskErrored(Box::new(e))),
+                    Err(e) => Some(KolmeError::TaskPanicked(e)),
                 }
             } else {
                 None

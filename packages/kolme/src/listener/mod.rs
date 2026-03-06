@@ -3,10 +3,11 @@ mod cosmos;
 #[cfg(feature = "ethereum")]
 mod ethereum;
 #[cfg(feature = "solana")]
+//@@@ WHY pub?
 pub mod solana;
 
 use crate::*;
-use futures_util::TryFutureExt;
+use futures_util::TryFutureExt as _; //@@@ NEED?
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {
@@ -105,11 +106,9 @@ impl<App: KolmeApp> Listener<App> {
 
         while let Some(res) = set.join_next().await {
             match res {
-                Err(e) => {
+                Err(details) => {
                     set.abort_all();
-                    return Err(KolmeError::ListenerPanicked {
-                        details: e.to_string(),
-                    });
+                    return Err(KolmeError::ListenerPanicked { details });
                 }
                 Ok(Err(e)) => return Err(e),
                 Ok(Ok(())) => (),

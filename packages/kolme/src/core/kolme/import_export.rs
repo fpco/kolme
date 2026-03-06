@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 
 use crate::*;
 
+//@@@ MOVE INTO KolmeError?
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeImportExportError {
     #[error("Child hash {child} was not previously written")]
@@ -34,11 +35,11 @@ pub enum KolmeImportExportError {
     #[error("Import blocks failed, found unexpected byte {byte}")]
     UnexpectedByte { byte: u8 },
 
-    #[error("Payload is too large")]
-    PayloadTooLarge,
+    #[error("Payload is too large: {0}")]
+    PayloadTooLarge(#[source] std::num::TryFromIntError),
 
-    #[error("Too many children")]
-    TooManyChildren,
+    #[error("Too many children: {0}")]
+    TooManyChildren(#[source] std::num::TryFromIntError),
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -148,14 +149,12 @@ impl<App: KolmeApp> Kolme<App> {
                         let mut buff = [0u8; 32];
                         src.read_exact(&mut buff).await?;
                         let child = Sha256Hash::from_array(buff);
-
                         if !hashes.contains(&child) {
                             return Err(KolmeImportExportError::ChildHashNotPreviouslyWritten {
                                 child,
                             }
                             .into());
                         }
-
                         let parent = payload.hash();
                         if !self.has_merkle_hash(child).await? {
                             return Err(KolmeImportExportError::MissingMerkleHashInStore {
@@ -199,12 +198,12 @@ async fn write_layer(
 ) -> Result<(), KolmeError> {
     dest.write_u8(0).await?;
     dest.write_u32(
-        u32::try_from(layer.payload.len()).map_err(|_| KolmeImportExportError::PayloadTooLarge)?,
+        u32::try_from(layer.payload.len()).map_err(KolmeImportExportError::PayloadTooLarge)?,
     )
     .await?;
     dest.write_all(layer.payload.bytes()).await?;
     dest.write_u32(
-        u32::try_from(layer.children.len()).map_err(|_| KolmeImportExportError::TooManyChildren)?,
+        u32::try_from(layer.children.len()).map_err(KolmeImportExportError::TooManyChildren)?,
     )
     .await?;
     for child in &layer.children {

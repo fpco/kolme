@@ -16,6 +16,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use super::GossipMessage;
 use crate::*;
 
+//@@@ WORTH ADDING THIS ERROR TYPE?
 #[derive(thiserror::Error, Debug)]
 enum WebsocketError {
     #[error(transparent)]

@@ -34,8 +34,9 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
     ) -> impl std::future::Future<Output = Result<(), KolmeError>> + Send;
 }
 
-#[derive(thiserror::Error, Debug)]
+//@@@ MOVE TO TOP?
 //@@@ DO WE NEED THIS ERROR TYPE?  PROBABLY KEEP, BUT MAYBE RENAME TO KolmeDataRequestError (AND SIMILAR FOR ITS KolmeError VARIANT)
+#[derive(thiserror::Error, Debug)]
 pub enum KolmeDataError {
     #[error("Data validation failed")]
     ValidationFailed,
