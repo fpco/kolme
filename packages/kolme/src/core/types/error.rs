@@ -562,7 +562,7 @@ pub enum KolmeError {
     CosmosError(#[from] Box<cosmos::Error>),
 
     #[cfg(feature = "ethereum")]
-    #[error("Failed to decode FundsReceived(address,uint256): {0}")]
+    #[error("Failed to decode FundsReceived: {0}")]
     FailedToDecodeFundsReceived(#[source] alloy::sol_types::Error),
 
     #[cfg(feature = "ethereum")]

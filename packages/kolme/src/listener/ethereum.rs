@@ -2,7 +2,7 @@ use crate::*;
 use alloy::{
     contract::{ContractInstance, Interface},
     json_abi::JsonAbi,
-    primitives::{Address, U256},
+    primitives::{Address, B256, U256},
     providers::Provider,
     rpc::types::eth::{BlockNumberOrTag, Filter, Log},
     sol,
@@ -13,15 +13,26 @@ use super::get_next_bridge_event_id;
 
 const ETH_NATIVE_DENOM: &str = "eth";
 
-sol! { event FundsReceived(address indexed sender, uint256 amount); }
+sol! { event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount); }
 
 enum EthereumBridgeEvent {
     FundsReceived(FundsReceived),
 }
 
 impl EthereumBridgeEvent {
-    fn from_log(log: &Log) -> Result<Option<Self>, KolmeError> {
+    fn event_id(&self) -> BridgeEventId {
+        match self {
+            Self::FundsReceived(FundsReceived { eventId, .. }) => BridgeEventId(*eventId),
+        }
+    }
+
+    fn from_log(log: &Log) -> Result<(u64, Option<u64>), KolmeError> {
         let Some(topic) = log.topic0().copied() else {
+            // having `topic0` as None would be unusual given our filters
+            tracing::debug!(
+                "Ignoring Ethereum log without topic0 at address {:#x}",
+                log.address()
+            );
             return Ok(None);
         };
 
@@ -31,7 +42,13 @@ impl EthereumBridgeEvent {
                     .map(|decoded| decoded.inner.data)
                     .map_err(KolmeError::FailedToDecodeFundsReceived)?,
             )),
-            _ => None,
+            _ => {
+                tracing::debug!(
+                    "Ignoring Ethereum log with unsupported topic {topic:#x} at address {:#x}",
+                    log.address()
+                );
+                None
+            }
         })
     }
 
@@ -41,7 +58,7 @@ impl EthereumBridgeEvent {
         event_id: BridgeEventId,
     ) -> Result<Message<AppMessage>, KolmeError> {
         let event = match self {
-            Self::FundsReceived(FundsReceived { sender, amount }) => BridgeEvent::Regular {
+            Self::FundsReceived(FundsReceived { sender, amount, .. }) => BridgeEvent::Regular {
                 wallet: Wallet(format!("{:#x}", sender)),
                 funds: vec![BridgedAssetAmount {
                     denom: ETH_NATIVE_DENOM.to_owned(),
@@ -148,13 +165,9 @@ async fn get_resume_cursor<P: Provider>(
     contract: &ContractInstance<P>,
     next_bridge_event_id: BridgeEventId,
 ) -> Result<(u64, Option<u64>), KolmeError> {
-    // On listener connecting, we need to find a point of synchronization between
-    // the sidechain and main blockchain (Ethereum).
-    // The simplest way is to scan all the blocks starting from genesis - thats the way
-    //   how it works now.
-    // CAUTION: being this way it is not ready for mainnet!
-    // A bit more optimal would be to scan since contract deployment.
-    // But best option would be to store the last block on the sidechain.
+    // On listener startup, we find sync point by scanning from genesis while
+    // filtering by contract address and indexed event ID.
+    // TODO: Switch from "since genesis" to "since contract deployment block".
     let latest = contract.provider().get_block_number().await?;
 
     if next_bridge_event_id == BridgeEventId::start() {
@@ -164,22 +177,43 @@ async fn get_resume_cursor<P: Provider>(
     let filter = Filter::new()
         .from_block(BlockNumberOrTag::Earliest)
         .to_block(latest)
-        .address(*contract.address());
+        .address(*contract.address())
+        .event_signature(FundsReceived::SIGNATURE_HASH)
+        .topic1(event_id_topic(next_bridge_event_id));
 
-    let mut chain_event_id = BridgeEventId::start();
     for log in contract.provider().get_logs(&filter).await? {
-        if log.removed || EthereumBridgeEvent::from_log(&log)?.is_none() {
+        if log.removed {
             continue;
         }
 
-        if chain_event_id == next_bridge_event_id {
-            return Ok((log.block_number.unwrap_or(0), log.log_index));
-        }
+        let Some(event) = EthereumBridgeEvent::from_log(&log)? else {
+            continue;
+        };
 
-        chain_event_id = chain_event_id.next();
+        anyhow::ensure!(
+            event.event_id() == next_bridge_event_id,
+            "Ethereum filtered resume query returned mismatched event ID. Expected {}, got {}",
+            next_bridge_event_id,
+            event.event_id()
+        );
+        return Ok((log.block_number.unwrap_or(0), log.log_index));
     }
 
+    tracing::warn!(
+        "Ethereum resume scan did not find expected event ID {} on contract {:#x}; scanned blocks 0..={} and will resume from latest+1",
+        next_bridge_event_id,
+        contract.address(),
+        latest
+    );
     Ok((latest.saturating_add(1), None))
+}
+
+/// Converts kolme's event id (u64) into 32-byte Ethereum topic value for log filtering
+fn event_id_topic(event_id: BridgeEventId) -> B256 {
+    let BridgeEventId(event_id) = event_id;
+    let mut bytes = [0u8; 32];
+    bytes[24..].copy_from_slice(&event_id.to_be_bytes());
+    B256::from(bytes)
 }
 
 async fn process_event<App: KolmeApp>(
@@ -192,8 +226,15 @@ async fn process_event<App: KolmeApp>(
     let Some(event) = EthereumBridgeEvent::from_log(log)? else {
         return Ok(());
     };
+    let actual_event_id = event.event_id();
+    anyhow::ensure!(
+        actual_event_id == *next_bridge_event_id,
+        "Unexpected Ethereum bridge event ID. Expected {}, got {}",
+        *next_bridge_event_id,
+        actual_event_id
+    );
 
-    let message = event.to_kolme_message::<App::Message>(chain, *next_bridge_event_id)?;
+    let message = event.to_kolme_message::<App::Message>(chain, actual_event_id)?;
     kolme
         .sign_propose_await_transaction(secret, vec![message])
         .await?;
@@ -218,28 +259,36 @@ mod tests {
     #[test]
     fn funds_received_topic_hash_matches_constant() {
         const FUNDS_RECEIVED_EVENT_TOPIC0_HEX: &str =
-            "0x8e47b87b0ef542cdfa1659c551d88bad38aa7f452d2bbb349ab7530dfec8be8f";
+            "0x4ade6a296f99f38f840a2a880cc9a27cec9ee56ce8d56cd80d3350e3419ed44c";
         let expected = FUNDS_RECEIVED_EVENT_TOPIC0_HEX.parse::<B256>().unwrap();
         assert_eq!(FundsReceived::SIGNATURE_HASH, expected);
     }
 
     #[test]
-    fn decode_funds_received_log_extracts_sender_and_amount() {
+    fn decode_funds_received_log_fields() {
         use alloy::primitives::{Bytes, Log as PrimitiveLog, LogData};
 
         let sender = "0x1111111111111111111111111111111111111111"
             .parse::<Address>()
             .unwrap();
 
+        let event_id = 7u64;
+        let mut event_id_topic = [0u8; 32];
+        event_id_topic[24..].copy_from_slice(&event_id.to_be_bytes());
+
         let mut sender_topic = [0u8; 32];
         sender_topic[12..].copy_from_slice(sender.as_slice());
 
         let amount = U256::from(42u64);
         let mut data = [0u8; 32];
-        amount.to_be_bytes::<32>().clone_into(&mut data);
+        data[0..32].copy_from_slice(&amount.to_be_bytes::<32>());
 
         let log_data = LogData::new(
-            vec![FundsReceived::SIGNATURE_HASH, B256::from(sender_topic)],
+            vec![
+                FundsReceived::SIGNATURE_HASH,
+                B256::from(event_id_topic),
+                B256::from(sender_topic),
+            ],
             Bytes::copy_from_slice(&data),
         )
         .unwrap();
@@ -253,6 +302,7 @@ mod tests {
 
         let decoded = log.log_decode::<FundsReceived>().unwrap().inner.data;
 
+        assert_eq!(decoded.eventId, event_id);
         assert_eq!(decoded.sender, sender);
         assert_eq!(decoded.amount, amount);
     }

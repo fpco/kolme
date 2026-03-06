@@ -5,6 +5,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::{DynProvider, Provider, ProviderBuilder},
     rpc::types::eth::TransactionRequest,
+    sol,
 };
 use anyhow::Result;
 use kolme::*;
@@ -13,11 +14,33 @@ use testtasks::TestTasks;
 
 // for actual addresses/keys and ways to renew them, check contracts/ethereum/e2e/README.md
 const TEST_BRIDGE_ADDRESS: &str = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-const TEST_ADMIN_ADDRESS: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
-const TEST_ADMIN_PRIVATE_KEY: &str =
+const TEST_ANVIL_ACCOUNT_0_ADDRESS: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+const TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
+const TEST_PROCESSOR_KEY_HEX: &str =
+    "038318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75";
+const TEST_APPROVER_KEY_HEX: &str =
+    "02ba5734d8f7091719471e7f7ed6b9df170dc70cc661ca05e688601ad984f068b0";
+
+sol! {
+    #[sol(rpc)]
+    interface IBridgeIntegration {
+        function get_config()
+            external
+            view
+            returns (
+                bytes processor,
+                bytes[] listeners,
+                uint16 neededListeners,
+                bytes[] approvers,
+                uint16 neededApprovers,
+                uint64 configNextEventId,
+                uint64 configNextActionId
+            );
+    }
+}
 
 #[derive(Clone)]
 struct EthereumBridgeTestApp {
@@ -116,6 +139,68 @@ async fn ethereum_listener_ingests_local_deposit() {
     TestTasks::start(ethereum_listener_ingests_local_deposit_inner, ()).await;
 }
 
+#[tokio::test]
+async fn ethereum_bridge_get_config_is_readable() {
+    let provider = anvil_provider().expect("failed to build anvil provider");
+
+    assert_anvil_identifiers_match(&provider)
+        .await
+        .expect("local anvil setup does not match expected deterministic identifiers");
+
+    let bridge: Address = TEST_BRIDGE_ADDRESS
+        .parse()
+        .expect("hardcoded bridge address is invalid");
+    let contract = IBridgeIntegration::new(bridge, provider.clone());
+    let cfg = contract
+        .get_config()
+        .call()
+        .await
+        .expect("bridge get_config call failed");
+
+    assert_eq!(cfg.processor.len(), 33, "invalid processor key length");
+    assert_eq!(
+        hex::encode(cfg.processor.as_ref()),
+        TEST_PROCESSOR_KEY_HEX,
+        "unexpected processor key in bridge config"
+    );
+    assert_eq!(
+        cfg.listeners.len(),
+        1,
+        "unexpected number of listeners in bridge config"
+    );
+    assert_eq!(
+        hex::encode(cfg.listeners[0].as_ref()),
+        TEST_PROCESSOR_KEY_HEX,
+        "unexpected listener key in bridge config"
+    );
+    assert_eq!(
+        cfg.approvers.len(),
+        1,
+        "unexpected number of approvers in bridge config"
+    );
+    assert_eq!(
+        hex::encode(cfg.approvers[0].as_ref()),
+        TEST_APPROVER_KEY_HEX,
+        "unexpected approver key in bridge config"
+    );
+    assert_eq!(
+        cfg.neededListeners, 1,
+        "unexpected listener quorum in bridge config"
+    );
+    assert_eq!(
+        cfg.neededApprovers, 1,
+        "unexpected approver quorum in bridge config"
+    );
+    assert_eq!(
+        cfg.configNextEventId, 0,
+        "unexpected initial value for configNextEventId"
+    );
+    assert_eq!(
+        cfg.configNextActionId, 0,
+        "unexpected initial value for configNextActionId"
+    );
+}
+
 async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, (): ()) {
     let validator = SecretKey::random();
     let kolme = Kolme::new(
@@ -146,9 +231,9 @@ async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, ():
 
     let expected_wallet = Wallet(format!(
         "{:#x}",
-        TEST_ADMIN_ADDRESS
+        TEST_ANVIL_ACCOUNT_0_ADDRESS
             .parse::<Address>()
-            .expect("hardcoded admin address is invalid")
+            .expect("hardcoded Anvil account 0 address is invalid")
     ));
     let kolme_for_waiter = kolme.clone();
     let wallet_for_waiter = expected_wallet.clone();
@@ -164,7 +249,7 @@ async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, ():
 
     let tx_hash = send_eth(
         &provider,
-        TEST_ADMIN_ADDRESS,
+        TEST_ANVIL_ACCOUNT_0_ADDRESS,
         TEST_BRIDGE_ADDRESS,
         test_tx_amount,
     )
@@ -178,7 +263,7 @@ async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, ():
         .expect("failed while waiting for specific Ethereum listener message");
 
     tracing::info!(
-        "Ethereum deposit ingested by Kolme listener. sender={TEST_ADMIN_ADDRESS}, tx={tx_hash}, contract={TEST_BRIDGE_ADDRESS}, amount_wei={test_tx_amount}"
+        "Ethereum deposit ingested by Kolme listener. sender={TEST_ANVIL_ACCOUNT_0_ADDRESS}, tx={tx_hash}, contract={TEST_BRIDGE_ADDRESS}, amount_wei={test_tx_amount}"
     );
 }
 
@@ -239,18 +324,19 @@ fn anvil_provider() -> Result<DynProvider> {
 
 async fn assert_anvil_identifiers_match(provider: &DynProvider) -> Result<()> {
     anyhow::ensure!(
-        TEST_ADMIN_PRIVATE_KEY.starts_with("0x") && TEST_ADMIN_PRIVATE_KEY.len() == 66,
-        "Invalid hardcoded Anvil admin private key format"
+        TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY.starts_with("0x")
+            && TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY.len() == 66,
+        "Invalid hardcoded Anvil account 0 private key format"
     );
 
-    let expected_admin: Address = TEST_ADMIN_ADDRESS.parse()?;
+    let expected_account: Address = TEST_ANVIL_ACCOUNT_0_ADDRESS.parse()?;
     let accounts = provider.get_accounts().await?;
-    let has_expected_admin = accounts
+    let has_expected_account = accounts
         .into_iter()
-        .any(|account| account == expected_admin);
+        .any(|account| account == expected_account);
     anyhow::ensure!(
-        has_expected_admin,
-        "Expected Anvil admin account {TEST_ADMIN_ADDRESS} is not available"
+        has_expected_account,
+        "Expected Anvil account 0 {TEST_ANVIL_ACCOUNT_0_ADDRESS} is not available"
     );
 
     Ok(())

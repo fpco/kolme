@@ -86,6 +86,8 @@ jobs:
         run: just anvil
       - name: Contract tests
         run: just cargo-contract-tests
+      - name: Ethereum Anvil CLI smoke
+        run: just ethereum-anvil-cli-smoke
 
   solana-contract:
     name: Solana Tests
@@ -137,3 +139,20 @@ jobs:
       - name: Test
         working-directory: solana
         run: just test
+
+  ethereum-contract:
+    name: Ethereum Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build
+        working-directory: contracts/ethereum
+        run: forge build
+      - name: Test
+        working-directory: contracts/ethereum
+        run: forge test

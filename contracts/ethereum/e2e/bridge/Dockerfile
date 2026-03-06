@@ -6,8 +6,10 @@ RUN apt-get update && \
 
 SHELL ["/bin/bash", "-lc"]
 
+ARG FOUNDRY_VERSION=v1.3.1
+
 RUN curl -L https://foundry.paradigm.xyz | bash && \
-    /root/.foundry/bin/foundryup
+    /root/.foundry/bin/foundryup --install "${FOUNDRY_VERSION}"
 
 # Install a fixed solc binary so `forge build` does not depend on external solc mirrors.
 RUN curl -L https://github.com/ethereum/solidity/releases/download/v0.8.30/solc-static-linux \
@@ -25,19 +27,19 @@ ARG ANVIL_MNEMONIC="test test test test test test test test test test test junk"
 COPY foundry.toml foundry.lock ./
 COPY lib ./lib
 COPY src ./src
-COPY e2e/bridgev1/bootstrap-state.sh /usr/local/bin/bootstrap-state.sh
+COPY e2e/bridge/bootstrap-state.sh /usr/local/bin/bootstrap-state.sh
 
 # Build contract artifacts inside the image.
 RUN forge build --use /usr/local/bin/solc
 
-# Bootstrap chain state and deploy BridgeV1.
+# Bootstrap chain state and deploy Bridge.
 RUN chmod +x /usr/local/bin/bootstrap-state.sh
 RUN /usr/local/bin/bootstrap-state.sh
 
 FROM foundry
 
 COPY --from=state_builder /bootstrap /bootstrap
-COPY e2e/bridgev1/entrypoint.sh /entrypoint.sh
+COPY e2e/bridge/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 

@@ -2,8 +2,10 @@ services:
   anvil:
     build:
       context: ..
-      dockerfile: e2e/bridgev1/Dockerfile
-    container_name: bridgev1-anvil
+      dockerfile: e2e/bridge/Dockerfile
+    container_name: bridge-anvil
     ports:
       - "8545:8545"
+    volumes:
+      - ./ethereum-anvil-cli-smoke.sh:/bootstrap/ethereum-anvil-cli-smoke.sh:ro
     restart: unless-stopped
