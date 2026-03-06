@@ -611,6 +611,19 @@ pub enum KolmeError {
     #[error("Unable to get latest archived block: {0}")]
     UnableToGetLatestArchivedBlock(#[source] KolmeStoreError),
 
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum filtered resume query returned mismatched event ID. Expected {expected}, got {actual}")]
+    EthereumFilteredResumeQueryEventIdMismatch {
+        actual: BridgeEventId,
+        expected: BridgeEventId,
+    },
+
+    #[cfg(feature = "ethereum")]
+    #[error("Unexpected Ethereum bridge event ID. Expected {expected}, got {actual}")]
+    UnexpectedEthereumBridgeEventId {
+        actual: BridgeEventId,
+        expected: BridgeEventId,
+    },
     //@@@ WHAT STILL USES THIS?
     #[error("{0}")]
     Other(String),

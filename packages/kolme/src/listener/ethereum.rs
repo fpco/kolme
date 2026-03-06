@@ -26,7 +26,7 @@ impl EthereumBridgeEvent {
         }
     }
 
-    fn from_log(log: &Log) -> Result<(u64, Option<u64>), KolmeError> {
+    fn from_log(log: &Log) -> Result<Option<Self>, KolmeError> {
         let Some(topic) = log.topic0().copied() else {
             // having `topic0` as None would be unusual given our filters
             tracing::debug!(
@@ -190,12 +190,12 @@ async fn get_resume_cursor<P: Provider>(
             continue;
         };
 
-        anyhow::ensure!(
-            event.event_id() == next_bridge_event_id,
-            "Ethereum filtered resume query returned mismatched event ID. Expected {}, got {}",
-            next_bridge_event_id,
-            event.event_id()
-        );
+        if event.event_id() != next_bridge_event_id {
+            return Err(KolmeError::EthereumFilteredResumeQueryEventIdMismatch {
+                actual: event.event_id(),
+                expected: next_bridge_event_id,
+            });
+        }
         return Ok((log.block_number.unwrap_or(0), log.log_index));
     }
 
@@ -227,12 +227,12 @@ async fn process_event<App: KolmeApp>(
         return Ok(());
     };
     let actual_event_id = event.event_id();
-    anyhow::ensure!(
-        actual_event_id == *next_bridge_event_id,
-        "Unexpected Ethereum bridge event ID. Expected {}, got {}",
-        *next_bridge_event_id,
-        actual_event_id
-    );
+    if actual_event_id != *next_bridge_event_id {
+        return Err(KolmeError::UnexpectedEthereumBridgeEventId {
+            actual: actual_event_id,
+            expected: *next_bridge_event_id,
+        });
+    }
 
     let message = event.to_kolme_message::<App::Message>(chain, actual_event_id)?;
     kolme
