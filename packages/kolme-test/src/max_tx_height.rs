@@ -46,7 +46,7 @@ async fn max_tx_height_inner(testtasks: TestTasks, (): ()) {
         .await
         .unwrap_err();
     match e {
-        KolmeError::Transaction(TransactionError::PastMaxHeight {
+        KolmeError::TransactionError(KolmeTransactionError::PastMaxHeight {
             txhash: _,
             max_height,
             proposed_height,

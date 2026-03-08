@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use base64::Engine;
 use borsh::BorshDeserialize;
 use kolme_solana_bridge_client::{
@@ -5,8 +7,6 @@ use kolme_solana_bridge_client::{
     ComputeBudgetInstruction,
 };
 use shared::solana::{InitializeIxData, Payload, SignedAction, SignedMsgIxData};
-use solana_rpc_client_api::client_error::ErrorKind;
-use std::str::FromStr;
 
 use super::*;
 
@@ -39,8 +39,7 @@ pub async fn execute(
     fee_per_cu: Option<u64>,
 ) -> Result<String, KolmeError> {
     let payload_bytes = base64::engine::general_purpose::STANDARD.decode(&payload_b64)?;
-    let payload: Payload =
-        BorshDeserialize::try_from_slice(&payload_bytes).map_err(KolmeError::from)?;
+    let payload: Payload = BorshDeserialize::try_from_slice(&payload_bytes)?;
 
     tracing::info!(
         "Executing signed message on bridge {program_id}: {:?}",
@@ -91,23 +90,15 @@ pub async fn execute(
     match client.send_and_confirm_transaction(&tx).await {
         Ok(sig) => Ok(sig.to_string()),
         Err(e) => {
-            match &e {
-                KolmeError::SolanaClient(client_err) => match &client_err.kind {
-                    ErrorKind::RpcError(rpc) => {
-                        tracing::error!("Solana RPC error on {program_id}: {:?}", rpc);
-                    }
-                    ErrorKind::TransactionError(tx) => {
-                        tracing::error!("Solana TX error on {program_id}: {:?}", tx);
-                    }
-                    other => {
-                        tracing::error!("Solana client error on {program_id}: {:?}", other);
-                    }
-                },
-                other => {
-                    tracing::error!("Execution failed on {program_id}: {:?}", other);
+            tracing::error!(
+                "Solana submitter failed to execute signed transaction: {}, error kind: {:?}",
+                e,
+                if let KolmeError::SolanaClientError(e) = &e {
+                    Some(&e.kind)
+                } else {
+                    None
                 }
-            }
-
+            );
             Err(e)
         }
     }

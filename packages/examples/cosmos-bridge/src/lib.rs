@@ -159,7 +159,11 @@ impl KolmeApp for CosmosBridgeApp {
                 let chain = match address.get_address_hrp().as_str() {
                     "osmo" => ExternalChain::OsmosisTestnet,
                     "neutron" => ExternalChain::NeutronTestnet,
-                    _ => return Err(KolmeError::other("Unsupported wallet address")),
+                    _ => {
+                        return Err(KolmeError::other(format!(
+                            "Unsupported wallet address: {address}"
+                        )))
+                    }
                 };
                 ctx.withdraw_asset(
                     AssetId(1),
@@ -184,11 +188,11 @@ struct RandomU32;
 impl<App> KolmeDataRequest<App> for RandomU32 {
     type Response = u32;
 
-    async fn load(self, _: &App) -> Result<Self::Response, KolmeDataError> {
+    async fn load(self, _: &App) -> Result<Self::Response, KolmeDataRequestError> {
         Ok(rand::random())
     }
 
-    async fn validate(self, _: &App, _: &Self::Response) -> Result<(), KolmeDataError> {
+    async fn validate(self, _: &App, _: &Self::Response) -> Result<(), KolmeDataRequestError> {
         // No validation possible
         Ok(())
     }

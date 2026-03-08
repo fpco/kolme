@@ -120,7 +120,7 @@ impl KolmeApp for EthereumBridgeTestApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> anyhow::Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(EmptyState {})
     }
 
@@ -128,7 +128,7 @@ impl KolmeApp for EthereumBridgeTestApp {
         &self,
         _ctx: &mut ExecutionContext<'_, Self>,
         _msg: &Self::Message,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), KolmeError> {
         Ok(())
     }
 }

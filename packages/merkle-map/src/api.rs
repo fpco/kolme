@@ -12,7 +12,7 @@ use crate::*;
 
 impl MerkleSerialError {
     pub fn custom<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
-        Self::Custom(e.to_string())
+        Self::Custom(Box::new(e))
     }
 }
 

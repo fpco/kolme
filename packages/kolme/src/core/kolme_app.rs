@@ -35,7 +35,7 @@ pub trait KolmeApp: Send + Sync + Clone + 'static {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum KolmeDataError {
+pub enum KolmeDataRequestError {
     #[error("Data validation failed")]
     ValidationFailed,
 
@@ -53,9 +53,13 @@ pub trait KolmeDataRequest<App>:
 
     /// Do an initial load of the data
     #[allow(async_fn_in_trait)]
-    async fn load(self, app: &App) -> Result<Self::Response, KolmeDataError>;
+    async fn load(self, app: &App) -> Result<Self::Response, KolmeDataRequestError>;
 
     /// Validate previously loaded data
     #[allow(async_fn_in_trait)]
-    async fn validate(self, app: &App, prev_res: &Self::Response) -> Result<(), KolmeDataError>;
+    async fn validate(
+        self,
+        app: &App,
+        prev_res: &Self::Response,
+    ) -> Result<(), KolmeDataRequestError>;
 }

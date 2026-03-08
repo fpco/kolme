@@ -25,9 +25,7 @@ use {
 use crate::*;
 
 pub use accounts::{Account, Accounts, AccountsError};
-pub use error::KolmeError;
-pub use error::KolmeExecutionError;
-pub use error::TransactionError;
+pub use error::{KolmeError, KolmeTransactionError};
 
 #[cfg(feature = "solana")]
 /// Wrapper around the Solana RPC client to hide sensitive information.
@@ -74,11 +72,10 @@ impl ToMerkleKey for ExternalChain {
 
 impl FromMerkleKey for ExternalChain {
     fn from_merkle_key(bytes: &[u8]) -> Result<Self, MerkleSerialError> {
-        let s = std::str::from_utf8(bytes)?;
-        s.parse()
-            .map_err(|_| MerkleSerialError::InvalidExternalChain {
-                value: s.to_string(),
-            })
+        std::str::from_utf8(bytes)
+            .map_err(MerkleSerialError::custom)?
+            .parse()
+            .map_err(MerkleSerialError::custom)
     }
 }
 
@@ -232,7 +229,7 @@ impl SolanaClientEndpoint {
             SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
             SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
         }
-        .map_err(KolmeError::SolanaPubsubError)
+        .map_err(KolmeError::from)
     }
 }
 
@@ -256,9 +253,13 @@ impl EthereumChain {
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn make_client(self) -> Result<DynProvider> {
-        let url = reqwest::Url::parse(self.default_rpc_url())
-            .with_context(|| format!("Invalid default Ethereum RPC URL for {self:?}"))?;
+    pub fn make_client(self) -> Result<DynProvider, KolmeError> {
+        let url = reqwest::Url::parse(self.default_rpc_url()).map_err(|e| {
+            KolmeError::InvalidDefaultEthereumRpcUrl {
+                chain: self,
+                error: e,
+            }
+        })?;
         Ok(DynProvider::new(ProviderBuilder::new().connect_http(url)))
     }
 }
@@ -369,11 +370,10 @@ impl MerkleDeserialize for ExternalChain {
         deserializer: &mut MerkleDeserializer,
         _version: usize,
     ) -> Result<Self, MerkleSerialError> {
-        let s = deserializer.load_str()?;
-        s.parse()
-            .map_err(|_| MerkleSerialError::InvalidExternalChain {
-                value: s.to_string(),
-            })
+        deserializer
+            .load_str()?
+            .parse()
+            .map_err(MerkleSerialError::custom)
     }
 }
 
@@ -870,15 +870,6 @@ impl TryFrom<i64> for AccountNonce {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum BlockHeightError {
-    #[error("Invalid block height: start={start}, end={end}")]
-    InvalidBlockHeight {
-        start: BlockHeight,
-        end: BlockHeight,
-    },
-}
-
 /// Height of a block
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Debug,
@@ -901,15 +892,14 @@ impl BlockHeight {
         self.0 == 0
     }
 
-    pub fn increasing_middle(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<BlockHeight, BlockHeightError> {
+    pub fn increasing_middle(&self, block_height: BlockHeight) -> Result<BlockHeight, KolmeError> {
         if self.0 >= block_height.0 {
-            return Err(BlockHeightError::InvalidBlockHeight {
-                start: *self,
-                end: block_height,
-            });
+            return Err(KolmeError::TransactionError(
+                KolmeTransactionError::InvalidBlockHeight {
+                    start: *self,
+                    end: block_height,
+                },
+            ));
         }
 
         // This cannot underflow due to the check above.
@@ -1127,10 +1117,7 @@ pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMes
 
 impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
     pub fn validate_signature(&self) -> Result<(), KolmeError> {
-        let pubkey = self
-            .0
-            .verify_signature()
-            .map_err(|_| KolmeError::SignatureVerificationFailed)?;
+        let pubkey = self.0.verify_signature()?;
         let expected = self.0.message.as_inner().pubkey;
         if pubkey != expected {
             return Err(KolmeError::InvalidTransactionSignature {
@@ -1630,23 +1617,24 @@ impl ConfiguredChains {
         }
     }
 
-    pub fn insert_ethereum(&mut self, chain: EthereumChain, config: ChainConfig) -> Result<()> {
+    pub fn insert_ethereum(
+        &mut self,
+        chain: EthereumChain,
+        config: ChainConfig,
+    ) -> Result<(), KolmeError> {
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Cosmos contract as an Ethereum bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureCosmosContractAsEthereumBridge);
             }
             BridgeContract::NeededSolanaBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Solana program as an Ethereum bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureSolanaProgramAsEthereumBridge);
             }
             BridgeContract::Deployed(address) => {
-                anyhow::ensure!(
-                    is_valid_evm_address(address),
-                    "Invalid Ethereum bridge contract address: {address}"
-                );
+                if !is_valid_evm_address(address) {
+                    return Err(KolmeError::InvalidEthereumBridgeContractAddress(
+                        address.to_owned(),
+                    ));
+                }
             }
         }
 
@@ -1795,9 +1783,7 @@ impl ExecAction {
                         })?;
                         Ok(payload)
                     }
-                    ChainName::Ethereum => {
-                        anyhow::bail!("Ethereum payload generation is not implemented yet")
-                    }
+                    ChainName::Ethereum => Err(KolmeError::EthereumPayloadGenerationNotImplemented),
                 }
             }
             ExecAction::SelfReplace(self_replace) => match chain.name() {
@@ -1837,9 +1823,7 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
-                ChainName::Ethereum => {
-                    anyhow::bail!("Ethereum payload generation is not implemented yet")
-                }
+                ChainName::Ethereum => Err(KolmeError::EthereumPayloadGenerationNotImplemented),
             },
             ExecAction::NewSet {
                 validator_set,
@@ -1875,15 +1859,13 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
-                ChainName::Ethereum => {
-                    anyhow::bail!("Ethereum payload generation is not implemented yet")
-                }
+                ChainName::Ethereum => Err(KolmeError::EthereumPayloadGenerationNotImplemented),
             },
             ExecAction::MigrateContract { migrate_contract } => {
                 let contract_addr = match &config.bridge {
                     BridgeContract::Deployed(addr) => addr.clone(),
                     _ => {
-                        return Err(KolmeError::ContractNotDeployed { chain });
+                        return Err(KolmeError::ContractNotDeployed(chain));
                     }
                 };
 
@@ -1935,10 +1917,12 @@ impl ExecAction {
 
 #[cfg(feature = "solana")]
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String, KolmeError> {
-    let len = borsh::object_length(&payload)?;
+    let len =
+        borsh::object_length(&payload).map_err(KolmeError::SolanaPayloadSerializationError)?;
 
     let mut buf = Vec::with_capacity(len);
-    borsh::BorshSerialize::serialize(&payload, &mut buf)?;
+    borsh::BorshSerialize::serialize(&payload, &mut buf)
+        .map_err(KolmeError::SolanaPayloadSerializationError)?;
 
     let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
 
@@ -1956,7 +1940,7 @@ pub struct FailedTransaction {
     pub txhash: TxHash,
     /// Block height we attempted to generate.
     pub proposed_height: BlockHeight,
-    pub error: TransactionError,
+    pub error: KolmeTransactionError,
 }
 
 impl Display for FailedTransaction {

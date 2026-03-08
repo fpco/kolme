@@ -26,7 +26,7 @@ impl EthereumBridgeEvent {
         }
     }
 
-    fn from_log(log: &Log) -> Result<Option<Self>> {
+    fn from_log(log: &Log) -> Result<Option<Self>, KolmeError> {
         let Some(topic) = log.topic0().copied() else {
             // having `topic0` as None would be unusual given our filters
             tracing::debug!(
@@ -40,7 +40,7 @@ impl EthereumBridgeEvent {
             FundsReceived::SIGNATURE_HASH => Some(Self::FundsReceived(
                 log.log_decode()
                     .map(|decoded| decoded.inner.data)
-                    .map_err(|e| anyhow::anyhow!("Failed to decode FundsReceived: {e}"))?,
+                    .map_err(KolmeError::FailedToDecodeFundsReceived)?,
             )),
             _ => {
                 tracing::debug!(
@@ -56,7 +56,7 @@ impl EthereumBridgeEvent {
         &self,
         chain: ExternalChain,
         event_id: BridgeEventId,
-    ) -> Result<Message<AppMessage>> {
+    ) -> Result<Message<AppMessage>, KolmeError> {
         let event = match self {
             Self::FundsReceived(FundsReceived { sender, amount, .. }) => BridgeEvent::Regular {
                 wallet: Wallet(format!("{:#x}", sender)),
@@ -81,12 +81,12 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     chain: EthereumChain,
     contract: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let ethereum_chain = chain;
     let chain: ExternalChain = ethereum_chain.into();
     let contract: Address = contract
         .parse()
-        .with_context(|| format!("Invalid Ethereum contract address: {contract}"))?;
+        .map_err(|error| KolmeError::InvalidEthereumContractAddress { contract, error })?;
     let provider = kolme.get_ethereum_client(ethereum_chain).await?;
     let contract: ContractInstance<_> =
         ContractInstance::new(contract, provider, Interface::new(JsonAbi::default()));
@@ -127,7 +127,7 @@ async fn listen_once<App: KolmeApp, P: Provider>(
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let latest = contract.provider().get_block_number().await?;
     if *next_block > latest {
         return Ok(());
@@ -164,7 +164,7 @@ async fn listen_once<App: KolmeApp, P: Provider>(
 async fn get_resume_cursor<P: Provider>(
     contract: &ContractInstance<P>,
     next_bridge_event_id: BridgeEventId,
-) -> Result<(u64, Option<u64>)> {
+) -> Result<(u64, Option<u64>), KolmeError> {
     // On listener startup, we find sync point by scanning from genesis while
     // filtering by contract address and indexed event ID.
     // TODO: Switch from "since genesis" to "since contract deployment block".
@@ -190,12 +190,12 @@ async fn get_resume_cursor<P: Provider>(
             continue;
         };
 
-        anyhow::ensure!(
-            event.event_id() == next_bridge_event_id,
-            "Ethereum filtered resume query returned mismatched event ID. Expected {}, got {}",
-            next_bridge_event_id,
-            event.event_id()
-        );
+        if event.event_id() != next_bridge_event_id {
+            return Err(KolmeError::EthereumFilteredResumeQueryEventIdMismatch {
+                actual: event.event_id(),
+                expected: next_bridge_event_id,
+            });
+        }
         return Ok((log.block_number.unwrap_or(0), log.log_index));
     }
 
@@ -222,17 +222,17 @@ async fn process_event<App: KolmeApp>(
     chain: ExternalChain,
     log: &Log,
     next_bridge_event_id: &mut BridgeEventId,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let Some(event) = EthereumBridgeEvent::from_log(log)? else {
         return Ok(());
     };
     let actual_event_id = event.event_id();
-    anyhow::ensure!(
-        actual_event_id == *next_bridge_event_id,
-        "Unexpected Ethereum bridge event ID. Expected {}, got {}",
-        *next_bridge_event_id,
-        actual_event_id
-    );
+    if actual_event_id != *next_bridge_event_id {
+        return Err(KolmeError::UnexpectedEthereumBridgeEventId {
+            actual: actual_event_id,
+            expected: *next_bridge_event_id,
+        });
+    }
 
     let message = event.to_kolme_message::<App::Message>(chain, actual_event_id)?;
     kolme
@@ -244,9 +244,9 @@ async fn process_event<App: KolmeApp>(
 
 // Ethereum uses uint256 as the standard amount type, in kolme we have u128,
 // hence the explicit conversion function with a distinct error logging
-fn u256_to_u128(value: U256) -> Result<u128> {
+fn u256_to_u128(value: U256) -> Result<u128, KolmeError> {
     if value > U256::from(u128::MAX) {
-        anyhow::bail!("Ethereum value {value} does not fit into u128");
+        return Err(KolmeError::EthereumValueDoesNotFitIntoU128(value));
     }
     Ok(value.to())
 }

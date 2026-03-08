@@ -1,7 +1,6 @@
 use crate::*;
-use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum AccountsError {
     #[error("Insufficient balance for account {account_id}, asset {asset_id}. Requested: {requested}. Available: {available}.")]
     InsufficientBalance {
@@ -22,13 +21,10 @@ pub enum AccountsError {
         asset_id: AssetId,
         to_burn: Decimal,
     },
-
-    #[error("Pubkey {key} already in use")]
-    PubkeyAlreadyInUse { key: Box<PublicKey> },
-
-    #[error("Wallet {wallet} already in use")]
-    WalletAlreadyInUse { wallet: Wallet },
-
+    #[error("Pubkey {0} already in use")]
+    PubkeyAlreadyInUse(PublicKey),
+    #[error("Wallet {0} already in use")]
+    WalletAlreadyInUse(Wallet),
     #[error(
         "Cannot remove pubkey {key} from account {id}, it's actually connected to {actual_id}"
     )]
@@ -37,7 +33,6 @@ pub enum AccountsError {
         id: AccountId,
         actual_id: AccountId,
     },
-
     #[error(
         "Cannot remove wallet {wallet} from account {id}, it's actually connected to {actual_id}"
     )]
@@ -46,7 +41,6 @@ pub enum AccountsError {
         id: AccountId,
         actual_id: AccountId,
     },
-
     #[error(
         "New account for pubkey {pubkey} expects an initial nonce of {expected}, received {actual}"
     )]
@@ -55,15 +49,12 @@ pub enum AccountsError {
         expected: AccountNonce,
         actual: AccountNonce,
     },
-
-    #[error("Account {account_id} not found")]
-    AccountNotFound { account_id: AccountId },
-
-    #[error("Pubkey {key} not found")]
-    PubkeyNotFound { key: Box<PublicKey> },
-
-    #[error("Wallet {wallet} not found")]
-    WalletNotFound { wallet: Wallet },
+    #[error("Account {0} not found")]
+    AccountNotFound(AccountId),
+    #[error("Cannot remove unknown pubkey {0}")]
+    CannotRemoveUnknownPubkey(PublicKey),
+    #[error("Wallet {0} not found")]
+    WalletNotFound(Wallet),
 }
 
 /// Track all information on accounts.
@@ -197,12 +188,12 @@ impl Accounts {
         key: PublicKey,
     ) -> Result<(), AccountsError> {
         if self.pubkeys.contains_key(&key) {
-            return Err(AccountsError::PubkeyAlreadyInUse { key: Box::new(key) });
+            return Err(AccountsError::PubkeyAlreadyInUse(key));
         }
         let account = self
             .accounts
             .get_mut(&account_id)
-            .ok_or(AccountsError::AccountNotFound { account_id })?;
+            .ok_or(AccountsError::AccountNotFound(account_id))?;
         self.pubkeys.insert(key, account_id);
         account.pubkeys.insert(key);
         Ok(())
@@ -278,7 +269,7 @@ impl Accounts {
         let (_, actual_id) = self
             .pubkeys
             .remove(&key)
-            .ok_or(AccountsError::PubkeyNotFound { key: Box::new(key) })?;
+            .ok_or(AccountsError::CannotRemoveUnknownPubkey(key))?;
         if id != actual_id {
             return Err(AccountsError::PubkeyAccountMismatch {
                 key: Box::new(key),
@@ -298,15 +289,13 @@ impl Accounts {
         wallet: &Wallet,
     ) -> Result<(), AccountsError> {
         if self.wallets.contains_key(wallet) {
-            return Err(AccountsError::WalletAlreadyInUse {
-                wallet: wallet.clone(),
-            });
+            return Err(AccountsError::WalletAlreadyInUse(wallet.clone()));
         }
 
         let account = self
             .accounts
             .get_mut(&account_id)
-            .ok_or(AccountsError::AccountNotFound { account_id })?;
+            .ok_or(AccountsError::AccountNotFound(account_id))?;
         self.wallets.insert(wallet.clone(), account_id);
         account.wallets.insert(wallet.clone());
         Ok(())
@@ -320,9 +309,7 @@ impl Accounts {
         let (_, actual_id) = self
             .wallets
             .remove(wallet)
-            .ok_or(AccountsError::WalletNotFound {
-                wallet: wallet.clone(),
-            })?;
+            .ok_or(AccountsError::WalletNotFound(wallet.clone()))?;
         if id != actual_id {
             return Err(AccountsError::WalletAccountMismatch {
                 wallet: wallet.clone(),
@@ -348,12 +335,14 @@ impl Accounts {
             Some(account_id) => {
                 let account = self.accounts.get_mut(account_id).unwrap();
                 if account.next_nonce != nonce {
-                    return Err(KolmeError::InvalidNonce {
-                        pubkey: Box::new(pubkey),
-                        account_id: *account_id,
-                        expected: account.next_nonce,
-                        actual: nonce,
-                    });
+                    return Err(KolmeError::TransactionError(
+                        KolmeTransactionError::InvalidNonce {
+                            pubkey: Box::new(pubkey),
+                            account_id: *account_id,
+                            expected: account.next_nonce,
+                            actual: nonce,
+                        },
+                    ));
                 }
                 account.next_nonce = account.next_nonce.next();
                 Ok(*account_id)
@@ -364,11 +353,13 @@ impl Accounts {
                 self.pubkeys.insert(pubkey, account_id);
                 account.pubkeys.insert(pubkey);
                 if nonce != account.next_nonce {
-                    return Err(KolmeError::Accounts(AccountsError::InvalidInitialNonce {
-                        pubkey: Box::new(pubkey),
-                        expected: account.next_nonce,
-                        actual: nonce,
-                    }));
+                    return Err(KolmeError::AccountsError(
+                        AccountsError::InvalidInitialNonce {
+                            pubkey: Box::new(pubkey),
+                            expected: account.next_nonce,
+                            actual: nonce,
+                        },
+                    ));
                 }
                 account.next_nonce = account.next_nonce.next();
                 Ok(account_id)
@@ -398,21 +389,17 @@ impl MerkleDeserialize for Accounts {
             for wallet in &account.wallets {
                 let x = wallets.insert(wallet.clone(), *id);
                 if let Some((_, id2)) = x {
-                    return Err(MerkleSerialError::WalletUsedInMultipleAccounts {
-                        wallet: wallet.to_string(),
-                        id: id.to_string(),
-                        other_id: id2.to_string(),
-                    });
+                    return Err(MerkleSerialError::Other(format!(
+                        "Wallet {wallet} used in both account {id} and {id2}"
+                    )));
                 }
             }
             for pubkey in &account.pubkeys {
                 let x = pubkeys.insert(*pubkey, *id);
                 if let Some((_, id2)) = x {
-                    return Err(MerkleSerialError::PubkeyUsedInMultipleAccounts {
-                        pubkey: pubkey.to_string(),
-                        id: id.to_string(),
-                        other_id: id2.to_string(),
-                    });
+                    return Err(MerkleSerialError::Other(format!(
+                        "Pubkey {pubkey} used in both account {id} and {id2}"
+                    )));
                 }
             }
         }

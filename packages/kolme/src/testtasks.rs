@@ -135,17 +135,17 @@ impl TestTasks {
                 match res {
                     Ok(Ok(_)) => {
                         if persistent {
-                            Some(KolmeError::PersistentTaskExited)
+                            Some(KolmeError::Other(
+                                "Persistent task exited unexpectedly".to_owned(),
+                            ))
                         } else {
                             None
                         }
                     }
-                    Ok(Err(e)) => Some(KolmeError::TaskErrored {
-                        error: e.to_string(),
-                    }),
-                    Err(e) => Some(KolmeError::TaskPanicked {
-                        details: e.to_string(),
-                    }),
+                    Ok(Err(e)) => {
+                        Some(KolmeError::Other(format!("Task exited with an error: {e}")))
+                    }
+                    Err(e) => Some(KolmeError::Other(format!("Task panicked: {e}"))),
                 }
             } else {
                 None

@@ -1,12 +1,12 @@
 #[cfg(feature = "cosmwasm")]
-pub mod cosmos;
+mod cosmos;
 #[cfg(feature = "ethereum")]
 mod ethereum;
 #[cfg(feature = "solana")]
-pub mod solana;
+mod solana;
 
 use crate::*;
-use futures_util::TryFutureExt;
+use futures_util::TryFutureExt as _;
 use tokio::task::JoinSet;
 
 pub struct Listener<App: KolmeApp> {
@@ -105,11 +105,9 @@ impl<App: KolmeApp> Listener<App> {
 
         while let Some(res) = set.join_next().await {
             match res {
-                Err(e) => {
+                Err(details) => {
                     set.abort_all();
-                    return Err(KolmeError::ListenerPanicked {
-                        details: e.to_string(),
-                    });
+                    return Err(KolmeError::ListenerPanicked(details));
                 }
                 Ok(Err(e)) => return Err(e),
                 Ok(Ok(())) => (),
@@ -173,7 +171,7 @@ impl<App: KolmeApp> Listener<App> {
         let config = &kolme.get_bridge_contracts().get(chain)?.config;
 
         if let BridgeContract::Deployed(_) = config.bridge {
-            return Err(KolmeError::ContractAlreadyDeployed { chain });
+            return Err(KolmeError::ContractAlreadyDeployed(chain));
         };
 
         let res: Result<(), KolmeError> = match ChainKind::from(chain) {
@@ -184,9 +182,7 @@ impl<App: KolmeApp> Listener<App> {
                     BridgeContract::NeededCosmosBridge { code_id } => code_id,
                     BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
                     BridgeContract::Deployed(_) => {
-                        return Err(KolmeError::ContractAlreadyDeployed {
-                            chain: chain.into(),
-                        });
+                        return Err(KolmeError::ContractAlreadyDeployed(chain.into()));
                     }
                 };
 
@@ -197,7 +193,6 @@ impl<App: KolmeApp> Listener<App> {
                     self.kolme.get_app().genesis_info(),
                 )
                 .await
-                .map_err(KolmeError::from)
             }
             #[cfg(not(feature = "cosmwasm"))]
             ChainKind::Cosmos(_) => Ok(()),
@@ -215,7 +210,7 @@ impl<App: KolmeApp> Listener<App> {
             #[cfg(not(feature = "solana"))]
             ChainKind::Solana(_) => Ok(()),
             ChainKind::Ethereum(_) => {
-                anyhow::bail!("Ethereum listener contract checks are not implemented yet")
+                return Err(KolmeError::EthereumListenerContractChecksNotImplemented);
             }
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => {

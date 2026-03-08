@@ -15,24 +15,6 @@ use tokio::time;
 
 use super::*;
 
-#[derive(thiserror::Error, Debug)]
-pub enum ListenerSolanaError {
-    #[error("Processor mismatch between genesis info and on-chain state")]
-    Processor,
-
-    #[error("Listeners mismatch between genesis info and on-chain state")]
-    Listeners,
-
-    #[error("Approvers mismatch between genesis info and on-chain state")]
-    Approvers,
-
-    #[error("Needed listeners mismatch between genesis info and on-chain state")]
-    NeededListeners,
-
-    #[error("Needed approvers mismatch between genesis info and on-chain state")]
-    NeededApprovers,
-}
-
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
@@ -60,45 +42,45 @@ pub async fn sanity_check_contract(
     let acc = client.get_account(&state_acc).await?;
 
     if acc.owner != program_id || acc.data.len() < 2 {
-        return Err(KolmeError::UninitializedSolanaBridge {
-            program: program.to_string(),
-        });
+        return Err(KolmeError::UninitializedSolanaBridge(program.to_owned()));
     }
 
     // Skip the first two bytes which are the discriminator byte and the bump seed respectively.
-    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..]).map_err(|x| {
-        KolmeError::InvalidSolanaBridgeState {
-            details: format!("{x:?}"),
-        }
-    })?;
+    let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..])
+        .map_err(KolmeError::InvalidSolanaBridgeState)?;
 
     if info.validator_set.processor != state.set.processor {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::Processor,
-        ));
+        return Err(KolmeError::ProcessorMismatch {
+            expected: Box::new(info.validator_set.processor),
+            actual: Box::new(state.set.processor),
+        });
     }
     if info.validator_set.listeners != state.set.listeners {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::Listeners,
-        ));
+        return Err(KolmeError::ListenersMismatch {
+            expected: info.validator_set.listeners.clone(),
+            actual: state.set.listeners,
+        });
     }
 
     if info.validator_set.approvers != state.set.approvers {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::Approvers,
-        ));
+        return Err(KolmeError::ApproversMismatch {
+            expected: info.validator_set.approvers.clone(),
+            actual: state.set.approvers,
+        });
     }
 
     if info.validator_set.needed_listeners != state.set.needed_listeners {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::NeededListeners,
-        ));
+        return Err(KolmeError::NeededListenersMismatch {
+            expected: info.validator_set.needed_listeners,
+            actual: state.set.needed_listeners,
+        });
     }
 
     if info.validator_set.needed_approvers != state.set.needed_approvers {
-        return Err(KolmeError::ListenerSolanaError(
-            ListenerSolanaError::NeededApprovers,
-        ));
+        return Err(KolmeError::NeededApproversMismatch {
+            expected: info.validator_set.needed_approvers,
+            actual: state.set.needed_approvers,
+        });
     }
 
     Ok(())
@@ -289,11 +271,8 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
         let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
         let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
 
-        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|e| {
-            KolmeError::InvalidSolanaBridgeLogMessage {
-                details: format!("{e:?}"),
-            }
-        });
+        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes)
+            .map_err(KolmeError::InvalidSolanaBridgeLogMessage);
 
         match result {
             Ok(result) => return Ok(Some(result)),
@@ -304,6 +283,7 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
                     );
                     return Ok(None);
                 }
+
                 return Err(e);
             }
         }

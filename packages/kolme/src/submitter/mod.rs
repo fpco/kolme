@@ -10,12 +10,6 @@ use utils::trigger::Trigger;
 
 use crate::*;
 
-#[derive(thiserror::Error, Debug)]
-pub enum SubmitterError {
-    #[error("Pass-through submission attempted on wrong chain: expected PassThrough, got {chain}")]
-    InvalidPassThroughChain { chain: ExternalChain },
-}
-
 /// Component which submits necessary transactions to the blockchain.
 pub struct Submitter<App: KolmeApp> {
     kolme: Kolme<App>,
@@ -355,7 +349,7 @@ impl<App: KolmeApp> Submitter<App> {
             #[cfg(feature = "pass_through")]
             ChainArgs::PassThrough { port } => {
                 if chain != ExternalChain::PassThrough {
-                    return Err(SubmitterError::InvalidPassThroughChain { chain }.into());
+                    return Err(KolmeError::InvalidPassThroughChain(chain));
                 }
                 let client = self.kolme.read().get_pass_through_client();
 

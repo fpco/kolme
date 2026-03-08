@@ -12,33 +12,27 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use crate::*;
 
 #[derive(thiserror::Error, Debug)]
-pub enum KolmeImportExportError {
-    #[error("Child hash {child} was not previously written")]
-    ChildHashNotPreviouslyWritten { child: Sha256Hash },
-
+pub enum ImportExportError {
+    #[error("Child hash {0} was not previously written")]
+    ChildHashNotPreviouslyWritten(Sha256Hash),
     #[error("Merkle hash {child} not found in Merkle store for parent {parent}")]
     MissingMerkleHashInStore {
         child: Sha256Hash,
         parent: Sha256Hash,
     },
-
-    #[error("Missing layer {hash}")]
-    MissingLayer { hash: Sha256Hash },
-
+    #[error("Missing layer {0}")]
+    MissingLayer(Sha256Hash),
     #[error("Logic error: writing layer {parent} but its child {child} is not yet written")]
     LogicChildNotYetWritten {
         parent: Sha256Hash,
         child: Sha256Hash,
     },
-
-    #[error("Import blocks failed, found unexpected byte {byte}")]
-    UnexpectedByte { byte: u8 },
-
-    #[error("Payload is too large")]
-    PayloadTooLarge,
-
-    #[error("Too many children")]
-    TooManyChildren,
+    #[error("Import blocks failed, found unexpected byte {0}")]
+    UnexpectedByte(u8),
+    #[error("Payload is too large: {0}")]
+    PayloadTooLarge(#[source] std::num::TryFromIntError),
+    #[error("Too many children: {0}")]
+    TooManyChildren(#[source] std::num::TryFromIntError),
 }
 
 impl<App: KolmeApp> Kolme<App> {
@@ -96,7 +90,7 @@ impl<App: KolmeApp> Kolme<App> {
                     let layer = self
                         .get_merkle_layer(hash)
                         .await?
-                        .ok_or(KolmeImportExportError::MissingLayer { hash })?;
+                        .ok_or(ImportExportError::MissingLayer(hash))?;
                     let children = layer.children.clone();
                     work_queue.push(Work::Write(hash, Box::new(layer)));
                     for child in children {
@@ -148,17 +142,14 @@ impl<App: KolmeApp> Kolme<App> {
                         let mut buff = [0u8; 32];
                         src.read_exact(&mut buff).await?;
                         let child = Sha256Hash::from_array(buff);
-
                         if !hashes.contains(&child) {
-                            return Err(KolmeImportExportError::ChildHashNotPreviouslyWritten {
-                                child,
-                            }
-                            .into());
+                            return Err(
+                                ImportExportError::ChildHashNotPreviouslyWritten(child).into()
+                            );
                         }
-
                         let parent = payload.hash();
                         if !self.has_merkle_hash(child).await? {
-                            return Err(KolmeImportExportError::MissingMerkleHashInStore {
+                            return Err(ImportExportError::MissingMerkleHashInStore {
                                 child,
                                 parent,
                             }
@@ -185,7 +176,7 @@ impl<App: KolmeApp> Kolme<App> {
                         self.add_block_with_state(block).await?;
                     }
                 }
-                b => return Err(KolmeImportExportError::UnexpectedByte { byte: b }.into()),
+                b => return Err(ImportExportError::UnexpectedByte(b).into()),
             }
         }
     }
@@ -198,18 +189,16 @@ async fn write_layer(
     written_layers: &mut HashSet<Sha256Hash>,
 ) -> Result<(), KolmeError> {
     dest.write_u8(0).await?;
-    dest.write_u32(
-        u32::try_from(layer.payload.len()).map_err(|_| KolmeImportExportError::PayloadTooLarge)?,
-    )
-    .await?;
+    dest.write_u32(u32::try_from(layer.payload.len()).map_err(ImportExportError::PayloadTooLarge)?)
+        .await?;
     dest.write_all(layer.payload.bytes()).await?;
     dest.write_u32(
-        u32::try_from(layer.children.len()).map_err(|_| KolmeImportExportError::TooManyChildren)?,
+        u32::try_from(layer.children.len()).map_err(ImportExportError::TooManyChildren)?,
     )
     .await?;
     for child in &layer.children {
         if !written_layers.contains(child) {
-            return Err(KolmeImportExportError::LogicChildNotYetWritten {
+            return Err(ImportExportError::LogicChildNotYetWritten {
                 parent: hash,
                 child: *child,
             }

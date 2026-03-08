@@ -78,7 +78,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .proposals
         {
             if existing.payload == payload {
-                return Err(KolmeError::DuplicateAdminProposal { id: *id });
+                return Err(KolmeError::DuplicateAdminProposal(*id));
             }
         }
 

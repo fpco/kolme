@@ -40,9 +40,9 @@ impl KolmeBackingStore for Store {
     }
 
     async fn delete_block(&self, _height: u64) -> Result<(), KolmeStoreError> {
-        Err(KolmeStoreError::UnsupportedDeleteOperation {
-            backend: StorageBackend::Fjall,
-        })
+        Err(KolmeStoreError::UnsupportedDeleteOperation(
+            StorageBackend::Fjall,
+        ))
     }
 
     async fn take_construct_lock(&self) -> Result<crate::KolmeConstructLock, KolmeStoreError> {
@@ -57,12 +57,7 @@ impl KolmeBackingStore for Store {
     }
 
     async fn get_height_for_tx(&self, txhash: Sha256Hash) -> Result<Option<u64>, KolmeStoreError> {
-        let Some(height) = self
-            .merkle
-            .handle
-            .get(tx_key(txhash))
-            .map_err(KolmeStoreError::custom)?
-        else {
+        let Some(height) = self.merkle.handle.get(tx_key(txhash))? else {
             return Ok(None);
         };
         let height = match <[u8; 8]>::try_from(&*height) {
@@ -70,9 +65,7 @@ impl KolmeBackingStore for Store {
             Err(e) => {
                 return Err(KolmeStoreError::InvalidHeight {
                     backend: StorageBackend::Fjall,
-                    txhash,
-                    bytes: height.to_vec(),
-                    reason: e,
+                    error: e,
                 });
             }
         };
@@ -86,7 +79,7 @@ impl KolmeBackingStore for Store {
         let (key, _hash_bytes) = latest.map_err(KolmeStoreError::custom)?;
         let key = (*key)
             .strip_prefix(b"block:")
-            .ok_or_else(|| KolmeStoreError::custom("Fjall key missing block: prefix"))?;
+            .ok_or_else(|| KolmeStoreError::Other("Fjall key missing block: prefix".to_owned()))?;
         let height = <[u8; 8]>::try_from(key).map_err(KolmeStoreError::custom)?;
         Ok(Some(u64::from_be_bytes(height)))
     }
@@ -206,11 +199,7 @@ impl KolmeBackingStore for Store {
         self.merkle
             .handle
             .insert(LATEST_ARCHIVED_HEIGHT_KEY, height.to_be_bytes())
-            .map_err(|e| {
-                KolmeStoreError::custom(format!(
-                    "Unable to update partition with given height: {e}"
-                ))
-            })?;
+            .map_err(KolmeStoreError::UnableToUpdatePartition)?;
 
         Ok(())
     }
@@ -220,7 +209,7 @@ impl KolmeBackingStore for Store {
             .merkle
             .handle
             .get(LATEST_ARCHIVED_HEIGHT_KEY)
-            .map_err(|e| KolmeStoreError::Custom(format!("Unable to retrieve latest height: {e}")))?
+            .map_err(KolmeStoreError::UnableToRetrieveLatestHeight)?
             .map(|contents| u64::from_be_bytes(std::array::from_fn(|i| contents[i]))))
     }
 

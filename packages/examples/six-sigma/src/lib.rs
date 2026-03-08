@@ -278,6 +278,7 @@ impl fmt::Debug for SixSigmaApp {
     }
 }
 
+#[allow(clippy::result_large_err)] // Work around Clippy bug
 fn change_balance(
     ctx: &mut ExecutionContext<'_, SixSigmaApp>,
     change: &BalanceChange,
@@ -322,11 +323,11 @@ struct OddsSource;
 impl<App> KolmeDataRequest<App> for OddsSource {
     type Response = Odds;
 
-    async fn load(self, _: &App) -> Result<Self::Response, KolmeDataError> {
+    async fn load(self, _: &App) -> Result<Self::Response, KolmeDataRequestError> {
         Ok([dec!(1.8), dec!(2.5), dec!(6.5)])
     }
 
-    async fn validate(self, _: &App, _: &Self::Response) -> Result<(), KolmeDataError> {
+    async fn validate(self, _: &App, _: &Self::Response) -> Result<(), KolmeDataRequestError> {
         // No validation possible
         Ok(())
     }
@@ -370,8 +371,7 @@ impl Tasks {
 
     pub fn spawn_api_server(&mut self) {
         let api_server = ApiServer::new(self.kolme.clone());
-        let bind = self.bind;
-        self.api_server = Some(self.set.spawn(api_server.run(bind)));
+        self.api_server = Some(self.set.spawn(api_server.run(self.bind)));
     }
 }
 

@@ -66,7 +66,7 @@ impl<App: KolmeApp> MaybeBlockInfo<App> {
                 let storable = store
                     .load_block(height)
                     .await?
-                    .ok_or_else(|| KolmeError::BlockMissingInStore { height })?;
+                    .ok_or_else(|| KolmeError::BlockMissingInStore(height))?;
                 let (framework_state, app_state) = tokio::try_join!(
                     store.load(storable.block.as_inner().framework_state),
                     store.load(storable.block.as_inner().app_state)

@@ -69,8 +69,8 @@ impl<App: KolmeApp> KolmeStore<App> {
         if let Some(actual) = self.load_genesis_info().await? {
             if &actual != expected {
                 return Err(KolmeError::MismatchedGenesisInfo {
-                    actual,
-                    expected: expected.clone(),
+                    actual: Box::new(actual),
+                    expected: Box::new(expected.clone()),
                 });
             }
         }
@@ -113,14 +113,17 @@ impl<App: KolmeApp> KolmeStore<App> {
     pub(crate) async fn add_merkle_layer(
         &self,
         layer: &MerkleLayerContents,
-    ) -> Result<(), KolmeStoreError> {
+    ) -> Result<(), KolmeError> {
         for child in &layer.children {
             if !self.has_merkle_hash(*child).await? {
-                return Err(KolmeStoreError::MissingMerkleChild { child: *child });
+                return Err(KolmeError::MissingMerkleChild(*child));
             }
         }
 
-        self.inner.add_merkle_layer(layer).await
+        self.inner
+            .add_merkle_layer(layer)
+            .await
+            .map_err(KolmeError::from)
     }
 
     pub(crate) async fn archive_block(&self, height: BlockHeight) -> Result<(), KolmeStoreError> {
