@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use anyhow::{bail, Context};
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
@@ -38,7 +37,7 @@ impl<App: KolmeApp> ApiServer<App> {
         self
     }
 
-    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<()> {
+    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<(), KolmeError> {
         let cors = CorsLayer::new()
             .allow_methods([Method::GET, Method::POST, Method::PUT])
             .allow_origin(Any)
@@ -52,9 +51,7 @@ impl<App: KolmeApp> ApiServer<App> {
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
         tracing::info!("Starting API server on {:?}", listener.local_addr()?);
-        axum::serve(listener, app)
-            .await
-            .map_err(anyhow::Error::from)
+        axum::serve(listener, app).await.map_err(KolmeError::from)
     }
 }
 
@@ -121,7 +118,7 @@ async fn broadcast<App: KolmeApp>(
 async fn broadcast_inner<App: KolmeApp>(
     kolme: Kolme<App>,
     tx: SignedTransaction<App::Message>,
-) -> Result<TxHash> {
+) -> Result<TxHash, KolmeError> {
     let txhash = tx.hash();
     kolme
         .read()
@@ -158,7 +155,7 @@ async fn get_block<App: KolmeApp>(
 async fn get_block_inner<App: KolmeApp>(
     kolme: &Kolme<App>,
     height: BlockHeight,
-) -> Result<Response, anyhow::Error> {
+) -> Result<Response, KolmeError> {
     #[derive(serde::Serialize)]
     struct Response<'a, App: KolmeApp> {
         code_version: &'a String,
@@ -208,9 +205,9 @@ struct BlockResponse {
 async fn block_response<App: KolmeApp>(
     kolme: &Kolme<App>,
     block: BlockHeight,
-) -> Result<BlockResponse> {
+) -> Result<BlockResponse, KolmeError> {
     let Some(signed_block) = kolme.get_block(block).await? else {
-        bail!("Block {} not found", block);
+        return Err(KolmeError::BlockNotFound(block));
     };
 
     let framework_hash = signed_block.block.as_inner().framework_state;
@@ -226,16 +223,17 @@ async fn block_response<App: KolmeApp>(
 async fn find_block_height<App: KolmeApp>(
     kolme: &Kolme<App>,
     chain_version: &Version<'_>,
-) -> Result<BlockResponse> {
+) -> Result<BlockResponse, KolmeError> {
     let next_height = kolme.read().get_next_height();
     let mut start_block = BlockHeight::start();
-    let mut end_block = next_height.prev().context("No blocks in chain")?;
+    let mut end_block = next_height.prev().ok_or(KolmeError::NoBlocksInChain)?;
 
     while start_block.0 <= end_block.0 {
         let middle_block = start_block.increasing_middle(end_block)?;
         let response = block_response(kolme, middle_block).await?;
-        let existing_version =
-            Version::from(&response.chain_version).context("Invalid version from response")?;
+        let existing_version = Version::from(&response.chain_version).ok_or_else(|| {
+            KolmeError::InvalidChainVersionFromResponse(response.chain_version.clone())
+        })?;
         let result = chain_version.compare(existing_version);
         match result {
             version_compare::Cmp::Eq => return Ok(response),
@@ -244,24 +242,27 @@ async fn find_block_height<App: KolmeApp>(
                 // Search in the lower half.
                 if middle_block.is_start() {
                     // We are at the beginning and the version is still too high.
-                    bail!(
-                        "Chain version {} not found, earliest is {}",
-                        chain_version,
-                        response.chain_version
-                    );
+                    return Err(KolmeError::ChainVersionNotFound {
+                        requested: chain_version.to_string(),
+                        earliest: response.chain_version,
+                    });
                 }
-                end_block = middle_block.prev().context("Underflow in prev")?;
+                end_block = middle_block.prev().ok_or(KolmeError::UnderflowInPrev)?;
             }
             version_compare::Cmp::Gt | version_compare::Cmp::Ge => {
                 // The version we want is newer than the one at `middle_block`.
                 // Search in the upper half.
                 start_block = middle_block.next();
             }
-            version_compare::Cmp::Ne => bail!("Not able to compare version"),
+            version_compare::Cmp::Ne => {
+                return Err(KolmeError::VersionComparisonFailed);
+            }
         }
     }
 
-    bail!("Could not find a block with chain version {chain_version}");
+    Err(KolmeError::BlockNotFoundOnChainVersion(
+        chain_version.to_string(),
+    ))
 }
 
 /// Find the first block height with a particular chain version
@@ -269,7 +270,7 @@ async fn find_first_block<App: KolmeApp>(
     kolme: &Kolme<App>,
     chain_version: &Version<'_>,
     mut end_block: BlockHeight,
-) -> Result<BlockHeight> {
+) -> Result<BlockHeight, KolmeError> {
     let mut start_block = BlockHeight::start();
     let mut first_block = None;
 
@@ -277,28 +278,27 @@ async fn find_first_block<App: KolmeApp>(
         let middle_block = start_block.increasing_middle(end_block)?;
         let response = block_response(kolme, middle_block).await?;
 
-        let response_chain_version =
-            Version::from(&response.chain_version).context("Invalid chain version")?;
+        let response_chain_version = Version::from(&response.chain_version).ok_or(
+            KolmeError::InvalidChainVersion(response.chain_version.to_owned()),
+        )?;
 
         if response_chain_version == *chain_version {
             first_block = Some(middle_block);
             if middle_block.is_start() {
                 break;
             }
-            end_block = middle_block.prev().context("Underflow in prev")?;
+            end_block = middle_block.prev().ok_or(KolmeError::UnderflowInPrev)?;
         } else if response_chain_version.compare(chain_version) == version_compare::Cmp::Lt {
             start_block = middle_block.next();
         } else {
             if middle_block.is_start() {
                 break;
             }
-            end_block = middle_block.prev().context("Underflow in prev")?;
+            end_block = middle_block.prev().ok_or(KolmeError::UnderflowInPrev)?;
         }
     }
 
-    first_block.context(format!(
-        "Could not find first block for chain version {chain_version}"
-    ))
+    first_block.ok_or_else(|| KolmeError::FirstBlockNotFound(chain_version.to_string()))
 }
 
 /// Find the last block height with a particular chain version
@@ -306,9 +306,9 @@ async fn find_last_block<App: KolmeApp>(
     kolme: &Kolme<App>,
     chain_version: &Version<'_>,
     mut start_block: BlockHeight,
-) -> Result<BlockHeight> {
+) -> Result<BlockHeight, KolmeError> {
     let next_height = kolme.read().get_next_height();
-    let latest_block = next_height.prev().context("No blocks in chain")?;
+    let latest_block = next_height.prev().ok_or(KolmeError::NoBlocksInChain)?;
     let mut end_block = latest_block;
     let mut last_block = None;
 
@@ -316,8 +316,9 @@ async fn find_last_block<App: KolmeApp>(
         let middle_block = start_block.increasing_middle(end_block)?;
         let response = block_response(kolme, middle_block).await?;
 
-        let response_chain_version =
-            Version::from(&response.chain_version).context("Invalid chain version")?;
+        let response_chain_version = Version::from(&response.chain_version).ok_or(
+            KolmeError::InvalidChainVersion(response.chain_version.to_owned()),
+        )?;
 
         if response_chain_version == *chain_version {
             last_block = Some(middle_block);
@@ -326,15 +327,13 @@ async fn find_last_block<App: KolmeApp>(
             if middle_block.is_start() {
                 break;
             }
-            end_block = middle_block.prev().context("Underflow in prev")?;
+            end_block = middle_block.prev().ok_or(KolmeError::UnderflowInPrev)?;
         } else {
             start_block = middle_block.next();
         }
     }
 
-    last_block.context(format!(
-        "Could not find last block for chain version {chain_version}"
-    ))
+    last_block.ok_or_else(|| KolmeError::LastBlockNotFound(chain_version.to_string()))
 }
 
 #[derive(serde::Deserialize)]
@@ -358,7 +357,7 @@ async fn fork_info<App: KolmeApp>(
         }
     };
 
-    let result: Result<ForkInfo> = async {
+    let result: Result<ForkInfo, KolmeError> = async {
         let found_block = find_block_height(&kolme, &chain_version).await?;
         let first_block =
             find_first_block(&kolme, &chain_version, found_block.block_height).await?;
@@ -411,7 +410,7 @@ async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocke
 
     async fn get_next_latest(
         latest: &mut tokio::sync::watch::Receiver<Option<Arc<SignedTaggedJson<LatestBlock>>>>,
-    ) -> Result<Arc<SignedTaggedJson<LatestBlock>>> {
+    ) -> Result<Arc<SignedTaggedJson<LatestBlock>>, KolmeError> {
         loop {
             latest.changed().await?;
             if let Some(latest) = latest.borrow().clone().as_ref() {
@@ -432,7 +431,7 @@ async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocke
                 next_height = next_height.next();
                 block.map(|block| Action::Raw(RawMessage::Block(block)))
             }
-            failed = failed_txs.recv() => failed.map(|failed| Action::Raw(RawMessage::Failed(failed))).map_err(anyhow::Error::from),
+            failed = failed_txs.recv() => failed.map(|failed| Action::Raw(RawMessage::Failed(failed))).map_err(KolmeError::from),
             latest = get_next_latest(&mut latest) => latest.map(|latest| Action::Raw(RawMessage::Latest(latest))),
         };
 
@@ -480,7 +479,7 @@ async fn handle_websocket<App: KolmeApp>(kolme: Kolme<App>, mut socket: WebSocke
 async fn to_api_notification<App: KolmeApp>(
     kolme: &Kolme<App>,
     raw: RawMessage<App::Message>,
-) -> Result<ApiNotification<App::Message>> {
+) -> Result<ApiNotification<App::Message>, KolmeError> {
     match raw {
         RawMessage::Block(block) => {
             let height = block.height();
@@ -490,8 +489,12 @@ async fn to_api_notification<App: KolmeApp>(
                 kolme.wait_for_block(height),
             )
             .await
-            .with_context(|| format!("Loading logs: took too long to load block {height}"))?
-            .with_context(|| format!("Failed to get block {height} in order to load logs"))?;
+            .map_err(|error| KolmeError::BlockTimeout { height, error })?
+            .map_err(|error| KolmeError::BlockLoadFailed {
+                height,
+                error: Box::new(error),
+            })?;
+
             let logs = kolme.load_logs(block.as_inner().logs).await?.into();
             Ok(ApiNotification::NewBlock { block, logs })
         }

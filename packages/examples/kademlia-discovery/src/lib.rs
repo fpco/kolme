@@ -106,7 +106,7 @@ impl KolmeApp for KademliaTestApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(State { hi_count: 0 })
     }
 
@@ -114,7 +114,7 @@ impl KolmeApp for KademliaTestApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             KademliaTestMessage::SayHi {} => ctx.state_mut().hi_count += 1,
         }
@@ -231,7 +231,7 @@ pub async fn new_version_node(api_server_port: u16) -> Result<()> {
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }
@@ -299,7 +299,7 @@ pub async fn validators(
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }

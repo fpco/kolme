@@ -32,7 +32,7 @@ impl<App: KolmeApp> Upgrader<App> {
         }
     }
 
-    async fn run_single(&self) -> Result<()> {
+    async fn run_single(&self) -> Result<(), KolmeError> {
         let kolme = self.kolme.read();
         let framework_state = kolme.get_framework_state();
 
@@ -91,7 +91,11 @@ impl<App: KolmeApp> Upgrader<App> {
         Ok(())
     }
 
-    async fn vote_on_upgrade(&self, id: AdminProposalId, payload: &ProposalPayload) -> Result<()> {
+    async fn vote_on_upgrade(
+        &self,
+        id: AdminProposalId,
+        payload: &ProposalPayload,
+    ) -> Result<(), KolmeError> {
         self.kolme
             .sign_propose_await_transaction(
                 &self.secret,
@@ -105,7 +109,7 @@ impl<App: KolmeApp> Upgrader<App> {
         Ok(())
     }
 
-    async fn propose_upgrade(&self) -> Result<()> {
+    async fn propose_upgrade(&self) -> Result<(), KolmeError> {
         self.kolme
             .sign_propose_await_transaction(
                 &self.secret,

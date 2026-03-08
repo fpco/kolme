@@ -131,7 +131,7 @@ impl KolmeApp for SolanaCosmosBridgeApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(State)
     }
 
@@ -139,7 +139,7 @@ impl KolmeApp for SolanaCosmosBridgeApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             BridgeMessage::ToSolana { to, amount } => {
                 ctx.withdraw_asset(
@@ -202,7 +202,7 @@ pub async fn serve(
             }
             Ok(Err(e)) => {
                 set.abort_all();
-                return Err(e);
+                return Err(e.into());
             }
             Ok(Ok(())) => (),
         }

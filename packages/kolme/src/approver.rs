@@ -10,7 +10,7 @@ impl<App: KolmeApp> Approver<App> {
         Approver { kolme, secret }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> Result<(), KolmeError> {
         let mut new_block = self.kolme.subscribe_new_block();
         self.catch_up_approvals_all().await?;
         loop {
@@ -19,7 +19,7 @@ impl<App: KolmeApp> Approver<App> {
         }
     }
 
-    async fn catch_up_approvals_all(&self) -> Result<()> {
+    async fn catch_up_approvals_all(&self) -> Result<(), KolmeError> {
         let kolme = self.kolme.read();
         for (chain, _) in kolme.get_bridge_contracts().iter() {
             self.catch_up_approvals(&kolme, chain).await?;
@@ -27,7 +27,11 @@ impl<App: KolmeApp> Approver<App> {
         Ok(())
     }
 
-    async fn catch_up_approvals(&self, kolme: &KolmeRead<App>, chain: ExternalChain) -> Result<()> {
+    async fn catch_up_approvals(
+        &self,
+        kolme: &KolmeRead<App>,
+        chain: ExternalChain,
+    ) -> Result<(), KolmeError> {
         let Some((action_id, action)) = kolme.get_next_bridge_action(chain)? else {
             return Ok(());
         };

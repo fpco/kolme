@@ -56,7 +56,7 @@ async fn evicts_same_tx_mempool_inner(test_tasks: TestTasks, (): ()) {
     });
 }
 
-async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
+async fn repeat_client(kolme: Kolme<SampleKolmeApp>) -> Result<(), KolmeError> {
     let secret = SecretKey::random();
 
     let tx = Arc::new(
@@ -130,7 +130,7 @@ async fn no_op_node(
     kolme: Kolme<SampleKolmeApp>,
     receiver: oneshot::Receiver<()>,
     data: Arc<Mutex<Vec<TxHash>>>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     receiver.await.ok();
     let hashes = data.lock().unwrap().clone();
     assert_eq!(hashes.len(), 5, "Five transactions expected");
@@ -160,7 +160,7 @@ async fn client(
     kolme: Kolme<SampleKolmeApp>,
     sender: oneshot::Sender<()>,
     data: Arc<Mutex<Vec<TxHash>>>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     for _ in 0..5 {
         let secret = SecretKey::random();
 

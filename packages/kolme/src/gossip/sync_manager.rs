@@ -136,7 +136,7 @@ impl<App: KolmeApp> SyncManager<App> {
         &mut self,
         gossip: &Gossip<App>,
         height: BlockHeight,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         if gossip.kolme.has_block(height).await? || self.needed_blocks.contains_key(&height) {
             return Ok(());
         }
@@ -189,7 +189,7 @@ impl<App: KolmeApp> SyncManager<App> {
         gossip: &Gossip<App>,
         hash: Sha256Hash,
         layer: Arc<MerkleLayerContents>,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         let Some(mut entry) = self.needed_blocks.first_entry() else {
             return Ok(());
         };
@@ -238,7 +238,7 @@ impl<App: KolmeApp> SyncManager<App> {
     pub(super) async fn get_data_requests(
         &mut self,
         gossip: &Gossip<App>,
-    ) -> Result<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>> {
+    ) -> Result<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>, KolmeError> {
         // We need to make sure that we are correctly performing
         // requests in order. That means that, in some cases, we'll
         // need to insert earlier block requests so that we fill in
@@ -267,7 +267,7 @@ impl<App: KolmeApp> SyncManager<App> {
         }
     }
 
-    async fn add_missing_needed_blocks(&mut self, gossip: &Gossip<App>) -> Result<()> {
+    async fn add_missing_needed_blocks(&mut self, gossip: &Gossip<App>) -> Result<(), KolmeError> {
         // First determine if we need to force sync from the beginning.
         match gossip.sync_mode {
             // State mode allows us to just grab the blocks we need.
@@ -307,7 +307,7 @@ impl<App: KolmeApp> SyncManager<App> {
         gossip: &Gossip<App>,
         height: BlockHeight,
         waiting: &mut WaitingBlock<App>,
-    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>> {
+    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>, KolmeError> {
         let label = DataRequest::Block(height);
         // Check if it got added to our store in the meanwhile
         if gossip.kolme.has_block(height).await? {
@@ -380,7 +380,7 @@ impl<App: KolmeApp> SyncManager<App> {
     async fn get_block_data_requests(
         gossip: &Gossip<App>,
         pending: &mut PendingBlock<App>,
-    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>> {
+    ) -> Result<Option<SmallVec<[DataRequest; DEFAULT_REQUEST_COUNT]>>, KolmeError> {
         let mut active_count = 0;
         let mut layers_to_drop = SmallVec::<[Sha256Hash; DEFAULT_REQUEST_COUNT]>::new();
         let mut res = SmallVec::new();
@@ -433,7 +433,7 @@ impl<App: KolmeApp> SyncManager<App> {
         gossip: &Gossip<App>,
         pending: &mut PendingBlock<App>,
         hash: Sha256Hash,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         if gossip.kolme.has_merkle_hash(hash).await? {
             // Awesome, we have the hash stored, we can drop it from pending and continue upstream.
             pending.pending_layers.remove(&hash);

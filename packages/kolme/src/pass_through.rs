@@ -89,7 +89,7 @@ pub async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload: &str,
-) -> Result<String> {
+) -> Result<String, KolmeError> {
     let url = format!("http://localhost:{port}/actions");
     tracing::debug!("Sending bridge action to {url}");
     let resp = client
@@ -117,7 +117,7 @@ impl PassThrough {
         }
     }
 
-    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<()> {
+    pub async fn run<A: tokio::net::ToSocketAddrs>(self, addr: A) -> Result<(), KolmeError> {
         let cors = CorsLayer::new()
             .allow_methods([Method::GET, Method::POST, Method::PUT])
             .allow_origin(Any)
@@ -137,9 +137,7 @@ impl PassThrough {
             "Starting PassThrough server on {:?}",
             listener.local_addr()?
         );
-        axum::serve(listener, app)
-            .await
-            .map_err(anyhow::Error::from)
+        axum::serve(listener, app).await.map_err(KolmeError::from)
     }
 }
 
@@ -147,7 +145,7 @@ pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
     port: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     tracing::debug!("pass through listen");
     let mut next_bridge_event_id = get_next_bridge_event_id(
         &kolme.read(),
@@ -160,7 +158,8 @@ pub async fn listen<App: KolmeApp>(
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
 
     loop {
-        let message = ws.next().await.context("WebSocket stream terminated")??; //receiver.recv().await?;
+        let message = ws.next().await.ok_or(KolmeError::WebSocketClosed)??;
+
         let message = serde_json::from_slice::<BridgeEventMessage>(&message.into_data())?;
         tracing::debug!("Received {}", serde_json::to_string(&message).unwrap());
         let message = to_kolme_message::<App::Message>(
