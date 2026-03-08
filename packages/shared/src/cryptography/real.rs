@@ -105,14 +105,14 @@ impl borsh::ser::BorshSerialize for PublicKey {
 impl borsh::de::BorshDeserialize for PublicKey {
     #[inline]
     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
-        use borsh::io::{Error, ErrorKind};
+        use borsh::io::Error;
 
         // We are forced to use the internal API because using the [T; N] array impl returns
         // a "Not all bytes read" error even though the binary representation is correct...
         let bytes: [u8; 33] = u8::array_from_reader(reader)?.unwrap(); // This always returns Some
         match Self::from_bytes(bytes) {
             Ok(sig) => Ok(sig),
-            Err(e) => Err(Error::new(ErrorKind::Other, e)),
+            Err(e) => Err(Error::other(e)),
         }
     }
 }
@@ -310,14 +310,14 @@ impl borsh::ser::BorshSerialize for Signature {
 impl borsh::de::BorshDeserialize for Signature {
     #[inline]
     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
-        use borsh::io::{Error, ErrorKind};
+        use borsh::io::Error;
 
         // We are forced to use the internal API because using the [T; N] array impl returns
         // a "Not all bytes read" error even though the binary representation is correct...
         let bytes: [u8; 64] = u8::array_from_reader(reader)?.unwrap(); // This always returns Some
         match Self::from_slice(&bytes) {
             Ok(sig) => Ok(sig),
-            Err(e) => Err(Error::new(ErrorKind::Other, e)),
+            Err(e) => Err(Error::other(e)),
         }
     }
 }
@@ -394,13 +394,13 @@ impl borsh::ser::BorshSerialize for RecoveryId {
 impl borsh::de::BorshDeserialize for RecoveryId {
     #[inline]
     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
-        use borsh::io::{Error, ErrorKind};
+        use borsh::io::Error;
 
         let byte = u8::deserialize_reader(reader)?;
 
         match Self::from_byte(byte) {
             Ok(id) => Ok(id),
-            Err(e) => Err(Error::new(ErrorKind::Other, e)),
+            Err(e) => Err(Error::other(e)),
         }
     }
 }

@@ -83,7 +83,7 @@ mod cw_impls {
         type Suffix = Self;
         type SuperSuffix = Self;
 
-        fn key(&self) -> Vec<cw_storage_plus::Key> {
+        fn key(&self) -> Vec<cw_storage_plus::Key<'_>> {
             self.0.key()
         }
     }

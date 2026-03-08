@@ -132,7 +132,7 @@ where
 }
 
 impl<K, V> MerkleMap<K, V> {
-    pub fn iter(&self) -> crate::impls::iter::Iter<K, V> {
+    pub fn iter(&self) -> crate::impls::iter::Iter<'_, K, V> {
         self.sanity_checks();
         self.into_iter()
     }
@@ -143,7 +143,7 @@ impl<K, V> MerkleMap<K, V> {
 }
 
 impl<K: ToMerkleKey, V> MerkleMap<K, V> {
-    pub fn range<T, R>(&self, range: R) -> impls::iter::Iter<K, V>
+    pub fn range<T, R>(&self, range: R) -> impls::iter::Iter<'_, K, V>
     where
         T: ToMerkleKey + ?Sized,
         K: Borrow<T>,

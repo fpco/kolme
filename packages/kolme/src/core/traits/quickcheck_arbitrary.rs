@@ -66,6 +66,9 @@ impl Arbitrary for ExternalChain {
             ExternalChain::SolanaTestnet,
             ExternalChain::SolanaDevnet,
             ExternalChain::SolanaLocal,
+            ExternalChain::EthereumMainnet,
+            ExternalChain::EthereumSepolia,
+            ExternalChain::EthereumLocal,
             #[cfg(feature = "pass_through")]
             ExternalChain::PassThrough,
         ];

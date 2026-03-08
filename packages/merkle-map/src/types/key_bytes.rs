@@ -15,7 +15,7 @@ impl MerkleKey {
         // First get the byte in question...
         let byte = *self.0.get(usize::from(depth / 2))?;
         // Then get either the high or low bits, depending on whether our depth is even or odd
-        Some(if depth % 2 == 0 {
+        Some(if depth.is_multiple_of(2) {
             byte >> 4
         } else {
             byte & 0x0F

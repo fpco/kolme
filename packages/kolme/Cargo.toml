@@ -57,6 +57,9 @@ cosmwasm-std = { workspace = true, optional = true }
 absurd-future = { workspace = true }
 version-compare = { workspace = true }
 
+# Ethereum
+alloy = { workspace = true, optional = true }
+
 [dev-dependencies]
 kademlia-discovery = { workspace = true }
 kolme-test = { workspace = true }
@@ -67,6 +70,7 @@ tempfile = { workspace = true }
 [features]
 pass_through = []
 cosmwasm = ["dep:cosmos", "dep:cosmwasm-std", "shared/cosmwasm"]
+ethereum = ["dep:alloy"]
 solana = [
   "dep:solana-account", "dep:solana-client", "dep:solana-commitment-config",
   "dep:solana-hash", "dep:solana-signature", "dep:solana-pubkey",

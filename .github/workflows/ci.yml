@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install depdendencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
@@ -35,7 +37,7 @@ jobs:
           tool: just@1.40.0,nextest@0.9.99,sqlx-cli
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.86.0
+          toolchain: 1.93.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -80,8 +82,12 @@ jobs:
         run: just cargo-test
       - name: Start localosmosis
         run: just localosmosis
+      - name: Start anvil
+        run: just anvil
       - name: Contract tests
         run: just cargo-contract-tests
+      - name: Ethereum Anvil CLI smoke
+        run: just ethereum-anvil-cli-smoke
 
   solana-contract:
     name: Solana Tests
@@ -89,6 +95,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install depdendencies
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
@@ -131,3 +139,20 @@ jobs:
       - name: Test
         working-directory: solana
         run: just test
+
+  ethereum-contract:
+    name: Ethereum Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Build
+        working-directory: contracts/ethereum
+        run: forge build
+      - name: Test
+        working-directory: contracts/ethereum
+        run: forge test

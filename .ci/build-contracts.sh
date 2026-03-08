@@ -25,6 +25,7 @@ docker  run --rm --tty \
 -v "$ARTIFACTS":/code/artifacts \
 -v "$REGISTRY_CACHE":/usr/local/cargo/registry \
 -v "$CARGO_GIT_CACHE":/usr/local/cargo/git \
+-e "RUSTUP_TOOLCHAIN=1.86.0" \
 docker.io/cosmwasm/optimizer:0.17.0
 
 # Our own custom build if different rust version is required

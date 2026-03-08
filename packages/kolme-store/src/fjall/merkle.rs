@@ -115,7 +115,7 @@ fn render_children(children: &[Sha256Hash]) -> Vec<u8> {
 }
 
 fn parse_children(children: &[u8]) -> Result<SmallVec<[Sha256Hash; 16]>, MerkleSerialError> {
-    if children.len() % 32 != 0 {
+    if !children.len().is_multiple_of(32) {
         return Err(MerkleSerialError::InvalidChildrenLength {
             len: children.len(),
         });

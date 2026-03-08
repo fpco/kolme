@@ -3,7 +3,12 @@ mod approver;
 mod common;
 mod core;
 pub mod gossip;
-#[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
+#[cfg(any(
+    feature = "solana",
+    feature = "cosmwasm",
+    feature = "ethereum",
+    feature = "pass_through"
+))]
 pub(crate) mod listener;
 #[cfg(feature = "pass_through")]
 pub mod pass_through;
@@ -20,7 +25,12 @@ pub use common::*;
 pub use core::*;
 pub use gossip::{Gossip, GossipBuilder, SyncMode};
 pub use jiff::Timestamp;
-#[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
+#[cfg(any(
+    feature = "solana",
+    feature = "cosmwasm",
+    feature = "ethereum",
+    feature = "pass_through"
+))]
 pub use listener::Listener;
 pub use merkle_map::*;
 pub use processor::Processor;

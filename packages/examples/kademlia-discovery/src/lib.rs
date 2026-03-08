@@ -122,22 +122,6 @@ impl KolmeApp for KademliaTestApp {
     }
 }
 
-#[derive(PartialEq, serde::Serialize, serde::Deserialize)]
-struct RandomU32;
-
-impl<App> KolmeDataRequest<App> for RandomU32 {
-    type Response = u32;
-
-    async fn load(self, _: &App) -> Result<Self::Response, KolmeDataError> {
-        Ok(rand::random())
-    }
-
-    async fn validate(self, _: &App, _: &Self::Response) -> Result<(), KolmeDataError> {
-        // No validation possible
-        Ok(())
-    }
-}
-
 pub async fn observer_node(validator_addr: &str, api_server_port: u16) -> Result<()> {
     let kolme = Kolme::new(
         KademliaTestApp::new(my_listener_key().clone(), my_approver_key().clone()),
