@@ -88,11 +88,15 @@ cargo-compile:
 
 # Non contract test
 cargo-test:
-    cat contract-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
+    cat contract-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked -E 'not binary(ethereum-bridge)' --
 
 # Contract related tests
 cargo-contract-tests:
     xargs -a contract-test-list.txt cargo nextest run --workspace --profile=ci --locked --
+
+cargo-contract-tests-ethereum:
+    just build-ethereum-contract
+    cargo test -p integration-tests --test ethereum-bridge -- --test-threads=1
 
 # Stress test
 stress-test:
