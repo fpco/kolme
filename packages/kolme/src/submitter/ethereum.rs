@@ -87,10 +87,20 @@ fn validator_set_constructor_args(validator_set: &ValidatorSet) -> Bridge::const
     ))
 }
 
-fn build_bridge_initcode(validator_set: &ValidatorSet) -> anyhow::Result<Vec<u8>> {
-    let mut initcode = load_bridge_create_bytecode()?;
+fn build_bridge_initcode_with_create_bytecode(
+    create_bytecode: &[u8],
+    validator_set: &ValidatorSet,
+) -> Vec<u8> {
+    let mut initcode = create_bytecode.to_vec();
     initcode.extend_from_slice(&validator_set_constructor_args(validator_set).abi_encode());
-    Ok(initcode)
+    initcode
+}
+
+fn build_bridge_initcode(validator_set: &ValidatorSet) -> anyhow::Result<Vec<u8>> {
+    Ok(build_bridge_initcode_with_create_bytecode(
+        &load_bridge_create_bytecode()?,
+        validator_set,
+    ))
 }
 
 pub(super) async fn instantiate(
@@ -119,7 +129,8 @@ mod tests {
     use alloy::sol_types::SolConstructor;
 
     use super::{
-        build_bridge_initcode, parse_bridge_create_bytecode_str, validator_set_constructor_args,
+        build_bridge_initcode_with_create_bytecode, parse_bridge_create_bytecode_str,
+        validator_set_constructor_args,
     };
     use crate::{SecretKey, ValidatorSet};
 
@@ -200,7 +211,8 @@ mod tests {
         };
 
         let args = validator_set_constructor_args(&set).abi_encode();
-        let initcode = build_bridge_initcode(&set).unwrap();
+        let initcode = build_bridge_initcode_with_create_bytecode(&[0x60, 0x01], &set);
+        assert!(initcode.starts_with(&[0x60, 0x01]));
         assert!(initcode.ends_with(&args));
     }
 }
