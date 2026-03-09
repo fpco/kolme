@@ -7,22 +7,19 @@ use alloy::{
     rpc::types::eth::TransactionRequest,
     sol,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use kolme::*;
 use rand::Rng;
 use testtasks::TestTasks;
 
-// for actual addresses/keys and ways to renew them, check contracts/ethereum/e2e/README.md
-const TEST_BRIDGE_ADDRESS: &str = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+// Important note: if same account is used for multiple tests simultaneously in
+// multiple threads, "nonce too low" error may appear. Either --test-threads=1 must be
+// used, or different account for different concurrent tests
 const TEST_ANVIL_ACCOUNT_0_ADDRESS: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
-const TEST_PROCESSOR_KEY_HEX: &str =
-    "038318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75";
-const TEST_APPROVER_KEY_HEX: &str =
-    "02ba5734d8f7091719471e7f7ed6b9df170dc70cc661ca05e688601ad984f068b0";
 
 sol! {
     #[sol(rpc)]
@@ -104,14 +101,6 @@ impl EthereumBridgeTestApp {
             },
         }
     }
-
-    fn with_deployed_bridge(validator: PublicKey, bridge_contract: &str) -> Self {
-        Self::new(
-            validator,
-            BridgeContract::Deployed(bridge_contract.to_string()),
-        )
-    }
-
     fn with_needed_bridge(validator: PublicKey) -> Self {
         Self::new(validator, BridgeContract::NeededEthereumBridge)
     }
@@ -146,16 +135,19 @@ async fn ethereum_listener_ingests_local_deposit() {
 
 #[tokio::test]
 async fn ethereum_bridge_get_config_is_readable() {
-    let provider = anvil_provider().expect("failed to build anvil provider");
+    init_logger(true, None);
+    TestTasks::start(ethereum_bridge_get_config_is_readable_inner, ()).await;
+}
 
+async fn ethereum_bridge_get_config_is_readable_inner(testtasks: TestTasks, (): ()) {
+    let provider = anvil_provider().expect("failed to build anvil provider");
     assert_anvil_identifiers_match(&provider)
         .await
         .expect("local anvil setup does not match expected deterministic identifiers");
-
-    let bridge: Address = TEST_BRIDGE_ADDRESS
-        .parse()
-        .expect("hardcoded bridge address is invalid");
-    let contract = IBridgeIntegration::new(bridge, provider.clone());
+    let deployed = deploy_bridge_with_kolme(&testtasks)
+        .await
+        .expect("failed to deploy Ethereum bridge with kolme");
+    let contract = IBridgeIntegration::new(deployed.bridge_address, provider);
     let cfg = contract
         .get_config()
         .call()
@@ -164,72 +156,40 @@ async fn ethereum_bridge_get_config_is_readable() {
 
     assert_eq!(cfg.processor.len(), 33, "invalid processor key length");
     assert_eq!(
-        hex::encode(cfg.processor.as_ref()),
-        TEST_PROCESSOR_KEY_HEX,
+        cfg.processor.as_ref(),
+        deployed.validator.public_key().as_bytes().as_ref(),
         "unexpected processor key in bridge config"
     );
+    assert_eq!(cfg.listeners.len(), 1, "unexpected listener count");
     assert_eq!(
-        cfg.listeners.len(),
-        1,
-        "unexpected number of listeners in bridge config"
-    );
-    assert_eq!(
-        hex::encode(cfg.listeners[0].as_ref()),
-        TEST_PROCESSOR_KEY_HEX,
+        cfg.listeners[0].as_ref(),
+        deployed.validator.public_key().as_bytes().as_ref(),
         "unexpected listener key in bridge config"
     );
+    assert_eq!(cfg.approvers.len(), 1, "unexpected approver count");
     assert_eq!(
-        cfg.approvers.len(),
-        1,
-        "unexpected number of approvers in bridge config"
-    );
-    assert_eq!(
-        hex::encode(cfg.approvers[0].as_ref()),
-        TEST_APPROVER_KEY_HEX,
+        cfg.approvers[0].as_ref(),
+        deployed.validator.public_key().as_bytes().as_ref(),
         "unexpected approver key in bridge config"
     );
+    assert_eq!(cfg.neededListeners, 1, "unexpected listener quorum");
+    assert_eq!(cfg.neededApprovers, 1, "unexpected approver quorum");
     assert_eq!(
-        cfg.neededListeners, 1,
-        "unexpected listener quorum in bridge config"
-    );
-    assert_eq!(
-        cfg.neededApprovers, 1,
-        "unexpected approver quorum in bridge config"
-    );
-    assert_eq!(
-        cfg.configNextEventId, 0,
-        "unexpected initial value for configNextEventId"
+        cfg.configNextEventId, 1,
+        "unexpected initial configNextEventId"
     );
     assert_eq!(
         cfg.configNextActionId, 0,
-        "unexpected initial value for configNextActionId"
+        "unexpected initial configNextActionId"
     );
 }
 
 async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, (): ()) {
-    let validator = SecretKey::random();
-    let kolme = Kolme::new(
-        EthereumBridgeTestApp::with_deployed_bridge(validator.public_key(), TEST_BRIDGE_ADDRESS),
-        DUMMY_CODE_VERSION,
-        KolmeStore::new_in_memory(),
-    )
-    .await
-    .unwrap();
-    let test_tx_amount: u128 = {
-        let mut rng = rand::thread_rng();
-        rng.gen_range(20u128..100u128)
-    };
-
-    testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
-    testtasks.try_spawn_persistent(
-        Listener::new(kolme.clone(), validator.clone()).run(ChainName::Ethereum),
-    );
-
-    // Give the listener loop a short head start before submitting the deposit tx.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
+    let deployed = deploy_bridge_with_kolme(&testtasks)
+        .await
+        .expect("failed to deploy Ethereum bridge with kolme");
+    let test_tx_amount: u128 = rand::thread_rng().gen_range(20u128..100u128);
     let provider = anvil_provider().expect("failed to build anvil provider");
-
     assert_anvil_identifiers_match(&provider)
         .await
         .expect("local anvil setup does not match expected deterministic identifiers");
@@ -240,35 +200,20 @@ async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, ():
             .parse::<Address>()
             .expect("hardcoded Anvil account 0 address is invalid")
     ));
-    let kolme_for_waiter = kolme.clone();
-    let wallet_for_waiter = expected_wallet.clone();
-    let waiter = tokio::spawn(async move {
-        wait_for_expected_listener_message_in_new_blocks(
-            &kolme_for_waiter,
-            &wallet_for_waiter,
-            test_tx_amount,
-        )
-        .await
-    });
-    tokio::task::yield_now().await;
-
-    let tx_hash = send_eth(
+    let tx_hash = send_eth_and_wait(
+        &deployed.kolme,
         &provider,
+        &expected_wallet,
         TEST_ANVIL_ACCOUNT_0_ADDRESS,
-        TEST_BRIDGE_ADDRESS,
+        deployed.bridge_address,
         test_tx_amount,
     )
     .await
     .expect("failed to send ETH to bridge contract");
 
-    tokio::time::timeout(Duration::from_secs(10), waiter)
-        .await
-        .expect("timed out waiting for specific Ethereum listener message")
-        .expect("listener message waiter task failed")
-        .expect("failed while waiting for specific Ethereum listener message");
-
     tracing::info!(
-        "Ethereum deposit ingested by Kolme listener. sender={TEST_ANVIL_ACCOUNT_0_ADDRESS}, tx={tx_hash}, contract={TEST_BRIDGE_ADDRESS}, amount_wei={test_tx_amount}"
+        "Ethereum deposit ingested by Kolme listener. sender={TEST_ANVIL_ACCOUNT_0_ADDRESS}, tx={tx_hash}, contract={:#x}, amount_wei={test_tx_amount}",
+        deployed.bridge_address
     );
 }
 
@@ -279,40 +224,14 @@ async fn ethereum_submitter_deploys_local_bridge() {
 }
 
 async fn ethereum_submitter_deploys_local_bridge_inner(testtasks: TestTasks, (): ()) {
-    let validator = SecretKey::random();
-    let signer = TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY
-        .parse()
-        .expect("hardcoded Anvil account 0 private key is invalid");
-    let kolme = Kolme::new(
-        EthereumBridgeTestApp::with_needed_bridge(validator.public_key()),
-        DUMMY_CODE_VERSION,
-        KolmeStore::new_in_memory(),
-    )
-    .await
-    .unwrap();
-
-    testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
-    testtasks.try_spawn_persistent(
-        Listener::new(kolme.clone(), validator.clone()).run(ChainName::Ethereum),
-    );
-    testtasks.try_spawn_persistent(Submitter::new_ethereum(kolme.clone(), signer).run());
-
-    let deployed_contract = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if let Some(contract) = deployed_bridge_address(&kolme) {
-                break contract;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("timed out waiting for Ethereum bridge deployment");
-
     let provider = anvil_provider().expect("failed to build anvil provider");
-    let bridge: Address = deployed_contract
-        .parse()
-        .expect("deployed bridge address in kolme state is invalid");
-    let contract = IBridgeIntegration::new(bridge, provider);
+    assert_anvil_identifiers_match(&provider)
+        .await
+        .expect("local anvil setup does not match expected deterministic identifiers");
+    let deployed = deploy_bridge_with_kolme(&testtasks)
+        .await
+        .expect("failed to deploy Ethereum bridge with kolme");
+    let contract = IBridgeIntegration::new(deployed.bridge_address, provider);
     let cfg = contract
         .get_config()
         .call()
@@ -321,23 +240,72 @@ async fn ethereum_submitter_deploys_local_bridge_inner(testtasks: TestTasks, ():
 
     assert_eq!(
         cfg.processor.as_ref(),
-        validator.public_key().as_bytes().as_ref(),
+        deployed.validator.public_key().as_bytes().as_ref(),
         "unexpected processor key in deployed bridge config"
     );
     assert_eq!(cfg.listeners.len(), 1, "unexpected listener count");
     assert_eq!(
         cfg.listeners[0].as_ref(),
-        validator.public_key().as_bytes().as_ref(),
+        deployed.validator.public_key().as_bytes().as_ref(),
         "unexpected listener key in deployed bridge config"
     );
     assert_eq!(cfg.approvers.len(), 1, "unexpected approver count");
     assert_eq!(
         cfg.approvers[0].as_ref(),
-        validator.public_key().as_bytes().as_ref(),
+        deployed.validator.public_key().as_bytes().as_ref(),
         "unexpected approver key in deployed bridge config"
     );
     assert_eq!(cfg.neededListeners, 1, "unexpected listener quorum");
     assert_eq!(cfg.neededApprovers, 1, "unexpected approver quorum");
+    assert_eq!(
+        cfg.configNextEventId, 1,
+        "unexpected initial configNextEventId"
+    );
+    assert_eq!(
+        cfg.configNextActionId, 0,
+        "unexpected initial configNextActionId"
+    );
+}
+
+#[derive(Clone)]
+struct DeployedBridge {
+    kolme: Kolme<EthereumBridgeTestApp>,
+    validator: SecretKey,
+    bridge_address: Address,
+}
+
+async fn deploy_bridge_with_kolme(testtasks: &TestTasks) -> Result<DeployedBridge> {
+    let validator = SecretKey::random();
+    let signer = TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY.parse()?;
+    let kolme = Kolme::new(
+        EthereumBridgeTestApp::with_needed_bridge(validator.public_key()),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await?;
+
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
+    testtasks.try_spawn_persistent(
+        Listener::new(kolme.clone(), validator.clone()).run(ChainName::Ethereum),
+    );
+    testtasks.try_spawn_persistent(Submitter::new_ethereum(kolme.clone(), signer).run());
+
+    let bridge_address = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(contract) = deployed_bridge_address(&kolme) {
+                break Ok::<Address, anyhow::Error>(contract.parse()?);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("timed out waiting for Ethereum bridge deployment")??;
+
+    Ok(DeployedBridge {
+        kolme,
+        validator,
+        bridge_address,
+    })
 }
 
 fn iter_block_messages(
@@ -435,11 +403,10 @@ async fn assert_anvil_identifiers_match(provider: &DynProvider) -> Result<()> {
 async fn send_eth(
     provider: &DynProvider,
     from: &str,
-    to: &str,
+    to: Address,
     amount_wei: u128,
 ) -> Result<String> {
     let from: Address = from.parse()?;
-    let to: Address = to.parse()?;
     let request = TransactionRequest::default()
         .with_from(from)
         .with_to(to)
@@ -448,4 +415,34 @@ async fn send_eth(
     let tx_hash = *pending.tx_hash();
     let _receipt = pending.get_receipt().await?;
     Ok(format!("{tx_hash:#x}"))
+}
+
+async fn send_eth_and_wait(
+    kolme: &Kolme<EthereumBridgeTestApp>,
+    provider: &DynProvider,
+    expected_wallet: &Wallet,
+    from: &str,
+    to: Address,
+    amount_wei: u128,
+) -> Result<String> {
+    let kolme_for_waiter = kolme.clone();
+    let wallet_for_waiter = expected_wallet.clone();
+    let waiter = tokio::spawn(async move {
+        wait_for_expected_listener_message_in_new_blocks(
+            &kolme_for_waiter,
+            &wallet_for_waiter,
+            amount_wei,
+        )
+        .await
+    });
+    tokio::task::yield_now().await;
+
+    let tx_hash = send_eth(provider, from, to, amount_wei).await?;
+
+    tokio::time::timeout(Duration::from_secs(10), waiter)
+        .await
+        .context("timed out waiting for specific Ethereum listener message")?
+        .context("listener message waiter task failed")??;
+
+    Ok(tx_hash)
 }

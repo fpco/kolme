@@ -91,7 +91,7 @@ contract BridgeTest is Test {
         vm.deal(nonAdmin, 1 ether);
 
         vm.expectEmit(true, true, false, true, address(bridge));
-        emit FundsReceived(0, nonAdmin, 0.1 ether);
+        emit FundsReceived(1, nonAdmin, 0.1 ether);
 
         vm.prank(nonAdmin);
         (bool ok, ) = address(bridge).call{value: 0.1 ether}("");
@@ -105,7 +105,7 @@ contract BridgeTest is Test {
         assertTrue(ok);
 
         (, , , , , uint64 configNextEventId, ) = bridge.get_config();
-        assertEq(configNextEventId, 1);
+        assertEq(configNextEventId, 2);
     }
 
     function test_ExecuteSignedIncrementsIdsAndEmitsEvent() public {
@@ -118,14 +118,14 @@ contract BridgeTest is Test {
         approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
 
         vm.expectEmit(true, true, false, true, address(bridge));
-        emit Signed(0, nonAdmin, 0);
+        emit Signed(1, nonAdmin, 0);
 
         vm.prank(nonAdmin);
         bridge.execute_signed(payload, processorSig, approverSigs);
 
         (, , , , , uint64 configNextEventId, uint64 configNextActionId) = bridge
             .get_config();
-        assertEq(configNextEventId, 1);
+        assertEq(configNextEventId, 2);
         assertEq(configNextActionId, 1);
     }
 
@@ -330,7 +330,7 @@ contract BridgeTest is Test {
         assertEq(approvers.length, 1);
         assertEq(approvers[0], TEST_VALIDATOR_KEY_2);
         assertEq(neededApprovers, 1);
-        assertEq(configNextEventId, 0);
+        assertEq(configNextEventId, 1);
         assertEq(configNextActionId, 0);
     }
 
@@ -462,7 +462,7 @@ contract BridgeTest is Test {
         assertEq(approvers[0], TEST_VALIDATOR_KEY);
         assertEq(neededListeners, 1);
         assertEq(neededApprovers, 1);
-        assertEq(configNextEventId, 0);
+        assertEq(configNextEventId, 1);
         assertEq(configNextActionId, 0);
     }
 
