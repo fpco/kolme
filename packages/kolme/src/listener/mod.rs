@@ -199,9 +199,18 @@ impl<App: KolmeApp> Listener<App> {
             }
             #[cfg(not(feature = "solana"))]
             ChainKind::Solana(_) => Ok(()),
-            ChainKind::Ethereum(_) => {
-                anyhow::bail!("Ethereum listener contract checks are not implemented yet")
+            #[cfg(feature = "ethereum")]
+            ChainKind::Ethereum(chain) => {
+                let provider = kolme.get_ethereum_client(chain).await?;
+                ethereum::sanity_check_contract(
+                    &provider,
+                    contract,
+                    self.kolme.get_app().genesis_info(),
+                )
+                .await
             }
+            #[cfg(not(feature = "ethereum"))]
+            ChainKind::Ethereum(_) => Ok(()),
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => {
                 anyhow::bail!("No wait for pass-through contract is expected")
