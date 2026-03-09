@@ -271,7 +271,27 @@ impl<App: KolmeApp> Submitter<App> {
             #[cfg(not(feature = "solana"))]
             GenesisAction::InstantiateSolana { .. } => Ok(()),
             #[cfg(feature = "ethereum")]
-            GenesisAction::InstantiateEthereum { .. } => Ok(()),
+            GenesisAction::InstantiateEthereum {
+                chain,
+                validator_set,
+            } => {
+                let signer = match &self.args {
+                    ChainArgs::Ethereum { signer } => signer.clone(),
+                    _ => return Ok(()),
+                };
+
+                let mut guard = self.genesis_created.write().await;
+                if guard.contains_key(&chain.into()) {
+                    return Ok(());
+                }
+
+                let addr = ethereum::instantiate(chain, signer, &validator_set).await?;
+
+                guard.insert(chain.into(), addr);
+                self.trigger_genesis_available.trigger();
+
+                Ok(())
+            }
             #[cfg(not(feature = "ethereum"))]
             GenesisAction::InstantiateEthereum { .. } => Ok(()),
         }
