@@ -1,5 +1,7 @@
 #[cfg(feature = "cosmwasm")]
 mod cosmos;
+#[cfg(feature = "ethereum")]
+mod ethereum;
 #[cfg(feature = "solana")]
 mod solana;
 
