@@ -75,7 +75,7 @@ enum EmptyMessage {}
 const DUMMY_CODE_VERSION: &str = "ethereum-listener-test-v1";
 const ETH_ASSET_ID: AssetId = AssetId(1);
 impl EthereumBridgeTestApp {
-    fn new(validator: PublicKey, bridge_contract: &str) -> Self {
+    fn new(validator: PublicKey, bridge: BridgeContract) -> Self {
         let mut chains = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
         assets.insert(
@@ -86,13 +86,7 @@ impl EthereumBridgeTestApp {
             },
         );
         chains
-            .insert_ethereum(
-                EthereumChain::Local,
-                ChainConfig {
-                    assets,
-                    bridge: BridgeContract::Deployed(bridge_contract.to_string()),
-                },
-            )
+            .insert_ethereum(EthereumChain::Local, ChainConfig { assets, bridge })
             .unwrap();
 
         Self {
@@ -109,6 +103,17 @@ impl EthereumBridgeTestApp {
                 version: DUMMY_CODE_VERSION.to_owned(),
             },
         }
+    }
+
+    fn with_deployed_bridge(validator: PublicKey, bridge_contract: &str) -> Self {
+        Self::new(
+            validator,
+            BridgeContract::Deployed(bridge_contract.to_string()),
+        )
+    }
+
+    fn with_needed_bridge(validator: PublicKey) -> Self {
+        Self::new(validator, BridgeContract::NeededEthereumBridge)
     }
 }
 
@@ -204,7 +209,7 @@ async fn ethereum_bridge_get_config_is_readable() {
 async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, (): ()) {
     let validator = SecretKey::random();
     let kolme = Kolme::new(
-        EthereumBridgeTestApp::new(validator.public_key(), TEST_BRIDGE_ADDRESS),
+        EthereumBridgeTestApp::with_deployed_bridge(validator.public_key(), TEST_BRIDGE_ADDRESS),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )
@@ -267,6 +272,74 @@ async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, ():
     );
 }
 
+#[tokio::test]
+async fn ethereum_submitter_deploys_local_bridge() {
+    init_logger(true, None);
+    TestTasks::start(ethereum_submitter_deploys_local_bridge_inner, ()).await;
+}
+
+async fn ethereum_submitter_deploys_local_bridge_inner(testtasks: TestTasks, (): ()) {
+    let validator = SecretKey::random();
+    let signer = TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY
+        .parse()
+        .expect("hardcoded Anvil account 0 private key is invalid");
+    let kolme = Kolme::new(
+        EthereumBridgeTestApp::with_needed_bridge(validator.public_key()),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await
+    .unwrap();
+
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
+    testtasks.try_spawn_persistent(
+        Listener::new(kolme.clone(), validator.clone()).run(ChainName::Ethereum),
+    );
+    testtasks.try_spawn_persistent(Submitter::new_ethereum(kolme.clone(), signer).run());
+
+    let deployed_contract = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(contract) = deployed_bridge_address(&kolme) {
+                break contract;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for Ethereum bridge deployment");
+
+    let provider = anvil_provider().expect("failed to build anvil provider");
+    let bridge: Address = deployed_contract
+        .parse()
+        .expect("deployed bridge address in kolme state is invalid");
+    let contract = IBridgeIntegration::new(bridge, provider);
+    let cfg = contract
+        .get_config()
+        .call()
+        .await
+        .expect("deployed bridge get_config call failed");
+
+    assert_eq!(
+        cfg.processor.as_ref(),
+        validator.public_key().as_bytes().as_ref(),
+        "unexpected processor key in deployed bridge config"
+    );
+    assert_eq!(cfg.listeners.len(), 1, "unexpected listener count");
+    assert_eq!(
+        cfg.listeners[0].as_ref(),
+        validator.public_key().as_bytes().as_ref(),
+        "unexpected listener key in deployed bridge config"
+    );
+    assert_eq!(cfg.approvers.len(), 1, "unexpected approver count");
+    assert_eq!(
+        cfg.approvers[0].as_ref(),
+        validator.public_key().as_bytes().as_ref(),
+        "unexpected approver key in deployed bridge config"
+    );
+    assert_eq!(cfg.neededListeners, 1, "unexpected listener quorum");
+    assert_eq!(cfg.neededApprovers, 1, "unexpected approver quorum");
+}
+
 fn iter_block_messages(
     block: &SignedBlock<EmptyMessage>,
 ) -> std::slice::Iter<'_, Message<EmptyMessage>> {
@@ -320,6 +393,23 @@ async fn wait_for_expected_listener_message_in_new_blocks(
 fn anvil_provider() -> Result<DynProvider> {
     let url = reqwest::Url::parse(TEST_ANVIL_RPC_URL)?;
     Ok(DynProvider::new(ProviderBuilder::new().connect_http(url)))
+}
+
+fn deployed_bridge_address(kolme: &Kolme<EthereumBridgeTestApp>) -> Option<String> {
+    let kolme_r = kolme.read();
+    let bridge = &kolme_r
+        .get_bridge_contracts()
+        .get(ExternalChain::EthereumLocal)
+        .ok()?
+        .config
+        .bridge;
+    match bridge {
+        BridgeContract::Deployed(address) => Some(address.clone()),
+        BridgeContract::NeededEthereumBridge => None,
+        BridgeContract::NeededCosmosBridge { .. } | BridgeContract::NeededSolanaBridge { .. } => {
+            None
+        }
+    }
 }
 
 async fn assert_anvil_identifiers_match(provider: &DynProvider) -> Result<()> {
