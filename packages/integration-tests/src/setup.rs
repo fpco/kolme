@@ -502,6 +502,7 @@ impl KolmeState {
             BridgeContract::NeededCosmosBridge { .. } => None,
             BridgeContract::NeededSolanaBridge { program_id } => Some(program_id),
             BridgeContract::Deployed(address) => Some(address),
+            BridgeContract::NeededEthereumBridge => None,
         }
     }
 }

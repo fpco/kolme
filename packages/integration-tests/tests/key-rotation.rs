@@ -267,6 +267,7 @@ async fn test_cosmos_contract_update_inner(testtasks: TestTasks, self_replace: b
     {
         BridgeContract::NeededCosmosBridge { .. } => unreachable!(),
         BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
+        BridgeContract::NeededEthereumBridge => unreachable!(),
         BridgeContract::Deployed(addr) => addr.clone(),
     };
 

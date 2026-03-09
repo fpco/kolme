@@ -170,6 +170,7 @@ impl<App: KolmeApp> Listener<App> {
                 let expected_code_id = match config.bridge {
                     BridgeContract::NeededCosmosBridge { code_id } => code_id,
                     BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
+                    BridgeContract::NeededEthereumBridge => unreachable!(),
                     BridgeContract::Deployed(_) => {
                         anyhow::bail!("Already have a deployed contract on {chain:?}")
                     }
@@ -236,7 +237,8 @@ impl<App: KolmeApp> Listener<App> {
 
             match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { .. }
-                | BridgeContract::NeededSolanaBridge { .. } => return None,
+                | BridgeContract::NeededSolanaBridge { .. }
+                | BridgeContract::NeededEthereumBridge => return None,
                 BridgeContract::Deployed(contract) => {
                     res.insert(chain, contract.clone());
                 }

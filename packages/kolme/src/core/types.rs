@@ -657,6 +657,7 @@ impl AssetConfig {
 pub enum BridgeContract {
     NeededCosmosBridge { code_id: u64 },
     NeededSolanaBridge { program_id: String },
+    NeededEthereumBridge,
     Deployed(String),
 }
 
@@ -670,6 +671,9 @@ impl MerkleSerialize for BridgeContract {
             BridgeContract::NeededSolanaBridge { program_id } => {
                 serializer.store_byte(1);
                 serializer.store(program_id)?;
+            }
+            BridgeContract::NeededEthereumBridge => {
+                serializer.store_byte(3);
             }
             BridgeContract::Deployed(addr) => {
                 serializer.store_byte(2);
@@ -693,6 +697,7 @@ impl MerkleDeserialize for BridgeContract {
                 program_id: deserializer.load()?,
             }),
             2 => Ok(Self::Deployed(deserializer.load()?)),
+            3 => Ok(Self::NeededEthereumBridge),
             byte => Err(MerkleSerialError::UnexpectedMagicByte { byte }),
         }
     }
@@ -708,6 +713,10 @@ pub enum GenesisAction {
     InstantiateSolana {
         chain: SolanaChain,
         program_id: String,
+        validator_set: ValidatorSet,
+    },
+    InstantiateEthereum {
+        chain: EthereumChain,
         validator_set: ValidatorSet,
     },
 }
@@ -1532,6 +1541,11 @@ impl ConfiguredChains {
                 ))
             }
             BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(program_id)?,
+            BridgeContract::NeededEthereumBridge => {
+                return Err(anyhow::anyhow!(
+                    "Trying to configure an Ethereum contract as a Solana bridge."
+                ))
+            }
             BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
         };
 
@@ -1548,6 +1562,11 @@ impl ConfiguredChains {
             BridgeContract::NeededSolanaBridge { .. } => {
                 return Err(anyhow::anyhow!(
                     "Trying to configure a Solana program as a Cosmos bridge."
+                ))
+            }
+            BridgeContract::NeededEthereumBridge => {
+                return Err(anyhow::anyhow!(
+                    "Trying to configure an Ethereum contract as a Cosmos bridge."
                 ))
             }
             BridgeContract::NeededCosmosBridge { .. } => (),
@@ -1595,6 +1614,7 @@ impl ConfiguredChains {
                     "Trying to configure a Solana program as an Ethereum bridge."
                 ))
             }
+            BridgeContract::NeededEthereumBridge => (),
             BridgeContract::Deployed(address) => {
                 anyhow::ensure!(
                     is_valid_evm_address(address),
@@ -1717,6 +1737,7 @@ impl ExecAction {
                         let program_id = match config.bridge.clone() {
                             BridgeContract::NeededCosmosBridge { .. } => unreachable!(),
                             BridgeContract::NeededSolanaBridge { program_id } => program_id,
+                            BridgeContract::NeededEthereumBridge => unreachable!(),
                             BridgeContract::Deployed(program_id) => program_id,
                         };
 
@@ -2204,6 +2225,10 @@ mod tests {
             assets: BTreeMap::new(),
             bridge: BridgeContract::NeededCosmosBridge { code_id: 1 },
         };
+        let ethereum_kind = ChainConfig {
+            assets: BTreeMap::new(),
+            bridge: BridgeContract::NeededEthereumBridge,
+        };
 
         assert!(chains
             .insert_ethereum(EthereumChain::Sepolia, invalid_address)
@@ -2211,6 +2236,9 @@ mod tests {
         assert!(chains
             .insert_ethereum(EthereumChain::Sepolia, wrong_contract_kind)
             .is_err());
+        assert!(chains
+            .insert_ethereum(EthereumChain::Sepolia, ethereum_kind)
+            .is_ok());
     }
 
     #[tokio::main]

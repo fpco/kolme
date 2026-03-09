@@ -134,6 +134,7 @@ impl<App: KolmeApp> Submitter<App> {
                 let chain: ExternalChain = match action {
                     GenesisAction::InstantiateCosmos { chain, .. } => chain.into(),
                     GenesisAction::InstantiateSolana { chain, .. } => chain.into(),
+                    GenesisAction::InstantiateEthereum { chain, .. } => chain.into(),
                 };
                 if let Some(contract) = genesis_created.read().await.get(&chain).cloned() {
                     if let Err(e) = Self::propose(&genesis_kolme, chain, contract) {
@@ -246,6 +247,7 @@ impl<App: KolmeApp> Submitter<App> {
             }
             #[cfg(not(feature = "solana"))]
             GenesisAction::InstantiateSolana { .. } => Ok(()),
+            GenesisAction::InstantiateEthereum { .. } => Ok(()),
         }
     }
 
@@ -298,7 +300,8 @@ impl<App: KolmeApp> Submitter<App> {
             let state = kolme.get_bridge_contracts().get(chain)?;
             match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { .. }
-                | BridgeContract::NeededSolanaBridge { .. } => return Ok(()),
+                | BridgeContract::NeededSolanaBridge { .. }
+                | BridgeContract::NeededEthereumBridge => return Ok(()),
                 BridgeContract::Deployed(contract) => contract.clone(),
             }
         };
