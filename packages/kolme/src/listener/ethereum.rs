@@ -14,6 +14,7 @@ use super::get_next_bridge_event_id;
 
 const ETH_NATIVE_DENOM: &str = "eth";
 const POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
+const WS_RETRY_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(30);
 
 sol! {
     event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
@@ -98,10 +99,9 @@ impl EthereumBridgeEvent {
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
-    chain: EthereumChain,
+    ethereum_chain: EthereumChain,
     contract: String,
 ) -> Result<()> {
-    let ethereum_chain = chain;
     let chain: ExternalChain = ethereum_chain.into();
     let contract: Address = contract
         .parse()
@@ -123,41 +123,10 @@ pub async fn listen<App: KolmeApp>(
         contract.address()
     );
 
-    match connect_ws(ethereum_chain, *contract.address()).await {
-        Ok(ws_contract) => {
-            tracing::info!(
-                "Ethereum listener subscribing to logs on chain {chain:?}, contract {:#x}",
-                ws_contract.address()
-            );
-
-            listen_with_subscription(
-                &kolme,
-                &secret,
-                chain,
-                &ws_contract,
-                &mut next_bridge_event_id,
-                &mut next_block,
-                &mut first_log_index,
-            )
-            .await?;
-
-            tracing::warn!(
-                "Ethereum listener subscription ended on chain {chain:?}, contract {:#x}; falling back to polling",
-                ws_contract.address()
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                "Ethereum listener could not establish WebSocket subscription on chain {chain:?}, contract {:#x}: {e}; falling back to polling",
-                contract.address()
-            );
-        }
-    }
-
-    listen_with_polling(
+    listen_with_ws_retry(
         &kolme,
         &secret,
-        chain,
+        ethereum_chain,
         &contract,
         &mut next_bridge_event_id,
         &mut next_block,
@@ -182,16 +151,34 @@ async fn connect_ws(
     ))
 }
 
-async fn listen_with_polling<App: KolmeApp, P: Provider>(
+async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
-    chain: ExternalChain,
+    ethereum_chain: EthereumChain,
     contract: &ContractInstance<P>,
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
 ) -> Result<()> {
+    let chain: ExternalChain = ethereum_chain.into();
+    let mut next_ws_retry = tokio::time::Instant::now();
+
     loop {
+        if tokio::time::Instant::now() >= next_ws_retry {
+            try_ws_session_once(
+                kolme,
+                secret,
+                ethereum_chain,
+                *contract.address(),
+                next_bridge_event_id,
+                next_block,
+                first_log_index,
+            )
+            .await;
+
+            next_ws_retry = tokio::time::Instant::now() + WS_RETRY_INTERVAL;
+        }
+
         listen_polling_once(
             kolme,
             secret,
@@ -203,6 +190,57 @@ async fn listen_with_polling<App: KolmeApp, P: Provider>(
         )
         .await?;
         tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+async fn try_ws_session_once<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    secret: &SecretKey,
+    ethereum_chain: EthereumChain,
+    contract_address: Address,
+    next_bridge_event_id: &mut BridgeEventId,
+    next_block: &mut u64,
+    first_log_index: &mut Option<u64>,
+) {
+    let chain: ExternalChain = ethereum_chain.into();
+    match connect_ws(ethereum_chain, contract_address).await {
+        Ok(ws_contract) => {
+            tracing::info!(
+                "Ethereum listener subscribing to logs on chain {chain:?}, contract {:#x}",
+                ws_contract.address()
+            );
+
+            if let Err(e) = listen_with_subscription(
+                kolme,
+                secret,
+                chain,
+                &ws_contract,
+                next_bridge_event_id,
+                next_block,
+                first_log_index,
+            )
+            .await
+            {
+                tracing::warn!(
+                    "Ethereum listener subscription failed on chain {chain:?}, contract {:#x}: {e}; continuing with polling and retrying WS in {}s",
+                    ws_contract.address(),
+                    WS_RETRY_INTERVAL.as_secs()
+                );
+            } else {
+                tracing::warn!(
+                    "Ethereum listener subscription ended on chain {chain:?}, contract {:#x}; continuing with polling and retrying WS in {}s",
+                    ws_contract.address(),
+                    WS_RETRY_INTERVAL.as_secs()
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Ethereum listener could not establish WebSocket subscription on chain {chain:?}, contract {:#x}: {e}; continuing with polling and retrying WS in {}s",
+                contract_address,
+                WS_RETRY_INTERVAL.as_secs()
+            );
+        }
     }
 }
 
