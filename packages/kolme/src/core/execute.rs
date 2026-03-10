@@ -304,7 +304,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     let config = &mut self.framework_state.chains.get_mut(chain)?.config;
                     match config.bridge {
                         BridgeContract::NeededCosmosBridge { .. } |
-                            BridgeContract::NeededSolanaBridge { .. } => (),
+                            BridgeContract::NeededSolanaBridge { .. } |
+                            BridgeContract::NeededEthereumBridge => (),
                         BridgeContract::Deployed(_) => anyhow::bail!("Already have a bridge contract for {chain:?}, just received another from a listener"),
                     }
                     config.bridge = BridgeContract::Deployed(contract.clone());

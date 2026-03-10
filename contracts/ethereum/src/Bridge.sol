@@ -119,7 +119,8 @@ contract Bridge is IBridge {
             approvers: approvers,
             neededApprovers: neededApprovers
         });
-        nextEventId = 0;
+        // Event 0 is reserved for bridge instantiation in kolme.
+        nextEventId = 1;
         nextActionId = 0;
     }
 

@@ -1,5 +1,7 @@
 #[cfg(feature = "cosmwasm")]
 mod cosmos;
+#[cfg(feature = "ethereum")]
+mod ethereum;
 #[cfg(feature = "solana")]
 mod solana;
 
@@ -37,6 +39,11 @@ enum ChainArgs {
         keypair: kolme_solana_bridge_client::keypair::Keypair,
         fee_per_cu: Option<u64>,
     },
+    #[cfg(feature = "ethereum")]
+    Ethereum {
+        #[allow(dead_code)]
+        signer: alloy::signers::local::PrivateKeySigner,
+    },
     #[cfg(feature = "pass_through")]
     PassThrough { port: u16 },
 }
@@ -49,6 +56,8 @@ impl ChainArgs {
             Self::Cosmos { .. } => chain.to_cosmos_chain().is_some(),
             #[cfg(feature = "solana")]
             Self::Solana { .. } => chain.to_solana_chain().is_some(),
+            #[cfg(feature = "ethereum")]
+            Self::Ethereum { .. } => chain.to_ethereum_chain().is_some(),
             #[cfg(feature = "pass_through")]
             Self::PassThrough { .. } => chain == ExternalChain::PassThrough,
         }
@@ -96,6 +105,20 @@ impl<App: KolmeApp> Submitter<App> {
         }
     }
 
+    #[cfg(feature = "ethereum")]
+    pub fn new_ethereum(
+        kolme: Kolme<App>,
+        signer: alloy::signers::local::PrivateKeySigner,
+    ) -> Self {
+        Submitter {
+            kolme,
+            args: ChainArgs::Ethereum { signer },
+            last_submitted: HashMap::new(),
+            genesis_created: Default::default(),
+            trigger_genesis_available: Trigger::new("submitter-genesis-available"),
+        }
+    }
+
     pub async fn run(mut self) -> Result<()> {
         let chains = self
             .kolme
@@ -134,6 +157,7 @@ impl<App: KolmeApp> Submitter<App> {
                 let chain: ExternalChain = match action {
                     GenesisAction::InstantiateCosmos { chain, .. } => chain.into(),
                     GenesisAction::InstantiateSolana { chain, .. } => chain.into(),
+                    GenesisAction::InstantiateEthereum { chain, .. } => chain.into(),
                 };
                 if let Some(contract) = genesis_created.read().await.get(&chain).cloned() {
                     if let Err(e) = Self::propose(&genesis_kolme, chain, contract) {
@@ -246,6 +270,30 @@ impl<App: KolmeApp> Submitter<App> {
             }
             #[cfg(not(feature = "solana"))]
             GenesisAction::InstantiateSolana { .. } => Ok(()),
+            #[cfg(feature = "ethereum")]
+            GenesisAction::InstantiateEthereum {
+                chain,
+                validator_set,
+            } => {
+                let signer = match &self.args {
+                    ChainArgs::Ethereum { signer } => signer.clone(),
+                    _ => return Ok(()),
+                };
+
+                let mut guard = self.genesis_created.write().await;
+                if guard.contains_key(&chain.into()) {
+                    return Ok(());
+                }
+
+                let addr = ethereum::instantiate(chain, signer, &validator_set).await?;
+
+                guard.insert(chain.into(), addr);
+                self.trigger_genesis_available.trigger();
+
+                Ok(())
+            }
+            #[cfg(not(feature = "ethereum"))]
+            GenesisAction::InstantiateEthereum { .. } => Ok(()),
         }
     }
 
@@ -298,7 +346,8 @@ impl<App: KolmeApp> Submitter<App> {
             let state = kolme.get_bridge_contracts().get(chain)?;
             match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { .. }
-                | BridgeContract::NeededSolanaBridge { .. } => return Ok(()),
+                | BridgeContract::NeededSolanaBridge { .. }
+                | BridgeContract::NeededEthereumBridge => return Ok(()),
                 BridgeContract::Deployed(contract) => contract.clone(),
             }
         };
@@ -354,6 +403,13 @@ impl<App: KolmeApp> Submitter<App> {
                 tracing::info!("Executing pass through contract: {contract}");
 
                 pass_through::execute(client, *port, *processor, approvals, payload).await?
+            }
+            #[cfg(feature = "ethereum")]
+            ChainArgs::Ethereum { .. } => {
+                tracing::warn!(
+                    "Ethereum action submission is not implemented yet for {chain:?}#{action_id}"
+                );
+                return Ok(());
             }
         };
 

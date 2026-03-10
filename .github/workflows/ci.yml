@@ -82,10 +82,14 @@ jobs:
         run: just cargo-test
       - name: Start localosmosis
         run: just localosmosis
-      - name: Start anvil
-        run: just anvil
       - name: Contract tests
         run: just cargo-contract-tests
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      - name: Start anvil
+        run: just anvil
+      - name: Ethereum contract tests
+        run: just cargo-contract-tests-ethereum
       - name: Ethereum Anvil CLI smoke
         run: just ethereum-anvil-cli-smoke
 

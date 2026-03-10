@@ -3,7 +3,7 @@ use alloy::{
     contract::{ContractInstance, Interface},
     json_abi::JsonAbi,
     primitives::{Address, B256, U256},
-    providers::Provider,
+    providers::{DynProvider, Provider},
     rpc::types::eth::{BlockNumberOrTag, Filter, Log},
     sol,
     sol_types::SolEvent,
@@ -13,7 +13,22 @@ use super::get_next_bridge_event_id;
 
 const ETH_NATIVE_DENOM: &str = "eth";
 
-sol! { event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount); }
+sol! {
+    event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
+
+    #[sol(rpc)]
+    contract Bridge {
+        function get_config() external view returns (
+            bytes processor,
+            bytes[] listeners,
+            uint16 neededListeners,
+            bytes[] approvers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        );
+    }
+}
 
 enum EthereumBridgeEvent {
     FundsReceived(FundsReceived),
@@ -22,7 +37,9 @@ enum EthereumBridgeEvent {
 impl EthereumBridgeEvent {
     fn event_id(&self) -> BridgeEventId {
         match self {
-            Self::FundsReceived(FundsReceived { eventId, .. }) => BridgeEventId(*eventId),
+            Self::FundsReceived(FundsReceived {
+                eventId: event_id, ..
+            }) => BridgeEventId(*event_id),
         }
     }
 
@@ -117,6 +134,55 @@ pub async fn listen<App: KolmeApp>(
         .await?;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
+}
+
+pub async fn sanity_check_contract(
+    provider: &DynProvider,
+    contract: &str,
+    info: &GenesisInfo,
+) -> Result<()> {
+    let address: Address = contract
+        .parse()
+        .with_context(|| format!("Invalid Ethereum contract address: {contract}"))?;
+    let code = provider.get_code_at(address).await?;
+    anyhow::ensure!(
+        !code.is_empty(),
+        "Ethereum contract {contract} has no bytecode deployed"
+    );
+
+    let bridge = Bridge::new(address, provider.clone());
+    let Bridge::get_configReturn {
+        processor,
+        listeners,
+        neededListeners: needed_listeners,
+        approvers,
+        neededApprovers: needed_approvers,
+        configNextEventId: _,
+        configNextActionId: _,
+    } = bridge.get_config().call().await?;
+
+    anyhow::ensure!(
+        PublicKey::from_bytes(&processor)? == info.validator_set.processor,
+        "Ethereum processor key mismatch"
+    );
+    anyhow::ensure!(
+        decode_validator_keys(&listeners)? == info.validator_set.listeners,
+        "Ethereum listener set mismatch"
+    );
+    anyhow::ensure!(
+        needed_listeners == info.validator_set.needed_listeners,
+        "Ethereum needed listener quorum mismatch"
+    );
+    anyhow::ensure!(
+        decode_validator_keys(&approvers)? == info.validator_set.approvers,
+        "Ethereum approver set mismatch"
+    );
+    anyhow::ensure!(
+        needed_approvers == info.validator_set.needed_approvers,
+        "Ethereum needed approver quorum mismatch"
+    );
+
+    Ok(())
 }
 
 async fn listen_once<App: KolmeApp, P: Provider>(
@@ -214,6 +280,13 @@ fn event_id_topic(event_id: BridgeEventId) -> B256 {
     let mut bytes = [0u8; 32];
     bytes[24..].copy_from_slice(&event_id.to_be_bytes());
     B256::from(bytes)
+}
+
+/// Converts `bytes[]` returned by contract's get_config() into something we can compare
+fn decode_validator_keys(keys: &[alloy::primitives::Bytes]) -> Result<BTreeSet<PublicKey>> {
+    keys.iter()
+        .map(|key| PublicKey::from_bytes(key.as_ref()).map_err(anyhow::Error::from))
+        .collect()
 }
 
 async fn process_event<App: KolmeApp>(

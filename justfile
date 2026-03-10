@@ -50,6 +50,10 @@ anvil:
 ethereum-anvil-cli-smoke:
     docker compose exec -T anvil /bootstrap/ethereum-anvil-cli-smoke.sh
 
+[working-directory("contracts/ethereum")]
+build-ethereum-contract:
+    forge build
+
 
 test $PROCESSOR_BLOCK_DB="psql://postgres:postgres@localhost:45921/postgres":
     just postgres
@@ -84,11 +88,15 @@ cargo-compile:
 
 # Non contract test
 cargo-test:
-    cat contract-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked --
+    cat contract-test-list.txt | xargs -I {} echo --skip {} | xargs cargo nextest run --workspace --locked -E 'not binary(ethereum-bridge)' --
 
 # Contract related tests
 cargo-contract-tests:
     xargs -a contract-test-list.txt cargo nextest run --workspace --profile=ci --locked --
+
+cargo-contract-tests-ethereum:
+    just build-ethereum-contract
+    cargo test -p integration-tests --test ethereum-bridge -- --test-threads=1
 
 # Stress test
 stress-test:
