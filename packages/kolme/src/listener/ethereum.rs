@@ -37,7 +37,9 @@ enum EthereumBridgeEvent {
 impl EthereumBridgeEvent {
     fn event_id(&self) -> BridgeEventId {
         match self {
-            Self::FundsReceived(FundsReceived { eventId, .. }) => BridgeEventId(*eventId),
+            Self::FundsReceived(FundsReceived {
+                eventId: event_id, ..
+            }) => BridgeEventId(*event_id),
         }
     }
 
@@ -152,9 +154,9 @@ pub async fn sanity_check_contract(
     let Bridge::get_configReturn {
         processor,
         listeners,
-        neededListeners,
+        neededListeners: needed_listeners,
         approvers,
-        neededApprovers,
+        neededApprovers: needed_approvers,
         configNextEventId: _,
         configNextActionId: _,
     } = bridge.get_config().call().await?;
@@ -168,7 +170,7 @@ pub async fn sanity_check_contract(
         "Ethereum listener set mismatch"
     );
     anyhow::ensure!(
-        neededListeners == info.validator_set.needed_listeners,
+        needed_listeners == info.validator_set.needed_listeners,
         "Ethereum needed listener quorum mismatch"
     );
     anyhow::ensure!(
@@ -176,7 +178,7 @@ pub async fn sanity_check_contract(
         "Ethereum approver set mismatch"
     );
     anyhow::ensure!(
-        neededApprovers == info.validator_set.needed_approvers,
+        needed_approvers == info.validator_set.needed_approvers,
         "Ethereum needed approver quorum mismatch"
     );
 
