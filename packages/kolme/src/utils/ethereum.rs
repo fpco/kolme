@@ -134,7 +134,11 @@ pub fn encode_self_replace_action(
     replacement: PublicKey,
 ) -> Vec<u8> {
     let action = SelfReplaceAction {
-        validatorType: validator_type as u8,
+        validatorType: match validator_type {
+            ValidatorType::Listener => 0,
+            ValidatorType::Processor => 1,
+            ValidatorType::Approver => 2,
+        },
         current: current.as_bytes().into_vec().into(),
         replacement: replacement.as_bytes().into_vec().into(),
     };
