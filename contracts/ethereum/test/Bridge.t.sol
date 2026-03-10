@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {Bridge} from "../src/Bridge.sol";
+import {BridgeBase} from "../src/BridgeBase.sol";
 
 contract BridgeRecoverHarness is Bridge {
     constructor(
@@ -256,7 +257,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidSignatureLength.selector,
+                BridgeBase.InvalidSignatureLength.selector,
                 signature.length
             )
         );
@@ -270,7 +271,10 @@ contract BridgeTest is Test {
         bytes32 payloadHash = sha256(payload);
 
         vm.expectRevert(
-            abi.encodeWithSelector(Bridge.InvalidSignatureV.selector, uint8(0))
+            abi.encodeWithSelector(
+                BridgeBase.InvalidSignatureV.selector,
+                uint8(0)
+            )
         );
         recoverHarness.recoverSigner(payloadHash, signature);
     }
@@ -287,7 +291,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidCurvePoint.selector,
+                BridgeBase.InvalidCurvePoint.selector,
                 invalidKey
             )
         );
@@ -344,7 +348,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidProcessorKey.selector,
+                BridgeBase.InvalidProcessorKey.selector,
                 shortKey
             )
         );
@@ -359,7 +363,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidProcessorKey.selector,
+                BridgeBase.InvalidProcessorKey.selector,
                 TEST_INVALID_PREFIX_KEY
             )
         );
@@ -374,7 +378,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidValidatorKey.selector,
+                BridgeBase.InvalidValidatorKey.selector,
                 uint256(0),
                 TEST_INVALID_PREFIX_KEY
             )
@@ -390,7 +394,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidValidatorKey.selector,
+                BridgeBase.InvalidValidatorKey.selector,
                 uint256(0),
                 TEST_INVALID_PREFIX_KEY
             )
@@ -407,7 +411,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.DuplicateValidatorKey.selector,
+                BridgeBase.DuplicateValidatorKey.selector,
                 uint256(0),
                 uint256(1),
                 TEST_VALIDATOR_KEY
@@ -425,7 +429,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.DuplicateValidatorKey.selector,
+                BridgeBase.DuplicateValidatorKey.selector,
                 uint256(0),
                 uint256(1),
                 TEST_VALIDATOR_KEY_2
@@ -478,7 +482,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidValidatorKey.selector,
+                BridgeBase.InvalidValidatorKey.selector,
                 uint256(2),
                 TEST_INVALID_PREFIX_KEY
             )
