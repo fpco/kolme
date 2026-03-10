@@ -405,11 +405,20 @@ impl<App: KolmeApp> Submitter<App> {
                 pass_through::execute(client, *port, *processor, approvals, payload).await?
             }
             #[cfg(feature = "ethereum")]
-            ChainArgs::Ethereum { .. } => {
-                tracing::warn!(
-                    "Ethereum action submission is not implemented yet for {chain:?}#{action_id}"
-                );
-                return Ok(());
+            ChainArgs::Ethereum { signer } => {
+                let Some(ethereum_chain) = chain.to_ethereum_chain() else {
+                    return Ok(());
+                };
+
+                ethereum::execute(
+                    ethereum_chain,
+                    signer.clone(),
+                    &contract,
+                    *processor,
+                    approvals,
+                    payload,
+                )
+                .await?
             }
         };
 

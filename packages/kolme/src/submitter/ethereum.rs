@@ -1,7 +1,8 @@
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use alloy::{
     network::TransactionBuilder,
+    primitives::Address,
     providers::{Provider, ProviderBuilder},
     rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
@@ -11,7 +12,9 @@ use alloy::{
 use anyhow::Context;
 use serde::Deserialize;
 
-use crate::{EthereumChain, ValidatorSet};
+use base64::Engine;
+
+use crate::{EthereumChain, PublicKey, SignatureWithRecovery, ValidatorSet};
 
 const BRIDGE_ARTIFACT_PATH: &str = "../../contracts/ethereum/out/Bridge.sol/Bridge.json";
 
@@ -34,6 +37,15 @@ sol! {
             bytes[] approvers,
             uint16 neededApprovers
         );
+    }
+
+    #[sol(rpc)]
+    interface BridgeExecute {
+        function execute_signed(
+            bytes payload,
+            bytes processor,
+            bytes[] approvers
+        ) external;
     }
 }
 
@@ -124,15 +136,69 @@ pub(super) async fn instantiate(
     Ok(format!("{address:#x}"))
 }
 
+/// Converts Kolme internal ECDSA signature format into Ethereum expected wire
+/// format (r||s||v, v=27/28)
+fn to_ethereum_signature(sig: SignatureWithRecovery) -> anyhow::Result<Vec<u8>> {
+    let mut out = sig.sig.to_bytes();
+    let recid = sig.recid.to_byte();
+    anyhow::ensure!(
+        recid <= 1,
+        "Invalid Ethereum recovery id {recid}, expected 0 or 1"
+    );
+    out.push(recid + 27);
+    Ok(out)
+}
+
+pub(super) async fn execute(
+    chain: EthereumChain,
+    signer: PrivateKeySigner,
+    contract: &str,
+    processor: SignatureWithRecovery,
+    approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
+    payload_b64: &str,
+) -> anyhow::Result<String> {
+    let payload = base64::engine::general_purpose::STANDARD
+        .decode(payload_b64)
+        .context("Failed to decode Ethereum bridge action payload from base64")?;
+
+    let processor = to_ethereum_signature(processor)?;
+    let approvers = approvals
+        .values()
+        .copied()
+        .map(to_ethereum_signature)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let url = reqwest::Url::parse(chain.default_rpc_url())
+        .with_context(|| format!("Invalid default Ethereum RPC URL for {chain:?}"))?;
+    let provider = ProviderBuilder::new().wallet(signer).connect_http(url);
+    let address: Address = contract.parse()?;
+    let bridge = BridgeExecute::new(address, provider);
+
+    let pending = bridge
+        .execute_signed(
+            payload.into(),
+            processor.into(),
+            approvers.into_iter().map(Into::into).collect(),
+        )
+        .send()
+        .await?;
+    let tx_hash = *pending.tx_hash();
+    pending.get_receipt().await?;
+
+    Ok(format!("{tx_hash:#x}"))
+}
+
 #[cfg(test)]
 mod tests {
+    use shared::cryptography::RecoveryId;
+
     use alloy::sol_types::SolConstructor;
 
     use super::{
         build_bridge_initcode_with_create_bytecode, parse_bridge_create_bytecode_str,
-        validator_set_constructor_args,
+        to_ethereum_signature, validator_set_constructor_args,
     };
-    use crate::{SecretKey, ValidatorSet};
+    use crate::{SecretKey, SignatureWithRecovery, ValidatorSet};
 
     #[test]
     fn parses_valid_foundry_artifact_bytecode() {
@@ -214,5 +280,25 @@ mod tests {
         let initcode = build_bridge_initcode_with_create_bytecode(&[0x60, 0x01], &set);
         assert!(initcode.starts_with(&[0x60, 0x01]));
         assert!(initcode.ends_with(&args));
+    }
+
+    #[test]
+    fn ethereum_signature_uses_rsv_with_27_plus_recid() {
+        let key = SecretKey::random();
+        let sig = key.sign_recoverable(b"msg").unwrap();
+
+        let encoded = to_ethereum_signature(sig).unwrap();
+        assert_eq!(encoded.len(), 65);
+        assert!(encoded[64] == 27 || encoded[64] == 28);
+    }
+
+    #[test]
+    fn ethereum_signature_rejects_invalid_recovery_id() {
+        let sig = SignatureWithRecovery {
+            recid: RecoveryId::from_byte(2).unwrap(),
+            sig: SecretKey::random().sign_recoverable(b"msg").unwrap().sig,
+        };
+        let err = to_ethereum_signature(sig).unwrap_err().to_string();
+        assert!(err.contains("Invalid Ethereum recovery id 2"));
     }
 }
