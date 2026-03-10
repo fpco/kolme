@@ -511,6 +511,22 @@ impl MerkleDeserialize for PendingBridgeAction {
     }
 }
 
+impl PendingBridgeAction {
+    /// Returns canonical bytes to be signed/verified for this action on a target chain.
+    ///
+    /// Most chains sign raw payload string bytes. Ethereum signs decoded ABI bytes
+    /// stored as base64 in `payload`.
+    pub(crate) fn payload_bytes_to_sign(&self, chain: ExternalChain) -> Result<Vec<u8>> {
+        match chain.name() {
+            ChainName::Ethereum => {
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &self.payload)
+                    .context("Failed to decode Ethereum bridge payload from base64")
+            }
+            _ => Ok(self.payload.as_bytes().to_vec()),
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PendingBridgeEvent {
     pub event: BridgeEvent,
@@ -2333,6 +2349,38 @@ mod tests {
         // bytes offset in head[1]
         assert_eq!(&decoded[32..63], &[0u8; 31]);
         assert_eq!(decoded[63], 0x40);
+    }
+
+    #[test]
+    fn payload_bytes_to_sign_uses_raw_string_bytes_for_non_ethereum() {
+        let action = PendingBridgeAction {
+            payload: "hello".to_owned(),
+            approvals: BTreeMap::new(),
+            processor: None,
+        };
+
+        let bytes = action
+            .payload_bytes_to_sign(ExternalChain::OsmosisLocal)
+            .unwrap();
+        assert_eq!(bytes, b"hello");
+    }
+
+    #[test]
+    fn payload_bytes_to_sign_decodes_base64_for_ethereum() {
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            [0u8, 1u8, 255u8],
+        );
+        let action = PendingBridgeAction {
+            payload: encoded,
+            approvals: BTreeMap::new(),
+            processor: None,
+        };
+
+        let bytes = action
+            .payload_bytes_to_sign(ExternalChain::EthereumLocal)
+            .unwrap();
+        assert_eq!(bytes, [0u8, 1u8, 255u8]);
     }
 
     #[tokio::main]
