@@ -18,6 +18,7 @@ use testtasks::TestTasks;
 const TEST_ANVIL_ACCOUNT_0_ADDRESS: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const TEST_ANVIL_ACCOUNT_2_ADDRESS: &str = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 
 const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
 
@@ -67,7 +68,10 @@ impl MerkleDeserialize for EmptyState {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-enum EmptyMessage {}
+enum EmptyMessage {
+    Mint { amount: Decimal },
+    Withdraw { recipient: String, amount: Decimal },
+}
 
 const DUMMY_CODE_VERSION: &str = "ethereum-listener-test-v1";
 const ETH_ASSET_ID: AssetId = AssetId(1);
@@ -120,9 +124,23 @@ impl KolmeApp for EthereumBridgeTestApp {
 
     async fn execute(
         &self,
-        _ctx: &mut ExecutionContext<'_, Self>,
-        _msg: &Self::Message,
+        ctx: &mut ExecutionContext<'_, Self>,
+        msg: &Self::Message,
     ) -> anyhow::Result<()> {
+        match msg {
+            EmptyMessage::Mint { amount } => {
+                ctx.mint_asset(ETH_ASSET_ID, ctx.get_sender_id(), *amount)?;
+            }
+            EmptyMessage::Withdraw { recipient, amount } => {
+                ctx.withdraw_asset(
+                    ETH_ASSET_ID,
+                    ExternalChain::EthereumLocal,
+                    ctx.get_sender_id(),
+                    &Wallet(recipient.clone()),
+                    *amount,
+                )?;
+            }
+        }
         Ok(())
     }
 }
@@ -223,6 +241,12 @@ async fn ethereum_submitter_deploys_local_bridge() {
     TestTasks::start(ethereum_submitter_deploys_local_bridge_inner, ()).await;
 }
 
+#[tokio::test]
+async fn ethereum_submitter_executes_signed_transfer_action() {
+    init_logger(true, None);
+    TestTasks::start(ethereum_submitter_executes_signed_transfer_action_inner, ()).await;
+}
+
 async fn ethereum_submitter_deploys_local_bridge_inner(testtasks: TestTasks, (): ()) {
     let provider = anvil_provider().expect("failed to build anvil provider");
     assert_anvil_identifiers_match(&provider)
@@ -267,6 +291,73 @@ async fn ethereum_submitter_deploys_local_bridge_inner(testtasks: TestTasks, ():
     );
 }
 
+async fn ethereum_submitter_executes_signed_transfer_action_inner(testtasks: TestTasks, (): ()) {
+    let provider = anvil_provider().expect("failed to build anvil provider");
+    assert_anvil_identifiers_match(&provider)
+        .await
+        .expect("local anvil setup does not match expected deterministic identifiers");
+    let deployed = deploy_bridge_with_kolme(&testtasks)
+        .await
+        .expect("failed to deploy Ethereum bridge with kolme");
+
+    // Ensure bridge has enough ETH to execute transfer action.
+    let bridge_fund_wei = 300_000_000_000_000_000u128; // 0.3 ETH
+    send_eth(
+        &provider,
+        TEST_ANVIL_ACCOUNT_0_ADDRESS,
+        deployed.bridge_address,
+        bridge_fund_wei,
+    )
+    .await
+    .expect("failed to fund deployed bridge");
+
+    let recipient: Address = TEST_ANVIL_ACCOUNT_2_ADDRESS
+        .parse()
+        .expect("hardcoded Anvil account 2 address is invalid");
+    let recipient_before = provider
+        .get_balance(recipient)
+        .await
+        .expect("failed to fetch recipient balance before transfer");
+
+    let withdraw_wei = 100_000_000_000_000_000u128; // 0.1 ETH
+    let withdraw_amount = Decimal::try_from_i128_with_scale(withdraw_wei as i128, 18)
+        .expect("valid decimal conversion for withdraw amount");
+    let recipient_wallet = format!("{recipient:#x}");
+
+    deployed
+        .kolme
+        .sign_propose_await_transaction(
+            &deployed.validator,
+            vec![
+                Message::App(EmptyMessage::Mint {
+                    amount: withdraw_amount,
+                }),
+                Message::App(EmptyMessage::Withdraw {
+                    recipient: recipient_wallet,
+                    amount: withdraw_amount,
+                }),
+            ],
+        )
+        .await
+        .expect("failed to propose mint+withdraw transaction");
+
+    let expected_balance = recipient_before + U256::from(withdraw_wei);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let current = provider
+                .get_balance(recipient)
+                .await
+                .expect("failed to fetch recipient balance");
+            if current >= expected_balance {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for Ethereum submitter transfer execution");
+}
+
 #[derive(Clone)]
 struct DeployedBridge {
     kolme: Kolme<EthereumBridgeTestApp>,
@@ -285,6 +376,7 @@ async fn deploy_bridge_with_kolme(testtasks: &TestTasks) -> Result<DeployedBridg
     .await?;
 
     testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
+    testtasks.try_spawn_persistent(Approver::new(kolme.clone(), validator.clone()).run());
     testtasks.try_spawn_persistent(
         Listener::new(kolme.clone(), validator.clone()).run(ChainName::Ethereum),
     );
