@@ -30,7 +30,7 @@ then
 
 elif [[ "$1" == "run" ]] || [[ "$1" == "" ]]
 then
-  exec anvil --mnemonic "$ANVIL_MNEMONIC" --host 0.0.0.0 --port 8545 --chain-id 31337 --load-state /bootstrap/state.json
+  exec anvil --mnemonic "$ANVIL_MNEMONIC" --host 0.0.0.0 --port 8545 --chain-id 31337
 fi
 
 exec "$@"
