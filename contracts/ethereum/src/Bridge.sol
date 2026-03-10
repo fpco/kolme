@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
+import {BridgeActions} from "./BridgeActions.sol";
 import {BridgeBase} from "./BridgeBase.sol";
 
 interface IBridge {
@@ -24,7 +25,7 @@ interface IBridge {
         );
 }
 
-contract Bridge is IBridge, BridgeBase {
+contract Bridge is IBridge, BridgeBase, BridgeActions {
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidProcessorSignature(address expected, address received);
     error InvalidApproverSignature(address signer);
@@ -60,7 +61,10 @@ contract Bridge is IBridge, BridgeBase {
         bytes calldata processor,
         bytes[] calldata approvers
     ) external {
-        (uint64 actionId, ) = abi.decode(payload, (uint64, bytes));
+        (uint64 actionId, bytes memory actionData) = abi.decode(
+            payload,
+            (uint64, bytes)
+        );
 
         if (actionId != nextActionId) {
             revert IncorrectActionId(nextActionId, actionId);
@@ -68,6 +72,7 @@ contract Bridge is IBridge, BridgeBase {
 
         bytes32 payloadHash = sha256(payload);
         _verifySignatures(payloadHash, processor, approvers);
+        _executeAction(actionData);
 
         emit Signed(nextEventId, msg.sender, actionId);
         nextEventId += 1;
