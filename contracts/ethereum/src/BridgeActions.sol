@@ -37,6 +37,16 @@ abstract contract BridgeActions is BridgeBase {
             actionData,
             (uint8, bytes)
         );
+        if (actionType == ACTION_NEW_SET) {
+            (
+                bytes memory newProcessor,
+                ,
+                ,
+                bytes[] memory newApprovers,
+                uint16 newNeededApprovers
+            ) = abi.decode(data, (bytes, bytes[], uint16, bytes[], uint16));
+            return (newProcessor, newApprovers, newNeededApprovers);
+        }
         if (actionType != ACTION_SELF_REPLACE) {
             return (expectedProcessor, expectedApprovers, neededApprovers);
         }

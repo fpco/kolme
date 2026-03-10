@@ -469,7 +469,54 @@ contract BridgeTest is Test {
         bytes memory actionData = abi.encode(
             uint8(3),
             abi.encode(
-                TEST_VALIDATOR_KEY_3,
+                TEST_VALIDATOR_KEY_2,
+                listeners,
+                uint16(1),
+                approvers,
+                uint16(1)
+            )
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory processorSig = _signPayload(
+            APPROVER_PRIVATE_KEY,
+            payload
+        );
+        bytes[] memory approverSigs = new bytes[](1);
+        approverSigs[0] = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
+
+        bridge.execute_signed(payload, processorSig, approverSigs);
+
+        (
+            bytes memory processor,
+            bytes[] memory cfgListeners,
+            uint16 neededListeners,
+            bytes[] memory cfgApprovers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        ) = bridge.get_config();
+
+        assertEq(processor, TEST_VALIDATOR_KEY_2);
+        assertEq(cfgListeners.length, 1);
+        assertEq(cfgListeners[0], TEST_VALIDATOR_KEY_3);
+        assertEq(neededListeners, 1);
+        assertEq(cfgApprovers.length, 1);
+        assertEq(cfgApprovers[0], TEST_VALIDATOR_KEY);
+        assertEq(neededApprovers, 1);
+        assertEq(configNextEventId, 2);
+        assertEq(configNextActionId, 1);
+    }
+
+    function test_RevertWhenNewSetSignedByCurrentSetNotProposedSet() public {
+        bytes[] memory listeners = new bytes[](1);
+        listeners[0] = TEST_VALIDATOR_KEY_3;
+        bytes[] memory approvers = new bytes[](1);
+        approvers[0] = TEST_VALIDATOR_KEY;
+
+        bytes memory actionData = abi.encode(
+            uint8(3),
+            abi.encode(
+                TEST_VALIDATOR_KEY_2,
                 listeners,
                 uint16(1),
                 approvers,
@@ -484,27 +531,14 @@ contract BridgeTest is Test {
         bytes[] memory approverSigs = new bytes[](1);
         approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
 
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidProcessorSignature.selector,
+                vm.addr(APPROVER_PRIVATE_KEY),
+                vm.addr(PROCESSOR_PRIVATE_KEY)
+            )
+        );
         bridge.execute_signed(payload, processorSig, approverSigs);
-
-        (
-            bytes memory processor,
-            bytes[] memory cfgListeners,
-            uint16 neededListeners,
-            bytes[] memory cfgApprovers,
-            uint16 neededApprovers,
-            uint64 configNextEventId,
-            uint64 configNextActionId
-        ) = bridge.get_config();
-
-        assertEq(processor, TEST_VALIDATOR_KEY_3);
-        assertEq(cfgListeners.length, 1);
-        assertEq(cfgListeners[0], TEST_VALIDATOR_KEY_3);
-        assertEq(neededListeners, 1);
-        assertEq(cfgApprovers.length, 1);
-        assertEq(cfgApprovers[0], TEST_VALIDATOR_KEY);
-        assertEq(neededApprovers, 1);
-        assertEq(configNextEventId, 2);
-        assertEq(configNextActionId, 1);
     }
 
     function test_GetConfigReturnsInitializedState() public view {
