@@ -18,6 +18,93 @@ abstract contract BridgeActions is BridgeBase {
     error CurrentValidatorNotFound(uint8 validatorType, bytes current);
     error TransferEthFailed(address recipient, uint256 amount);
 
+    function _expectedSignersForAction(
+        bytes memory actionData
+    )
+        internal
+        view
+        returns (
+            bytes memory expectedProcessor,
+            bytes[] memory expectedApprovers,
+            uint16 neededApprovers
+        )
+    {
+        expectedProcessor = validatorSet.processor;
+        expectedApprovers = _copyValidatorKeys(validatorSet.approvers);
+        neededApprovers = validatorSet.neededApprovers;
+
+        (uint8 actionType, bytes memory data) = abi.decode(
+            actionData,
+            (uint8, bytes)
+        );
+        if (actionType != ACTION_SELF_REPLACE) {
+            return (expectedProcessor, expectedApprovers, neededApprovers);
+        }
+
+        (
+            uint8 validatorType,
+            bytes memory current,
+            bytes memory replacement
+        ) = abi.decode(data, (uint8, bytes, bytes));
+        if (!_isValidValidatorKey(replacement)) {
+            revert InvalidValidatorKey(0, replacement);
+        }
+        _validatorAddress(replacement);
+
+        if (validatorType == VALIDATOR_PROCESSOR) {
+            if (keccak256(current) != keccak256(validatorSet.processor)) {
+                revert CurrentValidatorNotFound(validatorType, current);
+            }
+            expectedProcessor = replacement;
+            return (expectedProcessor, expectedApprovers, neededApprovers);
+        }
+        if (validatorType == VALIDATOR_LISTENER) {
+            uint256 currentIndex = _findValidatorIndex(validatorSet.listeners, current);
+            if (currentIndex == type(uint256).max) {
+                revert CurrentValidatorNotFound(validatorType, current);
+            }
+            uint256 replacementIndex = _findValidatorIndex(
+                validatorSet.listeners,
+                replacement
+            );
+            if (
+                replacementIndex != type(uint256).max &&
+                replacementIndex != currentIndex
+            ) {
+                revert DuplicateValidatorKey(
+                    currentIndex,
+                    replacementIndex,
+                    replacement
+                );
+            }
+            return (expectedProcessor, expectedApprovers, neededApprovers);
+        }
+        if (validatorType == VALIDATOR_APPROVER) {
+            uint256 currentIndex = _findValidatorIndex(validatorSet.approvers, current);
+            if (currentIndex == type(uint256).max) {
+                revert CurrentValidatorNotFound(validatorType, current);
+            }
+            uint256 replacementIndex = _findValidatorIndex(
+                validatorSet.approvers,
+                replacement
+            );
+            if (
+                replacementIndex != type(uint256).max &&
+                replacementIndex != currentIndex
+            ) {
+                revert DuplicateValidatorKey(
+                    currentIndex,
+                    replacementIndex,
+                    replacement
+                );
+            }
+            expectedApprovers[currentIndex] = replacement;
+            return (expectedProcessor, expectedApprovers, neededApprovers);
+        }
+
+        revert InvalidValidatorType(validatorType);
+    }
+
     function _executeAction(bytes memory actionData) internal {
         (uint8 actionType, bytes memory data) = abi.decode(
             actionData,
@@ -124,6 +211,15 @@ abstract contract BridgeActions is BridgeBase {
             }
         }
         return type(uint256).max;
+    }
+
+    function _copyValidatorKeys(
+        bytes[] storage keys
+    ) internal view returns (bytes[] memory copied) {
+        copied = new bytes[](keys.length);
+        for (uint256 i = 0; i < keys.length; i++) {
+            copied[i] = keys[i];
+        }
     }
 
     function _executeNewSet(bytes memory data) internal {

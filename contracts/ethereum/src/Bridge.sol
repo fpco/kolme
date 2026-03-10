@@ -71,7 +71,19 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         }
 
         bytes32 payloadHash = sha256(payload);
-        _verifySignatures(payloadHash, processor, approvers);
+        (
+            bytes memory expectedProcessor,
+            bytes[] memory expectedApprovers,
+            uint16 neededApprovers
+        ) = _expectedSignersForAction(actionData);
+        _verifySignatures(
+            payloadHash,
+            processor,
+            approvers,
+            expectedProcessor,
+            expectedApprovers,
+            neededApprovers
+        );
         _executeAction(actionData);
 
         emit Signed(nextEventId, msg.sender, actionId);
@@ -82,11 +94,12 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
     function _verifySignatures(
         bytes32 payloadHash,
         bytes calldata processor,
-        bytes[] calldata approvers
+        bytes[] calldata approvers,
+        bytes memory expectedProcessor,
+        bytes[] memory expectedApprovers,
+        uint16 neededApprovers
     ) internal view {
-        address expectedProcessorSigner = _validatorAddress(
-            validatorSet.processor
-        );
+        address expectedProcessorSigner = _validatorAddress(expectedProcessor);
         address processorSignerRecovered = _recoverSigner(
             payloadHash,
             processor
@@ -98,18 +111,25 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
             );
         }
 
-        uint256 configuredApproverCount = validatorSet.approvers.length;
-        address[] memory configuredApproverSigners = new address[](
-            configuredApproverCount
+        address[] memory configuredApproverSigners = _validatorAddresses(
+            expectedApprovers
         );
-        for (uint256 i = 0; i < configuredApproverCount; i++) {
-            configuredApproverSigners[i] = _validatorAddress(
-                validatorSet.approvers[i]
-            );
-        }
+        _verifyApproverSignatures(
+            payloadHash,
+            approvers,
+            configuredApproverSigners,
+            neededApprovers
+        );
+    }
 
+    function _verifyApproverSignatures(
+        bytes32 payloadHash,
+        bytes[] calldata approvers,
+        address[] memory configuredApproverSigners,
+        uint16 neededApprovers
+    ) internal pure {
+        uint256 configuredApproverCount = configuredApproverSigners.length;
         uint256 approverCount = approvers.length;
-        uint16 neededApprovers = validatorSet.neededApprovers;
         address[] memory seen = new address[](approverCount);
         uint256 uniqueApprovers = 0;
         for (uint256 i = 0; i < approverCount; i++) {
@@ -142,6 +162,16 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
                 neededApprovers,
                 uniqueApprovers
             );
+        }
+    }
+
+    function _validatorAddresses(
+        bytes[] memory validatorKeys
+    ) internal view returns (address[] memory result) {
+        uint256 count = validatorKeys.length;
+        result = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = _validatorAddress(validatorKeys[i]);
         }
     }
 

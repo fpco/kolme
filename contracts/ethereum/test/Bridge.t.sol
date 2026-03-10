@@ -355,13 +355,10 @@ contract BridgeTest is Test {
     function test_ExecuteSignedSelfReplaceProcessorAction() public {
         bytes memory actionData = abi.encode(
             uint8(2),
-            abi.encode(uint8(1), TEST_VALIDATOR_KEY, TEST_VALIDATOR_KEY_3)
+            abi.encode(uint8(1), TEST_VALIDATOR_KEY, TEST_VALIDATOR_KEY_2)
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
-        bytes memory processorSig = _signPayload(
-            PROCESSOR_PRIVATE_KEY,
-            payload
-        );
+        bytes memory processorSig = _signPayload(APPROVER_PRIVATE_KEY, payload);
         bytes[] memory approverSigs = new bytes[](1);
         approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
 
@@ -376,13 +373,91 @@ contract BridgeTest is Test {
             uint64 configNextEventId,
             uint64 configNextActionId
         ) = bridge.get_config();
-        assertEq(processor, TEST_VALIDATOR_KEY_3);
+        assertEq(processor, TEST_VALIDATOR_KEY_2);
         assertEq(listeners.length, 1);
         assertEq(neededListeners, 1);
         assertEq(approvers.length, 1);
         assertEq(neededApprovers, 1);
         assertEq(configNextEventId, 2);
         assertEq(configNextActionId, 1);
+    }
+
+    function test_RevertWhenSelfReplaceProcessorSignedByCurrentProcessor() public {
+        bytes memory actionData = abi.encode(
+            uint8(2),
+            abi.encode(uint8(1), TEST_VALIDATOR_KEY, TEST_VALIDATOR_KEY_2)
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory processorSig = _signPayload(
+            PROCESSOR_PRIVATE_KEY,
+            payload
+        );
+        bytes[] memory approverSigs = new bytes[](1);
+        approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidProcessorSignature.selector,
+                vm.addr(APPROVER_PRIVATE_KEY),
+                vm.addr(PROCESSOR_PRIVATE_KEY)
+            )
+        );
+        bridge.execute_signed(payload, processorSig, approverSigs);
+    }
+
+    function test_ExecuteSignedSelfReplaceApproverActionUsesReplacementApproverSet()
+        public
+    {
+        bytes memory actionData = abi.encode(
+            uint8(2),
+            abi.encode(uint8(2), TEST_VALIDATOR_KEY_2, TEST_VALIDATOR_KEY)
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory processorSig = _signPayload(
+            PROCESSOR_PRIVATE_KEY,
+            payload
+        );
+        bytes[] memory approverSigs = new bytes[](1);
+        approverSigs[0] = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
+
+        bridge.execute_signed(payload, processorSig, approverSigs);
+
+        (
+            ,
+            ,
+            ,
+            bytes[] memory approvers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        ) = bridge.get_config();
+        assertEq(approvers.length, 1);
+        assertEq(approvers[0], TEST_VALIDATOR_KEY);
+        assertEq(neededApprovers, 1);
+        assertEq(configNextEventId, 2);
+        assertEq(configNextActionId, 1);
+    }
+
+    function test_RevertWhenSelfReplaceApproverSignedByOldApprover() public {
+        bytes memory actionData = abi.encode(
+            uint8(2),
+            abi.encode(uint8(2), TEST_VALIDATOR_KEY_2, TEST_VALIDATOR_KEY)
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory processorSig = _signPayload(
+            PROCESSOR_PRIVATE_KEY,
+            payload
+        );
+        bytes[] memory approverSigs = new bytes[](1);
+        approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidApproverSignature.selector,
+                vm.addr(APPROVER_PRIVATE_KEY)
+            )
+        );
+        bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_ExecuteSignedNewSetAction() public {
