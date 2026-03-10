@@ -12,6 +12,7 @@ use alloy::{
 use super::get_next_bridge_event_id;
 
 const ETH_NATIVE_DENOM: &str = "eth";
+const POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
 
 sol! {
     event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
@@ -121,18 +122,39 @@ pub async fn listen<App: KolmeApp>(
         contract.address()
     );
 
+    listen_with_polling(
+        &kolme,
+        &secret,
+        chain,
+        &contract,
+        &mut next_bridge_event_id,
+        &mut next_block,
+        &mut first_log_index,
+    )
+    .await
+}
+
+async fn listen_with_polling<App: KolmeApp, P: Provider>(
+    kolme: &Kolme<App>,
+    secret: &SecretKey,
+    chain: ExternalChain,
+    contract: &ContractInstance<P>,
+    next_bridge_event_id: &mut BridgeEventId,
+    next_block: &mut u64,
+    first_log_index: &mut Option<u64>,
+) -> Result<()> {
     loop {
-        listen_once(
-            &kolme,
-            &secret,
+        listen_polling_once(
+            kolme,
+            secret,
             chain,
-            &contract,
-            &mut next_bridge_event_id,
-            &mut next_block,
-            &mut first_log_index,
+            contract,
+            next_bridge_event_id,
+            next_block,
+            first_log_index,
         )
         .await?;
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
 
@@ -185,7 +207,7 @@ pub async fn sanity_check_contract(
     Ok(())
 }
 
-async fn listen_once<App: KolmeApp, P: Provider>(
+async fn listen_polling_once<App: KolmeApp, P: Provider>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
     chain: ExternalChain,
