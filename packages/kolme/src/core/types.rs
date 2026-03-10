@@ -243,7 +243,7 @@ impl EthereumChain {
         ChainName::Ethereum
     }
 
-    pub const fn default_rpc_url(self) -> &'static str {
+    pub const fn default_http_url(self) -> &'static str {
         match self {
             EthereumChain::Mainnet => "https://ethereum-rpc.publicnode.com",
             EthereumChain::Sepolia => "https://ethereum-sepolia-rpc.publicnode.com",
@@ -251,10 +251,33 @@ impl EthereumChain {
         }
     }
 
+    pub const fn default_ws_url(self) -> &'static str {
+        match self {
+            EthereumChain::Mainnet => "wss://ethereum-rpc.publicnode.com",
+            EthereumChain::Sepolia => "wss://ethereum-sepolia-rpc.publicnode.com",
+            EthereumChain::Local => "ws://localhost:8545",
+        }
+    }
+
+    pub const fn default_rpc_url(self) -> &'static str {
+        self.default_http_url()
+    }
+
+    #[cfg(feature = "ethereum")]
+    pub fn parse_default_http_url(self) -> Result<reqwest::Url> {
+        reqwest::Url::parse(self.default_http_url())
+            .with_context(|| format!("Invalid default Ethereum HTTP URL for {self:?}"))
+    }
+
+    #[cfg(feature = "ethereum")]
+    pub fn parse_default_ws_url(self) -> Result<reqwest::Url> {
+        reqwest::Url::parse(self.default_ws_url())
+            .with_context(|| format!("Invalid default Ethereum WS URL for {self:?}"))
+    }
+
     #[cfg(feature = "ethereum")]
     pub fn make_client(self) -> Result<DynProvider> {
-        let url = reqwest::Url::parse(self.default_rpc_url())
-            .with_context(|| format!("Invalid default Ethereum RPC URL for {self:?}"))?;
+        let url = self.parse_default_http_url()?;
         Ok(DynProvider::new(ProviderBuilder::new().connect_http(url)))
     }
 }
@@ -2272,6 +2295,32 @@ mod tests {
             ExternalChain::EthereumLocal.to_ethereum_chain(),
             Some(EthereumChain::Local)
         );
+    }
+
+    #[test]
+    fn ethereum_chain_default_http_endpoints() {
+        assert_eq!(
+            EthereumChain::Mainnet.default_http_url(),
+            "https://ethereum-rpc.publicnode.com"
+        );
+        assert_eq!(
+            EthereumChain::Sepolia.default_http_url(),
+            "https://ethereum-sepolia-rpc.publicnode.com"
+        );
+        assert_eq!(EthereumChain::Local.default_http_url(), "http://localhost:8545");
+    }
+
+    #[test]
+    fn ethereum_chain_default_ws_endpoints() {
+        assert_eq!(
+            EthereumChain::Mainnet.default_ws_url(),
+            "wss://ethereum-rpc.publicnode.com"
+        );
+        assert_eq!(
+            EthereumChain::Sepolia.default_ws_url(),
+            "wss://ethereum-sepolia-rpc.publicnode.com"
+        );
+        assert_eq!(EthereumChain::Local.default_ws_url(), "ws://localhost:8545");
     }
 
     #[test]
