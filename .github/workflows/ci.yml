@@ -90,6 +90,8 @@ jobs:
         run: just anvil
       - name: Ethereum contract tests
         run: just cargo-contract-tests-ethereum
+      - name: Ethereum subscription-only contract tests
+        run: just cargo-contract-tests-ethereum-sub
 
   solana-contract:
     name: Solana Tests
