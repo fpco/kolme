@@ -3,11 +3,12 @@ use alloy::{
     contract::{ContractInstance, Interface},
     json_abi::JsonAbi,
     primitives::{Address, B256, U256},
-    providers::{DynProvider, Provider},
+    providers::{DynProvider, Provider, ProviderBuilder, WsConnect},
     rpc::types::eth::{BlockNumberOrTag, Filter, Log},
     sol,
     sol_types::SolEvent,
 };
+use futures_util::StreamExt;
 
 use super::get_next_bridge_event_id;
 
@@ -122,6 +123,37 @@ pub async fn listen<App: KolmeApp>(
         contract.address()
     );
 
+    match connect_ws(ethereum_chain, *contract.address()).await {
+        Ok(ws_contract) => {
+            tracing::info!(
+                "Ethereum listener subscribing to logs on chain {chain:?}, contract {:#x}",
+                ws_contract.address()
+            );
+
+            listen_with_subscription(
+                &kolme,
+                &secret,
+                chain,
+                &ws_contract,
+                &mut next_bridge_event_id,
+                &mut next_block,
+                &mut first_log_index,
+            )
+            .await?;
+
+            tracing::warn!(
+                "Ethereum listener subscription ended on chain {chain:?}, contract {:#x}; falling back to polling",
+                ws_contract.address()
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Ethereum listener could not establish WebSocket subscription on chain {chain:?}, contract {:#x}: {e}; falling back to polling",
+                contract.address()
+            );
+        }
+    }
+
     listen_with_polling(
         &kolme,
         &secret,
@@ -132,6 +164,22 @@ pub async fn listen<App: KolmeApp>(
         &mut first_log_index,
     )
     .await
+}
+
+async fn connect_ws(
+    chain: EthereumChain,
+    contract: Address,
+) -> Result<ContractInstance<DynProvider>> {
+    let ws_url = chain.parse_default_ws_url()?;
+    let provider = ProviderBuilder::new()
+        .connect_ws(WsConnect::new(ws_url.as_str()))
+        .await?;
+
+    Ok(ContractInstance::new(
+        contract,
+        DynProvider::new(provider),
+        Interface::new(JsonAbi::default()),
+    ))
 }
 
 async fn listen_with_polling<App: KolmeApp, P: Provider>(
@@ -207,6 +255,39 @@ pub async fn sanity_check_contract(
     Ok(())
 }
 
+async fn listen_with_subscription<App: KolmeApp, P: Provider>(
+    kolme: &Kolme<App>,
+    secret: &SecretKey,
+    chain: ExternalChain,
+    contract: &ContractInstance<P>,
+    next_bridge_event_id: &mut BridgeEventId,
+    next_block: &mut u64,
+    first_log_index: &mut Option<u64>,
+) -> Result<()> {
+    let filter = Filter::new()
+        .from_block(*next_block)
+        .address(*contract.address())
+        .event_signature(FundsReceived::SIGNATURE_HASH);
+    let sub = contract.provider().subscribe_logs(&filter).await?;
+    let mut stream = sub.into_stream();
+
+    while let Some(log) = stream.next().await {
+        if should_skip_log(&log, *next_block, *first_log_index) {
+            tracing::debug!("Skipping Ethereum subscription log: {:?}", log);
+            continue;
+        }
+
+        process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
+
+        if let Some(block_number) = log.block_number {
+            *next_block = block_number;
+        }
+        *first_log_index = log.log_index.map(|i| i.saturating_add(1));
+    }
+
+    Ok(())
+}
+
 async fn listen_polling_once<App: KolmeApp, P: Provider>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
@@ -227,18 +308,8 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
         .address(*contract.address());
 
     for log in contract.provider().get_logs(&filter).await? {
-        if log.removed {
+        if should_skip_log(&log, *next_block, *first_log_index) {
             continue;
-        }
-
-        if let Some(min_log_index) = *first_log_index {
-            if log.block_number == Some(*next_block)
-                && log
-                    .log_index
-                    .is_some_and(|log_index| log_index < min_log_index)
-            {
-                continue;
-            }
         }
 
         process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
@@ -247,6 +318,24 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
     *next_block = latest.saturating_add(1);
     *first_log_index = None;
     Ok(())
+}
+
+fn should_skip_log(log: &Log, next_block: u64, first_log_index: Option<u64>) -> bool {
+    if log.removed {
+        return true;
+    }
+
+    if let Some(min_log_index) = first_log_index {
+        if log.block_number == Some(next_block)
+            && log
+                .log_index
+                .is_some_and(|log_index| log_index < min_log_index)
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 async fn get_resume_cursor<P: Provider>(

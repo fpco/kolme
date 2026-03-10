@@ -2307,7 +2307,10 @@ mod tests {
             EthereumChain::Sepolia.default_http_url(),
             "https://ethereum-sepolia-rpc.publicnode.com"
         );
-        assert_eq!(EthereumChain::Local.default_http_url(), "http://localhost:8545");
+        assert_eq!(
+            EthereumChain::Local.default_http_url(),
+            "http://localhost:8545"
+        );
     }
 
     #[test]
