@@ -59,7 +59,7 @@ absurd-future = { workspace = true }
 version-compare = { workspace = true }
 
 # Ethereum
-alloy = { workspace = true, optional = true, features = ["signer-local"] }
+alloy = { workspace = true, optional = true, features = ["provider-ws", "signer-local"] }
 
 [dev-dependencies]
 kademlia-discovery = { workspace = true }
