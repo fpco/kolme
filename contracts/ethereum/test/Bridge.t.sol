@@ -541,6 +541,41 @@ contract BridgeTest is Test {
         bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
+    function test_RevertWhenNewSetApproverSignedByCurrentSetNotProposedSet()
+        public
+    {
+        bytes[] memory listeners = new bytes[](1);
+        listeners[0] = TEST_VALIDATOR_KEY_3;
+        bytes[] memory approvers = new bytes[](1);
+        approvers[0] = TEST_VALIDATOR_KEY;
+
+        bytes memory actionData = abi.encode(
+            uint8(3),
+            abi.encode(
+                TEST_VALIDATOR_KEY_2,
+                listeners,
+                uint16(1),
+                approvers,
+                uint16(1)
+            )
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+
+        // Proposed processor key is TEST_VALIDATOR_KEY_2, so this part is valid.
+        bytes memory processorSig = _signPayload(APPROVER_PRIVATE_KEY, payload);
+        bytes[] memory approverSigs = new bytes[](1);
+        // Proposed approver key is TEST_VALIDATOR_KEY, but this signature is from old approver.
+        approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidApproverSignature.selector,
+                vm.addr(APPROVER_PRIVATE_KEY)
+            )
+        );
+        bridge.execute_signed(payload, processorSig, approverSigs);
+    }
+
     function test_GetConfigReturnsInitializedState() public view {
         (
             bytes memory processor,
