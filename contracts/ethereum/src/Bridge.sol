@@ -11,6 +11,7 @@ interface IBridge {
         uint256 amount
     );
     event Signed(uint64 eventId, address indexed sender, uint64 actionId);
+    // forge-lint: disable-next-line(mixed-case-function)
     function get_config()
         external
         view
@@ -53,6 +54,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         nextEventId += 1;
     }
 
+    // forge-lint: disable-next-line(mixed-case-function)
     function execute_signed(
         bytes calldata payload,
         bytes calldata processor,
@@ -132,6 +134,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         );
     }
 
+    // forge-lint: disable-next-line(mixed-case-function)
     function get_config()
         external
         view
