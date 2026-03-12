@@ -1,9 +1,8 @@
 //! Ethereum-specific helpers.
+#![cfg(feature = "ethereum")]
 
-#[cfg(feature = "ethereum")]
 use std::str::FromStr;
 
-#[cfg(feature = "ethereum")]
 use alloy::{
     primitives::{Address, U256},
     sol,
@@ -11,7 +10,6 @@ use alloy::{
 };
 
 use crate::SignatureWithRecovery;
-#[cfg(feature = "ethereum")]
 use crate::{AssetAmount, PublicKey, ValidatorSet, ValidatorType};
 
 pub const ACTION_TRANSFER_ETH: u8 = 0;
@@ -19,7 +17,6 @@ pub const ACTION_TRANSFER_ERC20: u8 = 1;
 pub const ACTION_SELF_REPLACE: u8 = 2;
 pub const ACTION_NEW_SET: u8 = 3;
 
-#[cfg(feature = "ethereum")]
 sol! {
     struct TransferEthAction {
         address recipient;
@@ -108,7 +105,6 @@ pub fn abi_encode_u8_and_bytes(value: u8, data: &[u8]) -> Vec<u8> {
     encoded
 }
 
-#[cfg(feature = "ethereum")]
 pub fn encode_transfer_eth_action(
     recipient: &str,
     funds: &[AssetAmount],
@@ -130,7 +126,6 @@ pub fn encode_transfer_eth_action(
     ))
 }
 
-#[cfg(feature = "ethereum")]
 pub fn encode_self_replace_action(
     validator_type: ValidatorType,
     current: PublicKey,
@@ -161,7 +156,6 @@ fn signature_with_recovery_to_ethereum_bytes(
     Ok(out)
 }
 
-#[cfg(feature = "ethereum")]
 pub fn encode_new_set_action(
     validator_set: &ValidatorSet,
     rendered: &str,
