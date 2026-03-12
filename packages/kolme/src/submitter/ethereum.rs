@@ -1,7 +1,8 @@
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use alloy::{
     network::TransactionBuilder,
+    primitives::Address,
     providers::{Provider, ProviderBuilder},
     rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
@@ -11,7 +12,9 @@ use alloy::{
 use anyhow::Context;
 use serde::Deserialize;
 
-use crate::{EthereumChain, ValidatorSet};
+use base64::Engine;
+
+use crate::{EthereumChain, PublicKey, SignatureWithRecovery, ValidatorSet};
 
 const BRIDGE_ARTIFACT_PATH: &str = "../../contracts/ethereum/out/Bridge.sol/Bridge.json";
 
@@ -34,6 +37,15 @@ sol! {
             bytes[] approvers,
             uint16 neededApprovers
         );
+    }
+
+    #[sol(rpc)]
+    interface BridgeExecute {
+        function execute_signed(
+            bytes payload,
+            bytes processor,
+            bytes[] approvers
+        ) external;
     }
 }
 
@@ -124,15 +136,95 @@ pub(super) async fn instantiate(
     Ok(format!("{address:#x}"))
 }
 
+/// Converts Kolme internal ECDSA signature format into Ethereum expected wire
+/// format (r||s||v, v=27/28)
+fn to_ethereum_signature(sig: SignatureWithRecovery) -> anyhow::Result<Vec<u8>> {
+    let mut out = sig.sig.to_bytes();
+    let recid = sig.recid.to_byte();
+    anyhow::ensure!(
+        recid <= 1,
+        "Invalid Ethereum recovery id {recid}, expected 0 or 1"
+    );
+    out.push(recid + 27);
+    Ok(out)
+}
+
+#[derive(Debug)]
+struct ExecuteSignedArgs {
+    payload: Vec<u8>,
+    processor: Vec<u8>,
+    approvers: Vec<Vec<u8>>,
+}
+
+fn prepare_execute_signed_args(
+    processor: SignatureWithRecovery,
+    approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
+    payload_b64: &str,
+) -> anyhow::Result<ExecuteSignedArgs> {
+    let payload = base64::engine::general_purpose::STANDARD
+        .decode(payload_b64)
+        .context("Failed to decode Ethereum bridge action payload from base64")?;
+
+    let processor = to_ethereum_signature(processor)?;
+    let approvers = approvals
+        .values()
+        .copied()
+        .map(to_ethereum_signature)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(ExecuteSignedArgs {
+        payload,
+        processor,
+        approvers,
+    })
+}
+
+pub(super) async fn execute(
+    chain: EthereumChain,
+    signer: PrivateKeySigner,
+    contract: &str,
+    processor: SignatureWithRecovery,
+    approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
+    payload_b64: &str,
+) -> anyhow::Result<String> {
+    let ExecuteSignedArgs {
+        payload,
+        processor,
+        approvers,
+    } = prepare_execute_signed_args(processor, approvals, payload_b64)?;
+
+    let url = reqwest::Url::parse(chain.default_rpc_url())
+        .with_context(|| format!("Invalid default Ethereum RPC URL for {chain:?}"))?;
+    let provider = ProviderBuilder::new().wallet(signer).connect_http(url);
+    let address: Address = contract.parse()?;
+    let bridge = BridgeExecute::new(address, provider);
+
+    let pending = bridge
+        .execute_signed(
+            payload.into(),
+            processor.into(),
+            approvers.into_iter().map(Into::into).collect(),
+        )
+        .send()
+        .await?;
+    let tx_hash = *pending.tx_hash();
+    pending.get_receipt().await?;
+
+    Ok(format!("{tx_hash:#x}"))
+}
+
 #[cfg(test)]
 mod tests {
+    use shared::cryptography::RecoveryId;
+
     use alloy::sol_types::SolConstructor;
 
     use super::{
         build_bridge_initcode_with_create_bytecode, parse_bridge_create_bytecode_str,
-        validator_set_constructor_args,
+        prepare_execute_signed_args, to_ethereum_signature, validator_set_constructor_args,
     };
-    use crate::{SecretKey, ValidatorSet};
+    use crate::{PublicKey, SecretKey, SignatureWithRecovery, ValidatorSet};
+    use std::collections::BTreeMap;
 
     #[test]
     fn parses_valid_foundry_artifact_bytecode() {
@@ -214,5 +306,60 @@ mod tests {
         let initcode = build_bridge_initcode_with_create_bytecode(&[0x60, 0x01], &set);
         assert!(initcode.starts_with(&[0x60, 0x01]));
         assert!(initcode.ends_with(&args));
+    }
+
+    #[test]
+    fn ethereum_signature_uses_rsv_with_27_plus_recid() {
+        let key = SecretKey::random();
+        let sig = key.sign_recoverable(b"msg").unwrap();
+
+        let encoded = to_ethereum_signature(sig).unwrap();
+        assert_eq!(encoded.len(), 65);
+        assert!(encoded[64] == 27 || encoded[64] == 28);
+    }
+
+    #[test]
+    fn ethereum_signature_rejects_invalid_recovery_id() {
+        let sig = SignatureWithRecovery {
+            recid: RecoveryId::from_byte(2).unwrap(),
+            sig: SecretKey::random().sign_recoverable(b"msg").unwrap().sig,
+        };
+        let err = to_ethereum_signature(sig).unwrap_err().to_string();
+        assert!(err.contains("Invalid Ethereum recovery id 2"));
+    }
+
+    #[test]
+    fn prepare_execute_signed_args_decodes_payload_and_signatures() {
+        let processor_key = SecretKey::random();
+        let approver_key = SecretKey::random();
+        let payload_b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            [0u8, 1u8, 2u8, 3u8],
+        );
+        let processor_sig = processor_key.sign_recoverable([9u8, 8u8]).unwrap();
+        let approver_sig = approver_key.sign_recoverable([7u8, 6u8]).unwrap();
+        let mut approvals = BTreeMap::<PublicKey, SignatureWithRecovery>::new();
+        approvals.insert(approver_key.public_key(), approver_sig);
+
+        let args = prepare_execute_signed_args(processor_sig, &approvals, &payload_b64).unwrap();
+
+        assert_eq!(args.payload, [0u8, 1u8, 2u8, 3u8]);
+        assert_eq!(args.processor.len(), 65);
+        assert_eq!(args.approvers.len(), 1);
+        assert_eq!(args.approvers[0].len(), 65);
+        assert!(args.processor[64] == 27 || args.processor[64] == 28);
+        assert!(args.approvers[0][64] == 27 || args.approvers[0][64] == 28);
+    }
+
+    #[test]
+    fn prepare_execute_signed_args_rejects_invalid_base64_payload() {
+        let key = SecretKey::random();
+        let sig = key.sign_recoverable(b"msg").unwrap();
+        let approvals = BTreeMap::new();
+
+        let err = prepare_execute_signed_args(sig, &approvals, "not-base64")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("decode Ethereum bridge action payload"));
     }
 }

@@ -38,7 +38,8 @@ impl<App: KolmeApp> Approver<App> {
             return Ok(());
         }
 
-        let signature = self.secret.sign_recoverable(&action.payload)?;
+        let payload = action.payload_bytes_to_sign(chain)?;
+        let signature = self.secret.sign_recoverable(&payload)?;
         self.kolme
             .sign_propose_await_transaction(
                 &self.secret,

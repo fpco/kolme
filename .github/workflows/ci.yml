@@ -90,8 +90,6 @@ jobs:
         run: just anvil
       - name: Ethereum contract tests
         run: just cargo-contract-tests-ethereum
-      - name: Ethereum Anvil CLI smoke
-        run: just ethereum-anvil-cli-smoke
 
   solana-contract:
     name: Solana Tests

@@ -1,8 +1,8 @@
 # Bridge E2E (Anvil)
 
 This setup runs a deterministic local Ethereum JSON-RPC node for end-to-end testing.
-During image build, `Bridge` is deployed and Anvil state is snapshotted.
-Container startup loads that snapshot, so the contract is already deployed.
+Container startup runs Anvil with a deterministic mnemonic.
+The bridge is not pre-deployed; tests or smoke checks should deploy it explicitly.
 
 ## Start
 
@@ -18,13 +18,13 @@ cd e2e
 docker compose -f compose.yaml down
 ```
 
-## Rebuild (redeploy contract into snapshot)
+## Rebuild
 
 ```bash
 cd e2e
 docker compose -f compose.yaml build --no-cache
 ```
-Note: image build compiles contracts internally with `forge build` before deployment.
+Note: image build compiles contracts internally with `forge build`.
 
 ## Quick Check
 
@@ -48,4 +48,3 @@ Check the actual mnemonic in the `/bootstrap/mnemonic.txt` file.
 
 - `<admin_address>`: `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`
 - `<admin_private_key>`: `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`
-- `<bridge_contract_address>`: `0x5FbDB2315678afecb367f032d93F642f64180aa3`

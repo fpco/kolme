@@ -13,7 +13,6 @@ use cosmwasm_std::{Binary, CosmosMsg, Uint128};
 use alloy::providers::{DynProvider, ProviderBuilder};
 #[cfg(feature = "solana")]
 use {
-    base64::Engine,
     kolme_solana_bridge_client::{pubkey::Pubkey as SolanaPubkey, TokenProgram},
     solana_client::nonblocking::rpc_client::RpcClient as SolanaRpcClient,
     solana_rpc_client_api::client_error,
@@ -509,6 +508,22 @@ impl MerkleDeserialize for PendingBridgeAction {
             approvals: deserializer.load()?,
             processor: deserializer.load()?,
         })
+    }
+}
+
+impl PendingBridgeAction {
+    /// Returns canonical bytes to be signed/verified for this action on a target chain.
+    ///
+    /// Most chains sign raw payload string bytes. Ethereum signs decoded ABI bytes
+    /// stored as base64 in `payload`.
+    pub(crate) fn payload_bytes_to_sign(&self, chain: ExternalChain) -> Result<Vec<u8>> {
+        match chain.name() {
+            ChainName::Ethereum => {
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &self.payload)
+                    .context("Failed to decode Ethereum bridge payload from base64")
+            }
+            _ => Ok(self.payload.as_bytes().to_vec()),
+        }
     }
 }
 
@@ -1770,9 +1785,16 @@ impl ExecAction {
                         })?;
                         Ok(payload)
                     }
+                    #[cfg(feature = "ethereum")]
                     ChainName::Ethereum => {
-                        anyhow::bail!("Ethereum payload generation is not implemented yet")
+                        let action = EthereumActionPayload::Transfer {
+                            recipient: recipient.0.clone(),
+                            funds: funds.clone(),
+                        };
+                        serialize_ethereum_payload(id, &action)
                     }
+                    #[cfg(not(feature = "ethereum"))]
+                    ChainName::Ethereum => unreachable!(),
                 }
             }
             ExecAction::SelfReplace(self_replace) => match chain.name() {
@@ -1812,9 +1834,20 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
+                #[cfg(feature = "ethereum")]
                 ChainName::Ethereum => {
-                    anyhow::bail!("Ethereum payload generation is not implemented yet")
+                    let self_replace = self_replace.as_ref();
+                    let inner = self_replace.message.as_inner();
+                    let current = self_replace.verify_signature()?;
+                    let action = EthereumActionPayload::SelfReplace {
+                        validator_type: inner.validator_type,
+                        current,
+                        replacement: inner.replacement,
+                    };
+                    serialize_ethereum_payload(id, &action)
                 }
+                #[cfg(not(feature = "ethereum"))]
+                ChainName::Ethereum => unreachable!(),
             },
             ExecAction::NewSet {
                 validator_set,
@@ -1850,9 +1883,17 @@ impl ExecAction {
                 ChainName::Solana => unreachable!(),
                 #[cfg(feature = "pass_through")]
                 ChainName::PassThrough => todo!(),
+                #[cfg(feature = "ethereum")]
                 ChainName::Ethereum => {
-                    anyhow::bail!("Ethereum payload generation is not implemented yet")
+                    let action = EthereumActionPayload::NewSet {
+                        validator_set: validator_set.as_inner().clone(),
+                        rendered: validator_set.as_str().to_owned(),
+                        approvals: approvals.clone(),
+                    };
+                    serialize_ethereum_payload(id, &action)
                 }
+                #[cfg(not(feature = "ethereum"))]
+                ChainName::Ethereum => unreachable!(),
             },
             ExecAction::MigrateContract { migrate_contract } => {
                 let contract_addr = match &config.bridge {
@@ -1908,6 +1949,57 @@ impl ExecAction {
     }
 }
 
+#[cfg(feature = "ethereum")]
+#[derive(Clone)]
+enum EthereumActionPayload {
+    Transfer {
+        recipient: String,
+        funds: Vec<AssetAmount>,
+    },
+    SelfReplace {
+        validator_type: ValidatorType,
+        current: PublicKey,
+        replacement: PublicKey,
+    },
+    NewSet {
+        validator_set: ValidatorSet,
+        rendered: String,
+        approvals: Vec<SignatureWithRecovery>,
+    },
+}
+
+#[cfg(feature = "ethereum")]
+fn serialize_ethereum_payload(
+    id: BridgeActionId,
+    action: &EthereumActionPayload,
+) -> Result<String> {
+    let action = match action {
+        EthereumActionPayload::Transfer { recipient, funds } => {
+            crate::utils::ethereum::encode_transfer_eth_action(recipient, funds)?
+        }
+        EthereumActionPayload::SelfReplace {
+            validator_type,
+            current,
+            replacement,
+        } => crate::utils::ethereum::encode_self_replace_action(
+            *validator_type,
+            *current,
+            *replacement,
+        ),
+        EthereumActionPayload::NewSet {
+            validator_set,
+            rendered,
+            approvals,
+        } => crate::utils::ethereum::encode_new_set_action(validator_set, rendered, approvals)?,
+    };
+
+    let payload = crate::utils::ethereum::abi_encode_u64_and_bytes(id.0, &action);
+    Ok(base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        payload,
+    ))
+}
+
 #[cfg(feature = "solana")]
 fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String> {
     let len = borsh::object_length(&payload)
@@ -1917,7 +2009,7 @@ fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String>
     borsh::BorshSerialize::serialize(&payload, &mut buf)
         .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
 
-    let payload = base64::engine::general_purpose::STANDARD.encode(&buf);
+    let payload = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
 
     Ok(payload)
 }
@@ -2239,6 +2331,61 @@ mod tests {
         assert!(chains
             .insert_ethereum(EthereumChain::Sepolia, ethereum_kind)
             .is_ok());
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn serialize_ethereum_payload_wraps_abi_bytes_in_base64() {
+        let action = EthereumActionPayload::Transfer {
+            recipient: "0x1111111111111111111111111111111111111111".to_owned(),
+            funds: vec![AssetAmount {
+                id: AssetId(7),
+                amount: 42,
+            }],
+        };
+        let payload = serialize_ethereum_payload(BridgeActionId(9), &action).unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload).unwrap();
+
+        // uint64 action id in head[0]
+        assert_eq!(&decoded[0..24], &[0u8; 24]);
+        assert_eq!(&decoded[24..32], &9u64.to_be_bytes());
+
+        // bytes offset in head[1]
+        assert_eq!(&decoded[32..63], &[0u8; 31]);
+        assert_eq!(decoded[63], 0x40);
+    }
+
+    #[test]
+    fn payload_bytes_to_sign_uses_raw_string_bytes_for_non_ethereum() {
+        let action = PendingBridgeAction {
+            payload: "hello".to_owned(),
+            approvals: BTreeMap::new(),
+            processor: None,
+        };
+
+        let bytes = action
+            .payload_bytes_to_sign(ExternalChain::OsmosisLocal)
+            .unwrap();
+        assert_eq!(bytes, b"hello");
+    }
+
+    #[test]
+    fn payload_bytes_to_sign_decodes_base64_for_ethereum() {
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            [0u8, 1u8, 255u8],
+        );
+        let action = PendingBridgeAction {
+            payload: encoded,
+            approvals: BTreeMap::new(),
+            processor: None,
+        };
+
+        let bytes = action
+            .payload_bytes_to_sign(ExternalChain::EthereumLocal)
+            .unwrap();
+        assert_eq!(bytes, [0u8, 1u8, 255u8]);
     }
 
     #[tokio::main]

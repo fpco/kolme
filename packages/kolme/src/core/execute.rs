@@ -386,7 +386,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .with_context(|| {
                 format!("Cannot approve missing bridge action ID {action_id} for chain {chain}")
             })?;
-        let key = signature.validate(action.payload.as_bytes())?;
+        let payload = action.payload_bytes_to_sign(chain)?;
+        let key = signature.validate(&payload)?;
         // Using config.as_ref() instead of framework_state.get_config to work around
         // a borrow conflict with the mutable borrow above
         anyhow::ensure!(self
@@ -426,14 +427,14 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
 
         anyhow::ensure!(action.processor.is_none());
 
-        let payload = action.payload.as_bytes();
-        let processor_key = processor.validate(payload)?;
+        let payload = action.payload_bytes_to_sign(chain)?;
+        let processor_key = processor.validate(&payload)?;
         anyhow::ensure!(processor_key == self.framework_state.validator_set.as_ref().processor);
 
         let approvers_checked = approvers
             .iter()
             .map(|sig| {
-                let pubkey = sig.validate(payload)?;
+                let pubkey = sig.validate(&payload)?;
                 anyhow::ensure!(self
                     .framework_state
                     .validator_set

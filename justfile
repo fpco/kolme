@@ -47,10 +47,6 @@ anvil:
     docker compose up --build -d anvil
 
 [working-directory("contracts/ethereum/e2e")]
-ethereum-anvil-cli-smoke:
-    docker compose exec -T anvil /bootstrap/ethereum-anvil-cli-smoke.sh
-
-[working-directory("contracts/ethereum")]
 build-ethereum-contract:
     forge build
 

@@ -309,9 +309,10 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         };
 
+        let payload = action.payload_bytes_to_sign(chain)?;
         let mut approvers = vec![];
         for (key, sig) in &action.approvals {
-            let key2 = sig.validate(action.payload.as_bytes())?;
+            let key2 = sig.validate(&payload)?;
             anyhow::ensure!(key == &key2);
             if kolme.get_approver_pubkeys().contains(key) {
                 approvers.push(*sig);
@@ -328,7 +329,7 @@ impl<App: KolmeApp> Processor<App> {
             return Ok(());
         }
 
-        let processor = secret.sign_recoverable(&action.payload)?;
+        let processor = secret.sign_recoverable(&payload)?;
 
         let tx = kolme.create_signed_transaction(
             secret,
