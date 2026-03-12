@@ -10,6 +10,7 @@ use alloy::{
     sol_types::SolValue,
 };
 
+use crate::SignatureWithRecovery;
 #[cfg(feature = "ethereum")]
 use crate::{AssetAmount, PublicKey, ValidatorSet, ValidatorType};
 
@@ -37,6 +38,8 @@ sol! {
         uint16 neededListeners;
         bytes[] approvers;
         uint16 neededApprovers;
+        bytes rendered;
+        bytes[] approvals;
     }
 }
 
@@ -145,8 +148,32 @@ pub fn encode_self_replace_action(
     abi_encode_u8_and_bytes(ACTION_SELF_REPLACE, &action.abi_encode())
 }
 
+fn signature_with_recovery_to_ethereum_bytes(
+    signature: &SignatureWithRecovery,
+) -> anyhow::Result<Vec<u8>> {
+    let mut out = signature.sig.to_bytes();
+    let recid = signature.recid.to_byte();
+    anyhow::ensure!(
+        recid <= 1,
+        "Invalid Ethereum recovery id {recid}, expected 0 or 1"
+    );
+    out.push(recid + 27);
+    Ok(out)
+}
+
 #[cfg(feature = "ethereum")]
-pub fn encode_new_set_action(validator_set: &ValidatorSet) -> Vec<u8> {
+pub fn encode_new_set_action(
+    validator_set: &ValidatorSet,
+    rendered: &str,
+    approvals: &[SignatureWithRecovery],
+) -> anyhow::Result<Vec<u8>> {
+    let approvals = approvals
+        .iter()
+        .map(signature_with_recovery_to_ethereum_bytes)
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .into_iter()
+        .map(Into::into)
+        .collect();
     let action = NewSetAction {
         processor: validator_set.processor.as_bytes().into_vec().into(),
         listeners: validator_set
@@ -163,8 +190,13 @@ pub fn encode_new_set_action(validator_set: &ValidatorSet) -> Vec<u8> {
             .map(|key| key.as_bytes().into_vec().into())
             .collect(),
         neededApprovers: validator_set.needed_approvers,
+        rendered: rendered.as_bytes().to_vec().into(),
+        approvals,
     };
-    abi_encode_u8_and_bytes(ACTION_NEW_SET, &action.abi_encode())
+    Ok(abi_encode_u8_and_bytes(
+        ACTION_NEW_SET,
+        &action.abi_encode(),
+    ))
 }
 
 #[cfg(test)]

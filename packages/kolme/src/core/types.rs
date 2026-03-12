@@ -1887,8 +1887,9 @@ impl ExecAction {
                 ChainName::Ethereum => {
                     let action = EthereumActionPayload::NewSet {
                         validator_set: validator_set.as_inner().clone(),
+                        rendered: validator_set.as_str().to_owned(),
+                        approvals: approvals.clone(),
                     };
-                    let _ = approvals;
                     serialize_ethereum_payload(id, &action)
                 }
                 #[cfg(not(feature = "ethereum"))]
@@ -1962,6 +1963,8 @@ enum EthereumActionPayload {
     },
     NewSet {
         validator_set: ValidatorSet,
+        rendered: String,
+        approvals: Vec<SignatureWithRecovery>,
     },
 }
 
@@ -1983,9 +1986,11 @@ fn serialize_ethereum_payload(
             *current,
             *replacement,
         ),
-        EthereumActionPayload::NewSet { validator_set } => {
-            crate::utils::ethereum::encode_new_set_action(validator_set)
-        }
+        EthereumActionPayload::NewSet {
+            validator_set,
+            rendered,
+            approvals,
+        } => crate::utils::ethereum::encode_new_set_action(validator_set, rendered, approvals)?,
     };
 
     let payload = crate::utils::ethereum::abi_encode_u64_and_bytes(id.0, &action);

@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {Bridge} from "../src/Bridge.sol";
+import {BridgeActions} from "../src/BridgeActions.sol";
 import {BridgeBase} from "../src/BridgeBase.sol";
 
 contract BridgeRecoverHarness is Bridge {
@@ -465,6 +466,10 @@ contract BridgeTest is Test {
         listeners[0] = TEST_VALIDATOR_KEY_3;
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY;
+        bytes memory rendered = bytes("new-set-proof");
+        bytes[] memory innerApprovals = new bytes[](2);
+        innerApprovals[0] = _signPayload(PROCESSOR_PRIVATE_KEY, rendered);
+        innerApprovals[1] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
 
         bytes memory actionData = abi.encode(
             uint8(3),
@@ -473,7 +478,9 @@ contract BridgeTest is Test {
                 listeners,
                 uint16(1),
                 approvers,
-                uint16(1)
+                uint16(1),
+                rendered,
+                innerApprovals
             )
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -512,6 +519,10 @@ contract BridgeTest is Test {
         listeners[0] = TEST_VALIDATOR_KEY_3;
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY;
+        bytes memory rendered = bytes("new-set-proof");
+        bytes[] memory innerApprovals = new bytes[](2);
+        innerApprovals[0] = _signPayload(PROCESSOR_PRIVATE_KEY, rendered);
+        innerApprovals[1] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
 
         bytes memory actionData = abi.encode(
             uint8(3),
@@ -520,7 +531,9 @@ contract BridgeTest is Test {
                 listeners,
                 uint16(1),
                 approvers,
-                uint16(1)
+                uint16(1),
+                rendered,
+                innerApprovals
             )
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -548,6 +561,10 @@ contract BridgeTest is Test {
         listeners[0] = TEST_VALIDATOR_KEY_3;
         bytes[] memory approvers = new bytes[](1);
         approvers[0] = TEST_VALIDATOR_KEY;
+        bytes memory rendered = bytes("new-set-proof");
+        bytes[] memory innerApprovals = new bytes[](2);
+        innerApprovals[0] = _signPayload(PROCESSOR_PRIVATE_KEY, rendered);
+        innerApprovals[1] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
 
         bytes memory actionData = abi.encode(
             uint8(3),
@@ -556,7 +573,9 @@ contract BridgeTest is Test {
                 listeners,
                 uint16(1),
                 approvers,
-                uint16(1)
+                uint16(1),
+                rendered,
+                innerApprovals
             )
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -571,6 +590,42 @@ contract BridgeTest is Test {
             abi.encodeWithSelector(
                 Bridge.InvalidApproverSignature.selector,
                 vm.addr(APPROVER_PRIVATE_KEY)
+            )
+        );
+        bridge.execute_signed(payload, processorSig, approverSigs);
+    }
+
+    function test_RevertWhenNewSetInnerProofInsufficientGroups() public {
+        bytes[] memory listeners = new bytes[](1);
+        listeners[0] = TEST_VALIDATOR_KEY_3;
+        bytes[] memory approvers = new bytes[](1);
+        approvers[0] = TEST_VALIDATOR_KEY;
+        bytes memory rendered = bytes("new-set-proof");
+        bytes[] memory innerApprovals = new bytes[](1);
+        innerApprovals[0] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
+
+        bytes memory actionData = abi.encode(
+            uint8(3),
+            abi.encode(
+                TEST_VALIDATOR_KEY_2,
+                listeners,
+                uint16(1),
+                approvers,
+                uint16(1),
+                rendered,
+                innerApprovals
+            )
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory processorSig = _signPayload(APPROVER_PRIVATE_KEY, payload);
+        bytes[] memory approverSigs = new bytes[](1);
+        approverSigs[0] = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BridgeActions.InsufficientNewSetGroupSignatures.selector,
+                uint8(2),
+                uint8(1)
             )
         );
         bridge.execute_signed(payload, processorSig, approverSigs);

@@ -177,7 +177,7 @@ abstract contract BridgeBase {
     // Used for verifying processor/approvers signatures.
     function _recoverSigner(
         bytes32 payloadHash,
-        bytes calldata signature
+        bytes memory signature
     ) internal pure returns (address) {
         if (signature.length != 65) {
             revert InvalidSignatureLength(signature.length);
@@ -186,13 +186,25 @@ abstract contract BridgeBase {
         bytes32 s;
         uint8 v;
         assembly {
-            r := calldataload(signature.offset)
-            s := calldataload(add(signature.offset, 0x20))
-            v := byte(0, calldataload(add(signature.offset, 0x40)))
+            r := mload(add(signature, 0x20))
+            s := mload(add(signature, 0x40))
+            v := byte(0, mload(add(signature, 0x60)))
         }
         if (v != 27 && v != 28) {
             revert InvalidSignatureV(v);
         }
         return ecrecover(payloadHash, v, r, s);
+    }
+
+    function _containsSigner(
+        bytes[] storage keys,
+        address signer
+    ) internal view returns (bool) {
+        for (uint256 i = 0; i < keys.length; i++) {
+            if (_validatorAddress(keys[i]) == signer) {
+                return true;
+            }
+        }
+        return false;
     }
 }

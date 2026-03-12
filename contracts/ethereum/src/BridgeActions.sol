@@ -17,6 +17,9 @@ abstract contract BridgeActions is BridgeBase {
     error InvalidValidatorType(uint8 validatorType);
     error CurrentValidatorNotFound(uint8 validatorType, bytes current);
     error TransferEthFailed(address recipient, uint256 amount);
+    error InvalidNewSetApprovalSignature(address signer);
+    error DuplicateNewSetApprovalSignature(address signer);
+    error InsufficientNewSetGroupSignatures(uint8 needed, uint8 provided);
 
     function _expectedSignersForAction(
         bytes memory actionData
@@ -40,11 +43,20 @@ abstract contract BridgeActions is BridgeBase {
         if (actionType == ACTION_NEW_SET) {
             (
                 bytes memory newProcessor,
-                ,
-                ,
+                bytes[] memory newListeners,
+                uint16 newNeededListeners,
                 bytes[] memory newApprovers,
-                uint16 newNeededApprovers
-            ) = abi.decode(data, (bytes, bytes[], uint16, bytes[], uint16));
+                uint16 newNeededApprovers,
+                bytes memory rendered,
+                bytes[] memory approvals
+            ) = abi.decode(
+                    data,
+                    (bytes, bytes[], uint16, bytes[], uint16, bytes, bytes[])
+                );
+            _verifyNewSetApprovals(rendered, approvals);
+            // Silence unused local warnings while still validating tuple shape.
+            newListeners;
+            newNeededListeners;
             return (newProcessor, newApprovers, newNeededApprovers);
         }
         if (actionType != ACTION_SELF_REPLACE) {
@@ -69,7 +81,10 @@ abstract contract BridgeActions is BridgeBase {
             return (expectedProcessor, expectedApprovers, neededApprovers);
         }
         if (validatorType == VALIDATOR_LISTENER) {
-            uint256 currentIndex = _findValidatorIndex(validatorSet.listeners, current);
+            uint256 currentIndex = _findValidatorIndex(
+                validatorSet.listeners,
+                current
+            );
             if (currentIndex == type(uint256).max) {
                 revert CurrentValidatorNotFound(validatorType, current);
             }
@@ -90,7 +105,10 @@ abstract contract BridgeActions is BridgeBase {
             return (expectedProcessor, expectedApprovers, neededApprovers);
         }
         if (validatorType == VALIDATOR_APPROVER) {
-            uint256 currentIndex = _findValidatorIndex(validatorSet.approvers, current);
+            uint256 currentIndex = _findValidatorIndex(
+                validatorSet.approvers,
+                current
+            );
             if (currentIndex == type(uint256).max) {
                 revert CurrentValidatorNotFound(validatorType, current);
             }
@@ -238,8 +256,15 @@ abstract contract BridgeActions is BridgeBase {
             bytes[] memory listeners,
             uint16 neededListeners,
             bytes[] memory approvers,
-            uint16 neededApprovers
-        ) = abi.decode(data, (bytes, bytes[], uint16, bytes[], uint16));
+            uint16 neededApprovers,
+            bytes memory rendered,
+            bytes[] memory approvals
+        ) = abi.decode(
+                data,
+                (bytes, bytes[], uint16, bytes[], uint16, bytes, bytes[])
+            );
+        rendered;
+        approvals;
         _setValidatorSet(
             processor,
             listeners,
@@ -247,5 +272,57 @@ abstract contract BridgeActions is BridgeBase {
             approvers,
             neededApprovers
         );
+    }
+
+    function _verifyNewSetApprovals(
+        bytes memory rendered,
+        bytes[] memory approvals
+    ) internal view {
+        bytes32 renderedHash = sha256(rendered);
+
+        bool hasProcessor = false;
+        uint256 listeners = 0;
+        uint256 approvers = 0;
+        uint256 approvalsCount = approvals.length;
+        address[] memory seen = new address[](approvalsCount);
+        uint256 uniqueSigners = 0;
+
+        address processorSigner = _validatorAddress(validatorSet.processor);
+        for (uint256 i = 0; i < approvalsCount; i++) {
+            address signer = _recoverSigner(renderedHash, approvals[i]);
+
+            for (uint256 j = 0; j < uniqueSigners; j++) {
+                if (seen[j] == signer) {
+                    revert DuplicateNewSetApprovalSignature(signer);
+                }
+            }
+            seen[uniqueSigners] = signer;
+            uniqueSigners += 1;
+
+            bool inCurrentSet = false;
+            if (signer == processorSigner) {
+                hasProcessor = true;
+                inCurrentSet = true;
+            }
+            if (_containsSigner(validatorSet.listeners, signer)) {
+                listeners += 1;
+                inCurrentSet = true;
+            }
+            if (_containsSigner(validatorSet.approvers, signer)) {
+                approvers += 1;
+                inCurrentSet = true;
+            }
+            if (!inCurrentSet) {
+                revert InvalidNewSetApprovalSignature(signer);
+            }
+        }
+
+        uint8 groupApprovals = (hasProcessor ? 1 : 0) +
+            (listeners >= validatorSet.neededListeners ? 1 : 0) +
+            (approvers >= validatorSet.neededApprovers ? 1 : 0);
+
+        if (groupApprovals < 2) {
+            revert InsufficientNewSetGroupSignatures(2, groupApprovals);
+        }
     }
 }
