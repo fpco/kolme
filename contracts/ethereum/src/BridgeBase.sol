@@ -17,6 +17,9 @@ abstract contract BridgeBase {
     error InvalidSignatureLength(uint256 length);
     error InvalidSignatureV(uint8 v);
     error ModExpFailed();
+    error InvalidApproverSignature(address signer);
+    error DuplicateApproverSignature(address signer);
+    error InsufficientApproverSignatures(uint16 needed, uint256 provided);
 
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
@@ -177,7 +180,7 @@ abstract contract BridgeBase {
     // Used for verifying processor/approvers signatures.
     function _recoverSigner(
         bytes32 payloadHash,
-        bytes calldata signature
+        bytes memory signature
     ) internal pure returns (address) {
         if (signature.length != 65) {
             revert InvalidSignatureLength(signature.length);
@@ -186,13 +189,68 @@ abstract contract BridgeBase {
         bytes32 s;
         uint8 v;
         assembly {
-            r := calldataload(signature.offset)
-            s := calldataload(add(signature.offset, 0x20))
-            v := byte(0, calldataload(add(signature.offset, 0x40)))
+            r := mload(add(signature, 0x20))
+            s := mload(add(signature, 0x40))
+            v := byte(0, mload(add(signature, 0x60)))
         }
         if (v != 27 && v != 28) {
             revert InvalidSignatureV(v);
         }
         return ecrecover(payloadHash, v, r, s);
+    }
+
+    function _containsSigner(
+        bytes[] storage keys,
+        address signer
+    ) internal view returns (bool) {
+        for (uint256 i = 0; i < keys.length; i++) {
+            if (_validatorAddress(keys[i]) == signer) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _verifyApproverSignatures(
+        bytes32 payloadHash,
+        bytes[] calldata approvers,
+        address[] memory configuredApproverSigners,
+        uint16 neededApprovers
+    ) internal pure {
+        uint256 configuredApproverCount = configuredApproverSigners.length;
+        uint256 approverCount = approvers.length;
+        address[] memory seen = new address[](approverCount);
+        uint256 uniqueApprovers = 0;
+        for (uint256 i = 0; i < approverCount; i++) {
+            address signer = _recoverSigner(payloadHash, approvers[i]);
+
+            bool isConfiguredApprover = false;
+            for (uint256 j = 0; j < configuredApproverCount; j++) {
+                if (configuredApproverSigners[j] == signer) {
+                    isConfiguredApprover = true;
+                    break;
+                }
+            }
+            if (!isConfiguredApprover) {
+                revert InvalidApproverSignature(signer);
+            }
+
+            for (uint256 j = 0; j < uniqueApprovers; j++) {
+                if (seen[j] == signer) {
+                    revert DuplicateApproverSignature(signer);
+                }
+            }
+            seen[uniqueApprovers] = signer;
+            uniqueApprovers += 1;
+            if (uniqueApprovers == neededApprovers) {
+                break;
+            }
+        }
+        if (uniqueApprovers < neededApprovers) {
+            revert InsufficientApproverSignatures(
+                neededApprovers,
+                uniqueApprovers
+            );
+        }
     }
 }

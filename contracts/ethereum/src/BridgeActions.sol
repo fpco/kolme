@@ -17,6 +17,59 @@ abstract contract BridgeActions is BridgeBase {
     error InvalidValidatorType(uint8 validatorType);
     error CurrentValidatorNotFound(uint8 validatorType, bytes current);
     error TransferEthFailed(address recipient, uint256 amount);
+    error InvalidNewSetApprovalSignature(address signer);
+    error DuplicateNewSetApprovalSignature(address signer);
+    error InsufficientNewSetGroupSignatures(uint8 needed, uint8 provided);
+
+    function _validateActionForExecution(
+        bytes memory actionData
+    ) internal view {
+        (uint8 actionType, bytes memory data) = abi.decode(
+            actionData,
+            (uint8, bytes)
+        );
+
+        if (actionType == ACTION_SELF_REPLACE) {
+            (
+                uint8 validatorType,
+                bytes memory current,
+                bytes memory replacement
+            ) = abi.decode(data, (uint8, bytes, bytes));
+            _validateSelfReplace(validatorType, current, replacement);
+            return;
+        }
+        if (actionType == ACTION_NEW_SET) {
+            (
+                bytes memory processor,
+                bytes[] memory listeners,
+                uint16 neededListeners,
+                bytes[] memory approvers,
+                uint16 neededApprovers,
+                bytes memory rendered,
+                bytes[] memory approvals
+            ) = abi.decode(
+                    data,
+                    (bytes, bytes[], uint16, bytes[], uint16, bytes, bytes[])
+                );
+
+            // no-ops to silence compiler warnings - we want to validate full ABI shape
+            processor;
+            listeners;
+            neededListeners;
+            approvers;
+            neededApprovers;
+
+            _verifyNewSetApprovals(rendered, approvals);
+            return;
+        }
+        if (
+            actionType == ACTION_TRANSFER_ETH ||
+            actionType == ACTION_TRANSFER_ERC20
+        ) {
+            return;
+        }
+        revert InvalidActionType(actionType);
+    }
 
     function _expectedSignersForAction(
         bytes memory actionData
@@ -43,8 +96,14 @@ abstract contract BridgeActions is BridgeBase {
                 ,
                 ,
                 bytes[] memory newApprovers,
-                uint16 newNeededApprovers
-            ) = abi.decode(data, (bytes, bytes[], uint16, bytes[], uint16));
+                uint16 newNeededApprovers,
+                ,
+                bytes[] memory ignoredApprovals
+            ) = abi.decode(
+                    data,
+                    (bytes, bytes[], uint16, bytes[], uint16, bytes, bytes[])
+                );
+            ignoredApprovals;
             return (newProcessor, newApprovers, newNeededApprovers);
         }
         if (actionType != ACTION_SELF_REPLACE) {
@@ -56,57 +115,21 @@ abstract contract BridgeActions is BridgeBase {
             bytes memory current,
             bytes memory replacement
         ) = abi.decode(data, (uint8, bytes, bytes));
-        if (!_isValidValidatorKey(replacement)) {
-            revert InvalidValidatorKey(0, replacement);
-        }
-        _validatorAddress(replacement);
 
         if (validatorType == VALIDATOR_PROCESSOR) {
-            if (keccak256(current) != keccak256(validatorSet.processor)) {
-                revert CurrentValidatorNotFound(validatorType, current);
-            }
             expectedProcessor = replacement;
             return (expectedProcessor, expectedApprovers, neededApprovers);
         }
         if (validatorType == VALIDATOR_LISTENER) {
-            uint256 currentIndex = _findValidatorIndex(validatorSet.listeners, current);
-            if (currentIndex == type(uint256).max) {
-                revert CurrentValidatorNotFound(validatorType, current);
-            }
-            uint256 replacementIndex = _findValidatorIndex(
-                validatorSet.listeners,
-                replacement
-            );
-            if (
-                replacementIndex != type(uint256).max &&
-                replacementIndex != currentIndex
-            ) {
-                revert DuplicateValidatorKey(
-                    currentIndex,
-                    replacementIndex,
-                    replacement
-                );
-            }
             return (expectedProcessor, expectedApprovers, neededApprovers);
         }
         if (validatorType == VALIDATOR_APPROVER) {
-            uint256 currentIndex = _findValidatorIndex(validatorSet.approvers, current);
-            if (currentIndex == type(uint256).max) {
-                revert CurrentValidatorNotFound(validatorType, current);
-            }
-            uint256 replacementIndex = _findValidatorIndex(
+            uint256 currentIndex = _findValidatorIndex(
                 validatorSet.approvers,
-                replacement
+                current
             );
-            if (
-                replacementIndex != type(uint256).max &&
-                replacementIndex != currentIndex
-            ) {
-                revert DuplicateValidatorKey(
-                    currentIndex,
-                    replacementIndex,
-                    replacement
-                );
+            if (currentIndex == type(uint256).max) {
+                return (expectedProcessor, expectedApprovers, neededApprovers);
             }
             expectedApprovers[currentIndex] = replacement;
             return (expectedProcessor, expectedApprovers, neededApprovers);
@@ -153,6 +176,15 @@ abstract contract BridgeActions is BridgeBase {
             bytes memory current,
             bytes memory replacement
         ) = abi.decode(data, (uint8, bytes, bytes));
+        _validateSelfReplace(validatorType, current, replacement);
+        _doSelfReplace(validatorType, current, replacement);
+    }
+
+    function _validateSelfReplace(
+        uint8 validatorType,
+        bytes memory current,
+        bytes memory replacement
+    ) internal view {
         if (!_isValidValidatorKey(replacement)) {
             revert InvalidValidatorKey(0, replacement);
         }
@@ -162,11 +194,10 @@ abstract contract BridgeActions is BridgeBase {
             if (keccak256(current) != keccak256(validatorSet.processor)) {
                 revert CurrentValidatorNotFound(validatorType, current);
             }
-            validatorSet.processor = replacement;
             return;
         }
         if (validatorType == VALIDATOR_LISTENER) {
-            _replaceValidatorInArray(
+            _validateReplaceValidatorInArray(
                 validatorType,
                 validatorSet.listeners,
                 current,
@@ -175,7 +206,7 @@ abstract contract BridgeActions is BridgeBase {
             return;
         }
         if (validatorType == VALIDATOR_APPROVER) {
-            _replaceValidatorInArray(
+            _validateReplaceValidatorInArray(
                 validatorType,
                 validatorSet.approvers,
                 current,
@@ -187,12 +218,40 @@ abstract contract BridgeActions is BridgeBase {
         revert InvalidValidatorType(validatorType);
     }
 
-    function _replaceValidatorInArray(
+    function _doSelfReplace(
+        uint8 validatorType,
+        bytes memory current,
+        bytes memory replacement
+    ) internal {
+        if (validatorType == VALIDATOR_PROCESSOR) {
+            validatorSet.processor = replacement;
+            return;
+        }
+        if (validatorType == VALIDATOR_LISTENER) {
+            _doReplaceValidatorInArray(
+                validatorSet.listeners,
+                current,
+                replacement
+            );
+            return;
+        }
+        if (validatorType == VALIDATOR_APPROVER) {
+            _doReplaceValidatorInArray(
+                validatorSet.approvers,
+                current,
+                replacement
+            );
+            return;
+        }
+        revert InvalidValidatorType(validatorType);
+    }
+
+    function _validateReplaceValidatorInArray(
         uint8 validatorType,
         bytes[] storage keys,
         bytes memory current,
         bytes memory replacement
-    ) internal {
+    ) internal view {
         uint256 currentIndex = _findValidatorIndex(keys, current);
         if (currentIndex == type(uint256).max) {
             revert CurrentValidatorNotFound(validatorType, current);
@@ -208,6 +267,14 @@ abstract contract BridgeActions is BridgeBase {
                 replacement
             );
         }
+    }
+
+    function _doReplaceValidatorInArray(
+        bytes[] storage keys,
+        bytes memory current,
+        bytes memory replacement
+    ) internal {
+        uint256 currentIndex = _findValidatorIndex(keys, current);
         keys[currentIndex] = replacement;
     }
 
@@ -238,8 +305,17 @@ abstract contract BridgeActions is BridgeBase {
             bytes[] memory listeners,
             uint16 neededListeners,
             bytes[] memory approvers,
-            uint16 neededApprovers
-        ) = abi.decode(data, (bytes, bytes[], uint16, bytes[], uint16));
+            uint16 neededApprovers,
+            bytes memory rendered,
+            bytes[] memory approvals
+        ) = abi.decode(
+                data,
+                (bytes, bytes[], uint16, bytes[], uint16, bytes, bytes[])
+            );
+
+        // A third layer of signature verification - ensuring that the old set of validators
+        // approved the new set
+        _verifyNewSetApprovals(rendered, approvals);
         _setValidatorSet(
             processor,
             listeners,
@@ -247,5 +323,57 @@ abstract contract BridgeActions is BridgeBase {
             approvers,
             neededApprovers
         );
+    }
+
+    function _verifyNewSetApprovals(
+        bytes memory rendered,
+        bytes[] memory approvals
+    ) internal view {
+        bytes32 renderedHash = sha256(rendered);
+
+        bool hasProcessor = false;
+        uint256 listeners = 0;
+        uint256 approvers = 0;
+        uint256 approvalsCount = approvals.length;
+        address[] memory seen = new address[](approvalsCount);
+        uint256 uniqueSigners = 0;
+
+        address processorSigner = _validatorAddress(validatorSet.processor);
+        for (uint256 i = 0; i < approvalsCount; i++) {
+            address signer = _recoverSigner(renderedHash, approvals[i]);
+
+            for (uint256 j = 0; j < uniqueSigners; j++) {
+                if (seen[j] == signer) {
+                    revert DuplicateNewSetApprovalSignature(signer);
+                }
+            }
+            seen[uniqueSigners] = signer;
+            uniqueSigners += 1;
+
+            bool inCurrentSet = false;
+            if (signer == processorSigner) {
+                hasProcessor = true;
+                inCurrentSet = true;
+            }
+            if (_containsSigner(validatorSet.listeners, signer)) {
+                listeners += 1;
+                inCurrentSet = true;
+            }
+            if (_containsSigner(validatorSet.approvers, signer)) {
+                approvers += 1;
+                inCurrentSet = true;
+            }
+            if (!inCurrentSet) {
+                revert InvalidNewSetApprovalSignature(signer);
+            }
+        }
+
+        uint8 groupApprovals = (hasProcessor ? 1 : 0) +
+            (listeners >= validatorSet.neededListeners ? 1 : 0) +
+            (approvers >= validatorSet.neededApprovers ? 1 : 0);
+
+        if (groupApprovals < 2) {
+            revert InsufficientNewSetGroupSignatures(2, groupApprovals);
+        }
     }
 }

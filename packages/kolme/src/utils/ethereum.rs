@@ -1,16 +1,15 @@
 //! Ethereum-specific helpers.
+#![cfg(feature = "ethereum")]
 
-#[cfg(feature = "ethereum")]
 use std::str::FromStr;
 
-#[cfg(feature = "ethereum")]
 use alloy::{
     primitives::{Address, U256},
     sol,
     sol_types::SolValue,
 };
 
-#[cfg(feature = "ethereum")]
+use crate::SignatureWithRecovery;
 use crate::{AssetAmount, PublicKey, ValidatorSet, ValidatorType};
 
 pub const ACTION_TRANSFER_ETH: u8 = 0;
@@ -18,7 +17,6 @@ pub const ACTION_TRANSFER_ERC20: u8 = 1;
 pub const ACTION_SELF_REPLACE: u8 = 2;
 pub const ACTION_NEW_SET: u8 = 3;
 
-#[cfg(feature = "ethereum")]
 sol! {
     struct TransferEthAction {
         address recipient;
@@ -37,6 +35,8 @@ sol! {
         uint16 neededListeners;
         bytes[] approvers;
         uint16 neededApprovers;
+        bytes rendered;
+        bytes[] approvals;
     }
 }
 
@@ -105,7 +105,6 @@ pub fn abi_encode_u8_and_bytes(value: u8, data: &[u8]) -> Vec<u8> {
     encoded
 }
 
-#[cfg(feature = "ethereum")]
 pub fn encode_transfer_eth_action(
     recipient: &str,
     funds: &[AssetAmount],
@@ -127,7 +126,6 @@ pub fn encode_transfer_eth_action(
     ))
 }
 
-#[cfg(feature = "ethereum")]
 pub fn encode_self_replace_action(
     validator_type: ValidatorType,
     current: PublicKey,
@@ -145,8 +143,31 @@ pub fn encode_self_replace_action(
     abi_encode_u8_and_bytes(ACTION_SELF_REPLACE, &action.abi_encode())
 }
 
-#[cfg(feature = "ethereum")]
-pub fn encode_new_set_action(validator_set: &ValidatorSet) -> Vec<u8> {
+fn signature_with_recovery_to_ethereum_bytes(
+    signature: &SignatureWithRecovery,
+) -> anyhow::Result<Vec<u8>> {
+    let mut out = signature.sig.to_bytes();
+    let recid = signature.recid.to_byte();
+    anyhow::ensure!(
+        recid <= 1,
+        "Invalid Ethereum recovery id {recid}, expected 0 or 1"
+    );
+    out.push(recid + 27);
+    Ok(out)
+}
+
+pub fn encode_new_set_action(
+    validator_set: &ValidatorSet,
+    rendered: &str,
+    approvals: &[SignatureWithRecovery],
+) -> anyhow::Result<Vec<u8>> {
+    let approvals = approvals
+        .iter()
+        .map(signature_with_recovery_to_ethereum_bytes)
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .into_iter()
+        .map(Into::into)
+        .collect();
     let action = NewSetAction {
         processor: validator_set.processor.as_bytes().into_vec().into(),
         listeners: validator_set
@@ -163,8 +184,13 @@ pub fn encode_new_set_action(validator_set: &ValidatorSet) -> Vec<u8> {
             .map(|key| key.as_bytes().into_vec().into())
             .collect(),
         neededApprovers: validator_set.needed_approvers,
+        rendered: rendered.as_bytes().to_vec().into(),
+        approvals,
     };
-    abi_encode_u8_and_bytes(ACTION_NEW_SET, &action.abi_encode())
+    Ok(abi_encode_u8_and_bytes(
+        ACTION_NEW_SET,
+        &action.abi_encode(),
+    ))
 }
 
 #[cfg(test)]

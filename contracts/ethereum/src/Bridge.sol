@@ -11,6 +11,7 @@ interface IBridge {
         uint256 amount
     );
     event Signed(uint64 eventId, address indexed sender, uint64 actionId);
+    // forge-lint: disable-next-line(mixed-case-function)
     function get_config()
         external
         view
@@ -28,9 +29,6 @@ interface IBridge {
 contract Bridge is IBridge, BridgeBase, BridgeActions {
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidProcessorSignature(address expected, address received);
-    error InvalidApproverSignature(address signer);
-    error DuplicateApproverSignature(address signer);
-    error InsufficientApproverSignatures(uint16 needed, uint256 provided);
 
     constructor(
         bytes memory processor,
@@ -56,6 +54,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         nextEventId += 1;
     }
 
+    // forge-lint: disable-next-line(mixed-case-function)
     function execute_signed(
         bytes calldata payload,
         bytes calldata processor,
@@ -76,6 +75,8 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
             bytes[] memory expectedApprovers,
             uint16 neededApprovers
         ) = _expectedSignersForAction(actionData);
+
+        // First - verify signatures from the outer layer - signatures for action execution
         _verifySignatures(
             payloadHash,
             processor,
@@ -84,6 +85,11 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
             expectedApprovers,
             neededApprovers
         );
+
+        // Second - verify signatures in the inner layer - the action proposal
+        // and validate action payload
+        _validateActionForExecution(actionData);
+
         _executeAction(actionData);
 
         emit Signed(nextEventId, msg.sender, actionId);
@@ -111,9 +117,15 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
             );
         }
 
-        address[] memory configuredApproverSigners = _validatorAddresses(
-            expectedApprovers
+        uint256 approverCount = expectedApprovers.length;
+        address[] memory configuredApproverSigners = new address[](
+            approverCount
         );
+        for (uint256 i = 0; i < approverCount; i++) {
+            configuredApproverSigners[i] = _validatorAddress(
+                expectedApprovers[i]
+            );
+        }
         _verifyApproverSignatures(
             payloadHash,
             approvers,
@@ -122,59 +134,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         );
     }
 
-    function _verifyApproverSignatures(
-        bytes32 payloadHash,
-        bytes[] calldata approvers,
-        address[] memory configuredApproverSigners,
-        uint16 neededApprovers
-    ) internal pure {
-        uint256 configuredApproverCount = configuredApproverSigners.length;
-        uint256 approverCount = approvers.length;
-        address[] memory seen = new address[](approverCount);
-        uint256 uniqueApprovers = 0;
-        for (uint256 i = 0; i < approverCount; i++) {
-            address signer = _recoverSigner(payloadHash, approvers[i]);
-
-            bool isConfiguredApprover = false;
-            for (uint256 j = 0; j < configuredApproverCount; j++) {
-                if (configuredApproverSigners[j] == signer) {
-                    isConfiguredApprover = true;
-                    break;
-                }
-            }
-            if (!isConfiguredApprover) {
-                revert InvalidApproverSignature(signer);
-            }
-
-            for (uint256 j = 0; j < uniqueApprovers; j++) {
-                if (seen[j] == signer) {
-                    revert DuplicateApproverSignature(signer);
-                }
-            }
-            seen[uniqueApprovers] = signer;
-            uniqueApprovers += 1;
-            if (uniqueApprovers == neededApprovers) {
-                break;
-            }
-        }
-        if (uniqueApprovers < neededApprovers) {
-            revert InsufficientApproverSignatures(
-                neededApprovers,
-                uniqueApprovers
-            );
-        }
-    }
-
-    function _validatorAddresses(
-        bytes[] memory validatorKeys
-    ) internal view returns (address[] memory result) {
-        uint256 count = validatorKeys.length;
-        result = new address[](count);
-        for (uint256 i = 0; i < count; i++) {
-            result[i] = _validatorAddress(validatorKeys[i]);
-        }
-    }
-
+    // forge-lint: disable-next-line(mixed-case-function)
     function get_config()
         external
         view
