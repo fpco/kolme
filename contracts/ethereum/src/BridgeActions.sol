@@ -68,7 +68,7 @@ abstract contract BridgeActions is BridgeBase {
         ) {
             return;
         }
-        // Keep unknown-action rejection in _executeAction() to preserve existing error ordering.
+        revert InvalidActionType(actionType);
     }
 
     function _expectedSignersForAction(
