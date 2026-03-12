@@ -92,7 +92,11 @@ cargo-contract-tests:
 
 cargo-contract-tests-ethereum:
     just build-ethereum-contract
-    cargo test -p integration-tests --test ethereum-bridge -- --test-threads=1
+    cargo test -p integration-tests --test ethereum-bridge -- --test-threads=1 --skip subscription_only_listener_works
+
+cargo-contract-tests-ethereum-sub:
+    just build-ethereum-contract
+    KOLME_ETH_LISTENER_MODE=subscription-only cargo test -p integration-tests --test ethereum-bridge subscription_only_listener_works -- --test-threads=1
 
 # Stress test
 stress-test:
