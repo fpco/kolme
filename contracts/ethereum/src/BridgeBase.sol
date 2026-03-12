@@ -17,6 +17,9 @@ abstract contract BridgeBase {
     error InvalidSignatureLength(uint256 length);
     error InvalidSignatureV(uint8 v);
     error ModExpFailed();
+    error InvalidApproverSignature(address signer);
+    error DuplicateApproverSignature(address signer);
+    error InsufficientApproverSignatures(uint16 needed, uint256 provided);
 
     struct ValidatorSet {
         // Kolme keys are binary fixed-length data (33-byte compressed pubkey)
@@ -206,5 +209,48 @@ abstract contract BridgeBase {
             }
         }
         return false;
+    }
+
+    function _verifyApproverSignatures(
+        bytes32 payloadHash,
+        bytes[] calldata approvers,
+        address[] memory configuredApproverSigners,
+        uint16 neededApprovers
+    ) internal pure {
+        uint256 configuredApproverCount = configuredApproverSigners.length;
+        uint256 approverCount = approvers.length;
+        address[] memory seen = new address[](approverCount);
+        uint256 uniqueApprovers = 0;
+        for (uint256 i = 0; i < approverCount; i++) {
+            address signer = _recoverSigner(payloadHash, approvers[i]);
+
+            bool isConfiguredApprover = false;
+            for (uint256 j = 0; j < configuredApproverCount; j++) {
+                if (configuredApproverSigners[j] == signer) {
+                    isConfiguredApprover = true;
+                    break;
+                }
+            }
+            if (!isConfiguredApprover) {
+                revert InvalidApproverSignature(signer);
+            }
+
+            for (uint256 j = 0; j < uniqueApprovers; j++) {
+                if (seen[j] == signer) {
+                    revert DuplicateApproverSignature(signer);
+                }
+            }
+            seen[uniqueApprovers] = signer;
+            uniqueApprovers += 1;
+            if (uniqueApprovers == neededApprovers) {
+                break;
+            }
+        }
+        if (uniqueApprovers < neededApprovers) {
+            revert InsufficientApproverSignatures(
+                neededApprovers,
+                uniqueApprovers
+            );
+        }
     }
 }

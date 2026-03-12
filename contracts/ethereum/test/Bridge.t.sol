@@ -186,7 +186,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidApproverSignature.selector,
+                BridgeBase.InvalidApproverSignature.selector,
                 vm.addr(NON_APPROVER_PRIVATE_KEY)
             )
         );
@@ -220,7 +220,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.DuplicateApproverSignature.selector,
+                BridgeBase.DuplicateApproverSignature.selector,
                 vm.addr(APPROVER_PRIVATE_KEY)
             )
         );
@@ -238,7 +238,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InsufficientApproverSignatures.selector,
+                BridgeBase.InsufficientApproverSignatures.selector,
                 uint16(1),
                 uint256(0)
             )
@@ -454,7 +454,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidApproverSignature.selector,
+                BridgeBase.InvalidApproverSignature.selector,
                 vm.addr(APPROVER_PRIVATE_KEY)
             )
         );
@@ -588,7 +588,7 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidApproverSignature.selector,
+                BridgeBase.InvalidApproverSignature.selector,
                 vm.addr(APPROVER_PRIVATE_KEY)
             )
         );
