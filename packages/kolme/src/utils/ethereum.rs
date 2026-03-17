@@ -16,6 +16,7 @@ use crate::{PublicKey, ValidatorSet, ValidatorType};
 pub const ACTION_EXECUTE: u8 = 0;
 pub const ACTION_SELF_REPLACE: u8 = 1;
 pub const ACTION_NEW_SET: u8 = 2;
+pub const ETH_NATIVE_DENOM: &str = "eth";
 
 sol! {
     struct ExecuteAction {
@@ -63,6 +64,32 @@ fn encode_execute_action(target: Address, value: U256, data: Vec<u8>) -> Vec<u8>
     // Encode as tuple directly to match abi.decode(data, (address,uint256,bytes)).
     let action = (target, value, Bytes::from(data)).abi_encode_params();
     abi_encode_u8_and_bytes(ACTION_EXECUTE, &action)
+}
+
+pub fn evm_address_to_string(address: Address) -> String {
+    format!("{:#x}", address)
+}
+
+pub fn normalize_evm_address(address: &str) -> anyhow::Result<String> {
+    let address = Address::from_str(address)?;
+    Ok(evm_address_to_string(address))
+}
+
+/// `denom` could be "eth" (case-insensitive) or a EVM address.
+/// Will be canonicalized (lowercase "eth" or "0x...")
+pub fn normalize_ethereum_denom(denom: &str) -> anyhow::Result<String> {
+    if denom.eq_ignore_ascii_case(ETH_NATIVE_DENOM) {
+        return Ok(ETH_NATIVE_DENOM.to_owned());
+    }
+    normalize_evm_address(denom)
+}
+
+pub fn token_address_to_denom(token: Address) -> String {
+    if token == Address::ZERO {
+        ETH_NATIVE_DENOM.to_owned()
+    } else {
+        evm_address_to_string(token)
+    }
 }
 
 /// Build ACTION_EXECUTE payload for ETH transfers
@@ -161,7 +188,8 @@ pub fn encode_new_set_action(
 mod tests {
     use super::{
         abi_encode_u64_and_bytes, abi_encode_u8_and_bytes, encode_action_transfer_erc20,
-        encode_action_transfer_eth, ACTION_EXECUTE,
+        encode_action_transfer_eth, normalize_ethereum_denom, normalize_evm_address,
+        ACTION_EXECUTE, ETH_NATIVE_DENOM,
     };
     use alloy::primitives::{Address, U256};
     use std::str::FromStr;
@@ -265,5 +293,19 @@ mod tests {
         );
         assert_eq!(value, U256::from(0u128));
         assert_eq!(&data[0..4], &[0xa9, 0x05, 0x9c, 0xbb]); // transfer(address,uint256)
+    }
+
+    #[test]
+    fn normalize_ethereum_denom_canonicalizes_eth_and_evm_addresses() {
+        assert_eq!(normalize_ethereum_denom("ETH").unwrap(), ETH_NATIVE_DENOM);
+        assert_eq!(
+            normalize_ethereum_denom("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap(),
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+    }
+
+    #[test]
+    fn normalize_evm_address_rejects_non_address() {
+        assert!(normalize_evm_address("eth").is_err());
     }
 }

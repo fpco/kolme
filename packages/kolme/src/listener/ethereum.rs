@@ -1,3 +1,4 @@
+use crate::utils::ethereum::token_address_to_denom;
 use crate::*;
 use alloy::{
     contract::{ContractInstance, Interface},
@@ -12,7 +13,6 @@ use futures_util::StreamExt;
 
 use super::get_next_bridge_event_id;
 
-const ETH_NATIVE_DENOM: &str = "eth";
 const POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
 const WS_RETRY_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(30);
 
@@ -114,20 +114,15 @@ impl EthereumBridgeEvent {
                     .iter()
                     .zip(amounts.iter())
                     .map(|(token, amount)| {
-                        let denom = if *token == Address::ZERO {
-                            ETH_NATIVE_DENOM.to_owned()
-                        } else {
-                            format!("{:#x}", token)
-                        };
                         Ok(BridgedAssetAmount {
-                            denom,
+                            denom: token_address_to_denom(*token),
                             amount: u256_to_u128(*amount)?,
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
 
                 BridgeEvent::Regular {
-                    wallet: Wallet(format!("{:#x}", sender)),
+                    wallet: Wallet::from_ethereum(*sender),
                     funds,
                     keys: keys
                         .iter()

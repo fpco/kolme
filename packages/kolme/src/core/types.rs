@@ -988,6 +988,13 @@ impl MerkleDeserializeRaw for BlockHeight {
 )]
 pub struct Wallet(pub String);
 
+impl Wallet {
+    #[cfg(feature = "ethereum")]
+    pub fn from_ethereum(address: alloy::primitives::Address) -> Self {
+        Self(crate::utils::ethereum::evm_address_to_string(address))
+    }
+}
+
 impl ToMerkleKey for Wallet {
     fn to_merkle_key(&self) -> MerkleKey {
         self.0.to_merkle_key()
@@ -1640,7 +1647,28 @@ impl ConfiguredChains {
         }
     }
 
+    #[cfg(feature = "ethereum")]
     pub fn insert_ethereum(&mut self, chain: EthereumChain, config: ChainConfig) -> Result<()> {
+        use crate::utils::ethereum::{normalize_ethereum_denom, normalize_evm_address};
+
+        let mut config = config;
+        let mut normalized_assets = BTreeMap::new();
+        for (asset_name, asset_config) in std::mem::take(&mut config.assets) {
+            let normalized_name = normalize_ethereum_denom(&asset_name.0)
+                .with_context(|| format!("Invalid Ethereum asset name: {}", asset_name.0))?;
+            let old = normalized_assets.insert(AssetName(normalized_name.clone()), asset_config);
+            anyhow::ensure!(
+                old.is_none(),
+                "Duplicate Ethereum asset name after normalization: {normalized_name}"
+            );
+        }
+        config.assets = normalized_assets;
+
+        if let BridgeContract::Deployed(address) = &mut config.bridge {
+            *address = normalize_evm_address(address)
+                .with_context(|| format!("Invalid Ethereum bridge contract address: {address}"))?;
+        }
+
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
                 return Err(anyhow::anyhow!(
@@ -1653,25 +1681,13 @@ impl ConfiguredChains {
                 ))
             }
             BridgeContract::NeededEthereumBridge => (),
-            BridgeContract::Deployed(address) => {
-                anyhow::ensure!(
-                    is_valid_evm_address(address),
-                    "Invalid Ethereum bridge contract address: {address}"
-                );
-            }
+            BridgeContract::Deployed(_) => (),
         }
 
         self.0.insert(chain.into(), config);
 
         Ok(())
     }
-}
-
-fn is_valid_evm_address(address: &str) -> bool {
-    let Some(hex) = address.strip_prefix("0x") else {
-        return false;
-    };
-    hex.len() == 40 && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Input and output for a single data load while processing a block.
@@ -1810,6 +1826,8 @@ impl ExecAction {
                     }
                     #[cfg(feature = "ethereum")]
                     ChainName::Ethereum => {
+                        use crate::utils::ethereum::{normalize_ethereum_denom, ETH_NATIVE_DENOM};
+
                         anyhow::ensure!(
                             funds.len() == 1,
                             "Ethereum transfer action supports exactly one fund, got {}",
@@ -1823,15 +1841,19 @@ impl ExecAction {
                             .iter()
                             .find(|(_, config)| config.asset_id == fund.id)
                             .context("Unsupported asset ID")?;
+                        let normalized_asset_name = normalize_ethereum_denom(&asset_name.0)
+                            .with_context(|| {
+                                format!("Invalid Ethereum asset name in config: {}", asset_name.0)
+                            })?;
 
-                        let action = if asset_name.0.eq_ignore_ascii_case("eth") {
+                        let action = if normalized_asset_name == ETH_NATIVE_DENOM {
                             EthereumActionPayload::TransferEth {
                                 recipient: recipient.0.clone(),
                                 amount: fund.amount,
                             }
                         } else {
                             EthereumActionPayload::TransferErc20 {
-                                token: asset_name.0.clone(),
+                                token: normalized_asset_name,
                                 recipient: recipient.0.clone(),
                                 amount: fund.amount,
                             }
@@ -2195,9 +2217,23 @@ impl SolanaClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "ethereum")]
+    use alloy::primitives::Address;
     use quickcheck::quickcheck;
     use rust_decimal::dec;
     use std::collections::BTreeMap;
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn wallet_from_ethereum_is_canonical_lowercase_hex() {
+        let address = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            .parse::<Address>()
+            .unwrap();
+        assert_eq!(
+            Wallet::from_ethereum(address),
+            Wallet("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned())
+        );
+    }
 
     #[test]
     fn increasing_middle_with_difference_of_one() {
@@ -2363,6 +2399,7 @@ mod tests {
         assert_eq!(EthereumChain::Local.default_ws_url(), "ws://localhost:8545");
     }
 
+    #[cfg(feature = "ethereum")]
     #[test]
     fn insert_ethereum_accepts_deployed_evm_address() {
         let mut chains = ConfiguredChains::default();
@@ -2390,6 +2427,7 @@ mod tests {
         assert!(chains.0.contains_key(&ExternalChain::EthereumMainnet));
     }
 
+    #[cfg(feature = "ethereum")]
     #[test]
     fn insert_ethereum_rejects_invalid_bridge_config() {
         let mut chains = ConfiguredChains::default();
@@ -2415,6 +2453,49 @@ mod tests {
         assert!(chains
             .insert_ethereum(EthereumChain::Sepolia, ethereum_kind)
             .is_ok());
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn insert_ethereum_normalizes_bridge_address_and_asset_names() {
+        let mut chains = ConfiguredChains::default();
+        let mut assets = BTreeMap::new();
+        assets.insert(
+            AssetName("ETH".to_owned()),
+            AssetConfig {
+                decimals: 18,
+                asset_id: AssetId(1),
+            },
+        );
+        assets.insert(
+            AssetName("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned()),
+            AssetConfig {
+                decimals: 6,
+                asset_id: AssetId(2),
+            },
+        );
+        let config = ChainConfig {
+            assets,
+            bridge: BridgeContract::Deployed(
+                "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_owned(),
+            ),
+        };
+
+        chains
+            .insert_ethereum(EthereumChain::Local, config)
+            .unwrap();
+
+        let inserted = chains.0.get(&ExternalChain::EthereumLocal).unwrap();
+        match &inserted.bridge {
+            BridgeContract::Deployed(address) => {
+                assert_eq!(address, "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+            }
+            _ => panic!("unexpected bridge kind"),
+        }
+        assert!(inserted.assets.contains_key(&AssetName("eth".to_owned())));
+        assert!(inserted.assets.contains_key(&AssetName(
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()
+        )));
     }
 
     #[cfg(feature = "ethereum")]
