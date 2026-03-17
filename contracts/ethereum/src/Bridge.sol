@@ -3,6 +3,9 @@ pragma solidity ^0.8.30;
 
 import {BridgeActions} from "./BridgeActions.sol";
 import {BridgeBase} from "./BridgeBase.sol";
+import {
+    ReentrancyGuard
+} from "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 interface IBridge {
     event FundsReceived(
@@ -26,7 +29,7 @@ interface IBridge {
         );
 }
 
-contract Bridge is IBridge, BridgeBase, BridgeActions {
+contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidProcessorSignature(address expected, address received);
 
@@ -59,7 +62,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         bytes calldata payload,
         bytes calldata processor,
         bytes[] calldata approvers
-    ) external {
+    ) external nonReentrant {
         (uint64 actionId, bytes memory actionData) = abi.decode(
             payload,
             (uint64, bytes)

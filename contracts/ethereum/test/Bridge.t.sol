@@ -12,6 +12,49 @@ contract RevertingReceiver {
     }
 }
 
+// A contract designed to be called from bridge's execute_signed() entry point and
+// calling it back, triggering reentrancy guard, and ensuring that expected error was hit
+contract ReentrantExecuteSignedCaller {
+    Bridge private immutable BRIDGE;
+    bytes4 private constant REENTRANCY_GUARD_SELECTOR =
+        bytes4(keccak256("ReentrancyGuardReentrantCall()"));
+
+    constructor(Bridge bridge_) {
+        BRIDGE = bridge_;
+    }
+
+    function reenter() external returns (bool) {
+        bytes[] memory emptyApprovers = new bytes[](0);
+        (bool ok, bytes memory ret) = address(BRIDGE).call(
+            abi.encodeWithSelector(
+                Bridge.execute_signed.selector,
+                bytes(""),
+                bytes(""),
+                emptyApprovers
+            )
+        );
+
+        if (ok) {
+            revert("expected revert");
+        }
+
+        // check that the failure is reentrancy guard error
+        if (ret.length < 4) {
+            revert("missing selector");
+        }
+
+        bytes4 selector;
+        assembly {
+            // first 32 bytes of ret's memory storage is its length
+            selector := mload(add(ret, 0x20))
+        }
+        if (selector != REENTRANCY_GUARD_SELECTOR) {
+            revert("unexpected selector");
+        }
+        return true;
+    }
+}
+
 contract BridgeRecoverHarness is Bridge {
     constructor(
         bytes memory processor,
@@ -393,6 +436,34 @@ contract BridgeTest is Test {
             )
         );
         bridge.execute_signed(payload, processorSig, approverSigs);
+    }
+
+    function test_ExecuteSignedRejectsReentrantExecuteSignedCall() public {
+        ReentrantExecuteSignedCaller reentrant = new ReentrantExecuteSignedCaller(
+                bridge
+            );
+        bytes memory actionData = abi.encode(
+            ACTION_EXECUTE,
+            abi.encode(
+                address(reentrant),
+                uint256(0),
+                abi.encodeWithSignature("reenter()")
+            )
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory processorSig = _signPayload(
+            PROCESSOR_PRIVATE_KEY,
+            payload
+        );
+        bytes[] memory approverSigs = new bytes[](1);
+        approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
+
+        bridge.execute_signed(payload, processorSig, approverSigs);
+
+        (, , , , , uint64 configNextEventId, uint64 configNextActionId) = bridge
+            .get_config();
+        assertEq(configNextEventId, 2);
+        assertEq(configNextActionId, 1);
     }
 
     function test_ExecuteSignedSelfReplaceProcessorAction() public {
