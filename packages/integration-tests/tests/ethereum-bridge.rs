@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, fs, path::PathBuf, time::Duration};
 
 use alloy::{
     network::TransactionBuilder,
@@ -6,10 +6,12 @@ use alloy::{
     providers::{DynProvider, Provider, ProviderBuilder},
     rpc::types::eth::TransactionRequest,
     sol,
+    sol_types::{SolCall, SolConstructor},
 };
 use anyhow::{Context, Result};
 use kolme::*;
 use rand::Rng;
+use serde::Deserialize;
 use testtasks::TestTasks;
 
 // Important note: if same account is used for multiple tests simultaneously in
@@ -21,6 +23,8 @@ const TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY: &str =
 const TEST_ANVIL_ACCOUNT_2_ADDRESS: &str = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 
 const TEST_ANVIL_RPC_URL: &str = "http://localhost:8545";
+const TEST_ERC20_MINTABLE_ARTIFACT_PATH: &str =
+    "../../contracts/ethereum/out/TestERC20Mintable.sol/TestERC20Mintable.json";
 
 sol! {
     #[sol(rpc)]
@@ -38,6 +42,27 @@ sol! {
                 uint64 configNextActionId
             );
     }
+
+    contract TestERC20Mintable {
+        constructor(string name_, string symbol_);
+    }
+
+    #[sol(rpc)]
+    interface ITestERC20Mintable {
+        function mint(address to, uint256 amount) external;
+        function approve(address spender, uint256 amount) external returns (bool);
+        function balanceOf(address account) external view returns (uint256);
+    }
+}
+
+#[derive(Deserialize)]
+struct FoundryArtifact {
+    bytecode: ArtifactBytecode,
+}
+
+#[derive(Deserialize)]
+struct ArtifactBytecode {
+    object: String,
 }
 
 #[derive(Clone)]
@@ -548,4 +573,114 @@ async fn send_eth_and_wait(
         .context("listener message waiter task failed")??;
 
     Ok(tx_hash)
+}
+
+fn test_erc20_mintable_artifact_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(TEST_ERC20_MINTABLE_ARTIFACT_PATH)
+}
+
+fn load_test_erc20_mintable_create_bytecode() -> Result<Vec<u8>> {
+    let path = test_erc20_mintable_artifact_path();
+    let artifact = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "failed to read TestERC20Mintable artifact at {}. Run `just build-ethereum-contract` first",
+            path.display()
+        )
+    })?;
+
+    let parsed: FoundryArtifact =
+        serde_json::from_str(&artifact).context("failed to parse TestERC20Mintable artifact")?;
+
+    let object = parsed.bytecode.object.trim();
+    anyhow::ensure!(
+        !object.is_empty(),
+        "TestERC20Mintable artifact contains empty bytecode.object"
+    );
+    hex::decode(object.trim_start_matches("0x"))
+        .context("TestERC20Mintable artifact contains invalid hex in bytecode.object")
+}
+
+#[allow(dead_code)]
+async fn deploy_test_erc20_mintable(
+    provider: &DynProvider,
+    from: &str,
+    name: &str,
+    symbol: &str,
+) -> Result<Address> {
+    let from: Address = from.parse()?;
+    let mut initcode = load_test_erc20_mintable_create_bytecode()?;
+    let ctor = TestERC20Mintable::constructorCall::new((name.to_owned(), symbol.to_owned()));
+    initcode.extend_from_slice(&ctor.abi_encode());
+
+    let request = TransactionRequest::default()
+        .with_from(from)
+        .with_deploy_code(initcode);
+    let receipt = provider
+        .send_transaction(request)
+        .await?
+        .get_receipt()
+        .await?;
+    receipt
+        .contract_address
+        .context("ERC20 deployment transaction did not return a contract address")
+}
+
+#[allow(dead_code)]
+async fn mint_test_erc20_mintable(
+    provider: &DynProvider,
+    token: Address,
+    from: &str,
+    to: Address,
+    amount: u128,
+) -> Result<()> {
+    let from: Address = from.parse()?;
+    let call = ITestERC20Mintable::mintCall {
+        to,
+        amount: U256::from(amount),
+    };
+    let request = TransactionRequest::default()
+        .with_from(from)
+        .with_to(token)
+        .with_input(call.abi_encode());
+    let _receipt = provider
+        .send_transaction(request)
+        .await?
+        .get_receipt()
+        .await?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+async fn approve_test_erc20_mintable(
+    provider: &DynProvider,
+    token: Address,
+    from: &str,
+    spender: Address,
+    amount: u128,
+) -> Result<()> {
+    let from: Address = from.parse()?;
+    let call = ITestERC20Mintable::approveCall {
+        spender,
+        amount: U256::from(amount),
+    };
+    let request = TransactionRequest::default()
+        .with_from(from)
+        .with_to(token)
+        .with_input(call.abi_encode());
+    let _receipt = provider
+        .send_transaction(request)
+        .await?
+        .get_receipt()
+        .await?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+async fn balance_of_test_erc20_mintable(
+    provider: DynProvider,
+    token: Address,
+    account: Address,
+) -> Result<U256> {
+    let contract = ITestERC20Mintable::new(token, provider);
+    Ok(contract.balanceOf(account).call().await?)
 }
