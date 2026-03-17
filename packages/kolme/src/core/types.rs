@@ -2518,6 +2518,82 @@ mod tests {
         assert_eq!(decoded[63], 0x40);
     }
 
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn to_payload_ethereum_transfer_eth_matches_execute_encoding() {
+        let recipient = Wallet("0x1111111111111111111111111111111111111111".to_owned());
+        let config = ChainConfig {
+            assets: BTreeMap::from([(
+                AssetName("ETH".to_owned()),
+                AssetConfig {
+                    decimals: 18,
+                    asset_id: AssetId(1),
+                },
+            )]),
+            bridge: BridgeContract::NeededEthereumBridge,
+        };
+        let action = ExecAction::Transfer {
+            chain: ExternalChain::EthereumLocal,
+            recipient: recipient.clone(),
+            funds: vec![AssetAmount {
+                id: AssetId(1),
+                amount: 42,
+            }],
+        };
+        let action_id = BridgeActionId(9);
+
+        let payload = action
+            .to_payload(ExternalChain::EthereumLocal, &config, action_id)
+            .unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload).unwrap();
+        let expected_action =
+            crate::utils::ethereum::encode_action_transfer_eth(&recipient.0, 42).unwrap();
+        let expected =
+            crate::utils::ethereum::abi_encode_u64_and_bytes(action_id.0, &expected_action);
+        assert_eq!(decoded, expected);
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn to_payload_ethereum_transfer_erc20_matches_execute_encoding() {
+        let recipient = Wallet("0x1111111111111111111111111111111111111111".to_owned());
+        let config = ChainConfig {
+            assets: BTreeMap::from([(
+                AssetName("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned()),
+                AssetConfig {
+                    decimals: 6,
+                    asset_id: AssetId(1),
+                },
+            )]),
+            bridge: BridgeContract::NeededEthereumBridge,
+        };
+        let action = ExecAction::Transfer {
+            chain: ExternalChain::EthereumLocal,
+            recipient: recipient.clone(),
+            funds: vec![AssetAmount {
+                id: AssetId(1),
+                amount: 7,
+            }],
+        };
+        let action_id = BridgeActionId(3);
+
+        let payload = action
+            .to_payload(ExternalChain::EthereumLocal, &config, action_id)
+            .unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload).unwrap();
+        let expected_action = crate::utils::ethereum::encode_action_transfer_erc20(
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            &recipient.0,
+            7,
+        )
+        .unwrap();
+        let expected =
+            crate::utils::ethereum::abi_encode_u64_and_bytes(action_id.0, &expected_action);
+        assert_eq!(decoded, expected);
+    }
+
     #[test]
     fn payload_bytes_to_sign_uses_raw_string_bytes_for_non_ethereum() {
         let action = PendingBridgeAction {

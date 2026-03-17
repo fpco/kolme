@@ -56,6 +56,16 @@ contract MockERC20TransferFromFalse is MockERC20 {
     }
 }
 
+contract MockERC20TransferFromRevert is MockERC20 {
+    function transferFrom(
+        address,
+        address,
+        uint256
+    ) external pure override returns (bool) {
+        revert("tf revert");
+    }
+}
+
 contract RevertingReceiver {
     receive() external payable {
         revert("reject");
@@ -364,6 +374,43 @@ contract BridgeTest is Test {
                 uint256(10)
             )
         );
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RevertWhenRegularTransferFromReverts() public {
+        MockERC20TransferFromRevert token = new MockERC20TransferFromRevert();
+        token.mint(nonAdmin, 100);
+
+        vm.prank(nonAdmin);
+        assertTrue(token.approve(address(bridge), 10));
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(token);
+        amounts[0] = 10;
+        bytes[] memory keys = new bytes[](0);
+
+        vm.expectRevert(bytes("tf revert"));
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RevertWhenRegularKeyPayloadMalformed() public {
+        MockERC20 token = new MockERC20();
+        token.mint(nonAdmin, 100);
+
+        vm.prank(nonAdmin);
+        assertTrue(token.approve(address(bridge), 10));
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(token);
+        amounts[0] = 10;
+        bytes[] memory keys = new bytes[](1);
+        keys[0] = hex"1234";
+
+        vm.expectRevert();
         vm.prank(nonAdmin);
         bridge.regular(tokens, amounts, keys);
     }
