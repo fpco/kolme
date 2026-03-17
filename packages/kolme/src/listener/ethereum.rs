@@ -637,6 +637,62 @@ mod tests {
     }
 
     #[test]
+    fn to_kolme_message_maps_eth_and_erc20_denoms() {
+        let event = EthereumBridgeEvent::FundsReceived(FundsReceived {
+            eventId: 9,
+            sender: "0x1111111111111111111111111111111111111111"
+                .parse::<Address>()
+                .unwrap(),
+            tokens: vec![
+                "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .parse::<Address>()
+                    .unwrap(),
+                Address::ZERO,
+            ],
+            amounts: vec![U256::from(5u64), U256::from(7u64)],
+            keys: vec![],
+        });
+
+        let message = event
+            .to_kolme_message::<()>(ExternalChain::EthereumLocal, BridgeEventId(9))
+            .unwrap();
+        let Message::Listener {
+            event: BridgeEvent::Regular { wallet, funds, .. },
+            ..
+        } = message
+        else {
+            panic!("unexpected message kind");
+        };
+
+        assert_eq!(
+            wallet,
+            Wallet("0x1111111111111111111111111111111111111111".to_owned())
+        );
+        assert_eq!(funds.len(), 2);
+        assert_eq!(funds[0].denom, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(funds[0].amount, 5);
+        assert_eq!(funds[1].denom, "eth");
+        assert_eq!(funds[1].amount, 7);
+    }
+
+    #[test]
+    fn to_kolme_message_rejects_mismatched_token_and_amount_lengths() {
+        let event = EthereumBridgeEvent::FundsReceived(FundsReceived {
+            eventId: 1,
+            sender: "0x1111111111111111111111111111111111111111"
+                .parse::<Address>()
+                .unwrap(),
+            tokens: vec![Address::ZERO],
+            amounts: vec![],
+            keys: vec![],
+        });
+
+        assert!(event
+            .to_kolme_message::<()>(ExternalChain::EthereumLocal, BridgeEventId(1))
+            .is_err());
+    }
+
+    #[test]
     fn u256_to_u128_rejects_overflow() {
         assert!(u256_to_u128(U256::from(u128::MAX) + U256::from(1)).is_err());
     }
