@@ -8,6 +8,7 @@ abstract contract BridgeActions is BridgeBase {
     uint8 internal constant ACTION_TRANSFER_ERC20 = 1;
     uint8 internal constant ACTION_SELF_REPLACE = 2;
     uint8 internal constant ACTION_NEW_SET = 3;
+    uint8 internal constant ACTION_EXECUTE = 4;
 
     uint8 internal constant VALIDATOR_LISTENER = 0;
     uint8 internal constant VALIDATOR_PROCESSOR = 1;
@@ -17,6 +18,7 @@ abstract contract BridgeActions is BridgeBase {
     error InvalidValidatorType(uint8 validatorType);
     error CurrentValidatorNotFound(uint8 validatorType, bytes current);
     error TransferEthFailed(address recipient, uint256 amount);
+    error ExecuteCallFailed(address target, uint256 value, bytes data);
     error InvalidNewSetApprovalSignature(address signer);
     error DuplicateNewSetApprovalSignature(address signer);
     error InsufficientNewSetGroupSignatures(uint8 needed, uint8 provided);
@@ -66,6 +68,17 @@ abstract contract BridgeActions is BridgeBase {
             actionType == ACTION_TRANSFER_ETH ||
             actionType == ACTION_TRANSFER_ERC20
         ) {
+            return;
+        }
+        if (actionType == ACTION_EXECUTE) {
+            (address target, uint256 value, bytes memory callData) = abi.decode(
+                data,
+                (address, uint256, bytes)
+            );
+            // no-ops to silence compiler warnings - we want to validate full ABI shape
+            target;
+            value;
+            callData;
             return;
         }
         revert InvalidActionType(actionType);
@@ -147,6 +160,10 @@ abstract contract BridgeActions is BridgeBase {
             _executeTransferEth(data);
             return;
         }
+        if (actionType == ACTION_EXECUTE) {
+            _executeCall(data);
+            return;
+        }
         if (actionType == ACTION_SELF_REPLACE) {
             _executeSelfReplace(data);
             return;
@@ -167,6 +184,17 @@ abstract contract BridgeActions is BridgeBase {
         (bool success, ) = recipient.call{value: amount}("");
         if (!success) {
             revert TransferEthFailed(recipient, amount);
+        }
+    }
+
+    function _executeCall(bytes memory data) internal {
+        (address target, uint256 value, bytes memory callData) = abi.decode(
+            data,
+            (address, uint256, bytes)
+        );
+        (bool success, ) = target.call{value: value}(callData);
+        if (!success) {
+            revert ExecuteCallFailed(target, value, callData);
         }
     }
 

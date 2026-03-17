@@ -16,11 +16,18 @@ pub const ACTION_TRANSFER_ETH: u8 = 0;
 pub const ACTION_TRANSFER_ERC20: u8 = 1;
 pub const ACTION_SELF_REPLACE: u8 = 2;
 pub const ACTION_NEW_SET: u8 = 3;
+pub const ACTION_EXECUTE: u8 = 4;
 
 sol! {
     struct TransferEthAction {
         address recipient;
         uint256 amount;
+    }
+
+    struct ExecuteAction {
+        address target;
+        uint256 value;
+        bytes data;
     }
 
     struct SelfReplaceAction {
@@ -116,14 +123,16 @@ pub fn encode_transfer_eth_action(
     );
     let fund = funds[0].clone();
     let recipient = Address::from_str(recipient)?;
-    let action = TransferEthAction {
+    let transfer = TransferEthAction {
         recipient,
         amount: U256::from(fund.amount),
     };
-    Ok(abi_encode_u8_and_bytes(
-        ACTION_TRANSFER_ETH,
-        &action.abi_encode(),
-    ))
+    let action = ExecuteAction {
+        target: transfer.recipient,
+        value: transfer.amount,
+        data: vec![].into(),
+    };
+    Ok(abi_encode_u8_and_bytes(ACTION_EXECUTE, &action.abi_encode()))
 }
 
 pub fn encode_self_replace_action(

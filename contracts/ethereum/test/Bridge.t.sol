@@ -6,6 +6,12 @@ import {Bridge} from "../src/Bridge.sol";
 import {BridgeActions} from "../src/BridgeActions.sol";
 import {BridgeBase} from "../src/BridgeBase.sol";
 
+contract RevertingReceiver {
+    receive() external payable {
+        revert("reject");
+    }
+}
+
 contract BridgeRecoverHarness is Bridge {
     constructor(
         bytes memory processor,
@@ -335,8 +341,8 @@ contract BridgeTest is Test {
         uint256 amount = 0.2 ether;
 
         bytes memory actionData = abi.encode(
-            uint8(0),
-            abi.encode(recipient, amount)
+            uint8(4),
+            abi.encode(recipient, amount, bytes(""))
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
         bytes memory processorSig = _signPayload(
@@ -351,6 +357,34 @@ contract BridgeTest is Test {
 
         assertEq(recipient.balance, recipientBefore + amount);
         assertEq(address(bridge).balance, 1 ether - amount);
+    }
+
+    function test_RevertWhenExecuteActionCallFails() public {
+        vm.deal(address(bridge), 1 ether);
+        RevertingReceiver receiver = new RevertingReceiver();
+
+        bytes memory callData = abi.encodeWithSignature("doesNotExist()");
+        bytes memory actionData = abi.encode(
+            uint8(4),
+            abi.encode(address(receiver), 0, callData)
+        );
+        bytes memory payload = abi.encode(uint64(0), actionData);
+        bytes memory processorSig = _signPayload(
+            PROCESSOR_PRIVATE_KEY,
+            payload
+        );
+        bytes[] memory approverSigs = new bytes[](1);
+        approverSigs[0] = _signPayload(APPROVER_PRIVATE_KEY, payload);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BridgeActions.ExecuteCallFailed.selector,
+                address(receiver),
+                uint256(0),
+                callData
+            )
+        );
+        bridge.execute_signed(payload, processorSig, approverSigs);
     }
 
     function test_ExecuteSignedSelfReplaceProcessorAction() public {
