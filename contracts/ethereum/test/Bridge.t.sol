@@ -117,7 +117,10 @@ contract BridgeTest is Test {
     }
 
     function test_ExecuteSignedIncrementsIdsAndEmitsEvent() public {
-        bytes memory actionData = abi.encode(uint8(0), abi.encode(nonAdmin, 0));
+        bytes memory actionData = abi.encode(
+            uint8(4),
+            abi.encode(nonAdmin, 0, bytes(""))
+        );
         bytes memory payload = abi.encode(uint64(0), actionData);
         bytes memory processorSig = _signPayload(
             PROCESSOR_PRIVATE_KEY,

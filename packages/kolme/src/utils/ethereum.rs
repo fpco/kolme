@@ -12,18 +12,11 @@ use alloy::{
 use crate::SignatureWithRecovery;
 use crate::{AssetAmount, PublicKey, ValidatorSet, ValidatorType};
 
-pub const ACTION_TRANSFER_ETH: u8 = 0;
-pub const ACTION_TRANSFER_ERC20: u8 = 1;
 pub const ACTION_SELF_REPLACE: u8 = 2;
 pub const ACTION_NEW_SET: u8 = 3;
 pub const ACTION_EXECUTE: u8 = 4;
 
 sol! {
-    struct TransferEthAction {
-        address recipient;
-        uint256 amount;
-    }
-
     struct ExecuteAction {
         address target;
         uint256 value;
@@ -112,7 +105,7 @@ pub fn abi_encode_u8_and_bytes(value: u8, data: &[u8]) -> Vec<u8> {
     encoded
 }
 
-pub fn encode_transfer_eth_action(
+pub fn encode_execute_eth_action(
     recipient: &str,
     funds: &[AssetAmount],
 ) -> anyhow::Result<Vec<u8>> {
@@ -123,13 +116,9 @@ pub fn encode_transfer_eth_action(
     );
     let fund = funds[0].clone();
     let recipient = Address::from_str(recipient)?;
-    let transfer = TransferEthAction {
-        recipient,
-        amount: U256::from(fund.amount),
-    };
     let action = ExecuteAction {
-        target: transfer.recipient,
-        value: transfer.amount,
+        target: recipient,
+        value: U256::from(fund.amount),
         data: vec![].into(),
     };
     Ok(abi_encode_u8_and_bytes(ACTION_EXECUTE, &action.abi_encode()))

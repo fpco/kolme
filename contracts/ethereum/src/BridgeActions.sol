@@ -4,8 +4,6 @@ pragma solidity ^0.8.30;
 import {BridgeBase} from "./BridgeBase.sol";
 
 abstract contract BridgeActions is BridgeBase {
-    uint8 internal constant ACTION_TRANSFER_ETH = 0;
-    uint8 internal constant ACTION_TRANSFER_ERC20 = 1;
     uint8 internal constant ACTION_SELF_REPLACE = 2;
     uint8 internal constant ACTION_NEW_SET = 3;
     uint8 internal constant ACTION_EXECUTE = 4;
@@ -17,7 +15,6 @@ abstract contract BridgeActions is BridgeBase {
     error InvalidActionType(uint8 actionType);
     error InvalidValidatorType(uint8 validatorType);
     error CurrentValidatorNotFound(uint8 validatorType, bytes current);
-    error TransferEthFailed(address recipient, uint256 amount);
     error ExecuteCallFailed(address target, uint256 value, bytes data);
     error InvalidNewSetApprovalSignature(address signer);
     error DuplicateNewSetApprovalSignature(address signer);
@@ -62,12 +59,6 @@ abstract contract BridgeActions is BridgeBase {
             neededApprovers;
 
             _verifyNewSetApprovals(rendered, approvals);
-            return;
-        }
-        if (
-            actionType == ACTION_TRANSFER_ETH ||
-            actionType == ACTION_TRANSFER_ERC20
-        ) {
             return;
         }
         if (actionType == ACTION_EXECUTE) {
@@ -156,10 +147,6 @@ abstract contract BridgeActions is BridgeBase {
             actionData,
             (uint8, bytes)
         );
-        if (actionType == ACTION_TRANSFER_ETH) {
-            _executeTransferEth(data);
-            return;
-        }
         if (actionType == ACTION_EXECUTE) {
             _executeCall(data);
             return;
@@ -174,17 +161,6 @@ abstract contract BridgeActions is BridgeBase {
         }
 
         revert InvalidActionType(actionType);
-    }
-
-    function _executeTransferEth(bytes memory data) internal {
-        (address recipient, uint256 amount) = abi.decode(
-            data,
-            (address, uint256)
-        );
-        (bool success, ) = recipient.call{value: amount}("");
-        if (!success) {
-            revert TransferEthFailed(recipient, amount);
-        }
     }
 
     function _executeCall(bytes memory data) internal {

@@ -1998,7 +1998,7 @@ fn serialize_ethereum_payload(
 ) -> Result<String> {
     let action = match action {
         EthereumActionPayload::Transfer { recipient, funds } => {
-            crate::utils::ethereum::encode_transfer_eth_action(recipient, funds)?
+            crate::utils::ethereum::encode_execute_eth_action(recipient, funds)?
         }
         EthereumActionPayload::SelfReplace {
             validator_type,
