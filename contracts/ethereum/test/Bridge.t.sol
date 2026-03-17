@@ -44,6 +44,11 @@ contract BridgeRecoverHarness is Bridge {
 }
 
 contract BridgeTest is Test {
+    // Keep these in sync with action constants in BridgeActions.sol.
+    uint8 constant ACTION_EXECUTE = 0;
+    uint8 constant ACTION_SELF_REPLACE = 1;
+    uint8 constant ACTION_NEW_SET = 2;
+
     event FundsReceived(
         uint64 indexed eventId,
         address indexed sender,
@@ -118,7 +123,7 @@ contract BridgeTest is Test {
 
     function test_ExecuteSignedIncrementsIdsAndEmitsEvent() public {
         bytes memory actionData = abi.encode(
-            uint8(4),
+            ACTION_EXECUTE,
             abi.encode(nonAdmin, 0, bytes(""))
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -344,7 +349,7 @@ contract BridgeTest is Test {
         uint256 amount = 0.2 ether;
 
         bytes memory actionData = abi.encode(
-            uint8(4),
+            ACTION_EXECUTE,
             abi.encode(recipient, amount, bytes(""))
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -368,7 +373,7 @@ contract BridgeTest is Test {
 
         bytes memory callData = abi.encodeWithSignature("doesNotExist()");
         bytes memory actionData = abi.encode(
-            uint8(4),
+            ACTION_EXECUTE,
             abi.encode(address(receiver), 0, callData)
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -392,7 +397,7 @@ contract BridgeTest is Test {
 
     function test_ExecuteSignedSelfReplaceProcessorAction() public {
         bytes memory actionData = abi.encode(
-            uint8(2),
+            ACTION_SELF_REPLACE,
             abi.encode(uint8(1), TEST_VALIDATOR_KEY, TEST_VALIDATOR_KEY_2)
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -420,9 +425,11 @@ contract BridgeTest is Test {
         assertEq(configNextActionId, 1);
     }
 
-    function test_RevertWhenSelfReplaceProcessorSignedByCurrentProcessor() public {
+    function test_RevertWhenSelfReplaceProcessorSignedByCurrentProcessor()
+        public
+    {
         bytes memory actionData = abi.encode(
-            uint8(2),
+            ACTION_SELF_REPLACE,
             abi.encode(uint8(1), TEST_VALIDATOR_KEY, TEST_VALIDATOR_KEY_2)
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -447,7 +454,7 @@ contract BridgeTest is Test {
         public
     {
         bytes memory actionData = abi.encode(
-            uint8(2),
+            ACTION_SELF_REPLACE,
             abi.encode(uint8(2), TEST_VALIDATOR_KEY_2, TEST_VALIDATOR_KEY)
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -478,7 +485,7 @@ contract BridgeTest is Test {
 
     function test_RevertWhenSelfReplaceApproverSignedByOldApprover() public {
         bytes memory actionData = abi.encode(
-            uint8(2),
+            ACTION_SELF_REPLACE,
             abi.encode(uint8(2), TEST_VALIDATOR_KEY_2, TEST_VALIDATOR_KEY)
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
@@ -509,7 +516,7 @@ contract BridgeTest is Test {
         innerApprovals[1] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
 
         bytes memory actionData = abi.encode(
-            uint8(3),
+            ACTION_NEW_SET,
             abi.encode(
                 TEST_VALIDATOR_KEY_2,
                 listeners,
@@ -521,10 +528,7 @@ contract BridgeTest is Test {
             )
         );
         bytes memory payload = abi.encode(uint64(0), actionData);
-        bytes memory processorSig = _signPayload(
-            APPROVER_PRIVATE_KEY,
-            payload
-        );
+        bytes memory processorSig = _signPayload(APPROVER_PRIVATE_KEY, payload);
         bytes[] memory approverSigs = new bytes[](1);
         approverSigs[0] = _signPayload(PROCESSOR_PRIVATE_KEY, payload);
 
@@ -562,7 +566,7 @@ contract BridgeTest is Test {
         innerApprovals[1] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
 
         bytes memory actionData = abi.encode(
-            uint8(3),
+            ACTION_NEW_SET,
             abi.encode(
                 TEST_VALIDATOR_KEY_2,
                 listeners,
@@ -604,7 +608,7 @@ contract BridgeTest is Test {
         innerApprovals[1] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
 
         bytes memory actionData = abi.encode(
-            uint8(3),
+            ACTION_NEW_SET,
             abi.encode(
                 TEST_VALIDATOR_KEY_2,
                 listeners,
@@ -642,7 +646,7 @@ contract BridgeTest is Test {
         innerApprovals[0] = _signPayload(APPROVER_PRIVATE_KEY, rendered);
 
         bytes memory actionData = abi.encode(
-            uint8(3),
+            ACTION_NEW_SET,
             abi.encode(
                 TEST_VALIDATOR_KEY_2,
                 listeners,

@@ -12,9 +12,10 @@ use alloy::{
 use crate::SignatureWithRecovery;
 use crate::{AssetAmount, PublicKey, ValidatorSet, ValidatorType};
 
-pub const ACTION_SELF_REPLACE: u8 = 2;
-pub const ACTION_NEW_SET: u8 = 3;
-pub const ACTION_EXECUTE: u8 = 4;
+// Keep these in sync with action constants in contracts/ethereum/src/BridgeActions.sol.
+pub const ACTION_EXECUTE: u8 = 0;
+pub const ACTION_SELF_REPLACE: u8 = 1;
+pub const ACTION_NEW_SET: u8 = 2;
 
 sol! {
     struct ExecuteAction {

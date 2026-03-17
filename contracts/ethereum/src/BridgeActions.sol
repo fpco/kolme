@@ -4,9 +4,9 @@ pragma solidity ^0.8.30;
 import {BridgeBase} from "./BridgeBase.sol";
 
 abstract contract BridgeActions is BridgeBase {
-    uint8 internal constant ACTION_SELF_REPLACE = 2;
-    uint8 internal constant ACTION_NEW_SET = 3;
-    uint8 internal constant ACTION_EXECUTE = 4;
+    uint8 internal constant ACTION_EXECUTE = 0;
+    uint8 internal constant ACTION_SELF_REPLACE = 1;
+    uint8 internal constant ACTION_NEW_SET = 2;
 
     uint8 internal constant VALIDATOR_LISTENER = 0;
     uint8 internal constant VALIDATOR_PROCESSOR = 1;
