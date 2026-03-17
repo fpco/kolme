@@ -1810,9 +1810,31 @@ impl ExecAction {
                     }
                     #[cfg(feature = "ethereum")]
                     ChainName::Ethereum => {
-                        let action = EthereumActionPayload::Transfer {
-                            recipient: recipient.0.clone(),
-                            funds: funds.clone(),
+                        anyhow::ensure!(
+                            funds.len() == 1,
+                            "Ethereum transfer action supports exactly one fund, got {}",
+                            funds.len()
+                        );
+                        let fund = &funds[0];
+
+                        // TODO: find more efficient way to find asset name
+                        let (asset_name, _) = config
+                            .assets
+                            .iter()
+                            .find(|(_, config)| config.asset_id == fund.id)
+                            .context("Unsupported asset ID")?;
+
+                        let action = if asset_name.0.eq_ignore_ascii_case("eth") {
+                            EthereumActionPayload::TransferEth {
+                                recipient: recipient.0.clone(),
+                                amount: fund.amount,
+                            }
+                        } else {
+                            EthereumActionPayload::TransferErc20 {
+                                token: asset_name.0.clone(),
+                                recipient: recipient.0.clone(),
+                                amount: fund.amount,
+                            }
                         };
                         serialize_ethereum_payload(id, &action)
                     }
@@ -1975,9 +1997,14 @@ impl ExecAction {
 #[cfg(feature = "ethereum")]
 #[derive(Clone)]
 enum EthereumActionPayload {
-    Transfer {
+    TransferEth {
         recipient: String,
-        funds: Vec<AssetAmount>,
+        amount: u128,
+    },
+    TransferErc20 {
+        token: String,
+        recipient: String,
+        amount: u128,
     },
     SelfReplace {
         validator_type: ValidatorType,
@@ -1997,9 +2024,14 @@ fn serialize_ethereum_payload(
     action: &EthereumActionPayload,
 ) -> Result<String> {
     let action = match action {
-        EthereumActionPayload::Transfer { recipient, funds } => {
-            crate::utils::ethereum::encode_execute_eth_action(recipient, funds)?
+        EthereumActionPayload::TransferEth { recipient, amount } => {
+            crate::utils::ethereum::encode_action_transfer_eth(recipient, *amount)?
         }
+        EthereumActionPayload::TransferErc20 {
+            token,
+            recipient,
+            amount,
+        } => crate::utils::ethereum::encode_action_transfer_erc20(token, recipient, *amount)?,
         EthereumActionPayload::SelfReplace {
             validator_type,
             current,
@@ -2388,12 +2420,9 @@ mod tests {
     #[cfg(feature = "ethereum")]
     #[test]
     fn serialize_ethereum_payload_wraps_abi_bytes_in_base64() {
-        let action = EthereumActionPayload::Transfer {
+        let action = EthereumActionPayload::TransferEth {
             recipient: "0x1111111111111111111111111111111111111111".to_owned(),
-            funds: vec![AssetAmount {
-                id: AssetId(7),
-                amount: 42,
-            }],
+            amount: 42,
         };
         let payload = serialize_ethereum_payload(BridgeActionId(9), &action).unwrap();
         let decoded =
