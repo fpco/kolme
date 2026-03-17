@@ -189,7 +189,7 @@ abstract contract BridgeActions is BridgeBase {
         bytes memory current,
         bytes memory replacement
     ) internal view {
-        if (!_isValidValidatorKey(replacement)) {
+        if (!_isValidSecp256k1Pubkey(replacement)) {
             revert InvalidValidatorKey(0, replacement);
         }
         _validatorAddress(replacement);

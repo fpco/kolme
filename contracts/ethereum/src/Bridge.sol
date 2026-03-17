@@ -15,7 +15,8 @@ interface IBridge {
         uint64 indexed eventId,
         address indexed sender,
         address[] tokens,
-        uint256[] amounts
+        uint256[] amounts,
+        bytes[] keys
     );
     event Signed(uint64 eventId, address indexed sender, uint64 actionId);
     // forge-lint: disable-next-line(mixed-case-function)
@@ -45,6 +46,12 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     );
     error ERC20TransferFailed(address token, address from, uint256 amount);
     error RegularFundsLengthMismatch(uint256 tokens, uint256 amounts);
+    error InvalidRegularKey(uint256 index, bytes key);
+    error InvalidRegularKeySignature(
+        uint256 index,
+        address expected,
+        address received
+    );
 
     constructor(
         bytes memory processor,
@@ -68,9 +75,10 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     receive() external payable {
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
+        bytes[] memory keys = new bytes[](0);
         tokens[0] = address(0);
         amounts[0] = msg.value;
-        emit FundsReceived(nextEventId, msg.sender, tokens, amounts);
+        emit FundsReceived(nextEventId, msg.sender, tokens, amounts, keys);
         nextEventId += 1;
     }
 
@@ -79,10 +87,28 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
         uint256[] calldata amounts,
         bytes[] calldata keys
     ) external nonReentrant {
-        keys;
         uint256 transferCount = tokens.length;
         if (transferCount != amounts.length) {
             revert RegularFundsLengthMismatch(transferCount, amounts.length);
+        }
+
+        bytes32 regularHash = sha256(abi.encodePacked(msg.sender));
+        uint256 regularKeyCount = keys.length;
+        bytes[] memory regularKeys = new bytes[](regularKeyCount);
+        for (uint256 i = 0; i < regularKeyCount; i++) {
+            (bytes memory key, bytes memory signature) = abi.decode(
+                keys[i],
+                (bytes, bytes)
+            );
+            if (!_isValidSecp256k1Pubkey(key)) {
+                revert InvalidRegularKey(i, key);
+            }
+            address expected = _validatorAddress(key);
+            address received = _recoverSigner(regularHash, signature);
+            if (received != expected) {
+                revert InvalidRegularKeySignature(i, expected, received);
+            }
+            regularKeys[i] = key;
         }
 
         for (uint256 i = 0; i < transferCount; i++) {
@@ -104,7 +130,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
             }
         }
 
-        emit FundsReceived(nextEventId, msg.sender, tokens, amounts);
+        emit FundsReceived(nextEventId, msg.sender, tokens, amounts, regularKeys);
         nextEventId += 1;
     }
 

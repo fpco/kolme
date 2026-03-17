@@ -36,7 +36,7 @@ impl EthereumListenerMode {
 }
 
 sol! {
-    event FundsReceived(uint64 indexed eventId, address indexed sender, address[] tokens, uint256[] amounts);
+    event FundsReceived(uint64 indexed eventId, address indexed sender, address[] tokens, uint256[] amounts, bytes[] keys);
 
     #[sol(rpc)]
     contract Bridge {
@@ -101,6 +101,7 @@ impl EthereumBridgeEvent {
                 sender,
                 tokens,
                 amounts,
+                keys,
                 ..
             }) => {
                 anyhow::ensure!(
@@ -128,7 +129,10 @@ impl EthereumBridgeEvent {
                 BridgeEvent::Regular {
                     wallet: Wallet(format!("{:#x}", sender)),
                     funds,
-                    keys: vec![],
+                    keys: keys
+                        .iter()
+                        .map(|key| PublicKey::from_bytes(key.as_ref()))
+                        .collect::<Result<Vec<_>, _>>()?,
                 }
             }
         };
@@ -554,10 +558,10 @@ mod tests {
     #[test]
     fn funds_received_topic_hash_matches_constant() {
         // To recalculate signature hash:
-        // cast keccak "FundsReceived(uint64,address,address[],uint256[])"
+        // cast keccak "FundsReceived(uint64,address,address[],uint256[],bytes[])"
         // (in contracts/ethereum)
         const FUNDS_RECEIVED_EVENT_TOPIC0_HEX: &str =
-            "0xa64b0227b96084eb93ea9d6a70b367bd844217ac4d2bce15ee7537196d68503b";
+            "0x02bb338ef0fcb89993f4087b28532775e53951c8025a81666d399e7263389a6c";
         let expected = FUNDS_RECEIVED_EVENT_TOPIC0_HEX.parse::<B256>().unwrap();
         assert_eq!(FundsReceived::SIGNATURE_HASH, expected);
     }
@@ -582,11 +586,13 @@ mod tests {
         sender_topic[12..].copy_from_slice(sender.as_slice());
         let amounts = vec![U256::from(42u64), U256::from(7u64)];
         let tokens = vec![token_a, token_b];
+        let keys = vec![Bytes::from(vec![0x02; 33])];
         let event = FundsReceived {
             eventId: event_id,
             sender,
             tokens: tokens.clone(),
             amounts: amounts.clone(),
+            keys: keys.clone(),
         };
 
         let log_data = LogData::new(
@@ -612,6 +618,7 @@ mod tests {
         assert_eq!(decoded.sender, sender);
         assert_eq!(decoded.tokens, tokens);
         assert_eq!(decoded.amounts, amounts);
+        assert_eq!(decoded.keys, keys);
     }
 
     #[test]

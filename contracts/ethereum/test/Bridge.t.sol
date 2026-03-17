@@ -146,7 +146,8 @@ contract BridgeTest is Test {
         uint64 indexed eventId,
         address indexed sender,
         address[] tokens,
-        uint256[] amounts
+        uint256[] amounts,
+        bytes[] keys
     );
     event Signed(uint64 eventId, address indexed sender, uint64 actionId);
     bytes constant TEST_VALIDATOR_KEY =
@@ -198,11 +199,12 @@ contract BridgeTest is Test {
         vm.deal(nonAdmin, 1 ether);
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
+        bytes[] memory keys = new bytes[](0);
         tokens[0] = address(0);
         amounts[0] = 0.1 ether;
 
         vm.expectEmit(true, true, false, true, address(bridge));
-        emit FundsReceived(1, nonAdmin, tokens, amounts);
+        emit FundsReceived(1, nonAdmin, tokens, amounts, keys);
 
         vm.prank(nonAdmin);
         (bool ok, ) = address(bridge).call{value: 0.1 ether}("");
@@ -230,9 +232,13 @@ contract BridgeTest is Test {
         uint256[] memory amounts = new uint256[](1);
         tokens[0] = address(token);
         amounts[0] = 70;
-        bytes[] memory keys = new bytes[](0);
+        bytes[] memory keys = new bytes[](1);
+        keys[0] = abi.encode(
+            TEST_VALIDATOR_KEY,
+            _signRegularMessage(PROCESSOR_PRIVATE_KEY, nonAdmin)
+        );
         vm.expectEmit(true, true, false, true, address(bridge));
-        emit FundsReceived(1, nonAdmin, tokens, amounts);
+        emit FundsReceived(1, nonAdmin, tokens, amounts, _eventKeys(keys));
 
         vm.prank(nonAdmin);
         bridge.regular(tokens, amounts, keys);
@@ -242,6 +248,63 @@ contract BridgeTest is Test {
 
         (, , , , , uint64 configNextEventId, ) = bridge.get_config();
         assertEq(configNextEventId, 2);
+    }
+
+    function test_RevertWhenRegularKeyInvalid() public {
+        MockERC20 token = new MockERC20();
+        token.mint(nonAdmin, 100);
+
+        vm.prank(nonAdmin);
+        assertTrue(token.approve(address(bridge), 10));
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(token);
+        amounts[0] = 10;
+        bytes[] memory keys = new bytes[](1);
+        keys[0] = abi.encode(
+            bytes("short"),
+            _signRegularMessage(PROCESSOR_PRIVATE_KEY, nonAdmin)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidRegularKey.selector,
+                uint256(0),
+                bytes("short")
+            )
+        );
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RevertWhenRegularKeySignatureMismatch() public {
+        MockERC20 token = new MockERC20();
+        token.mint(nonAdmin, 100);
+
+        vm.prank(nonAdmin);
+        assertTrue(token.approve(address(bridge), 10));
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(token);
+        amounts[0] = 10;
+        bytes[] memory keys = new bytes[](1);
+        keys[0] = abi.encode(
+            TEST_VALIDATOR_KEY,
+            _signRegularMessage(APPROVER_PRIVATE_KEY, nonAdmin)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidRegularKeySignature.selector,
+                uint256(0),
+                vm.addr(PROCESSOR_PRIVATE_KEY),
+                vm.addr(APPROVER_PRIVATE_KEY)
+            )
+        );
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
     }
 
     function test_RevertWhenRegularDepositTokenZero() public {
@@ -340,10 +403,14 @@ contract BridgeTest is Test {
         tokens[1] = address(tokenB);
         amounts[0] = 40;
         amounts[1] = 20;
-        bytes[] memory keys = new bytes[](0);
+        bytes[] memory keys = new bytes[](1);
+        keys[0] = abi.encode(
+            TEST_VALIDATOR_KEY,
+            _signRegularMessage(PROCESSOR_PRIVATE_KEY, nonAdmin)
+        );
 
         vm.expectEmit(true, true, false, true, address(bridge));
-        emit FundsReceived(1, nonAdmin, tokens, amounts);
+        emit FundsReceived(1, nonAdmin, tokens, amounts, _eventKeys(keys));
 
         vm.prank(nonAdmin);
         bridge.regular(tokens, amounts, keys);
@@ -1112,5 +1179,24 @@ contract BridgeTest is Test {
         bytes32 hash = sha256(payload);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, hash);
         return abi.encodePacked(r, s, v);
+    }
+
+    function _signRegularMessage(
+        uint256 privateKey,
+        address wallet
+    ) internal returns (bytes memory) {
+        bytes32 hash = sha256(abi.encodePacked(wallet));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, hash);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _eventKeys(
+        bytes[] memory encodedKeys
+    ) internal pure returns (bytes[] memory out) {
+        out = new bytes[](encodedKeys.length);
+        for (uint256 i = 0; i < encodedKeys.length; i++) {
+            (bytes memory key, ) = abi.decode(encodedKeys[i], (bytes, bytes));
+            out[i] = key;
+        }
     }
 }
