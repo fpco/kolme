@@ -29,6 +29,7 @@ const TEST_ERC20_MINTABLE_ARTIFACT_PATH: &str =
 sol! {
     #[sol(rpc)]
     interface IBridgeIntegration {
+        function regular(address[] tokens, uint256[] amounts, bytes[] keys) external;
         function get_config()
             external
             view
@@ -100,8 +101,17 @@ enum EmptyMessage {
 
 const DUMMY_CODE_VERSION: &str = "ethereum-listener-test-v1";
 const ETH_ASSET_ID: AssetId = AssetId(1);
+const ERC20_ASSET_ID: AssetId = AssetId(2);
 impl EthereumBridgeTestApp {
     fn new(validator: PublicKey, bridge: BridgeContract) -> Self {
+        Self::new_with_optional_erc20(validator, bridge, None)
+    }
+
+    fn new_with_optional_erc20(
+        validator: PublicKey,
+        bridge: BridgeContract,
+        erc20_denom: Option<String>,
+    ) -> Self {
         let mut chains = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
         assets.insert(
@@ -111,6 +121,15 @@ impl EthereumBridgeTestApp {
                 asset_id: ETH_ASSET_ID,
             },
         );
+        if let Some(erc20_denom) = erc20_denom {
+            assets.insert(
+                AssetName(erc20_denom),
+                AssetConfig {
+                    decimals: 18,
+                    asset_id: ERC20_ASSET_ID,
+                },
+            );
+        }
         chains
             .insert_ethereum(EthereumChain::Local, ChainConfig { assets, bridge })
             .unwrap();
@@ -132,6 +151,15 @@ impl EthereumBridgeTestApp {
     }
     fn with_needed_bridge(validator: PublicKey) -> Self {
         Self::new(validator, BridgeContract::NeededEthereumBridge)
+    }
+
+    #[allow(dead_code)]
+    fn with_needed_bridge_and_erc20_asset(validator: PublicKey, erc20_address: Address) -> Self {
+        Self::new_with_optional_erc20(
+            validator,
+            BridgeContract::NeededEthereumBridge,
+            Some(format!("{:#x}", erc20_address)),
+        )
     }
 }
 
@@ -174,6 +202,16 @@ impl KolmeApp for EthereumBridgeTestApp {
 async fn ethereum_listener_ingests_local_deposit() {
     init_logger(true, None);
     TestTasks::start(ethereum_listener_ingests_local_deposit_inner, ()).await;
+}
+
+#[tokio::test]
+async fn ethereum_listener_ingests_local_erc20_regular_deposit() {
+    init_logger(true, None);
+    TestTasks::start(
+        ethereum_listener_ingests_local_erc20_regular_deposit_inner,
+        (),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -267,6 +305,66 @@ async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, ():
 
     tracing::info!(
         "Ethereum deposit ingested by Kolme listener. sender={TEST_ANVIL_ACCOUNT_0_ADDRESS}, tx={tx_hash}, contract={:#x}, amount_wei={test_tx_amount}",
+        deployed.bridge_address
+    );
+}
+
+async fn ethereum_listener_ingests_local_erc20_regular_deposit_inner(testtasks: TestTasks, (): ()) {
+    let provider = anvil_provider().expect("failed to build anvil provider");
+    assert_anvil_identifiers_match(&provider)
+        .await
+        .expect("local anvil setup does not match expected deterministic identifiers");
+
+    let token = deploy_test_erc20_mintable(&provider, TEST_ANVIL_ACCOUNT_0_ADDRESS, "Test", "TST")
+        .await
+        .expect("failed to deploy test ERC20");
+    let deployed = deploy_bridge_with_kolme_with_erc20_asset(&testtasks, token)
+        .await
+        .expect("failed to deploy Ethereum bridge with kolme");
+
+    let deposit_amount: u128 = rand::thread_rng().gen_range(20u128..100u128);
+    mint_test_erc20_mintable(
+        &provider,
+        token,
+        TEST_ANVIL_ACCOUNT_2_ADDRESS,
+        TEST_ANVIL_ACCOUNT_2_ADDRESS
+            .parse()
+            .expect("hardcoded Anvil account 2 address is invalid"),
+        deposit_amount,
+    )
+    .await
+    .expect("failed to mint test ERC20 to depositor");
+    approve_test_erc20_mintable(
+        &provider,
+        token,
+        TEST_ANVIL_ACCOUNT_2_ADDRESS,
+        deployed.bridge_address,
+        deposit_amount,
+    )
+    .await
+    .expect("failed to approve bridge for test ERC20");
+
+    let expected_wallet = Wallet(format!(
+        "{:#x}",
+        TEST_ANVIL_ACCOUNT_2_ADDRESS
+            .parse::<Address>()
+            .expect("hardcoded Anvil account 2 address is invalid")
+    ));
+    let expected_denom = format!("{:#x}", token);
+    send_regular_erc20_and_wait(
+        &deployed.kolme,
+        &provider,
+        &expected_wallet,
+        TEST_ANVIL_ACCOUNT_2_ADDRESS,
+        deployed.bridge_address,
+        token,
+        deposit_amount,
+    )
+    .await
+    .expect("failed to submit regular ERC20 deposit");
+
+    tracing::info!(
+        "Ethereum ERC20 regular() deposit ingested by Kolme listener. sender={TEST_ANVIL_ACCOUNT_2_ADDRESS}, contract={:#x}, token={expected_denom}, amount={deposit_amount}",
         deployed.bridge_address
     );
 }
@@ -436,6 +534,47 @@ async fn deploy_bridge_with_kolme(testtasks: &TestTasks) -> Result<DeployedBridg
     })
 }
 
+async fn deploy_bridge_with_kolme_with_erc20_asset(
+    testtasks: &TestTasks,
+    erc20_address: Address,
+) -> Result<DeployedBridge> {
+    let validator = SecretKey::random();
+    let signer = TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY.parse()?;
+    let kolme = Kolme::new(
+        EthereumBridgeTestApp::with_needed_bridge_and_erc20_asset(
+            validator.public_key(),
+            erc20_address,
+        ),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await?;
+
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
+    testtasks.try_spawn_persistent(Approver::new(kolme.clone(), validator.clone()).run());
+    testtasks.try_spawn_persistent(
+        Listener::new(kolme.clone(), validator.clone()).run(ChainName::Ethereum),
+    );
+    testtasks.try_spawn_persistent(Submitter::new_ethereum(kolme.clone(), signer).run());
+
+    let bridge_address = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(contract) = deployed_bridge_address(&kolme) {
+                break Ok::<Address, anyhow::Error>(contract.parse()?);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("timed out waiting for Ethereum bridge deployment")??;
+
+    Ok(DeployedBridge {
+        kolme,
+        validator,
+        bridge_address,
+    })
+}
+
 fn iter_block_messages(
     block: &SignedBlock<EmptyMessage>,
 ) -> std::slice::Iter<'_, Message<EmptyMessage>> {
@@ -573,6 +712,98 @@ async fn send_eth_and_wait(
         .context("listener message waiter task failed")??;
 
     Ok(tx_hash)
+}
+
+async fn send_regular_erc20_and_wait(
+    kolme: &Kolme<EthereumBridgeTestApp>,
+    provider: &DynProvider,
+    expected_wallet: &Wallet,
+    from: &str,
+    bridge: Address,
+    token: Address,
+    amount_wei: u128,
+) -> Result<String> {
+    let expected_denom = format!("{:#x}", token);
+    let kolme_for_waiter = kolme.clone();
+    let wallet_for_waiter = expected_wallet.clone();
+    let denom_for_waiter = expected_denom.clone();
+
+    // Start waiting for the event before the tx is sent to avoid race condition
+    let waiter = tokio::spawn(async move {
+        wait_for_expected_listener_message_in_new_blocks_for_fund(
+            &kolme_for_waiter,
+            &wallet_for_waiter,
+            &denom_for_waiter,
+            amount_wei,
+        )
+        .await
+    });
+    tokio::task::yield_now().await;
+
+    let from: Address = from.parse()?;
+    let call = IBridgeIntegration::regularCall {
+        tokens: vec![token],
+        amounts: vec![U256::from(amount_wei)],
+        keys: vec![],
+    };
+    let request = TransactionRequest::default()
+        .with_from(from)
+        .with_to(bridge)
+        .with_input(call.abi_encode());
+    let pending = provider.send_transaction(request).await?;
+    let tx_hash = *pending.tx_hash();
+    let _receipt = pending.get_receipt().await?;
+
+    tokio::time::timeout(Duration::from_secs(10), waiter)
+        .await
+        .context("timed out waiting for specific Ethereum listener message")?
+        .context("listener message waiter task failed")??;
+
+    Ok(format!("{tx_hash:#x}"))
+}
+
+async fn wait_for_expected_listener_message_in_new_blocks_for_fund(
+    kolme: &Kolme<EthereumBridgeTestApp>,
+    expected_wallet: &Wallet,
+    expected_denom: &str,
+    expected_amount_wei: u128,
+) -> Result<()> {
+    let target_chain = ExternalChain::EthereumLocal;
+    let mut next_height = kolme.read().get_next_height();
+
+    loop {
+        let block = kolme.wait_for_block(next_height).await?;
+        let found = iter_block_messages(&block)
+            .filter(|message| {
+                if let Message::Listener {
+                    chain,
+                    event_id: _,
+                    event:
+                        BridgeEvent::Regular {
+                            wallet,
+                            funds,
+                            keys,
+                        },
+                } = message
+                {
+                    *chain == target_chain
+                        && wallet == expected_wallet
+                        && keys.is_empty()
+                        && funds.len() == 1
+                        && funds[0].denom == expected_denom
+                        && funds[0].amount == expected_amount_wei
+                } else {
+                    false
+                }
+            })
+            .count();
+
+        if found == 1 {
+            return Ok(());
+        }
+
+        next_height = next_height.next();
+    }
 }
 
 fn test_erc20_mintable_artifact_path() -> PathBuf {
