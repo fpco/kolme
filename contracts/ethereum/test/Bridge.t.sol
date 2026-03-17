@@ -6,6 +6,56 @@ import {Bridge} from "../src/Bridge.sol";
 import {BridgeActions} from "../src/BridgeActions.sol";
 import {BridgeBase} from "../src/BridgeBase.sol";
 
+contract MockERC20 {
+    mapping(address => uint256) internal balances;
+    mapping(address => mapping(address => uint256)) internal allowances;
+
+    function mint(address to, uint256 amount) external {
+        balances[to] += amount;
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        return balances[account];
+    }
+
+    function allowance(
+        address owner,
+        address spender
+    ) external view returns (uint256) {
+        return allowances[owner][spender];
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowances[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external virtual returns (bool) {
+        uint256 allowed = allowances[from][msg.sender];
+        if (allowed < amount || balances[from] < amount) {
+            return false;
+        }
+        allowances[from][msg.sender] = allowed - amount;
+        balances[from] -= amount;
+        balances[to] += amount;
+        return true;
+    }
+}
+
+contract MockERC20TransferFromFalse is MockERC20 {
+    function transferFrom(
+        address,
+        address,
+        uint256
+    ) external pure override returns (bool) {
+        return false;
+    }
+}
+
 contract RevertingReceiver {
     receive() external payable {
         revert("reject");
@@ -95,7 +145,8 @@ contract BridgeTest is Test {
     event FundsReceived(
         uint64 indexed eventId,
         address indexed sender,
-        uint256 amount
+        address[] tokens,
+        uint256[] amounts
     );
     event Signed(uint64 eventId, address indexed sender, uint64 actionId);
     bytes constant TEST_VALIDATOR_KEY =
@@ -145,9 +196,13 @@ contract BridgeTest is Test {
 
     function test_ReceiveEthEmitsEvent() public {
         vm.deal(nonAdmin, 1 ether);
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(0);
+        amounts[0] = 0.1 ether;
 
         vm.expectEmit(true, true, false, true, address(bridge));
-        emit FundsReceived(1, nonAdmin, 0.1 ether);
+        emit FundsReceived(1, nonAdmin, tokens, amounts);
 
         vm.prank(nonAdmin);
         (bool ok, ) = address(bridge).call{value: 0.1 ether}("");
@@ -162,6 +217,139 @@ contract BridgeTest is Test {
 
         (, , , , , uint64 configNextEventId, ) = bridge.get_config();
         assertEq(configNextEventId, 2);
+    }
+
+    function test_RegularErc20EmitsEventAndUpdatesBalances() public {
+        MockERC20 token = new MockERC20();
+        token.mint(nonAdmin, 100);
+
+        vm.prank(nonAdmin);
+        assertTrue(token.approve(address(bridge), 70));
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(token);
+        amounts[0] = 70;
+        bytes[] memory keys = new bytes[](0);
+        vm.expectEmit(true, true, false, true, address(bridge));
+        emit FundsReceived(1, nonAdmin, tokens, amounts);
+
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
+
+        assertEq(token.balanceOf(address(bridge)), 70);
+        assertEq(token.balanceOf(nonAdmin), 30);
+
+        (, , , , , uint64 configNextEventId, ) = bridge.get_config();
+        assertEq(configNextEventId, 2);
+    }
+
+    function test_RevertWhenRegularDepositTokenZero() public {
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(0);
+        amounts[0] = 1;
+        bytes[] memory keys = new bytes[](0);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InvalidDepositToken.selector,
+                address(0)
+            )
+        );
+        bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RevertWhenRegularAllowanceInsufficient() public {
+        MockERC20 token = new MockERC20();
+        token.mint(nonAdmin, 100);
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(token);
+        amounts[0] = 10;
+        bytes[] memory keys = new bytes[](0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.InsufficientAllowance.selector,
+                address(token),
+                nonAdmin,
+                uint256(0),
+                uint256(10)
+            )
+        );
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RevertWhenRegularTransferFromFails() public {
+        MockERC20TransferFromFalse token = new MockERC20TransferFromFalse();
+        token.mint(nonAdmin, 100);
+
+        vm.prank(nonAdmin);
+        assertTrue(token.approve(address(bridge), 10));
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(token);
+        amounts[0] = 10;
+        bytes[] memory keys = new bytes[](0);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.ERC20TransferFailed.selector,
+                address(token),
+                nonAdmin,
+                uint256(10)
+            )
+        );
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RevertWhenRegularFundsLengthMismatch() public {
+        address[] memory tokens = new address[](2);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(1);
+        tokens[1] = address(2);
+        amounts[0] = 1;
+        bytes[] memory keys = new bytes[](0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.RegularFundsLengthMismatch.selector,
+                uint256(2),
+                uint256(1)
+            )
+        );
+        bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RegularErc20BatchTransfers() public {
+        MockERC20 tokenA = new MockERC20();
+        MockERC20 tokenB = new MockERC20();
+        tokenA.mint(nonAdmin, 100);
+        tokenB.mint(nonAdmin, 50);
+
+        vm.startPrank(nonAdmin);
+        assertTrue(tokenA.approve(address(bridge), 40));
+        assertTrue(tokenB.approve(address(bridge), 20));
+        vm.stopPrank();
+
+        address[] memory tokens = new address[](2);
+        uint256[] memory amounts = new uint256[](2);
+        tokens[0] = address(tokenA);
+        tokens[1] = address(tokenB);
+        amounts[0] = 40;
+        amounts[1] = 20;
+        bytes[] memory keys = new bytes[](0);
+
+        vm.expectEmit(true, true, false, true, address(bridge));
+        emit FundsReceived(1, nonAdmin, tokens, amounts);
+
+        vm.prank(nonAdmin);
+        bridge.regular(tokens, amounts, keys);
+
+        assertEq(tokenA.balanceOf(address(bridge)), 40);
+        assertEq(tokenB.balanceOf(address(bridge)), 20);
     }
 
     function test_ExecuteSignedIncrementsIdsAndEmitsEvent() public {

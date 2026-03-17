@@ -36,7 +36,7 @@ impl EthereumListenerMode {
 }
 
 sol! {
-    event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
+    event FundsReceived(uint64 indexed eventId, address indexed sender, address[] tokens, uint256[] amounts);
 
     #[sol(rpc)]
     contract Bridge {
@@ -97,14 +97,40 @@ impl EthereumBridgeEvent {
         event_id: BridgeEventId,
     ) -> Result<Message<AppMessage>> {
         let event = match self {
-            Self::FundsReceived(FundsReceived { sender, amount, .. }) => BridgeEvent::Regular {
-                wallet: Wallet(format!("{:#x}", sender)),
-                funds: vec![BridgedAssetAmount {
-                    denom: ETH_NATIVE_DENOM.to_owned(),
-                    amount: u256_to_u128(*amount)?,
-                }],
-                keys: vec![],
-            },
+            Self::FundsReceived(FundsReceived {
+                sender,
+                tokens,
+                amounts,
+                ..
+            }) => {
+                anyhow::ensure!(
+                    tokens.len() == amounts.len(),
+                    "Ethereum FundsReceived malformed payload: tokens length {} != amounts length {}",
+                    tokens.len(),
+                    amounts.len()
+                );
+                let funds = tokens
+                    .iter()
+                    .zip(amounts.iter())
+                    .map(|(token, amount)| {
+                        let denom = if *token == Address::ZERO {
+                            ETH_NATIVE_DENOM.to_owned()
+                        } else {
+                            format!("{:#x}", token)
+                        };
+                        Ok(BridgedAssetAmount {
+                            denom,
+                            amount: u256_to_u128(*amount)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
+                BridgeEvent::Regular {
+                    wallet: Wallet(format!("{:#x}", sender)),
+                    funds,
+                    keys: vec![],
+                }
+            }
         };
 
         Ok(Message::Listener {
@@ -527,8 +553,11 @@ mod tests {
 
     #[test]
     fn funds_received_topic_hash_matches_constant() {
+        // To recalculate signature hash:
+        // cast keccak "FundsReceived(uint64,address,address[],uint256[])"
+        // (in contracts/ethereum)
         const FUNDS_RECEIVED_EVENT_TOPIC0_HEX: &str =
-            "0x4ade6a296f99f38f840a2a880cc9a27cec9ee56ce8d56cd80d3350e3419ed44c";
+            "0xa64b0227b96084eb93ea9d6a70b367bd844217ac4d2bce15ee7537196d68503b";
         let expected = FUNDS_RECEIVED_EVENT_TOPIC0_HEX.parse::<B256>().unwrap();
         assert_eq!(FundsReceived::SIGNATURE_HASH, expected);
     }
@@ -540,6 +569,10 @@ mod tests {
         let sender = "0x1111111111111111111111111111111111111111"
             .parse::<Address>()
             .unwrap();
+        let token_a = "0x2222222222222222222222222222222222222222"
+            .parse::<Address>()
+            .unwrap();
+        let token_b = Address::ZERO;
 
         let event_id = 7u64;
         let mut event_id_topic = [0u8; 32];
@@ -547,10 +580,14 @@ mod tests {
 
         let mut sender_topic = [0u8; 32];
         sender_topic[12..].copy_from_slice(sender.as_slice());
-
-        let amount = U256::from(42u64);
-        let mut data = [0u8; 32];
-        data[0..32].copy_from_slice(&amount.to_be_bytes::<32>());
+        let amounts = vec![U256::from(42u64), U256::from(7u64)];
+        let tokens = vec![token_a, token_b];
+        let event = FundsReceived {
+            eventId: event_id,
+            sender,
+            tokens: tokens.clone(),
+            amounts: amounts.clone(),
+        };
 
         let log_data = LogData::new(
             vec![
@@ -558,7 +595,7 @@ mod tests {
                 B256::from(event_id_topic),
                 B256::from(sender_topic),
             ],
-            Bytes::copy_from_slice(&data),
+            Bytes::from(event.encode_data()),
         )
         .unwrap();
         let log = Log {
@@ -573,7 +610,8 @@ mod tests {
 
         assert_eq!(decoded.eventId, event_id);
         assert_eq!(decoded.sender, sender);
-        assert_eq!(decoded.amount, amount);
+        assert_eq!(decoded.tokens, tokens);
+        assert_eq!(decoded.amounts, amounts);
     }
 
     #[test]

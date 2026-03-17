@@ -6,12 +6,16 @@ import {BridgeBase} from "./BridgeBase.sol";
 import {
     ReentrancyGuard
 } from "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import {
+    IERC20
+} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 interface IBridge {
     event FundsReceived(
         uint64 indexed eventId,
         address indexed sender,
-        uint256 amount
+        address[] tokens,
+        uint256[] amounts
     );
     event Signed(uint64 eventId, address indexed sender, uint64 actionId);
     // forge-lint: disable-next-line(mixed-case-function)
@@ -32,6 +36,15 @@ interface IBridge {
 contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidProcessorSignature(address expected, address received);
+    error InvalidDepositToken(address token);
+    error InsufficientAllowance(
+        address token,
+        address owner,
+        uint256 allowed,
+        uint256 required
+    );
+    error ERC20TransferFailed(address token, address from, uint256 amount);
+    error RegularFundsLengthMismatch(uint256 tokens, uint256 amounts);
 
     constructor(
         bytes memory processor,
@@ -53,7 +66,45 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     }
 
     receive() external payable {
-        emit FundsReceived(nextEventId, msg.sender, msg.value);
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = address(0);
+        amounts[0] = msg.value;
+        emit FundsReceived(nextEventId, msg.sender, tokens, amounts);
+        nextEventId += 1;
+    }
+
+    function regular(
+        address[] calldata tokens,
+        uint256[] calldata amounts,
+        bytes[] calldata keys
+    ) external nonReentrant {
+        keys;
+        uint256 transferCount = tokens.length;
+        if (transferCount != amounts.length) {
+            revert RegularFundsLengthMismatch(transferCount, amounts.length);
+        }
+
+        for (uint256 i = 0; i < transferCount; i++) {
+            address token = tokens[i];
+            uint256 amount = amounts[i];
+            // regular() is ERC20-only; native ETH deposits use receive().
+            if (token == address(0)) {
+                revert InvalidDepositToken(token);
+            }
+
+            IERC20 erc20 = IERC20(token);
+            uint256 allowed = erc20.allowance(msg.sender, address(this));
+            if (allowed < amount) {
+                revert InsufficientAllowance(token, msg.sender, allowed, amount);
+            }
+            bool success = erc20.transferFrom(msg.sender, address(this), amount);
+            if (!success) {
+                revert ERC20TransferFailed(token, msg.sender, amount);
+            }
+        }
+
+        emit FundsReceived(nextEventId, msg.sender, tokens, amounts);
         nextEventId += 1;
     }
 
