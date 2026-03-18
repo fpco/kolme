@@ -3,6 +3,7 @@
 [Introduction](intro.md)
 
 - [Technical Overview](technical/overview.md)
+  - [Quick Model](technical/quick-model.md)
   - [Core Chain Mechanics](technical/core-mechanics.md)
   - [Triadic Security Model](technical/triadic-security.md)
   - [External Data Handling](technical/external-data.md)
