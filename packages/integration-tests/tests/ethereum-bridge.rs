@@ -685,8 +685,8 @@ async fn send_eth(
         from,
         to,
         RegularCall {
-            tokens: vec![Address::ZERO], // 0 address is for ETH
-            amounts_wei: vec![amount_wei],
+            tokens: vec![],
+            amounts_wei: vec![],
             keys: vec![],
             msg_value_wei: amount_wei,
         },

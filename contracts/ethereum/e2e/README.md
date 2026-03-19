@@ -49,10 +49,11 @@ Deposits are submitted via `regular(tokens, amounts, keys)`.
 
 ### ETH
 
-1. Call `regular([address(0)], [<amount_wei>], <keys>)` on the bridge contract with `msg.value = <amount_wei>`.
+1. Call `regular([], [], <keys>)` on the bridge contract with `msg.value = <amount_wei>`.
 
 Notes:
 - Plain ETH transfers to the bridge are unsupported and revert.
+- `regular(...)` input funds in calldata are ERC20-only; `token = address(0)` in `tokens` is rejected, ETH is in `msg.value`
 - `keys` are user secp256k1 pubkeys provided with the deposit event payload.
 
 ## Ethereum Denom Format (Kolme side)

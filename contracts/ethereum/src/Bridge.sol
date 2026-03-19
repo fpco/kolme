@@ -37,6 +37,7 @@ interface IBridge {
 contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidProcessorSignature(address expected, address received);
+    error InvalidDepositToken(address token);
     error InsufficientAllowance(
         address token,
         address owner,
@@ -45,7 +46,6 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     );
     error ERC20TransferFailed(address token, address from, uint256 amount);
     error RegularFundsLengthMismatch(uint256 tokens, uint256 amounts);
-    error EthValueMismatch(uint256 expected, uint256 received);
     error InvalidRegularKey(uint256 index, bytes key);
     error InvalidRegularKeySignature(
         uint256 index,
@@ -101,32 +101,54 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
             regularKeys[i] = key;
         }
 
-        uint256 ethExpectedValue = 0;
         for (uint256 i = 0; i < transferCount; i++) {
             address token = tokens[i];
             uint256 amount = amounts[i];
-            // Native ETH leg, value is checked after iterating all entries.
+
+            // ETH is in msg.value
             if (token == address(0)) {
-                ethExpectedValue += amount;
-                continue;
+                revert InvalidDepositToken(token);
             }
 
             IERC20 erc20 = IERC20(token);
             uint256 allowed = erc20.allowance(msg.sender, address(this));
             if (allowed < amount) {
-                revert InsufficientAllowance(token, msg.sender, allowed, amount);
+                revert InsufficientAllowance(
+                    token,
+                    msg.sender,
+                    allowed,
+                    amount
+                );
             }
-            bool success = erc20.transferFrom(msg.sender, address(this), amount);
+            bool success = erc20.transferFrom(
+                msg.sender,
+                address(this),
+                amount
+            );
             if (!success) {
                 revert ERC20TransferFailed(token, msg.sender, amount);
             }
         }
 
-        if (msg.value != ethExpectedValue) {
-            revert EthValueMismatch(ethExpectedValue, msg.value);
+        uint256 eventTransferCount = transferCount + (msg.value > 0 ? 1 : 0);
+        address[] memory eventTokens = new address[](eventTransferCount);
+        uint256[] memory eventAmounts = new uint256[](eventTransferCount);
+        for (uint256 i = 0; i < transferCount; i++) {
+            eventTokens[i] = tokens[i];
+            eventAmounts[i] = amounts[i];
+        }
+        if (msg.value > 0) {
+            eventTokens[transferCount] = address(0);
+            eventAmounts[transferCount] = msg.value;
         }
 
-        emit FundsReceived(nextEventId, msg.sender, tokens, amounts, regularKeys);
+        emit FundsReceived(
+            nextEventId,
+            msg.sender,
+            eventTokens,
+            eventAmounts,
+            regularKeys
+        );
         nextEventId += 1;
     }
 

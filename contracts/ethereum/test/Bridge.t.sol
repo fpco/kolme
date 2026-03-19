@@ -206,18 +206,26 @@ contract BridgeTest is Test {
 
     function test_RegularEthEmitsEvent() public {
         vm.deal(nonAdmin, 1 ether);
-        address[] memory tokens = new address[](1);
-        uint256[] memory amounts = new uint256[](1);
+        address[] memory tokens = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
         bytes[] memory keys = new bytes[](1);
-        tokens[0] = address(0);
-        amounts[0] = 0.1 ether;
+        address[] memory expectedTokens = new address[](1);
+        uint256[] memory expectedAmounts = new uint256[](1);
+        expectedTokens[0] = address(0);
+        expectedAmounts[0] = 0.1 ether;
         keys[0] = abi.encode(
             TEST_VALIDATOR_KEY,
             _signRegularMessage(PROCESSOR_PRIVATE_KEY, nonAdmin)
         );
 
         vm.expectEmit(true, true, false, true, address(bridge));
-        emit FundsReceived(1, nonAdmin, tokens, amounts, _eventKeys(keys));
+        emit FundsReceived(
+            1,
+            nonAdmin,
+            expectedTokens,
+            expectedAmounts,
+            _eventKeys(keys)
+        );
 
         vm.prank(nonAdmin);
         bridge.regular{value: 0.1 ether}(tokens, amounts, keys);
@@ -225,11 +233,9 @@ contract BridgeTest is Test {
 
     function test_RegularEthIncrementsNextEventId() public {
         vm.deal(nonAdmin, 1 ether);
-        address[] memory tokens = new address[](1);
-        uint256[] memory amounts = new uint256[](1);
+        address[] memory tokens = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
         bytes[] memory keys = new bytes[](0);
-        tokens[0] = address(0);
-        amounts[0] = 0.1 ether;
 
         vm.prank(nonAdmin);
         bridge.regular{value: 0.1 ether}(tokens, amounts, keys);
@@ -324,7 +330,7 @@ contract BridgeTest is Test {
         bridge.regular(tokens, amounts, keys);
     }
 
-    function test_RevertWhenRegularEthValueMismatchMissingValue() public {
+    function test_RevertWhenRegularDepositTokenZero() public {
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         tokens[0] = address(0);
@@ -333,27 +339,11 @@ contract BridgeTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.EthValueMismatch.selector,
-                uint256(1),
-                uint256(0)
+                Bridge.InvalidDepositToken.selector,
+                address(0)
             )
         );
         bridge.regular(tokens, amounts, keys);
-    }
-
-    function test_RevertWhenRegularEthValueMismatchUnexpectedValue() public {
-        address[] memory tokens = new address[](0);
-        uint256[] memory amounts = new uint256[](0);
-        bytes[] memory keys = new bytes[](0);
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                Bridge.EthValueMismatch.selector,
-                uint256(0),
-                uint256(1)
-            )
-        );
-        bridge.regular{value: 1}(tokens, amounts, keys);
     }
 
     function test_RevertWhenRegularAllowanceInsufficient() public {
