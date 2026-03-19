@@ -37,7 +37,6 @@ interface IBridge {
 contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidProcessorSignature(address expected, address received);
-    error InvalidDepositToken(address token);
     error InsufficientAllowance(
         address token,
         address owner,
@@ -46,6 +45,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     );
     error ERC20TransferFailed(address token, address from, uint256 amount);
     error RegularFundsLengthMismatch(uint256 tokens, uint256 amounts);
+    error EthValueMismatch(uint256 expected, uint256 received);
     error InvalidRegularKey(uint256 index, bytes key);
     error InvalidRegularKeySignature(
         uint256 index,
@@ -72,21 +72,11 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
         nextActionId = 0;
     }
 
-    receive() external payable {
-        address[] memory tokens = new address[](1);
-        uint256[] memory amounts = new uint256[](1);
-        bytes[] memory keys = new bytes[](0);
-        tokens[0] = address(0);
-        amounts[0] = msg.value;
-        emit FundsReceived(nextEventId, msg.sender, tokens, amounts, keys);
-        nextEventId += 1;
-    }
-
     function regular(
         address[] calldata tokens,
         uint256[] calldata amounts,
         bytes[] calldata keys
-    ) external nonReentrant {
+    ) external payable nonReentrant {
         uint256 transferCount = tokens.length;
         if (transferCount != amounts.length) {
             revert RegularFundsLengthMismatch(transferCount, amounts.length);
@@ -111,12 +101,14 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
             regularKeys[i] = key;
         }
 
+        uint256 ethExpectedValue = 0;
         for (uint256 i = 0; i < transferCount; i++) {
             address token = tokens[i];
             uint256 amount = amounts[i];
-            // regular() is ERC20-only; native ETH deposits use receive().
+            // Native ETH leg, value is checked after iterating all entries.
             if (token == address(0)) {
-                revert InvalidDepositToken(token);
+                ethExpectedValue += amount;
+                continue;
             }
 
             IERC20 erc20 = IERC20(token);
@@ -128,6 +120,10 @@ contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
             if (!success) {
                 revert ERC20TransferFailed(token, msg.sender, amount);
             }
+        }
+
+        if (msg.value != ethExpectedValue) {
+            revert EthValueMismatch(ethExpectedValue, msg.value);
         }
 
         emit FundsReceived(nextEventId, msg.sender, tokens, amounts, regularKeys);

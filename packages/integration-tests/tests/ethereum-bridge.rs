@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fs, path::PathBuf, time::Duration};
 
 use alloy::{
     network::TransactionBuilder,
-    primitives::{Address, U256},
+    primitives::{Address, Bytes, U256},
     providers::{DynProvider, Provider, ProviderBuilder},
     rpc::types::eth::TransactionRequest,
     sol,
@@ -29,7 +29,7 @@ const TEST_ERC20_MINTABLE_ARTIFACT_PATH: &str =
 sol! {
     #[sol(rpc)]
     interface IBridgeIntegration {
-        function regular(address[] tokens, uint256[] amounts, bytes[] keys) external;
+        function regular(address[] tokens, uint256[] amounts, bytes[] keys) external payable;
         function get_config()
             external
             view
@@ -54,6 +54,13 @@ sol! {
         function approve(address spender, uint256 amount) external returns (bool);
         function balanceOf(address account) external view returns (uint256);
     }
+}
+
+struct RegularCall {
+    tokens: Vec<Address>,
+    amounts_wei: Vec<u128>,
+    keys: Vec<Bytes>,
+    msg_value_wei: u128,
 }
 
 #[derive(Deserialize)]
@@ -673,15 +680,18 @@ async fn send_eth(
     to: Address,
     amount_wei: u128,
 ) -> Result<String> {
-    let from: Address = from.parse()?;
-    let request = TransactionRequest::default()
-        .with_from(from)
-        .with_to(to)
-        .with_value(U256::from(amount_wei));
-    let pending = provider.send_transaction(request).await?;
-    let tx_hash = *pending.tx_hash();
-    let _receipt = pending.get_receipt().await?;
-    Ok(format!("{tx_hash:#x}"))
+    send_regular(
+        provider,
+        from,
+        to,
+        RegularCall {
+            tokens: vec![Address::ZERO], // 0 address is for ETH
+            amounts_wei: vec![amount_wei],
+            keys: vec![],
+            msg_value_wei: amount_wei,
+        },
+    )
+    .await
 }
 
 async fn send_eth_and_wait(
@@ -723,7 +733,57 @@ async fn send_regular_erc20_and_wait(
     token: Address,
     amount_wei: u128,
 ) -> Result<String> {
-    let expected_denom = format!("{:#x}", token);
+    send_regular_and_wait(
+        kolme,
+        provider,
+        expected_wallet,
+        from,
+        bridge,
+        RegularCall {
+            tokens: vec![token],
+            amounts_wei: vec![amount_wei],
+            keys: vec![],
+            msg_value_wei: 0,
+        },
+    )
+    .await
+}
+
+async fn send_regular_and_wait(
+    kolme: &Kolme<EthereumBridgeTestApp>,
+    provider: &DynProvider,
+    expected_wallet: &Wallet,
+    from: &str,
+    bridge: Address,
+    regular: RegularCall,
+) -> Result<String> {
+    let RegularCall {
+        tokens,
+        amounts_wei,
+        keys,
+        msg_value_wei,
+    } = regular;
+    anyhow::ensure!(
+        tokens.len() == amounts_wei.len(),
+        "send_regular_and_wait tokens/amounts length mismatch: {} vs {}",
+        tokens.len(),
+        amounts_wei.len()
+    );
+
+    // Waiter matches exactly one expected fund entry.
+    // Keep this helper single-asset; batch matching is intentionally out of
+    // scope for these tests.
+    anyhow::ensure!(
+        tokens.len() == 1,
+        "send_regular_and_wait currently expects exactly one token/amount entry"
+    );
+
+    let expected_denom = if tokens[0] == Address::ZERO {
+        "eth".to_owned()
+    } else {
+        format!("{:#x}", tokens[0])
+    };
+    let expected_amount_wei = amounts_wei[0];
     let kolme_for_waiter = kolme.clone();
     let wallet_for_waiter = expected_wallet.clone();
     let denom_for_waiter = expected_denom.clone();
@@ -734,31 +794,66 @@ async fn send_regular_erc20_and_wait(
             &kolme_for_waiter,
             &wallet_for_waiter,
             &denom_for_waiter,
-            amount_wei,
+            expected_amount_wei,
         )
         .await
     });
     tokio::task::yield_now().await;
 
-    let from: Address = from.parse()?;
-    let call = IBridgeIntegration::regularCall {
-        tokens: vec![token],
-        amounts: vec![U256::from(amount_wei)],
-        keys: vec![],
-    };
-    let request = TransactionRequest::default()
-        .with_from(from)
-        .with_to(bridge)
-        .with_input(call.abi_encode());
-    let pending = provider.send_transaction(request).await?;
-    let tx_hash = *pending.tx_hash();
-    let _receipt = pending.get_receipt().await?;
+    let tx_hash = send_regular(
+        provider,
+        from,
+        bridge,
+        RegularCall {
+            tokens,
+            amounts_wei,
+            keys,
+            msg_value_wei,
+        },
+    )
+    .await?;
 
     tokio::time::timeout(Duration::from_secs(10), waiter)
         .await
         .context("timed out waiting for specific Ethereum listener message")?
         .context("listener message waiter task failed")??;
 
+    Ok(tx_hash)
+}
+
+async fn send_regular(
+    provider: &DynProvider,
+    from: &str,
+    bridge: Address,
+    regular: RegularCall,
+) -> Result<String> {
+    let RegularCall {
+        tokens,
+        amounts_wei,
+        keys,
+        msg_value_wei,
+    } = regular;
+    anyhow::ensure!(
+        tokens.len() == amounts_wei.len(),
+        "send_regular tokens/amounts length mismatch: {} vs {}",
+        tokens.len(),
+        amounts_wei.len()
+    );
+
+    let from: Address = from.parse()?;
+    let call = IBridgeIntegration::regularCall {
+        tokens,
+        amounts: amounts_wei.into_iter().map(U256::from).collect(),
+        keys,
+    };
+    let request = TransactionRequest::default()
+        .with_from(from)
+        .with_to(bridge)
+        .with_value(U256::from(msg_value_wei))
+        .with_input(call.abi_encode());
+    let pending = provider.send_transaction(request).await?;
+    let tx_hash = *pending.tx_hash();
+    let _receipt = pending.get_receipt().await?;
     Ok(format!("{tx_hash:#x}"))
 }
 

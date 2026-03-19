@@ -196,16 +196,34 @@ contract BridgeTest is Test {
         );
     }
 
-    function test_ReceiveEth() public {
+    function test_RevertWhenReceiveEthDirectTransfer() public {
         vm.deal(nonAdmin, 1 ether);
 
         vm.prank(nonAdmin);
         (bool ok, ) = address(bridge).call{value: 0.25 ether}("");
-        assertTrue(ok);
-        assertEq(address(bridge).balance, 0.25 ether);
+        assertFalse(ok);
     }
 
-    function test_ReceiveEthEmitsEvent() public {
+    function test_RegularEthEmitsEvent() public {
+        vm.deal(nonAdmin, 1 ether);
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        bytes[] memory keys = new bytes[](1);
+        tokens[0] = address(0);
+        amounts[0] = 0.1 ether;
+        keys[0] = abi.encode(
+            TEST_VALIDATOR_KEY,
+            _signRegularMessage(PROCESSOR_PRIVATE_KEY, nonAdmin)
+        );
+
+        vm.expectEmit(true, true, false, true, address(bridge));
+        emit FundsReceived(1, nonAdmin, tokens, amounts, _eventKeys(keys));
+
+        vm.prank(nonAdmin);
+        bridge.regular{value: 0.1 ether}(tokens, amounts, keys);
+    }
+
+    function test_RegularEthIncrementsNextEventId() public {
         vm.deal(nonAdmin, 1 ether);
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
@@ -213,19 +231,8 @@ contract BridgeTest is Test {
         tokens[0] = address(0);
         amounts[0] = 0.1 ether;
 
-        vm.expectEmit(true, true, false, true, address(bridge));
-        emit FundsReceived(1, nonAdmin, tokens, amounts, keys);
-
         vm.prank(nonAdmin);
-        (bool ok, ) = address(bridge).call{value: 0.1 ether}("");
-        assertTrue(ok);
-    }
-
-    function test_ReceiveEthIncrementsNextEventId() public {
-        vm.deal(nonAdmin, 1 ether);
-        vm.prank(nonAdmin);
-        (bool ok, ) = address(bridge).call{value: 0.1 ether}("");
-        assertTrue(ok);
+        bridge.regular{value: 0.1 ether}(tokens, amounts, keys);
 
         (, , , , , uint64 configNextEventId, ) = bridge.get_config();
         assertEq(configNextEventId, 2);
@@ -317,19 +324,36 @@ contract BridgeTest is Test {
         bridge.regular(tokens, amounts, keys);
     }
 
-    function test_RevertWhenRegularDepositTokenZero() public {
+    function test_RevertWhenRegularEthValueMismatchMissingValue() public {
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         tokens[0] = address(0);
         amounts[0] = 1;
         bytes[] memory keys = new bytes[](0);
+
         vm.expectRevert(
             abi.encodeWithSelector(
-                Bridge.InvalidDepositToken.selector,
-                address(0)
+                Bridge.EthValueMismatch.selector,
+                uint256(1),
+                uint256(0)
             )
         );
         bridge.regular(tokens, amounts, keys);
+    }
+
+    function test_RevertWhenRegularEthValueMismatchUnexpectedValue() public {
+        address[] memory tokens = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
+        bytes[] memory keys = new bytes[](0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Bridge.EthValueMismatch.selector,
+                uint256(0),
+                uint256(1)
+            )
+        );
+        bridge.regular{value: 1}(tokens, amounts, keys);
     }
 
     function test_RevertWhenRegularAllowanceInsufficient() public {
