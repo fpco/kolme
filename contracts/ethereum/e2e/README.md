@@ -38,15 +38,21 @@ cast code <bridge_contract_address> --rpc-url http://localhost:8545
 - Configure Kolme's Ethereum RPC client to point at `http://host.docker.internal:8545` when Kolme itself runs in Docker.
 - Use `http://localhost:8545` when Kolme runs directly on the host.
 
-## ERC20 Deposit Flow
+## Deposit Flow
 
-For ERC20 deposits, user flow is:
+Deposits are submitted via `regular(tokens, amounts, keys)`.
+
+### ERC20
 
 1. Call `approve(<bridge_address>, <amount>)` on the token contract.
-2. Call `regular(<token_address>, <amount>, <keys>)` on the bridge contract.
+2. Call `regular([<token_address>], [<amount>], <keys>)` on the bridge contract with `msg.value = 0`.
+
+### ETH
+
+1. Call `regular([address(0)], [<amount_wei>], <keys>)` on the bridge contract with `msg.value = <amount_wei>`.
 
 Notes:
-- `regular(...)` rejects `token = address(0)`. Native ETH deposits use plain ETH transfer to bridge (`receive()` path), not `regular(...)`.
+- Plain ETH transfers to the bridge are unsupported and revert.
 - `keys` are user secp256k1 pubkeys provided with the deposit event payload.
 
 ## Ethereum Denom Format (Kolme side)
