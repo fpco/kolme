@@ -4,23 +4,25 @@
 use std::str::FromStr;
 
 use alloy::{
-    primitives::{Address, U256},
+    primitives::{Address, Bytes, U256},
     sol,
-    sol_types::SolValue,
+    sol_types::{SolCall, SolValue},
 };
 
 use crate::SignatureWithRecovery;
-use crate::{AssetAmount, PublicKey, ValidatorSet, ValidatorType};
+use crate::{PublicKey, ValidatorSet, ValidatorType};
 
-pub const ACTION_TRANSFER_ETH: u8 = 0;
-pub const ACTION_TRANSFER_ERC20: u8 = 1;
-pub const ACTION_SELF_REPLACE: u8 = 2;
-pub const ACTION_NEW_SET: u8 = 3;
+// Keep these in sync with action constants in contracts/ethereum/src/BridgeActions.sol.
+pub const ACTION_EXECUTE: u8 = 0;
+pub const ACTION_SELF_REPLACE: u8 = 1;
+pub const ACTION_NEW_SET: u8 = 2;
+pub const ETH_NATIVE_DENOM: &str = "eth";
 
 sol! {
-    struct TransferEthAction {
-        address recipient;
-        uint256 amount;
+    struct ExecuteAction {
+        address target;
+        uint256 value;
+        bytes data;
     }
 
     struct SelfReplaceAction {
@@ -38,91 +40,80 @@ sol! {
         bytes rendered;
         bytes[] approvals;
     }
+
+    interface IERC20 {
+        function transfer(address recipient, uint256 amount) external returns (bool);
+    }
 }
 
 /// ABI-encode execute_signed() payload `(uint64 action_id, bytes action_data)` according
 /// to Solidity ABI rules.
 pub fn abi_encode_u64_and_bytes(value: u64, data: &[u8]) -> Vec<u8> {
-    const WORD_SIZE: usize = 32;
-
-    let mut encoded =
-        Vec::with_capacity(WORD_SIZE * 3 + data.len().div_ceil(WORD_SIZE) * WORD_SIZE);
-
-    // head[0] = uint64
-    let mut word = [0u8; WORD_SIZE];
-    word[WORD_SIZE - 8..].copy_from_slice(&value.to_be_bytes());
-    encoded.extend_from_slice(&word);
-
-    // head[1] = offset to dynamic bytes argument
-    word.fill(0);
-    word[WORD_SIZE - 1] = 0x40;
-    encoded.extend_from_slice(&word);
-
-    // tail[0] = bytes length
-    word.fill(0);
-    word[WORD_SIZE - 8..].copy_from_slice(&(data.len() as u64).to_be_bytes());
-    encoded.extend_from_slice(&word);
-
-    // tail[1..] = bytes data + right padding to 32-byte boundary
-    encoded.extend_from_slice(data);
-    let padding = (WORD_SIZE - (data.len() % WORD_SIZE)) % WORD_SIZE;
-    if padding > 0 {
-        encoded.resize(encoded.len() + padding, 0);
-    }
-
-    encoded
+    (value, Bytes::copy_from_slice(data)).abi_encode_params()
 }
 
 /// ABI-encode _executeAction() payload `(uint8, bytes)` in bridge contract
 pub fn abi_encode_u8_and_bytes(value: u8, data: &[u8]) -> Vec<u8> {
-    const WORD_SIZE: usize = 32;
-
-    let mut encoded =
-        Vec::with_capacity(WORD_SIZE * 3 + data.len().div_ceil(WORD_SIZE) * WORD_SIZE);
-
-    // head[0] = uint8
-    let mut word = [0u8; WORD_SIZE];
-    word[WORD_SIZE - 1] = value;
-    encoded.extend_from_slice(&word);
-
-    // head[1] = offset to dynamic bytes argument
-    word.fill(0);
-    word[WORD_SIZE - 1] = 0x40;
-    encoded.extend_from_slice(&word);
-
-    // tail[0] = bytes length
-    word.fill(0);
-    word[WORD_SIZE - 8..].copy_from_slice(&(data.len() as u64).to_be_bytes());
-    encoded.extend_from_slice(&word);
-
-    // tail[1..] = bytes data + right padding to 32-byte boundary
-    encoded.extend_from_slice(data);
-    let padding = (WORD_SIZE - (data.len() % WORD_SIZE)) % WORD_SIZE;
-    if padding > 0 {
-        encoded.resize(encoded.len() + padding, 0);
-    }
-
-    encoded
+    // In ABI head encoding, uint8 and uint256 both occupy one 32-byte word;
+    // for values 0..=255 the byte layout is identical.
+    (U256::from(value), Bytes::copy_from_slice(data)).abi_encode_params()
 }
 
-pub fn encode_transfer_eth_action(
-    recipient: &str,
-    funds: &[AssetAmount],
-) -> anyhow::Result<Vec<u8>> {
-    anyhow::ensure!(
-        funds.len() == 1,
-        "Ethereum transfer action supports exactly one fund, got {}",
-        funds.len()
-    );
-    let fund = funds[0].clone();
+fn encode_execute_action(target: Address, value: U256, data: Vec<u8>) -> Vec<u8> {
+    // Solidity decodes execute data as tuple: (address,uint256,bytes).
+    // Encode as tuple directly to match abi.decode(data, (address,uint256,bytes)).
+    let action = (target, value, Bytes::from(data)).abi_encode_params();
+    abi_encode_u8_and_bytes(ACTION_EXECUTE, &action)
+}
+
+pub fn evm_address_to_string(address: Address) -> String {
+    format!("{:#x}", address)
+}
+
+pub fn normalize_evm_address(address: &str) -> anyhow::Result<String> {
+    let address = Address::from_str(address)?;
+    Ok(evm_address_to_string(address))
+}
+
+/// `denom` could be "eth" (case-insensitive) or a EVM address.
+/// Will be canonicalized (lowercase "eth" or "0x...")
+pub fn normalize_ethereum_denom(denom: &str) -> anyhow::Result<String> {
+    if denom.eq_ignore_ascii_case(ETH_NATIVE_DENOM) {
+        return Ok(ETH_NATIVE_DENOM.to_owned());
+    }
+    normalize_evm_address(denom)
+}
+
+pub fn token_address_to_denom(token: Address) -> String {
+    if token == Address::ZERO {
+        ETH_NATIVE_DENOM.to_owned()
+    } else {
+        evm_address_to_string(token)
+    }
+}
+
+/// Build ACTION_EXECUTE payload for ETH transfers
+pub fn encode_action_transfer_eth(recipient: &str, amount: u128) -> anyhow::Result<Vec<u8>> {
     let recipient = Address::from_str(recipient)?;
-    let action = TransferEthAction {
+    Ok(encode_execute_action(recipient, U256::from(amount), vec![]))
+}
+
+/// Build ACTION_EXECUTE payload for ERC20(custom tokens) transfers
+pub fn encode_action_transfer_erc20(
+    token: &str,
+    recipient: &str,
+    amount: u128,
+) -> anyhow::Result<Vec<u8>> {
+    let token = Address::from_str(token)?;
+    let recipient = Address::from_str(recipient)?;
+    let transfer_call = IERC20::transferCall {
         recipient,
-        amount: U256::from(fund.amount),
+        amount: U256::from(amount),
     };
-    Ok(abi_encode_u8_and_bytes(
-        ACTION_TRANSFER_ETH,
-        &action.abi_encode(),
+    Ok(encode_execute_action(
+        token,
+        U256::ZERO,
+        transfer_call.abi_encode(),
     ))
 }
 
@@ -195,7 +186,32 @@ pub fn encode_new_set_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{abi_encode_u64_and_bytes, abi_encode_u8_and_bytes};
+    use super::{
+        abi_encode_u64_and_bytes, abi_encode_u8_and_bytes, encode_action_transfer_erc20,
+        encode_action_transfer_eth, normalize_ethereum_denom, normalize_evm_address,
+        ACTION_EXECUTE, ETH_NATIVE_DENOM,
+    };
+    use alloy::primitives::{Address, U256};
+    use std::str::FromStr;
+
+    fn decode_execute_action_contract_abi(action: &[u8]) -> (Address, U256, Vec<u8>) {
+        assert!(action.len() >= 128, "action payload too short");
+
+        let target = Address::from_slice(&action[12..32]);
+        let value = U256::from_be_slice(&action[32..64]);
+        let data_offset = U256::from_be_slice(&action[64..96]).to::<usize>();
+        assert_eq!(data_offset, 96, "unexpected execute calldata offset");
+
+        let data_len = U256::from_be_slice(&action[96..128]).to::<usize>();
+        let data_start = 128usize;
+        let data_end = data_start + data_len;
+        assert!(
+            action.len() >= data_end,
+            "execute calldata shorter than declared length"
+        );
+
+        (target, value, action[data_start..data_end].to_vec())
+    }
 
     #[test]
     fn abi_encode_u64_and_bytes_matches_expected_layout() {
@@ -239,5 +255,57 @@ mod tests {
         // bytes data + right-padding
         assert_eq!(&encoded[96..99], b"abc");
         assert!(encoded[99..128].iter().all(|x| *x == 0));
+    }
+
+    #[test]
+    fn encode_action_transfer_eth_uses_empty_calldata_and_amount_as_value() {
+        let payload =
+            encode_action_transfer_eth("0x1111111111111111111111111111111111111111", 42).unwrap();
+
+        assert_eq!(payload[31], ACTION_EXECUTE);
+        let action_bytes_len = u64::from_be_bytes(payload[88..96].try_into().unwrap()) as usize;
+        let (target, value, data) =
+            decode_execute_action_contract_abi(&payload[96..96 + action_bytes_len]);
+        assert_eq!(
+            target,
+            Address::from_str("0x1111111111111111111111111111111111111111").unwrap()
+        );
+        assert_eq!(value, U256::from(42u128));
+        assert!(data.is_empty());
+    }
+
+    #[test]
+    fn encode_action_transfer_erc20_uses_transfer_calldata() {
+        let payload = encode_action_transfer_erc20(
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            7,
+        )
+        .unwrap();
+
+        assert_eq!(payload[31], ACTION_EXECUTE);
+        let action_bytes_len = u64::from_be_bytes(payload[88..96].try_into().unwrap()) as usize;
+        let (target, value, data) =
+            decode_execute_action_contract_abi(&payload[96..96 + action_bytes_len]);
+        assert_eq!(
+            target,
+            Address::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()
+        );
+        assert_eq!(value, U256::from(0u128));
+        assert_eq!(&data[0..4], &[0xa9, 0x05, 0x9c, 0xbb]); // transfer(address,uint256)
+    }
+
+    #[test]
+    fn normalize_ethereum_denom_canonicalizes_eth_and_evm_addresses() {
+        assert_eq!(normalize_ethereum_denom("ETH").unwrap(), ETH_NATIVE_DENOM);
+        assert_eq!(
+            normalize_ethereum_denom("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap(),
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+    }
+
+    #[test]
+    fn normalize_evm_address_rejects_non_address() {
+        assert!(normalize_evm_address("eth").is_err());
     }
 }

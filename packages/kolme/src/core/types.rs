@@ -988,6 +988,13 @@ impl MerkleDeserializeRaw for BlockHeight {
 )]
 pub struct Wallet(pub String);
 
+impl Wallet {
+    #[cfg(feature = "ethereum")]
+    pub fn from_ethereum(address: alloy::primitives::Address) -> Self {
+        Self(crate::utils::ethereum::evm_address_to_string(address))
+    }
+}
+
 impl ToMerkleKey for Wallet {
     fn to_merkle_key(&self) -> MerkleKey {
         self.0.to_merkle_key()
@@ -1640,7 +1647,28 @@ impl ConfiguredChains {
         }
     }
 
+    #[cfg(feature = "ethereum")]
     pub fn insert_ethereum(&mut self, chain: EthereumChain, config: ChainConfig) -> Result<()> {
+        use crate::utils::ethereum::{normalize_ethereum_denom, normalize_evm_address};
+
+        let mut config = config;
+        let mut normalized_assets = BTreeMap::new();
+        for (asset_name, asset_config) in std::mem::take(&mut config.assets) {
+            let normalized_name = normalize_ethereum_denom(&asset_name.0)
+                .with_context(|| format!("Invalid Ethereum asset name: {}", asset_name.0))?;
+            let old = normalized_assets.insert(AssetName(normalized_name.clone()), asset_config);
+            anyhow::ensure!(
+                old.is_none(),
+                "Duplicate Ethereum asset name after normalization: {normalized_name}"
+            );
+        }
+        config.assets = normalized_assets;
+
+        if let BridgeContract::Deployed(address) = &mut config.bridge {
+            *address = normalize_evm_address(address)
+                .with_context(|| format!("Invalid Ethereum bridge contract address: {address}"))?;
+        }
+
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
                 return Err(anyhow::anyhow!(
@@ -1653,25 +1681,13 @@ impl ConfiguredChains {
                 ))
             }
             BridgeContract::NeededEthereumBridge => (),
-            BridgeContract::Deployed(address) => {
-                anyhow::ensure!(
-                    is_valid_evm_address(address),
-                    "Invalid Ethereum bridge contract address: {address}"
-                );
-            }
+            BridgeContract::Deployed(_) => (),
         }
 
         self.0.insert(chain.into(), config);
 
         Ok(())
     }
-}
-
-fn is_valid_evm_address(address: &str) -> bool {
-    let Some(hex) = address.strip_prefix("0x") else {
-        return false;
-    };
-    hex.len() == 40 && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Input and output for a single data load while processing a block.
@@ -1810,9 +1826,37 @@ impl ExecAction {
                     }
                     #[cfg(feature = "ethereum")]
                     ChainName::Ethereum => {
-                        let action = EthereumActionPayload::Transfer {
-                            recipient: recipient.0.clone(),
-                            funds: funds.clone(),
+                        use crate::utils::ethereum::{normalize_ethereum_denom, ETH_NATIVE_DENOM};
+
+                        anyhow::ensure!(
+                            funds.len() == 1,
+                            "Ethereum transfer action supports exactly one fund, got {}",
+                            funds.len()
+                        );
+                        let fund = &funds[0];
+
+                        // TODO: find more efficient way to find asset name
+                        let (asset_name, _) = config
+                            .assets
+                            .iter()
+                            .find(|(_, config)| config.asset_id == fund.id)
+                            .context("Unsupported asset ID")?;
+                        let normalized_asset_name = normalize_ethereum_denom(&asset_name.0)
+                            .with_context(|| {
+                                format!("Invalid Ethereum asset name in config: {}", asset_name.0)
+                            })?;
+
+                        let action = if normalized_asset_name == ETH_NATIVE_DENOM {
+                            EthereumActionPayload::TransferEth {
+                                recipient: recipient.0.clone(),
+                                amount: fund.amount,
+                            }
+                        } else {
+                            EthereumActionPayload::TransferErc20 {
+                                token: normalized_asset_name,
+                                recipient: recipient.0.clone(),
+                                amount: fund.amount,
+                            }
                         };
                         serialize_ethereum_payload(id, &action)
                     }
@@ -1975,9 +2019,14 @@ impl ExecAction {
 #[cfg(feature = "ethereum")]
 #[derive(Clone)]
 enum EthereumActionPayload {
-    Transfer {
+    TransferEth {
         recipient: String,
-        funds: Vec<AssetAmount>,
+        amount: u128,
+    },
+    TransferErc20 {
+        token: String,
+        recipient: String,
+        amount: u128,
     },
     SelfReplace {
         validator_type: ValidatorType,
@@ -1997,9 +2046,14 @@ fn serialize_ethereum_payload(
     action: &EthereumActionPayload,
 ) -> Result<String> {
     let action = match action {
-        EthereumActionPayload::Transfer { recipient, funds } => {
-            crate::utils::ethereum::encode_transfer_eth_action(recipient, funds)?
+        EthereumActionPayload::TransferEth { recipient, amount } => {
+            crate::utils::ethereum::encode_action_transfer_eth(recipient, *amount)?
         }
+        EthereumActionPayload::TransferErc20 {
+            token,
+            recipient,
+            amount,
+        } => crate::utils::ethereum::encode_action_transfer_erc20(token, recipient, *amount)?,
         EthereumActionPayload::SelfReplace {
             validator_type,
             current,
@@ -2163,9 +2217,23 @@ impl SolanaClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "ethereum")]
+    use alloy::primitives::Address;
     use quickcheck::quickcheck;
     use rust_decimal::dec;
     use std::collections::BTreeMap;
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn wallet_from_ethereum_is_canonical_lowercase_hex() {
+        let address = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            .parse::<Address>()
+            .unwrap();
+        assert_eq!(
+            Wallet::from_ethereum(address),
+            Wallet("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned())
+        );
+    }
 
     #[test]
     fn increasing_middle_with_difference_of_one() {
@@ -2331,6 +2399,7 @@ mod tests {
         assert_eq!(EthereumChain::Local.default_ws_url(), "ws://localhost:8545");
     }
 
+    #[cfg(feature = "ethereum")]
     #[test]
     fn insert_ethereum_accepts_deployed_evm_address() {
         let mut chains = ConfiguredChains::default();
@@ -2358,6 +2427,7 @@ mod tests {
         assert!(chains.0.contains_key(&ExternalChain::EthereumMainnet));
     }
 
+    #[cfg(feature = "ethereum")]
     #[test]
     fn insert_ethereum_rejects_invalid_bridge_config() {
         let mut chains = ConfiguredChains::default();
@@ -2387,13 +2457,53 @@ mod tests {
 
     #[cfg(feature = "ethereum")]
     #[test]
+    fn insert_ethereum_normalizes_bridge_address_and_asset_names() {
+        let mut chains = ConfiguredChains::default();
+        let mut assets = BTreeMap::new();
+        assets.insert(
+            AssetName("ETH".to_owned()),
+            AssetConfig {
+                decimals: 18,
+                asset_id: AssetId(1),
+            },
+        );
+        assets.insert(
+            AssetName("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned()),
+            AssetConfig {
+                decimals: 6,
+                asset_id: AssetId(2),
+            },
+        );
+        let config = ChainConfig {
+            assets,
+            bridge: BridgeContract::Deployed(
+                "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_owned(),
+            ),
+        };
+
+        chains
+            .insert_ethereum(EthereumChain::Local, config)
+            .unwrap();
+
+        let inserted = chains.0.get(&ExternalChain::EthereumLocal).unwrap();
+        match &inserted.bridge {
+            BridgeContract::Deployed(address) => {
+                assert_eq!(address, "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+            }
+            _ => panic!("unexpected bridge kind"),
+        }
+        assert!(inserted.assets.contains_key(&AssetName("eth".to_owned())));
+        assert!(inserted.assets.contains_key(&AssetName(
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()
+        )));
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
     fn serialize_ethereum_payload_wraps_abi_bytes_in_base64() {
-        let action = EthereumActionPayload::Transfer {
+        let action = EthereumActionPayload::TransferEth {
             recipient: "0x1111111111111111111111111111111111111111".to_owned(),
-            funds: vec![AssetAmount {
-                id: AssetId(7),
-                amount: 42,
-            }],
+            amount: 42,
         };
         let payload = serialize_ethereum_payload(BridgeActionId(9), &action).unwrap();
         let decoded =
@@ -2406,6 +2516,82 @@ mod tests {
         // bytes offset in head[1]
         assert_eq!(&decoded[32..63], &[0u8; 31]);
         assert_eq!(decoded[63], 0x40);
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn to_payload_ethereum_transfer_eth_matches_execute_encoding() {
+        let recipient = Wallet("0x1111111111111111111111111111111111111111".to_owned());
+        let config = ChainConfig {
+            assets: BTreeMap::from([(
+                AssetName("ETH".to_owned()),
+                AssetConfig {
+                    decimals: 18,
+                    asset_id: AssetId(1),
+                },
+            )]),
+            bridge: BridgeContract::NeededEthereumBridge,
+        };
+        let action = ExecAction::Transfer {
+            chain: ExternalChain::EthereumLocal,
+            recipient: recipient.clone(),
+            funds: vec![AssetAmount {
+                id: AssetId(1),
+                amount: 42,
+            }],
+        };
+        let action_id = BridgeActionId(9);
+
+        let payload = action
+            .to_payload(ExternalChain::EthereumLocal, &config, action_id)
+            .unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload).unwrap();
+        let expected_action =
+            crate::utils::ethereum::encode_action_transfer_eth(&recipient.0, 42).unwrap();
+        let expected =
+            crate::utils::ethereum::abi_encode_u64_and_bytes(action_id.0, &expected_action);
+        assert_eq!(decoded, expected);
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn to_payload_ethereum_transfer_erc20_matches_execute_encoding() {
+        let recipient = Wallet("0x1111111111111111111111111111111111111111".to_owned());
+        let config = ChainConfig {
+            assets: BTreeMap::from([(
+                AssetName("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned()),
+                AssetConfig {
+                    decimals: 6,
+                    asset_id: AssetId(1),
+                },
+            )]),
+            bridge: BridgeContract::NeededEthereumBridge,
+        };
+        let action = ExecAction::Transfer {
+            chain: ExternalChain::EthereumLocal,
+            recipient: recipient.clone(),
+            funds: vec![AssetAmount {
+                id: AssetId(1),
+                amount: 7,
+            }],
+        };
+        let action_id = BridgeActionId(3);
+
+        let payload = action
+            .to_payload(ExternalChain::EthereumLocal, &config, action_id)
+            .unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload).unwrap();
+        let expected_action = crate::utils::ethereum::encode_action_transfer_erc20(
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            &recipient.0,
+            7,
+        )
+        .unwrap();
+        let expected =
+            crate::utils::ethereum::abi_encode_u64_and_bytes(action_id.0, &expected_action);
+        assert_eq!(decoded, expected);
     }
 
     #[test]

@@ -4,10 +4,9 @@ pragma solidity ^0.8.30;
 import {BridgeBase} from "./BridgeBase.sol";
 
 abstract contract BridgeActions is BridgeBase {
-    uint8 internal constant ACTION_TRANSFER_ETH = 0;
-    uint8 internal constant ACTION_TRANSFER_ERC20 = 1;
-    uint8 internal constant ACTION_SELF_REPLACE = 2;
-    uint8 internal constant ACTION_NEW_SET = 3;
+    uint8 internal constant ACTION_EXECUTE = 0;
+    uint8 internal constant ACTION_SELF_REPLACE = 1;
+    uint8 internal constant ACTION_NEW_SET = 2;
 
     uint8 internal constant VALIDATOR_LISTENER = 0;
     uint8 internal constant VALIDATOR_PROCESSOR = 1;
@@ -16,7 +15,7 @@ abstract contract BridgeActions is BridgeBase {
     error InvalidActionType(uint8 actionType);
     error InvalidValidatorType(uint8 validatorType);
     error CurrentValidatorNotFound(uint8 validatorType, bytes current);
-    error TransferEthFailed(address recipient, uint256 amount);
+    error ExecuteCallFailed(address target, uint256 value, bytes data);
     error InvalidNewSetApprovalSignature(address signer);
     error DuplicateNewSetApprovalSignature(address signer);
     error InsufficientNewSetGroupSignatures(uint8 needed, uint8 provided);
@@ -62,10 +61,15 @@ abstract contract BridgeActions is BridgeBase {
             _verifyNewSetApprovals(rendered, approvals);
             return;
         }
-        if (
-            actionType == ACTION_TRANSFER_ETH ||
-            actionType == ACTION_TRANSFER_ERC20
-        ) {
+        if (actionType == ACTION_EXECUTE) {
+            (address target, uint256 value, bytes memory callData) = abi.decode(
+                data,
+                (address, uint256, bytes)
+            );
+            // no-ops to silence compiler warnings - we want to validate full ABI shape
+            target;
+            value;
+            callData;
             return;
         }
         revert InvalidActionType(actionType);
@@ -143,8 +147,8 @@ abstract contract BridgeActions is BridgeBase {
             actionData,
             (uint8, bytes)
         );
-        if (actionType == ACTION_TRANSFER_ETH) {
-            _executeTransferEth(data);
+        if (actionType == ACTION_EXECUTE) {
+            _executeCall(data);
             return;
         }
         if (actionType == ACTION_SELF_REPLACE) {
@@ -159,14 +163,14 @@ abstract contract BridgeActions is BridgeBase {
         revert InvalidActionType(actionType);
     }
 
-    function _executeTransferEth(bytes memory data) internal {
-        (address recipient, uint256 amount) = abi.decode(
+    function _executeCall(bytes memory data) internal {
+        (address target, uint256 value, bytes memory callData) = abi.decode(
             data,
-            (address, uint256)
+            (address, uint256, bytes)
         );
-        (bool success, ) = recipient.call{value: amount}("");
+        (bool success, ) = target.call{value: value}(callData);
         if (!success) {
-            revert TransferEthFailed(recipient, amount);
+            revert ExecuteCallFailed(target, value, callData);
         }
     }
 
@@ -185,7 +189,7 @@ abstract contract BridgeActions is BridgeBase {
         bytes memory current,
         bytes memory replacement
     ) internal view {
-        if (!_isValidValidatorKey(replacement)) {
+        if (!_isValidSecp256k1Pubkey(replacement)) {
             revert InvalidValidatorKey(0, replacement);
         }
         _validatorAddress(replacement);

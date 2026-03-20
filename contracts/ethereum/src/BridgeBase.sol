@@ -39,7 +39,7 @@ abstract contract BridgeBase {
     uint256 internal constant SECP256K1_SQRT_EXP =
         0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF0C;
 
-    function _isValidValidatorKey(
+    function _isValidSecp256k1Pubkey(
         bytes memory key
     ) internal pure returns (bool) {
         return key.length == 33 && (key[0] == 0x02 || key[0] == 0x03);
@@ -62,7 +62,7 @@ abstract contract BridgeBase {
         bytes[] memory approvers,
         uint16 neededApprovers
     ) internal {
-        if (!_isValidValidatorKey(processor)) {
+        if (!_isValidSecp256k1Pubkey(processor)) {
             revert InvalidProcessorKey(processor);
         }
         _validatorAddress(processor);
@@ -70,7 +70,7 @@ abstract contract BridgeBase {
             revert EmptyListeners();
         }
         for (uint256 i = 0; i < listeners.length; i++) {
-            if (!_isValidValidatorKey(listeners[i])) {
+            if (!_isValidSecp256k1Pubkey(listeners[i])) {
                 revert InvalidValidatorKey(i, listeners[i]);
             }
             _validatorAddress(listeners[i]);
@@ -83,7 +83,7 @@ abstract contract BridgeBase {
             revert EmptyApprovers();
         }
         for (uint256 i = 0; i < approvers.length; i++) {
-            if (!_isValidValidatorKey(approvers[i])) {
+            if (!_isValidSecp256k1Pubkey(approvers[i])) {
                 revert InvalidValidatorKey(i, approvers[i]);
             }
             _validatorAddress(approvers[i]);
@@ -110,7 +110,7 @@ abstract contract BridgeBase {
     function _validatorAddress(
         bytes memory key
     ) internal view returns (address) {
-        if (!_isValidValidatorKey(key)) {
+        if (!_isValidSecp256k1Pubkey(key)) {
             revert InvalidCurvePoint(key);
         }
         uint256 x = 0;

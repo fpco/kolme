@@ -3,12 +3,20 @@ pragma solidity ^0.8.30;
 
 import {BridgeActions} from "./BridgeActions.sol";
 import {BridgeBase} from "./BridgeBase.sol";
+import {
+    ReentrancyGuard
+} from "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import {
+    IERC20
+} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 interface IBridge {
     event FundsReceived(
         uint64 indexed eventId,
         address indexed sender,
-        uint256 amount
+        address[] tokens,
+        uint256[] amounts,
+        bytes[] keys
     );
     event Signed(uint64 eventId, address indexed sender, uint64 actionId);
     // forge-lint: disable-next-line(mixed-case-function)
@@ -26,9 +34,24 @@ interface IBridge {
         );
 }
 
-contract Bridge is IBridge, BridgeBase, BridgeActions {
+contract Bridge is IBridge, BridgeBase, BridgeActions, ReentrancyGuard {
     error IncorrectActionId(uint64 expected, uint64 received);
     error InvalidProcessorSignature(address expected, address received);
+    error InvalidDepositToken(address token);
+    error InsufficientAllowance(
+        address token,
+        address owner,
+        uint256 allowed,
+        uint256 required
+    );
+    error ERC20TransferFailed(address token, address from, uint256 amount);
+    error RegularFundsLengthMismatch(uint256 tokens, uint256 amounts);
+    error InvalidRegularKey(uint256 index, bytes key);
+    error InvalidRegularKeySignature(
+        uint256 index,
+        address expected,
+        address received
+    );
 
     constructor(
         bytes memory processor,
@@ -49,8 +72,83 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         nextActionId = 0;
     }
 
-    receive() external payable {
-        emit FundsReceived(nextEventId, msg.sender, msg.value);
+    function regular(
+        address[] calldata tokens,
+        uint256[] calldata amounts,
+        bytes[] calldata keys
+    ) external payable nonReentrant {
+        uint256 transferCount = tokens.length;
+        if (transferCount != amounts.length) {
+            revert RegularFundsLengthMismatch(transferCount, amounts.length);
+        }
+
+        bytes32 regularHash = sha256(abi.encodePacked(msg.sender));
+        uint256 regularKeyCount = keys.length;
+        bytes[] memory regularKeys = new bytes[](regularKeyCount);
+        for (uint256 i = 0; i < regularKeyCount; i++) {
+            (bytes memory key, bytes memory signature) = abi.decode(
+                keys[i],
+                (bytes, bytes)
+            );
+            if (!_isValidSecp256k1Pubkey(key)) {
+                revert InvalidRegularKey(i, key);
+            }
+            address expected = _validatorAddress(key);
+            address received = _recoverSigner(regularHash, signature);
+            if (received != expected) {
+                revert InvalidRegularKeySignature(i, expected, received);
+            }
+            regularKeys[i] = key;
+        }
+
+        for (uint256 i = 0; i < transferCount; i++) {
+            address token = tokens[i];
+            uint256 amount = amounts[i];
+
+            // ETH is in msg.value
+            if (token == address(0)) {
+                revert InvalidDepositToken(token);
+            }
+
+            IERC20 erc20 = IERC20(token);
+            uint256 allowed = erc20.allowance(msg.sender, address(this));
+            if (allowed < amount) {
+                revert InsufficientAllowance(
+                    token,
+                    msg.sender,
+                    allowed,
+                    amount
+                );
+            }
+            bool success = erc20.transferFrom(
+                msg.sender,
+                address(this),
+                amount
+            );
+            if (!success) {
+                revert ERC20TransferFailed(token, msg.sender, amount);
+            }
+        }
+
+        uint256 eventTransferCount = transferCount + (msg.value > 0 ? 1 : 0);
+        address[] memory eventTokens = new address[](eventTransferCount);
+        uint256[] memory eventAmounts = new uint256[](eventTransferCount);
+        for (uint256 i = 0; i < transferCount; i++) {
+            eventTokens[i] = tokens[i];
+            eventAmounts[i] = amounts[i];
+        }
+        if (msg.value > 0) {
+            eventTokens[transferCount] = address(0);
+            eventAmounts[transferCount] = msg.value;
+        }
+
+        emit FundsReceived(
+            nextEventId,
+            msg.sender,
+            eventTokens,
+            eventAmounts,
+            regularKeys
+        );
         nextEventId += 1;
     }
 
@@ -59,7 +157,7 @@ contract Bridge is IBridge, BridgeBase, BridgeActions {
         bytes calldata payload,
         bytes calldata processor,
         bytes[] calldata approvers
-    ) external {
+    ) external nonReentrant {
         (uint64 actionId, bytes memory actionData) = abi.decode(
             payload,
             (uint64, bytes)

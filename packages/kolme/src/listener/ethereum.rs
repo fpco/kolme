@@ -1,3 +1,4 @@
+use crate::utils::ethereum::token_address_to_denom;
 use crate::*;
 use alloy::{
     contract::{ContractInstance, Interface},
@@ -12,7 +13,6 @@ use futures_util::StreamExt;
 
 use super::get_next_bridge_event_id;
 
-const ETH_NATIVE_DENOM: &str = "eth";
 const POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
 const WS_RETRY_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(30);
 
@@ -36,7 +36,7 @@ impl EthereumListenerMode {
 }
 
 sol! {
-    event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount);
+    event FundsReceived(uint64 indexed eventId, address indexed sender, address[] tokens, uint256[] amounts, bytes[] keys);
 
     #[sol(rpc)]
     contract Bridge {
@@ -97,14 +97,39 @@ impl EthereumBridgeEvent {
         event_id: BridgeEventId,
     ) -> Result<Message<AppMessage>> {
         let event = match self {
-            Self::FundsReceived(FundsReceived { sender, amount, .. }) => BridgeEvent::Regular {
-                wallet: Wallet(format!("{:#x}", sender)),
-                funds: vec![BridgedAssetAmount {
-                    denom: ETH_NATIVE_DENOM.to_owned(),
-                    amount: u256_to_u128(*amount)?,
-                }],
-                keys: vec![],
-            },
+            Self::FundsReceived(FundsReceived {
+                sender,
+                tokens,
+                amounts,
+                keys,
+                ..
+            }) => {
+                anyhow::ensure!(
+                    tokens.len() == amounts.len(),
+                    "Ethereum FundsReceived malformed payload: tokens length {} != amounts length {}",
+                    tokens.len(),
+                    amounts.len()
+                );
+                let funds = tokens
+                    .iter()
+                    .zip(amounts.iter())
+                    .map(|(token, amount)| {
+                        Ok(BridgedAssetAmount {
+                            denom: token_address_to_denom(*token),
+                            amount: u256_to_u128(*amount)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
+                BridgeEvent::Regular {
+                    wallet: Wallet::from_ethereum(*sender),
+                    funds,
+                    keys: keys
+                        .iter()
+                        .map(|key| PublicKey::from_bytes(key.as_ref()))
+                        .collect::<Result<Vec<_>, _>>()?,
+                }
+            }
         };
 
         Ok(Message::Listener {
@@ -527,8 +552,11 @@ mod tests {
 
     #[test]
     fn funds_received_topic_hash_matches_constant() {
+        // To recalculate signature hash:
+        // cast keccak "FundsReceived(uint64,address,address[],uint256[],bytes[])"
+        // (in contracts/ethereum)
         const FUNDS_RECEIVED_EVENT_TOPIC0_HEX: &str =
-            "0x4ade6a296f99f38f840a2a880cc9a27cec9ee56ce8d56cd80d3350e3419ed44c";
+            "0x02bb338ef0fcb89993f4087b28532775e53951c8025a81666d399e7263389a6c";
         let expected = FUNDS_RECEIVED_EVENT_TOPIC0_HEX.parse::<B256>().unwrap();
         assert_eq!(FundsReceived::SIGNATURE_HASH, expected);
     }
@@ -540,6 +568,10 @@ mod tests {
         let sender = "0x1111111111111111111111111111111111111111"
             .parse::<Address>()
             .unwrap();
+        let token_a = "0x2222222222222222222222222222222222222222"
+            .parse::<Address>()
+            .unwrap();
+        let token_b = Address::ZERO;
 
         let event_id = 7u64;
         let mut event_id_topic = [0u8; 32];
@@ -547,10 +579,16 @@ mod tests {
 
         let mut sender_topic = [0u8; 32];
         sender_topic[12..].copy_from_slice(sender.as_slice());
-
-        let amount = U256::from(42u64);
-        let mut data = [0u8; 32];
-        data[0..32].copy_from_slice(&amount.to_be_bytes::<32>());
+        let amounts = vec![U256::from(42u64), U256::from(7u64)];
+        let tokens = vec![token_a, token_b];
+        let keys = vec![Bytes::from(vec![0x02; 33])];
+        let event = FundsReceived {
+            eventId: event_id,
+            sender,
+            tokens: tokens.clone(),
+            amounts: amounts.clone(),
+            keys: keys.clone(),
+        };
 
         let log_data = LogData::new(
             vec![
@@ -558,7 +596,7 @@ mod tests {
                 B256::from(event_id_topic),
                 B256::from(sender_topic),
             ],
-            Bytes::copy_from_slice(&data),
+            Bytes::from(event.encode_data()),
         )
         .unwrap();
         let log = Log {
@@ -573,7 +611,9 @@ mod tests {
 
         assert_eq!(decoded.eventId, event_id);
         assert_eq!(decoded.sender, sender);
-        assert_eq!(decoded.amount, amount);
+        assert_eq!(decoded.tokens, tokens);
+        assert_eq!(decoded.amounts, amounts);
+        assert_eq!(decoded.keys, keys);
     }
 
     #[test]
@@ -594,6 +634,62 @@ mod tests {
         };
 
         assert!(EthereumBridgeEvent::from_log(&log).unwrap().is_none());
+    }
+
+    #[test]
+    fn to_kolme_message_maps_eth_and_erc20_denoms() {
+        let event = EthereumBridgeEvent::FundsReceived(FundsReceived {
+            eventId: 9,
+            sender: "0x1111111111111111111111111111111111111111"
+                .parse::<Address>()
+                .unwrap(),
+            tokens: vec![
+                "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .parse::<Address>()
+                    .unwrap(),
+                Address::ZERO,
+            ],
+            amounts: vec![U256::from(5u64), U256::from(7u64)],
+            keys: vec![],
+        });
+
+        let message = event
+            .to_kolme_message::<()>(ExternalChain::EthereumLocal, BridgeEventId(9))
+            .unwrap();
+        let Message::Listener {
+            event: BridgeEvent::Regular { wallet, funds, .. },
+            ..
+        } = message
+        else {
+            panic!("unexpected message kind");
+        };
+
+        assert_eq!(
+            wallet,
+            Wallet("0x1111111111111111111111111111111111111111".to_owned())
+        );
+        assert_eq!(funds.len(), 2);
+        assert_eq!(funds[0].denom, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(funds[0].amount, 5);
+        assert_eq!(funds[1].denom, "eth");
+        assert_eq!(funds[1].amount, 7);
+    }
+
+    #[test]
+    fn to_kolme_message_rejects_mismatched_token_and_amount_lengths() {
+        let event = EthereumBridgeEvent::FundsReceived(FundsReceived {
+            eventId: 1,
+            sender: "0x1111111111111111111111111111111111111111"
+                .parse::<Address>()
+                .unwrap(),
+            tokens: vec![Address::ZERO],
+            amounts: vec![],
+            keys: vec![],
+        });
+
+        assert!(event
+            .to_kolme_message::<()>(ExternalChain::EthereumLocal, BridgeEventId(1))
+            .is_err());
     }
 
     #[test]

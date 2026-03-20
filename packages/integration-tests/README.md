@@ -18,3 +18,14 @@ dropped using `just drop-db run-tests`
 
 ## Solana-Cosmos bridge
 To run the Solana-Cosmos bridge test run the shell script: `sh solana-bridge-tests.sh bridge_transfer`.
+
+## Ethereum bridge notes
+
+- Deposit flow uses `regular(tokens, amounts, keys)`:
+  - ERC20: `approve(bridge, amount)` then `regular([token], [amount], keys)` with `msg.value = 0`.
+  - ETH: `regular([], [], keys)` with `msg.value = amount_wei`.
+- `regular(...)` input funds in calldata are ERC20-only; `token = address(0)` in `tokens` is rejected, ETH amount is in `msg.value`.
+- Plain ETH transfers to the bridge are unsupported and expected to revert.
+- In listener/submitter expectations, Ethereum denoms are normalized as:
+  - `eth` for native ETH
+  - lowercase `0x...` address for ERC20 tokens
