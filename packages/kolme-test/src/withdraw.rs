@@ -205,6 +205,7 @@ fn genesis_info(validator_set: ValidatorSet, pass_through_port: u16) -> GenesisI
         .insert_pass_through(ChainConfig {
             assets,
             bridge: BridgeContract::Deployed(pass_through_port.to_string()),
+            confirmation_depth: None,
         })
         .unwrap();
 

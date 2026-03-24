@@ -138,7 +138,16 @@ impl EthereumBridgeTestApp {
             );
         }
         chains
-            .insert_ethereum(EthereumChain::Local, ChainConfig { assets, bridge })
+            .insert_ethereum(
+                EthereumChain::Local,
+                ChainConfig {
+                    assets,
+                    bridge,
+                    confirmation_depth: Some(
+                        kolme::utils::ethereum::DEFAULT_ETHEREUM_CONFIRMATION_DEPTH,
+                    ),
+                },
+            )
             .unwrap();
 
         Self {
