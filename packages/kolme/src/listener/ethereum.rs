@@ -13,27 +13,12 @@ use futures_util::StreamExt;
 
 use super::get_next_bridge_event_id;
 
-const POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
+// Ethereum block times are typically >= 4s on public networks (e.g. ~12s on mainnet),
+// so polling every 4s significantly reduces RPC load with negligible freshness impact.
+// Keep local polling at 1s for fast dev/test feedback loops.
+const POLL_INTERVAL_LOCAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
+const POLL_INTERVAL_DEFAULT: tokio::time::Duration = tokio::time::Duration::from_secs(4);
 const WS_RETRY_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(30);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EthereumListenerMode {
-    Hybrid,
-    SubscriptionOnly,
-}
-
-impl EthereumListenerMode {
-    fn from_env_value(value: Option<&str>) -> Self {
-        match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
-            Some("subscription-only") => Self::SubscriptionOnly,
-            _ => Self::Hybrid,
-        }
-    }
-
-    fn from_env() -> Self {
-        Self::from_env_value(std::env::var("KOLME_ETH_LISTENER_MODE").ok().as_deref())
-    }
-}
 
 sol! {
     event FundsReceived(uint64 indexed eventId, address indexed sender, address[] tokens, uint256[] amounts, bytes[] keys);
@@ -147,7 +132,6 @@ pub async fn listen<App: KolmeApp>(
     contract: String,
 ) -> Result<()> {
     let chain: ExternalChain = ethereum_chain.into();
-    let mode = EthereumListenerMode::from_env();
     let contract: Address = contract
         .parse()
         .with_context(|| format!("Invalid Ethereum contract address: {contract}"))?;
@@ -167,19 +151,11 @@ pub async fn listen<App: KolmeApp>(
         "Beginning Ethereum listener loop on chain {chain:?}, contract {:#x}, next event ID: {next_bridge_event_id}, next block: {next_block}, first log index: {first_log_index:?}",
         contract.address()
     );
-    tracing::info!(
-        "Ethereum listener mode on chain {chain:?}: {:?} (env KOLME_ETH_LISTENER_MODE={})",
-        mode,
-        std::env::var("KOLME_ETH_LISTENER_MODE")
-            .as_deref()
-            .unwrap_or("<unset>")
-    );
 
     listen_with_ws_retry(
         &kolme,
         &secret,
         ethereum_chain,
-        mode,
         &contract,
         &mut next_bridge_event_id,
         &mut next_block,
@@ -204,44 +180,55 @@ async fn connect_ws(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
     ethereum_chain: EthereumChain,
-    mode: EthereumListenerMode,
     contract: &ContractInstance<P>,
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
 ) -> Result<()> {
     let chain: ExternalChain = ethereum_chain.into();
+    let contract_address = *contract.address();
+    let poll_interval = match ethereum_chain {
+        EthereumChain::Local => POLL_INTERVAL_LOCAL,
+        EthereumChain::Mainnet | EthereumChain::Sepolia => POLL_INTERVAL_DEFAULT,
+    };
     let mut next_ws_retry = tokio::time::Instant::now();
+    let mut subscriber_task: Option<tokio::task::JoinHandle<()>> = None;
 
     loop {
-        if tokio::time::Instant::now() >= next_ws_retry {
-            let ws_result = try_ws_session_once(
-                kolme,
-                secret,
-                ethereum_chain,
-                *contract.address(),
-                next_bridge_event_id,
-                next_block,
-                first_log_index,
-            )
-            .await;
-            if let Err(e) = ws_result {
-                if matches!(mode, EthereumListenerMode::SubscriptionOnly) {
-                    return Err(e);
+        // Every WS_RETRY_INTERVAL seconds, check whether subscriber task is running.
+        // If there is none, spawn one.
+        if subscriber_task
+            .as_ref()
+            .is_some_and(tokio::task::JoinHandle::is_finished)
+        {
+            if let Some(handle) = subscriber_task.take() {
+                if let Err(e) = handle.await {
+                    tracing::warn!(
+                        "Ethereum listener subscriber task join failed on chain {chain:?}: {e}"
+                    );
                 }
             }
-
-            next_ws_retry = tokio::time::Instant::now() + WS_RETRY_INTERVAL;
         }
 
-        if matches!(mode, EthereumListenerMode::SubscriptionOnly) {
-            tokio::time::sleep(POLL_INTERVAL).await;
-            continue;
+        if tokio::time::Instant::now() >= next_ws_retry {
+            next_ws_retry = tokio::time::Instant::now() + WS_RETRY_INTERVAL;
+            if subscriber_task.is_none() {
+                let kolme = kolme.clone();
+                let secret = secret.clone();
+                subscriber_task = Some(tokio::spawn(async move {
+                    if let Err(e) =
+                        try_ws_session_once(&kolme, &secret, ethereum_chain, contract_address).await
+                    {
+                        tracing::debug!(
+                            "Ethereum listener subscriber session ended on chain {chain:?}: {e}"
+                        );
+                    }
+                }));
+            }
         }
 
         listen_polling_once(
@@ -254,7 +241,7 @@ async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
             first_log_index,
         )
         .await?;
-        tokio::time::sleep(POLL_INTERVAL).await;
+        tokio::time::sleep(poll_interval).await;
     }
 }
 
@@ -263,9 +250,6 @@ async fn try_ws_session_once<App: KolmeApp>(
     secret: &SecretKey,
     ethereum_chain: EthereumChain,
     contract_address: Address,
-    next_bridge_event_id: &mut BridgeEventId,
-    next_block: &mut u64,
-    first_log_index: &mut Option<u64>,
 ) -> Result<()> {
     let chain: ExternalChain = ethereum_chain.into();
     let ws_contract = match connect_ws(ethereum_chain, contract_address).await {
@@ -286,17 +270,7 @@ async fn try_ws_session_once<App: KolmeApp>(
         }
     };
 
-    if let Err(e) = listen_with_subscription(
-        kolme,
-        secret,
-        chain,
-        &ws_contract,
-        next_bridge_event_id,
-        next_block,
-        first_log_index,
-    )
-    .await
-    {
+    if let Err(e) = listen_with_subscription(kolme, secret, chain, &ws_contract).await {
         tracing::warn!(
             "Ethereum listener subscription failed on chain {chain:?}, contract {:#x}: {e}; continuing with polling and retrying WS in {}s",
             ws_contract.address(),
@@ -366,33 +340,30 @@ pub async fn sanity_check_contract(
 }
 
 async fn listen_with_subscription<App: KolmeApp, P: Provider>(
-    kolme: &Kolme<App>,
-    secret: &SecretKey,
+    _kolme: &Kolme<App>,
+    _secret: &SecretKey,
     chain: ExternalChain,
     contract: &ContractInstance<P>,
-    next_bridge_event_id: &mut BridgeEventId,
-    next_block: &mut u64,
-    first_log_index: &mut Option<u64>,
 ) -> Result<()> {
     let filter = Filter::new()
-        .from_block(*next_block)
+        .from_block(BlockNumberOrTag::Latest)
         .address(*contract.address())
         .event_signature(FundsReceived::SIGNATURE_HASH);
     let sub = contract.provider().subscribe_logs(&filter).await?;
     let mut stream = sub.into_stream();
 
     while let Some(log) = stream.next().await {
-        if should_skip_log(&log, *next_block, *first_log_index) {
-            tracing::debug!("Skipping Ethereum subscription log: {:?}", log);
+        if log.removed {
             continue;
         }
-
-        process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
-
-        if let Some(block_number) = log.block_number {
-            *next_block = block_number;
+        if let Some(event) = EthereumBridgeEvent::from_log(&log)? {
+            tracing::debug!(
+                "Ethereum subscription observed event {} on chain {chain:?} at block {:?}, log index {:?}",
+                event.event_id(),
+                log.block_number,
+                log.log_index
+            );
         }
-        *first_log_index = log.log_index.map(|i| i.saturating_add(1));
     }
 
     Ok(())
@@ -407,14 +378,30 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
 ) -> Result<()> {
+    let confirmation_depth = kolme
+        .read()
+        .get_framework_state()
+        .get_chain_states()
+        .get(chain)
+        .ok()
+        .and_then(|state| state.config.confirmation_depth);
+
     let latest = contract.provider().get_block_number().await?;
-    if *next_block > latest {
+
+    let Some(confirmed_head) =
+        confirmation_depth.map_or(Some(latest), |depth| latest.checked_sub(depth))
+    else {
+        // edge case: total chain length is less than confirmation_depth
+        return Ok(());
+    };
+
+    if *next_block > confirmed_head {
         return Ok(());
     }
 
     let filter = Filter::new()
         .from_block(*next_block)
-        .to_block(latest)
+        .to_block(confirmed_head)
         .address(*contract.address());
 
     for log in contract.provider().get_logs(&filter).await? {
@@ -425,7 +412,7 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
         process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
     }
 
-    *next_block = latest.saturating_add(1);
+    *next_block = confirmed_head.saturating_add(1);
     *first_log_index = None;
     Ok(())
 }
@@ -695,37 +682,5 @@ mod tests {
     #[test]
     fn u256_to_u128_rejects_overflow() {
         assert!(u256_to_u128(U256::from(u128::MAX) + U256::from(1)).is_err());
-    }
-
-    #[test]
-    fn ethereum_listener_mode_parser_defaults_to_hybrid() {
-        assert_eq!(
-            EthereumListenerMode::from_env_value(None),
-            EthereumListenerMode::Hybrid
-        );
-        assert_eq!(
-            EthereumListenerMode::from_env_value(Some("")),
-            EthereumListenerMode::Hybrid
-        );
-        assert_eq!(
-            EthereumListenerMode::from_env_value(Some("hybrid")),
-            EthereumListenerMode::Hybrid
-        );
-    }
-
-    #[test]
-    fn ethereum_listener_mode_parser_accepts_subscription_only() {
-        assert_eq!(
-            EthereumListenerMode::from_env_value(Some("subscription-only")),
-            EthereumListenerMode::SubscriptionOnly
-        );
-        assert_eq!(
-            EthereumListenerMode::from_env_value(Some("  subscription-only ")),
-            EthereumListenerMode::SubscriptionOnly
-        );
-        assert_eq!(
-            EthereumListenerMode::from_env_value(Some("SUBSCRIPTION-ONLY")),
-            EthereumListenerMode::SubscriptionOnly
-        );
     }
 }
