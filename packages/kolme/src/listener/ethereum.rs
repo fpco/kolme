@@ -10,6 +10,7 @@ use alloy::{
     sol_types::SolEvent,
 };
 use futures_util::StreamExt;
+use std::collections::VecDeque;
 
 use super::get_next_bridge_event_id;
 
@@ -19,6 +20,15 @@ use super::get_next_bridge_event_id;
 const POLL_INTERVAL_LOCAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
 const POLL_INTERVAL_DEFAULT: tokio::time::Duration = tokio::time::Duration::from_secs(4);
 const WS_RETRY_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(30);
+const SUBSCRIBER_HINT_CAPACITY: usize = 256;
+
+#[derive(Clone, Copy, Debug)]
+struct SubscriberHint {
+    event_id: BridgeEventId,
+    block_number: u64,
+}
+
+type SubscriberHintState = Arc<tokio::sync::RwLock<VecDeque<SubscriberHint>>>;
 
 sol! {
     event FundsReceived(uint64 indexed eventId, address indexed sender, address[] tokens, uint256[] amounts, bytes[] keys);
@@ -146,6 +156,7 @@ pub async fn listen<App: KolmeApp>(
 
     let (mut next_block, mut first_log_index) =
         get_resume_cursor(&contract, next_bridge_event_id).await?;
+    let subscriber_hint: SubscriberHintState = Arc::new(tokio::sync::RwLock::new(VecDeque::new()));
 
     tracing::info!(
         "Beginning Ethereum listener loop on chain {chain:?}, contract {:#x}, next event ID: {next_bridge_event_id}, next block: {next_block}, first log index: {first_log_index:?}",
@@ -157,6 +168,7 @@ pub async fn listen<App: KolmeApp>(
         &secret,
         ethereum_chain,
         &contract,
+        &subscriber_hint,
         &mut next_bridge_event_id,
         &mut next_block,
         &mut first_log_index,
@@ -180,11 +192,13 @@ async fn connect_ws(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
     ethereum_chain: EthereumChain,
     contract: &ContractInstance<P>,
+    subscriber_hint: &SubscriberHintState,
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
@@ -219,9 +233,16 @@ async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
             if subscriber_task.is_none() {
                 let kolme = kolme.clone();
                 let secret = secret.clone();
+                let subscriber_hint = subscriber_hint.clone();
                 subscriber_task = Some(tokio::spawn(async move {
-                    if let Err(e) =
-                        try_ws_session_once(&kolme, &secret, ethereum_chain, contract_address).await
+                    if let Err(e) = try_ws_session_once(
+                        &kolme,
+                        &secret,
+                        ethereum_chain,
+                        contract_address,
+                        &subscriber_hint,
+                    )
+                    .await
                     {
                         tracing::debug!(
                             "Ethereum listener subscriber session ended on chain {chain:?}: {e}"
@@ -236,6 +257,7 @@ async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
             secret,
             chain,
             contract,
+            subscriber_hint,
             next_bridge_event_id,
             next_block,
             first_log_index,
@@ -250,6 +272,7 @@ async fn try_ws_session_once<App: KolmeApp>(
     secret: &SecretKey,
     ethereum_chain: EthereumChain,
     contract_address: Address,
+    subscriber_hint: &SubscriberHintState,
 ) -> Result<()> {
     let chain: ExternalChain = ethereum_chain.into();
     let ws_contract = match connect_ws(ethereum_chain, contract_address).await {
@@ -270,7 +293,9 @@ async fn try_ws_session_once<App: KolmeApp>(
         }
     };
 
-    if let Err(e) = listen_with_subscription(kolme, secret, chain, &ws_contract).await {
+    if let Err(e) =
+        listen_with_subscription(kolme, secret, chain, &ws_contract, subscriber_hint).await
+    {
         tracing::warn!(
             "Ethereum listener subscription failed on chain {chain:?}, contract {:#x}: {e}; continuing with polling and retrying WS in {}s",
             ws_contract.address(),
@@ -344,6 +369,7 @@ async fn listen_with_subscription<App: KolmeApp, P: Provider>(
     _secret: &SecretKey,
     chain: ExternalChain,
     contract: &ContractInstance<P>,
+    subscriber_hint: &SubscriberHintState,
 ) -> Result<()> {
     let filter = Filter::new()
         .from_block(BlockNumberOrTag::Latest)
@@ -357,6 +383,23 @@ async fn listen_with_subscription<App: KolmeApp, P: Provider>(
             continue;
         }
         if let Some(event) = EthereumBridgeEvent::from_log(&log)? {
+            if let Some(block_number) = log.block_number {
+                let mut hints = subscriber_hint.write().await;
+                hints.push_back(SubscriberHint {
+                    event_id: event.event_id(),
+                    block_number,
+                });
+                while hints.len() > SUBSCRIBER_HINT_CAPACITY {
+                    if let Some(evicted) = hints.pop_front() {
+                        tracing::debug!(
+                            "Ethereum subscriber hint queue full (capacity {}), evicting oldest hint: event_id={}, block_number={}",
+                            SUBSCRIBER_HINT_CAPACITY,
+                            evicted.event_id,
+                            evicted.block_number
+                        );
+                    }
+                }
+            }
             tracing::debug!(
                 "Ethereum subscription observed event {} on chain {chain:?} at block {:?}, log index {:?}",
                 event.event_id(),
@@ -369,11 +412,13 @@ async fn listen_with_subscription<App: KolmeApp, P: Provider>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn listen_polling_once<App: KolmeApp, P: Provider>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
     chain: ExternalChain,
     contract: &ContractInstance<P>,
+    subscriber_hint: &SubscriberHintState,
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
@@ -399,22 +444,100 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
         return Ok(());
     }
 
-    let filter = Filter::new()
-        .from_block(*next_block)
-        .to_block(confirmed_head)
-        .address(*contract.address());
-
-    for log in contract.provider().get_logs(&filter).await? {
-        if should_skip_log(&log, *next_block, *first_log_index) {
-            continue;
+    // Look if any hints were left by subscriber
+    let hinted_upper_bound = {
+        let mut hints = subscriber_hint.write().await;
+        while hints
+            .front()
+            .is_some_and(|hint| hint.event_id < *next_bridge_event_id)
+        {
+            hints.pop_front();
         }
+        match hints.front().copied() {
+            Some(hint)
+                if hint.event_id == *next_bridge_event_id
+                    && hint.block_number <= confirmed_head =>
+            {
+                hints.pop_front().map(|hint| hint.block_number)
+            }
+            _ => None,
+        }
+    };
+    let usable_hint = hinted_upper_bound.filter(|hint| *hint >= *next_block);
+    let expected_event_id = *next_bridge_event_id;
 
-        process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
+    if let Some(hint_block) = usable_hint {
+        // Try a direct probe on the hinted block first.
+        let fast_track_first_log_index = if hint_block == *next_block {
+            *first_log_index
+        } else {
+            None
+        };
+        let hinted_event_id = process_range(
+            contract,
+            kolme,
+            secret,
+            chain,
+            hint_block,
+            fast_track_first_log_index,
+            expected_event_id,
+            hint_block,
+        )
+        .await?;
+
+        if hinted_event_id != expected_event_id {
+            // Hint helped, the event was processed - lets do an early exit to get
+            // back in a next iteration
+            *next_bridge_event_id = hinted_event_id;
+            *next_block = hint_block.saturating_add(1);
+            *first_log_index = None;
+            return Ok(());
+        }
     }
 
+    // Hint missing or probe did not help; poll normally up to confirmed head.
+    *next_bridge_event_id = process_range(
+        contract,
+        kolme,
+        secret,
+        chain,
+        *next_block,
+        *first_log_index,
+        expected_event_id,
+        confirmed_head,
+    )
+    .await?;
     *next_block = confirmed_head.saturating_add(1);
     *first_log_index = None;
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_range<App: KolmeApp, P: Provider>(
+    contract: &ContractInstance<P>,
+    kolme: &Kolme<App>,
+    secret: &SecretKey,
+    chain: ExternalChain,
+    next_block: u64,
+    first_log_index: Option<u64>,
+    next_bridge_event_id: BridgeEventId,
+    to_block: u64,
+) -> Result<BridgeEventId> {
+    let filter = Filter::new()
+        .from_block(next_block)
+        .to_block(to_block)
+        .address(*contract.address());
+
+    let mut next_bridge_event_id = next_bridge_event_id;
+    for log in contract.provider().get_logs(&filter).await? {
+        if should_skip_log(&log, next_block, first_log_index) {
+            continue;
+        }
+
+        process_event(kolme, secret, chain, &log, &mut next_bridge_event_id).await?;
+    }
+
+    Ok(next_bridge_event_id)
 }
 
 fn should_skip_log(log: &Log, next_block: u64, first_log_index: Option<u64>) -> bool {
