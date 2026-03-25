@@ -143,9 +143,7 @@ impl EthereumBridgeTestApp {
                 ChainConfig {
                     assets,
                     bridge,
-                    confirmation_depth: Some(
-                        kolme::utils::ethereum::DEFAULT_ETHEREUM_CONFIRMATION_DEPTH,
-                    ),
+                    confirmation_depth: ConfirmationDepth::Disabled,
                 },
             )
             .unwrap();

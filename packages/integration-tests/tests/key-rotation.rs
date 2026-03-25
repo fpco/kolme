@@ -72,7 +72,7 @@ impl SampleKolmeApp {
                     bridge: BridgeContract::NeededCosmosBridge {
                         code_id: bridge_code_id,
                     },
-                    confirmation_depth: None,
+                    confirmation_depth: ConfirmationDepth::Disabled,
                 },
             )
             .unwrap();
@@ -109,7 +109,7 @@ impl SampleKolmeApp {
                     bridge: BridgeContract::NeededSolanaBridge {
                         program_id: BRIDGE_PUBKEY.to_string(),
                     },
-                    confirmation_depth: None,
+                    confirmation_depth: ConfirmationDepth::Disabled,
                 },
             )
             .unwrap();

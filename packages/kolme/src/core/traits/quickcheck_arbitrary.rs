@@ -1,6 +1,6 @@
 use crate::core::types::{
     AccountId, AccountNonce, AssetConfig, AssetId, AssetName, BridgeContract, ChainConfig,
-    ExternalChain, Wallet,
+    ConfirmationDepth, ExternalChain, Wallet,
 };
 use quickcheck::{Arbitrary, Gen};
 use std::collections::BTreeMap;
@@ -53,7 +53,14 @@ impl Arbitrary for ChainConfig {
         Self {
             assets: <BTreeMap<AssetName, AssetConfig>>::arbitrary(g),
             bridge: <BridgeContract>::arbitrary(g),
-            confirmation_depth: <Option<u64>>::arbitrary(g),
+            confirmation_depth: g
+                .choose(&[
+                    ConfirmationDepth::UseDefault,
+                    ConfirmationDepth::Disabled,
+                    ConfirmationDepth::Value(<u64>::arbitrary(g)),
+                ])
+                .unwrap()
+                .clone(),
         }
     }
 }

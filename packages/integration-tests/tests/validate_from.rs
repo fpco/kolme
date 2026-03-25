@@ -63,7 +63,7 @@ impl SampleKolmeApp {
                 ChainConfig {
                     assets,
                     bridge: BridgeContract::NeededCosmosBridge { code_id },
-                    confirmation_depth: None,
+                    confirmation_depth: ConfirmationDepth::Disabled,
                 },
             )
             .unwrap();

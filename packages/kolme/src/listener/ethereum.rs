@@ -1,4 +1,4 @@
-use crate::utils::ethereum::token_address_to_denom;
+use crate::utils::ethereum::{token_address_to_denom, DEFAULT_ETHEREUM_CONFIRMATION_DEPTH};
 use crate::*;
 use alloy::{
     contract::{ContractInstance, Interface},
@@ -429,7 +429,12 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
         .get_chain_states()
         .get(chain)
         .ok()
-        .and_then(|state| state.config.confirmation_depth);
+        .map(|state| match state.config.confirmation_depth {
+            ConfirmationDepth::UseDefault => Some(DEFAULT_ETHEREUM_CONFIRMATION_DEPTH),
+            ConfirmationDepth::Disabled => None,
+            ConfirmationDepth::Value(depth) => Some(depth),
+        })
+        .unwrap_or(Some(DEFAULT_ETHEREUM_CONFIRMATION_DEPTH));
 
     let latest = contract.provider().get_block_number().await?;
 
