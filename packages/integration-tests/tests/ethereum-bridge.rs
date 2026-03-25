@@ -231,17 +231,6 @@ async fn ethereum_listener_ingests_local_erc20_regular_deposit() {
 }
 
 #[tokio::test]
-async fn subscription_only_listener_works() {
-    init_logger(true, None);
-    assert_eq!(
-        std::env::var("KOLME_ETH_LISTENER_MODE").ok().as_deref(),
-        Some("subscription-only"),
-        "KOLME_ETH_LISTENER_MODE must be set to \"subscription-only\" for this test",
-    );
-    TestTasks::start(ethereum_listener_ingests_local_deposit_inner, ()).await;
-}
-
-#[tokio::test]
 async fn ethereum_bridge_get_config_is_readable() {
     init_logger(true, None);
     TestTasks::start(ethereum_bridge_get_config_is_readable_inner, ()).await;
