@@ -50,6 +50,7 @@ impl Arbitrary for AssetConfig {
 
 impl Arbitrary for ChainConfig {
     fn arbitrary(g: &mut Gen) -> Self {
+        let random_depth = <u64>::arbitrary(g);
         Self {
             assets: <BTreeMap<AssetName, AssetConfig>>::arbitrary(g),
             bridge: <BridgeContract>::arbitrary(g),
@@ -57,7 +58,7 @@ impl Arbitrary for ChainConfig {
                 .choose(&[
                     ConfirmationDepth::UseDefault,
                     ConfirmationDepth::Disabled,
-                    ConfirmationDepth::Value(<u64>::arbitrary(g)),
+                    ConfirmationDepth::Value(random_depth),
                 ])
                 .unwrap()
                 .clone(),

@@ -452,21 +452,7 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
     // Look if any hints were left by subscriber
     let hinted_upper_bound = {
         let mut hints = subscriber_hint.write().await;
-        while hints
-            .front()
-            .is_some_and(|hint| hint.event_id < *next_bridge_event_id)
-        {
-            hints.pop_front();
-        }
-        match hints.front().copied() {
-            Some(hint)
-                if hint.event_id == *next_bridge_event_id
-                    && hint.block_number <= confirmed_head =>
-            {
-                hints.pop_front().map(|hint| hint.block_number)
-            }
-            _ => None,
-        }
+        take_next_usable_hint_upper_bound(&mut hints, *next_bridge_event_id, confirmed_head)
     };
     let usable_hint = hinted_upper_bound.filter(|hint| *hint >= *next_block);
     let expected_event_id = *next_bridge_event_id;
@@ -515,6 +501,28 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
     *next_block = confirmed_head.saturating_add(1);
     *first_log_index = None;
     Ok(())
+}
+
+fn take_next_usable_hint_upper_bound(
+    hints: &mut VecDeque<SubscriberHint>,
+    next_bridge_event_id: BridgeEventId,
+    confirmed_head: u64,
+) -> Option<u64> {
+    while hints
+        .front()
+        .is_some_and(|hint| hint.event_id < next_bridge_event_id)
+    {
+        hints.pop_front();
+    }
+
+    match hints.front().copied() {
+        Some(hint)
+            if hint.event_id == next_bridge_event_id && hint.block_number <= confirmed_head =>
+        {
+            hints.pop_front().map(|hint| hint.block_number)
+        }
+        _ => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -664,6 +672,7 @@ fn u256_to_u128(value: U256) -> Result<u128> {
 mod tests {
     use super::*;
     use alloy::{primitives::B256, rpc::types::eth::Log};
+    use std::collections::VecDeque;
 
     #[test]
     fn funds_received_topic_hash_matches_constant() {
@@ -810,5 +819,55 @@ mod tests {
     #[test]
     fn u256_to_u128_rejects_overflow() {
         assert!(u256_to_u128(U256::from(u128::MAX) + U256::from(1)).is_err());
+    }
+
+    #[test]
+    fn hint_queue_drops_stale_then_uses_matching_confirmed_hint() {
+        let mut hints = VecDeque::from([
+            SubscriberHint {
+                event_id: BridgeEventId(1),
+                block_number: 10,
+            },
+            SubscriberHint {
+                event_id: BridgeEventId(2),
+                block_number: 12,
+            },
+        ]);
+
+        let upper_bound = take_next_usable_hint_upper_bound(&mut hints, BridgeEventId(2), 20);
+
+        assert_eq!(upper_bound, Some(12));
+        assert!(hints.is_empty());
+    }
+
+    #[test]
+    fn hint_queue_keeps_front_when_event_id_is_ahead_of_next() {
+        let mut hints = VecDeque::from([SubscriberHint {
+            event_id: BridgeEventId(3),
+            block_number: 8,
+        }]);
+
+        let upper_bound = take_next_usable_hint_upper_bound(&mut hints, BridgeEventId(2), 20);
+
+        assert_eq!(upper_bound, None);
+        assert_eq!(hints.len(), 1);
+        assert_eq!(
+            hints.front().map(|hint| hint.event_id),
+            Some(BridgeEventId(3))
+        );
+    }
+
+    #[test]
+    fn hint_queue_keeps_front_when_block_is_above_confirmed_head() {
+        let mut hints = VecDeque::from([SubscriberHint {
+            event_id: BridgeEventId(2),
+            block_number: 50,
+        }]);
+
+        let upper_bound = take_next_usable_hint_upper_bound(&mut hints, BridgeEventId(2), 20);
+
+        assert_eq!(upper_bound, None);
+        assert_eq!(hints.len(), 1);
+        assert_eq!(hints.front().map(|hint| hint.block_number), Some(50));
     }
 }
