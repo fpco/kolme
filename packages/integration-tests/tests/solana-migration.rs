@@ -51,7 +51,7 @@ impl SampleKolmeApp {
                     bridge: BridgeContract::NeededSolanaBridge {
                         program_id: BRIDGE_PUBKEY.to_string(),
                     },
-                    confirmation_depth: ConfirmationDepth::Disabled,
+                    confirmation_depth: None,
                 },
             )
             .unwrap();

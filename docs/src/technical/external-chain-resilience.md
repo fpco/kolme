@@ -15,7 +15,7 @@ Kolme minimizes reliance on external blockchains, ensuring applications remain o
 - **Validation**:
   - Listeners and approvers validate bridge events (e.g., deposits, withdrawals) as transactions, ensuring security without external chain dependency, per [Triadic Security Model](triadic-security.md).
   - For Ethereum, polling is the authoritative ingestion path; WebSocket subscription is used as an in-memory hint source for scan optimization, not as an ingestion mode.
-  - Ethereum polling applies `confirmation_depth` from chain config: `UseDefault` (Ethereum default), `Disabled` (no confirmation bound), or `Value(n)` (explicit depth).
+  - Ethereum polling applies `confirmation_depth` from chain config: `None` means no confirmation bound; `Some(n)` means explicit depth of `n` blocks.
 
 ## Bridge Contracts
 

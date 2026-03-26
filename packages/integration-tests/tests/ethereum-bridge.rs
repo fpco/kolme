@@ -111,12 +111,7 @@ const ETH_ASSET_ID: AssetId = AssetId(1);
 const ERC20_ASSET_ID: AssetId = AssetId(2);
 impl EthereumBridgeTestApp {
     fn new(validator: PublicKey, bridge: BridgeContract) -> Self {
-        Self::new_with_optional_erc20_and_confirmation_depth(
-            validator,
-            bridge,
-            None,
-            ConfirmationDepth::Disabled,
-        )
+        Self::new_with_optional_erc20_and_confirmation_depth(validator, bridge, None, None)
     }
 
     fn new_with_optional_erc20(
@@ -124,19 +119,14 @@ impl EthereumBridgeTestApp {
         bridge: BridgeContract,
         erc20_denom: Option<String>,
     ) -> Self {
-        Self::new_with_optional_erc20_and_confirmation_depth(
-            validator,
-            bridge,
-            erc20_denom,
-            ConfirmationDepth::Disabled,
-        )
+        Self::new_with_optional_erc20_and_confirmation_depth(validator, bridge, erc20_denom, None)
     }
 
     fn new_with_optional_erc20_and_confirmation_depth(
         validator: PublicKey,
         bridge: BridgeContract,
         erc20_denom: Option<String>,
-        confirmation_depth: ConfirmationDepth,
+        confirmation_depth: Option<u64>,
     ) -> Self {
         let mut chains = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
@@ -188,7 +178,7 @@ impl EthereumBridgeTestApp {
 
     fn with_needed_bridge_and_confirmation_depth(
         validator: PublicKey,
-        confirmation_depth: ConfirmationDepth,
+        confirmation_depth: Option<u64>,
     ) -> Self {
         Self::new_with_optional_erc20_and_confirmation_depth(
             validator,
@@ -357,10 +347,9 @@ async fn ethereum_listener_ingests_local_deposit_with_confirmation_depth_1_inner
     testtasks: TestTasks,
     (): (),
 ) {
-    let deployed =
-        deploy_bridge_with_kolme_with_confirmation_depth(&testtasks, ConfirmationDepth::Value(1))
-            .await
-            .expect("failed to deploy Ethereum bridge with kolme");
+    let deployed = deploy_bridge_with_kolme_with_confirmation_depth(&testtasks, Some(1))
+        .await
+        .expect("failed to deploy Ethereum bridge with kolme");
     let test_tx_amount: u128 = rand::thread_rng().gen_range(20u128..100u128);
     let provider = anvil_provider().expect("failed to build anvil provider");
     assert_anvil_identifiers_match(&provider)
@@ -648,7 +637,7 @@ async fn deploy_bridge_with_kolme(testtasks: &TestTasks) -> Result<DeployedBridg
 
 async fn deploy_bridge_with_kolme_with_confirmation_depth(
     testtasks: &TestTasks,
-    confirmation_depth: ConfirmationDepth,
+    confirmation_depth: Option<u64>,
 ) -> Result<DeployedBridge> {
     let validator = SecretKey::random();
     let signer = TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY.parse()?;

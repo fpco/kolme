@@ -51,7 +51,7 @@ impl SampleKolmeApp {
                 ChainConfig {
                     assets: BTreeMap::new(),
                     bridge: BridgeContract::NeededCosmosBridge { code_id },
-                    confirmation_depth: ConfirmationDepth::Disabled,
+                    confirmation_depth: None,
                 },
             )
             .unwrap();

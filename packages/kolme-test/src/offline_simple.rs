@@ -62,7 +62,7 @@ impl Default for SampleKolmeApp {
                     bridge: BridgeContract::NeededCosmosBridge {
                         code_id: OSMOSIS_TESTNET_CODE_ID,
                     },
-                    confirmation_depth: ConfirmationDepth::Disabled,
+                    confirmation_depth: None,
                 },
             )
             .unwrap();
@@ -74,7 +74,7 @@ impl Default for SampleKolmeApp {
                     bridge: BridgeContract::NeededCosmosBridge {
                         code_id: NEUTRON_TESTNET_CODE_ID,
                     },
-                    confirmation_depth: ConfirmationDepth::Disabled,
+                    confirmation_depth: None,
                 },
             )
             .unwrap();
