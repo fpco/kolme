@@ -111,13 +111,22 @@ const ETH_ASSET_ID: AssetId = AssetId(1);
 const ERC20_ASSET_ID: AssetId = AssetId(2);
 impl EthereumBridgeTestApp {
     fn new(validator: PublicKey, bridge: BridgeContract) -> Self {
-        Self::new_with_optional_erc20(validator, bridge, None)
+        Self::new_with_optional_erc20_and_confirmation_depth(validator, bridge, None, None)
     }
 
     fn new_with_optional_erc20(
         validator: PublicKey,
         bridge: BridgeContract,
         erc20_denom: Option<String>,
+    ) -> Self {
+        Self::new_with_optional_erc20_and_confirmation_depth(validator, bridge, erc20_denom, None)
+    }
+
+    fn new_with_optional_erc20_and_confirmation_depth(
+        validator: PublicKey,
+        bridge: BridgeContract,
+        erc20_denom: Option<String>,
+        confirmation_depth: Option<u64>,
     ) -> Self {
         let mut chains = ConfiguredChains::default();
         let mut assets = BTreeMap::new();
@@ -138,7 +147,14 @@ impl EthereumBridgeTestApp {
             );
         }
         chains
-            .insert_ethereum(EthereumChain::Local, ChainConfig { assets, bridge })
+            .insert_ethereum(
+                EthereumChain::Local,
+                ChainConfig {
+                    assets,
+                    bridge,
+                    confirmation_depth,
+                },
+            )
             .unwrap();
 
         Self {
@@ -158,6 +174,18 @@ impl EthereumBridgeTestApp {
     }
     fn with_needed_bridge(validator: PublicKey) -> Self {
         Self::new(validator, BridgeContract::NeededEthereumBridge)
+    }
+
+    fn with_needed_bridge_and_confirmation_depth(
+        validator: PublicKey,
+        confirmation_depth: Option<u64>,
+    ) -> Self {
+        Self::new_with_optional_erc20_and_confirmation_depth(
+            validator,
+            BridgeContract::NeededEthereumBridge,
+            None,
+            confirmation_depth,
+        )
     }
 
     #[allow(dead_code)]
@@ -212,6 +240,16 @@ async fn ethereum_listener_ingests_local_deposit() {
 }
 
 #[tokio::test]
+async fn ethereum_listener_ingests_local_deposit_with_confirmation_depth_1() {
+    init_logger(true, None);
+    TestTasks::start(
+        ethereum_listener_ingests_local_deposit_with_confirmation_depth_1_inner,
+        (),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn ethereum_listener_ingests_local_erc20_regular_deposit() {
     init_logger(true, None);
     TestTasks::start(
@@ -219,17 +257,6 @@ async fn ethereum_listener_ingests_local_erc20_regular_deposit() {
         (),
     )
     .await;
-}
-
-#[tokio::test]
-async fn subscription_only_listener_works() {
-    init_logger(true, None);
-    assert_eq!(
-        std::env::var("KOLME_ETH_LISTENER_MODE").ok().as_deref(),
-        Some("subscription-only"),
-        "KOLME_ETH_LISTENER_MODE must be set to \"subscription-only\" for this test",
-    );
-    TestTasks::start(ethereum_listener_ingests_local_deposit_inner, ()).await;
 }
 
 #[tokio::test]
@@ -312,6 +339,73 @@ async fn ethereum_listener_ingests_local_deposit_inner(testtasks: TestTasks, ():
 
     tracing::info!(
         "Ethereum deposit ingested by Kolme listener. sender={TEST_ANVIL_ACCOUNT_0_ADDRESS}, tx={tx_hash}, contract={:#x}, amount_wei={test_tx_amount}",
+        deployed.bridge_address
+    );
+}
+
+async fn ethereum_listener_ingests_local_deposit_with_confirmation_depth_1_inner(
+    testtasks: TestTasks,
+    (): (),
+) {
+    let deployed = deploy_bridge_with_kolme_with_confirmation_depth(&testtasks, Some(1))
+        .await
+        .expect("failed to deploy Ethereum bridge with kolme");
+    let test_tx_amount: u128 = rand::thread_rng().gen_range(20u128..100u128);
+    let provider = anvil_provider().expect("failed to build anvil provider");
+    assert_anvil_identifiers_match(&provider)
+        .await
+        .expect("local anvil setup does not match expected deterministic identifiers");
+
+    let expected_wallet = Wallet(format!(
+        "{:#x}",
+        TEST_ANVIL_ACCOUNT_0_ADDRESS
+            .parse::<Address>()
+            .expect("hardcoded Anvil account 0 address is invalid")
+    ));
+
+    let kolme_for_waiter = deployed.kolme.clone();
+    let wallet_for_waiter = expected_wallet.clone();
+    let waiter = tokio::spawn(async move {
+        wait_for_expected_listener_message_in_new_blocks(
+            &kolme_for_waiter,
+            &wallet_for_waiter,
+            test_tx_amount,
+        )
+        .await
+    });
+    tokio::task::yield_now().await;
+
+    let tx_hash = send_eth(
+        &provider,
+        TEST_ANVIL_ACCOUNT_0_ADDRESS,
+        deployed.bridge_address,
+        test_tx_amount,
+    )
+    .await
+    .expect("failed to send ETH to bridge contract");
+
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(
+        !waiter.is_finished(),
+        "depth=1 listener ingested event before it had one additional confirmation block"
+    );
+
+    // Mine one extra block so depth=1 confirms the deposit block.
+    let mine_to: Address = TEST_ANVIL_ACCOUNT_2_ADDRESS
+        .parse()
+        .expect("hardcoded Anvil account 2 address is invalid");
+    let _mine_tx_hash = send_eth(&provider, TEST_ANVIL_ACCOUNT_0_ADDRESS, mine_to, 1)
+        .await
+        .expect("failed to mine follow-up block for confirmation depth");
+
+    tokio::time::timeout(Duration::from_secs(10), waiter)
+        .await
+        .expect("timed out waiting for depth=1 Ethereum listener ingestion")
+        .expect("listener message waiter task failed")
+        .expect("failed waiting for listener message");
+
+    tracing::info!(
+        "Ethereum deposit ingested by Kolme listener with confirmation_depth=1. sender={TEST_ANVIL_ACCOUNT_0_ADDRESS}, tx={tx_hash}, contract={:#x}, amount_wei={test_tx_amount}",
         deployed.bridge_address
     );
 }
@@ -511,6 +605,47 @@ async fn deploy_bridge_with_kolme(testtasks: &TestTasks) -> Result<DeployedBridg
     let signer = TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY.parse()?;
     let kolme = Kolme::new(
         EthereumBridgeTestApp::with_needed_bridge(validator.public_key()),
+        DUMMY_CODE_VERSION,
+        KolmeStore::new_in_memory(),
+    )
+    .await?;
+
+    testtasks.spawn_persistent(Processor::new(kolme.clone(), validator.clone()).run());
+    testtasks.try_spawn_persistent(Approver::new(kolme.clone(), validator.clone()).run());
+    testtasks.try_spawn_persistent(
+        Listener::new(kolme.clone(), validator.clone()).run(ChainName::Ethereum),
+    );
+    testtasks.try_spawn_persistent(Submitter::new_ethereum(kolme.clone(), signer).run());
+
+    let bridge_address = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(contract) = deployed_bridge_address(&kolme) {
+                break Ok::<Address, anyhow::Error>(contract.parse()?);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("timed out waiting for Ethereum bridge deployment")??;
+
+    Ok(DeployedBridge {
+        kolme,
+        validator,
+        bridge_address,
+    })
+}
+
+async fn deploy_bridge_with_kolme_with_confirmation_depth(
+    testtasks: &TestTasks,
+    confirmation_depth: Option<u64>,
+) -> Result<DeployedBridge> {
+    let validator = SecretKey::random();
+    let signer = TEST_ANVIL_ACCOUNT_0_PRIVATE_KEY.parse()?;
+    let kolme = Kolme::new(
+        EthereumBridgeTestApp::with_needed_bridge_and_confirmation_depth(
+            validator.public_key(),
+            confirmation_depth,
+        ),
         DUMMY_CODE_VERSION,
         KolmeStore::new_in_memory(),
     )

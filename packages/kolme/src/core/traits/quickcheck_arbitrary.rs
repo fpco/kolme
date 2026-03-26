@@ -53,6 +53,7 @@ impl Arbitrary for ChainConfig {
         Self {
             assets: <BTreeMap<AssetName, AssetConfig>>::arbitrary(g),
             bridge: <BridgeContract>::arbitrary(g),
+            confirmation_depth: <Option<u64>>::arbitrary(g),
         }
     }
 }

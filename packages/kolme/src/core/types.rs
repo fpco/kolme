@@ -399,6 +399,11 @@ impl MerkleDeserialize for ExternalChain {
 pub struct ChainConfig {
     pub assets: BTreeMap<AssetName, AssetConfig>,
     pub bridge: BridgeContract,
+    /// Confirmation depth for bridge event ingestion.
+    ///
+    /// This setting is generic for future chain listeners, but currently enforced
+    /// only by the Ethereum listener.
+    pub confirmation_depth: Option<u64>,
 }
 impl ChainConfig {
     fn into_state(self) -> ChainState {
@@ -582,10 +587,19 @@ impl MerkleDeserialize for PendingBridgeEvent {
 }
 
 impl MerkleSerialize for ChainConfig {
+    fn merkle_version() -> usize {
+        1
+    }
+
     fn merkle_serialize(&self, serializer: &mut MerkleSerializer) -> Result<(), MerkleSerialError> {
-        let ChainConfig { assets, bridge } = self;
+        let ChainConfig {
+            assets,
+            bridge,
+            confirmation_depth,
+        } = self;
         serializer.store(assets)?;
         serializer.store(bridge)?;
+        serializer.store(confirmation_depth)?;
         Ok(())
     }
 }
@@ -593,11 +607,16 @@ impl MerkleSerialize for ChainConfig {
 impl MerkleDeserialize for ChainConfig {
     fn merkle_deserialize(
         deserializer: &mut MerkleDeserializer,
-        _version: usize,
+        version: usize,
     ) -> Result<Self, MerkleSerialError> {
         Ok(Self {
             assets: deserializer.load()?,
             bridge: deserializer.load()?,
+            confirmation_depth: if version == 0 {
+                None
+            } else {
+                deserializer.load()?
+            },
         })
     }
 }
@@ -2219,6 +2238,7 @@ mod tests {
     use super::*;
     #[cfg(feature = "ethereum")]
     use alloy::primitives::Address;
+    use merkle_map::{MerkleDeserialize, MerkleSerialize, MerkleSerializer};
     use quickcheck::quickcheck;
     use rust_decimal::dec;
     use std::collections::BTreeMap;
@@ -2343,6 +2363,64 @@ mod tests {
     }
 
     #[test]
+    fn chain_config_confirmation_depth_defaults_to_none_when_omitted_in_json() {
+        let raw = r#"{"assets":{},"bridge":"NeededEthereumBridge"}"#;
+        let config: ChainConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(config.confirmation_depth, None);
+    }
+
+    #[test]
+    fn chain_config_confirmation_depth_honors_explicit_json_override() {
+        let raw = r#"{"assets":{},"bridge":"NeededEthereumBridge","confirmation_depth":42}"#;
+        let config: ChainConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(config.confirmation_depth, Some(42));
+    }
+
+    #[derive(Clone)]
+    struct LegacyChainConfig {
+        assets: BTreeMap<AssetName, AssetConfig>,
+        bridge: BridgeContract,
+    }
+
+    impl MerkleSerialize for LegacyChainConfig {
+        fn merkle_serialize(
+            &self,
+            serializer: &mut MerkleSerializer,
+        ) -> Result<(), MerkleSerialError> {
+            serializer.store(&self.assets)?;
+            serializer.store(&self.bridge)?;
+            Ok(())
+        }
+    }
+
+    impl MerkleDeserialize for LegacyChainConfig {
+        fn merkle_deserialize(
+            deserializer: &mut merkle_map::MerkleDeserializer,
+            _version: usize,
+        ) -> Result<Self, MerkleSerialError> {
+            Ok(Self {
+                assets: deserializer.load()?,
+                bridge: deserializer.load()?,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn chain_config_merkle_v0_defaults_confirmation_depth_to_none() {
+        let mut store = MerkleMemoryStore::default();
+        let legacy = LegacyChainConfig {
+            assets: BTreeMap::new(),
+            bridge: BridgeContract::NeededEthereumBridge,
+        };
+        let hash = merkle_map::save(&mut store, &legacy).await.unwrap();
+        let config = merkle_map::load::<ChainConfig, _>(&mut store, hash)
+            .await
+            .unwrap();
+
+        assert_eq!(config.confirmation_depth, None);
+    }
+
+    #[test]
     fn ethereum_chain_conversions() {
         assert_eq!(
             ExternalChain::from(EthereumChain::Mainnet),
@@ -2408,12 +2486,14 @@ mod tests {
             bridge: BridgeContract::Deployed(
                 "0x0123456789abcdef0123456789abcdef01234567".to_owned(),
             ),
+            confirmation_depth: None,
         };
         let mainnet_config = ChainConfig {
             assets: BTreeMap::new(),
             bridge: BridgeContract::Deployed(
                 "0x89abcdef0123456789abcdef0123456789abcdef".to_owned(),
             ),
+            confirmation_depth: None,
         };
 
         chains
@@ -2434,14 +2514,17 @@ mod tests {
         let invalid_address = ChainConfig {
             assets: BTreeMap::new(),
             bridge: BridgeContract::Deployed("not-an-address".to_owned()),
+            confirmation_depth: None,
         };
         let wrong_contract_kind = ChainConfig {
             assets: BTreeMap::new(),
             bridge: BridgeContract::NeededCosmosBridge { code_id: 1 },
+            confirmation_depth: None,
         };
         let ethereum_kind = ChainConfig {
             assets: BTreeMap::new(),
             bridge: BridgeContract::NeededEthereumBridge,
+            confirmation_depth: None,
         };
 
         assert!(chains
@@ -2479,6 +2562,7 @@ mod tests {
             bridge: BridgeContract::Deployed(
                 "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_owned(),
             ),
+            confirmation_depth: None,
         };
 
         chains
@@ -2496,6 +2580,24 @@ mod tests {
         assert!(inserted.assets.contains_key(&AssetName(
             "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()
         )));
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn insert_ethereum_preserves_explicit_confirmation_depth_override() {
+        let mut chains = ConfiguredChains::default();
+        let config = ChainConfig {
+            assets: BTreeMap::new(),
+            bridge: BridgeContract::NeededEthereumBridge,
+            confirmation_depth: Some(7),
+        };
+
+        chains
+            .insert_ethereum(EthereumChain::Local, config)
+            .unwrap();
+
+        let inserted = chains.0.get(&ExternalChain::EthereumLocal).unwrap();
+        assert_eq!(inserted.confirmation_depth, Some(7));
     }
 
     #[cfg(feature = "ethereum")]
@@ -2531,6 +2633,7 @@ mod tests {
                 },
             )]),
             bridge: BridgeContract::NeededEthereumBridge,
+            confirmation_depth: None,
         };
         let action = ExecAction::Transfer {
             chain: ExternalChain::EthereumLocal,
@@ -2567,6 +2670,7 @@ mod tests {
                 },
             )]),
             bridge: BridgeContract::NeededEthereumBridge,
+            confirmation_depth: None,
         };
         let action = ExecAction::Transfer {
             chain: ExternalChain::EthereumLocal,

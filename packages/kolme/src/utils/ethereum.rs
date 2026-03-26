@@ -17,6 +17,7 @@ pub const ACTION_EXECUTE: u8 = 0;
 pub const ACTION_SELF_REPLACE: u8 = 1;
 pub const ACTION_NEW_SET: u8 = 2;
 pub const ETH_NATIVE_DENOM: &str = "eth";
+pub const DEFAULT_ETHEREUM_CONFIRMATION_DEPTH: u64 = 30;
 
 sol! {
     struct ExecuteAction {
