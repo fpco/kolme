@@ -212,7 +212,7 @@ async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
     let mut next_ws_retry = tokio::time::Instant::now();
     let mut subscriber_task: Option<tokio::task::JoinHandle<()>> = None;
 
-    loop {
+    let result = loop {
         // Every WS_RETRY_INTERVAL seconds, check whether subscriber task is running.
         // If there is none, spawn one.
         if subscriber_task
@@ -252,7 +252,7 @@ async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
             }
         }
 
-        listen_polling_once(
+        if let Err(e) = listen_polling_once(
             kolme,
             secret,
             chain,
@@ -262,9 +262,25 @@ async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
             next_block,
             first_log_index,
         )
-        .await?;
+        .await
+        {
+            break Err(e);
+        }
         tokio::time::sleep(poll_interval).await;
+    };
+
+    if let Some(handle) = subscriber_task.take() {
+        handle.abort();
+        if let Err(e) = handle.await {
+            if !e.is_cancelled() {
+                tracing::warn!(
+                    "Ethereum listener subscriber task join failed on chain {chain:?}: {e}"
+                );
+            }
+        }
     }
+
+    result
 }
 
 async fn try_ws_session_once<App: KolmeApp>(
