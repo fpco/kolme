@@ -1,6 +1,15 @@
 pub use rand::rngs::ThreadRng;
 
+use chacha20poly1305::{
+    aead::{AeadInPlace, KeyInit},
+    ChaCha20Poly1305, Key, Nonce, Tag,
+};
+use k256::ecdh::{diffie_hellman, EphemeralSecret, SharedSecret};
+use rand::{CryptoRng, RngCore};
+use sha2::Sha256;
 use std::{fmt::Display, str::FromStr};
+
+const KEY_DERIVATION_INFO: &[u8] = b"kolme/chacha20poly1305-v1";
 
 /// Newtype wrapper around [k256::PublicKey] to provide consistent serialization.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,6 +63,41 @@ impl PublicKey {
                 source,
                 bytes: bytes.to_owned(),
             })
+    }
+
+    /// Encrypt data so it can be decrypted by the corresponding [SecretKey].
+    pub fn encrypt(
+        &self,
+        plaintext: impl AsRef<[u8]>,
+    ) -> Result<EncryptedMessage, EncryptionError> {
+        self.encrypt_with(&mut rand::thread_rng(), plaintext)
+    }
+
+    pub fn encrypt_with(
+        &self,
+        rng: &mut (impl CryptoRng + RngCore),
+        plaintext: impl AsRef<[u8]>,
+    ) -> Result<EncryptedMessage, EncryptionError> {
+        let ephemeral_secret = EphemeralSecret::random(rng);
+        let ephemeral_public_key: PublicKey = k256::PublicKey::from(&ephemeral_secret).into();
+        let shared_secret = ephemeral_secret.diffie_hellman(&self.0);
+        let key = derive_encryption_key(&shared_secret)?;
+
+        let mut nonce_bytes = [0u8; 12];
+        rng.fill_bytes(&mut nonce_bytes);
+
+        let cipher = ChaCha20Poly1305::new(&key);
+        let mut buffer = plaintext.as_ref().to_vec();
+        let tag = cipher
+            .encrypt_in_place_detached(Nonce::from_slice(&nonce_bytes), &[], &mut buffer)
+            .map_err(|_| EncryptionError::EncryptionFailed)?;
+
+        Ok(EncryptedMessage {
+            ephemeral_public_key,
+            nonce: nonce_bytes,
+            ciphertext: buffer,
+            tag: tag.into(),
+        })
     }
 }
 
@@ -157,6 +201,24 @@ pub enum SecretKeyError {
     InvalidBytes { source: k256::elliptic_curve::Error },
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum EncryptionError {
+    #[error("Key derivation failed")]
+    KeyDerivationFailed,
+    #[error("Encryption failed")]
+    EncryptionFailed,
+    #[error("Decryption failed")]
+    DecryptionFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EncryptedMessage {
+    pub ephemeral_public_key: PublicKey,
+    pub nonce: [u8; 12],
+    pub ciphertext: Vec<u8>,
+    pub tag: [u8; 16],
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct SecretKey(k256::SecretKey);
 
@@ -215,6 +277,23 @@ impl SecretKey {
     pub fn reveal_as_hex(&self) -> String {
         hex::encode(self.0.to_bytes())
     }
+
+    pub fn decrypt(&self, message: &EncryptedMessage) -> Result<Vec<u8>, EncryptionError> {
+        let shared_secret = diffie_hellman(
+            self.0.to_nonzero_scalar(),
+            message.ephemeral_public_key.0.as_affine(),
+        );
+        let key = derive_encryption_key(&shared_secret)?;
+
+        let cipher = ChaCha20Poly1305::new(&key);
+        let mut buffer = message.ciphertext.clone();
+        let tag = Tag::from_slice(&message.tag);
+        cipher
+            .decrypt_in_place_detached(Nonce::from_slice(&message.nonce), &[], &mut buffer, tag)
+            .map_err(|_| EncryptionError::DecryptionFailed)?;
+
+        Ok(buffer)
+    }
 }
 
 impl FromStr for SecretKey {
@@ -229,6 +308,15 @@ impl std::fmt::Debug for SecretKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str("SecretKey(contents redacted)")
     }
+}
+
+fn derive_encryption_key(shared_secret: &SharedSecret) -> Result<Key, EncryptionError> {
+    let hkdf = shared_secret.extract::<Sha256>(None);
+    let mut okm = [0u8; 32];
+    hkdf.expand(KEY_DERIVATION_INFO, &mut okm)
+        .map_err(|_| EncryptionError::KeyDerivationFailed)?;
+
+    Ok(Key::clone_from_slice(&okm))
 }
 
 mod sigerr {
@@ -414,5 +502,44 @@ impl From<k256::ecdsa::RecoveryId> for RecoveryId {
 impl SignatureWithRecovery {
     pub fn validate(&self, msg: &[u8]) -> Result<PublicKey, PublicKeyError> {
         PublicKey::recover_from_msg(msg, &self.sig, self.recid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let receiver = SecretKey::random();
+        let plaintext = b"hello world";
+
+        let encrypted = receiver.public_key().encrypt(plaintext).unwrap();
+        let decrypted = receiver.decrypt(&encrypted).unwrap();
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn encrypt_is_randomized() {
+        let receiver = SecretKey::random();
+        let plaintext = b"stable text";
+
+        let first = receiver.public_key().encrypt(plaintext).unwrap();
+        let second = receiver.public_key().encrypt(plaintext).unwrap();
+
+        assert_ne!(first.nonce, second.nonce);
+        assert_ne!(first.ciphertext, second.ciphertext);
+        assert_ne!(first.ephemeral_public_key, second.ephemeral_public_key);
+    }
+
+    #[test]
+    fn tampering_fails() {
+        let receiver = SecretKey::random();
+        let mut encrypted = receiver.public_key().encrypt(b"super secret").unwrap();
+
+        encrypted.ciphertext[0] ^= 0b0000_0001;
+
+        assert!(receiver.decrypt(&encrypted).is_err());
     }
 }
