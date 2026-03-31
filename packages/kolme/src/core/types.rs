@@ -2146,6 +2146,10 @@ pub enum LogBridgeEvent {
         bridge_event_id: BridgeEventId,
         account_id: AccountId,
     },
+    Signed {
+        wallet: Wallet,
+        action_id: BridgeActionId,
+    },
 }
 
 /// Whether we validate data loads during block processing.
