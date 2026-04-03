@@ -79,6 +79,7 @@ impl Default for SolanaCosmosBridgeApp {
                     bridge: BridgeContract::NeededCosmosBridge {
                         code_id: OSMOSIS_CODE_ID,
                     },
+                    confirmation_depth: None,
                 },
             )
             .unwrap();
@@ -100,6 +101,7 @@ impl Default for SolanaCosmosBridgeApp {
                     bridge: BridgeContract::NeededSolanaBridge {
                         program_id: "7Y2ftN9nSf4ubzRDiUvcENMeV4S695JEFpYtqdt836pW".into(),
                     },
+                    confirmation_depth: None,
                 },
             )
             .unwrap();

@@ -92,6 +92,7 @@ impl SixSigmaApp {
                     bridge: BridgeContract::NeededCosmosBridge {
                         code_id: LOCALOSMOSIS_CODE_ID,
                     },
+                    confirmation_depth: None,
                 },
             )
             .unwrap();
@@ -123,6 +124,7 @@ impl SixSigmaApp {
                     bridge: BridgeContract::NeededSolanaBridge {
                         program_id: "7Y2ftN9nSf4ubzRDiUvcENMeV4S695JEFpYtqdt836pW".into(),
                     },
+                    confirmation_depth: None,
                 },
             )
             .unwrap();
@@ -152,6 +154,7 @@ impl SixSigmaApp {
             .insert_pass_through(ChainConfig {
                 assets,
                 bridge: BridgeContract::Deployed("12345".to_string()),
+                confirmation_depth: None,
             })
             .unwrap();
 

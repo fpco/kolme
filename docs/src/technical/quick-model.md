@@ -9,7 +9,7 @@ Kolme is an appchain framework: each app runs on its own public chain, with app 
 - Block production is processor-authoritative for liveness; safety is enforced operationally via quorum governance (e.g., key rotation/replacement), not autonomous fork competition.
 - State is split into framework state (balances, nonces, validator sets, proposals, chain version) and app state; both are hash-committed in blocks and updated atomically per transaction.
 - Security roles: listeners (observe external-chain bridge events), processor (executes/blocks), approvers (authorize outbound bridge actions), submitters (best-effort relayers that broadcast approved actions externally).
-- Listeners and approvers are quorum multisig sets using aggregated individual signatures (not threshold crypto), with chain-specific finality handling (e.g., Solana finalized commitment); there is no generic configurable N-block confirmation-depth rule in current code.
+- Listeners and approvers are quorum multisig sets using aggregated individual signatures (not threshold crypto), with chain-specific finality handling (e.g., Solana finalized commitment).
 - Inbound bridge flow: external event -> listener quorum confirmation -> processor ingests and executes on Kolme.
 - Outbound bridge flow: Kolme emits ordered bridge actions -> approver quorum signs -> submitter relays to external chain.
 - Admin/security changes require 2 of 3 validator groups (processor, listeners, approvers).
