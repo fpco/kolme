@@ -1,19 +1,56 @@
+use crate::utils::ethereum::token_address_to_denom;
 use crate::*;
 use alloy::{
     contract::{ContractInstance, Interface},
     json_abi::JsonAbi,
     primitives::{Address, B256, U256},
-    providers::Provider,
+    providers::{DynProvider, Provider, ProviderBuilder, WsConnect},
     rpc::types::eth::{BlockNumberOrTag, Filter, Log},
     sol,
     sol_types::SolEvent,
 };
+use futures_util::StreamExt;
 
 use super::get_next_bridge_event_id;
 
-const ETH_NATIVE_DENOM: &str = "eth";
+const POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(1);
+const WS_RETRY_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(30);
 
-sol! { event FundsReceived(uint64 indexed eventId, address indexed sender, uint256 amount); }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EthereumListenerMode {
+    Hybrid,
+    SubscriptionOnly,
+}
+
+impl EthereumListenerMode {
+    fn from_env_value(value: Option<&str>) -> Self {
+        match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+            Some("subscription-only") => Self::SubscriptionOnly,
+            _ => Self::Hybrid,
+        }
+    }
+
+    fn from_env() -> Self {
+        Self::from_env_value(std::env::var("KOLME_ETH_LISTENER_MODE").ok().as_deref())
+    }
+}
+
+sol! {
+    event FundsReceived(uint64 indexed eventId, address indexed sender, address[] tokens, uint256[] amounts, bytes[] keys);
+
+    #[sol(rpc)]
+    contract Bridge {
+        function get_config() external view returns (
+            bytes processor,
+            bytes[] listeners,
+            uint16 neededListeners,
+            bytes[] approvers,
+            uint16 neededApprovers,
+            uint64 configNextEventId,
+            uint64 configNextActionId
+        );
+    }
+}
 
 enum EthereumBridgeEvent {
     FundsReceived(FundsReceived),
@@ -22,7 +59,9 @@ enum EthereumBridgeEvent {
 impl EthereumBridgeEvent {
     fn event_id(&self) -> BridgeEventId {
         match self {
-            Self::FundsReceived(FundsReceived { eventId, .. }) => BridgeEventId(*eventId),
+            Self::FundsReceived(FundsReceived {
+                eventId: event_id, ..
+            }) => BridgeEventId(*event_id),
         }
     }
 
@@ -58,14 +97,39 @@ impl EthereumBridgeEvent {
         event_id: BridgeEventId,
     ) -> Result<Message<AppMessage>, KolmeError> {
         let event = match self {
-            Self::FundsReceived(FundsReceived { sender, amount, .. }) => BridgeEvent::Regular {
-                wallet: Wallet(format!("{:#x}", sender)),
-                funds: vec![BridgedAssetAmount {
-                    denom: ETH_NATIVE_DENOM.to_owned(),
-                    amount: u256_to_u128(*amount)?,
-                }],
-                keys: vec![],
-            },
+            Self::FundsReceived(FundsReceived {
+                sender,
+                tokens,
+                amounts,
+                keys,
+                ..
+            }) => {
+                anyhow::ensure!(
+                    tokens.len() == amounts.len(),
+                    "Ethereum FundsReceived malformed payload: tokens length {} != amounts length {}",
+                    tokens.len(),
+                    amounts.len()
+                );
+                let funds = tokens
+                    .iter()
+                    .zip(amounts.iter())
+                    .map(|(token, amount)| {
+                        Ok(BridgedAssetAmount {
+                            denom: token_address_to_denom(*token),
+                            amount: u256_to_u128(*amount)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
+                BridgeEvent::Regular {
+                    wallet: Wallet::from_ethereum(*sender),
+                    funds,
+                    keys: keys
+                        .iter()
+                        .map(|key| PublicKey::from_bytes(key.as_ref()))
+                        .collect::<Result<Vec<_>, _>>()?,
+                }
+            }
         };
 
         Ok(Message::Listener {
@@ -79,11 +143,11 @@ impl EthereumBridgeEvent {
 pub async fn listen<App: KolmeApp>(
     kolme: Kolme<App>,
     secret: SecretKey,
-    chain: EthereumChain,
+    ethereum_chain: EthereumChain,
     contract: String,
 ) -> Result<(), KolmeError> {
-    let ethereum_chain = chain;
     let chain: ExternalChain = ethereum_chain.into();
+    let mode = EthereumListenerMode::from_env();
     let contract: Address = contract
         .parse()
         .map_err(|error| KolmeError::InvalidEthereumContractAddress { contract, error })?;
@@ -103,23 +167,238 @@ pub async fn listen<App: KolmeApp>(
         "Beginning Ethereum listener loop on chain {chain:?}, contract {:#x}, next event ID: {next_bridge_event_id}, next block: {next_block}, first log index: {first_log_index:?}",
         contract.address()
     );
+    tracing::info!(
+        "Ethereum listener mode on chain {chain:?}: {:?} (env KOLME_ETH_LISTENER_MODE={})",
+        mode,
+        std::env::var("KOLME_ETH_LISTENER_MODE")
+            .as_deref()
+            .unwrap_or("<unset>")
+    );
+
+    listen_with_ws_retry(
+        &kolme,
+        &secret,
+        ethereum_chain,
+        mode,
+        &contract,
+        &mut next_bridge_event_id,
+        &mut next_block,
+        &mut first_log_index,
+    )
+    .await
+}
+
+async fn connect_ws(
+    chain: EthereumChain,
+    contract: Address,
+) -> Result<ContractInstance<DynProvider>> {
+    let ws_url = chain.parse_default_ws_url()?;
+    let provider = ProviderBuilder::new()
+        .connect_ws(WsConnect::new(ws_url.as_str()))
+        .await?;
+
+    Ok(ContractInstance::new(
+        contract,
+        DynProvider::new(provider),
+        Interface::new(JsonAbi::default()),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
+    kolme: &Kolme<App>,
+    secret: &SecretKey,
+    ethereum_chain: EthereumChain,
+    mode: EthereumListenerMode,
+    contract: &ContractInstance<P>,
+    next_bridge_event_id: &mut BridgeEventId,
+    next_block: &mut u64,
+    first_log_index: &mut Option<u64>,
+) -> Result<()> {
+    let chain: ExternalChain = ethereum_chain.into();
+    let mut next_ws_retry = tokio::time::Instant::now();
 
     loop {
-        listen_once(
-            &kolme,
-            &secret,
+        if tokio::time::Instant::now() >= next_ws_retry {
+            let ws_result = try_ws_session_once(
+                kolme,
+                secret,
+                ethereum_chain,
+                *contract.address(),
+                next_bridge_event_id,
+                next_block,
+                first_log_index,
+            )
+            .await;
+            if let Err(e) = ws_result {
+                if matches!(mode, EthereumListenerMode::SubscriptionOnly) {
+                    return Err(e);
+                }
+            }
+
+            next_ws_retry = tokio::time::Instant::now() + WS_RETRY_INTERVAL;
+        }
+
+        if matches!(mode, EthereumListenerMode::SubscriptionOnly) {
+            tokio::time::sleep(POLL_INTERVAL).await;
+            continue;
+        }
+
+        listen_polling_once(
+            kolme,
+            secret,
             chain,
-            &contract,
-            &mut next_bridge_event_id,
-            &mut next_block,
-            &mut first_log_index,
+            contract,
+            next_bridge_event_id,
+            next_block,
+            first_log_index,
         )
         .await?;
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
 
-async fn listen_once<App: KolmeApp, P: Provider>(
+async fn try_ws_session_once<App: KolmeApp>(
+    kolme: &Kolme<App>,
+    secret: &SecretKey,
+    ethereum_chain: EthereumChain,
+    contract_address: Address,
+    next_bridge_event_id: &mut BridgeEventId,
+    next_block: &mut u64,
+    first_log_index: &mut Option<u64>,
+) -> Result<()> {
+    let chain: ExternalChain = ethereum_chain.into();
+    let ws_contract = match connect_ws(ethereum_chain, contract_address).await {
+        Ok(ws_contract) => {
+            tracing::info!(
+                "Ethereum listener subscribing to logs on chain {chain:?}, contract {:#x}",
+                ws_contract.address()
+            );
+            ws_contract
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Ethereum listener could not establish WebSocket subscription on chain {chain:?}, contract {:#x}: {e}; continuing with polling and retrying WS in {}s",
+                contract_address,
+                WS_RETRY_INTERVAL.as_secs()
+            );
+            return Err(e);
+        }
+    };
+
+    if let Err(e) = listen_with_subscription(
+        kolme,
+        secret,
+        chain,
+        &ws_contract,
+        next_bridge_event_id,
+        next_block,
+        first_log_index,
+    )
+    .await
+    {
+        tracing::warn!(
+            "Ethereum listener subscription failed on chain {chain:?}, contract {:#x}: {e}; continuing with polling and retrying WS in {}s",
+            ws_contract.address(),
+            WS_RETRY_INTERVAL.as_secs()
+        );
+        return Err(e);
+    }
+
+    tracing::warn!(
+        "Ethereum listener subscription ended on chain {chain:?}, contract {:#x}; continuing with polling and retrying WS in {}s",
+        ws_contract.address(),
+        WS_RETRY_INTERVAL.as_secs()
+    );
+    anyhow::bail!(
+        "Ethereum listener subscription ended on chain {chain:?}, contract {:#x}",
+        ws_contract.address()
+    );
+}
+
+pub async fn sanity_check_contract(
+    provider: &DynProvider,
+    contract: &str,
+    info: &GenesisInfo,
+) -> Result<()> {
+    let address: Address = contract
+        .parse()
+        .with_context(|| format!("Invalid Ethereum contract address: {contract}"))?;
+    let code = provider.get_code_at(address).await?;
+    anyhow::ensure!(
+        !code.is_empty(),
+        "Ethereum contract {contract} has no bytecode deployed"
+    );
+
+    let bridge = Bridge::new(address, provider.clone());
+    let Bridge::get_configReturn {
+        processor,
+        listeners,
+        neededListeners: needed_listeners,
+        approvers,
+        neededApprovers: needed_approvers,
+        configNextEventId: _,
+        configNextActionId: _,
+    } = bridge.get_config().call().await?;
+
+    anyhow::ensure!(
+        PublicKey::from_bytes(&processor)? == info.validator_set.processor,
+        "Ethereum processor key mismatch"
+    );
+    anyhow::ensure!(
+        decode_validator_keys(&listeners)? == info.validator_set.listeners,
+        "Ethereum listener set mismatch"
+    );
+    anyhow::ensure!(
+        needed_listeners == info.validator_set.needed_listeners,
+        "Ethereum needed listener quorum mismatch"
+    );
+    anyhow::ensure!(
+        decode_validator_keys(&approvers)? == info.validator_set.approvers,
+        "Ethereum approver set mismatch"
+    );
+    anyhow::ensure!(
+        needed_approvers == info.validator_set.needed_approvers,
+        "Ethereum needed approver quorum mismatch"
+    );
+
+    Ok(())
+}
+
+async fn listen_with_subscription<App: KolmeApp, P: Provider>(
+    kolme: &Kolme<App>,
+    secret: &SecretKey,
+    chain: ExternalChain,
+    contract: &ContractInstance<P>,
+    next_bridge_event_id: &mut BridgeEventId,
+    next_block: &mut u64,
+    first_log_index: &mut Option<u64>,
+) -> Result<()> {
+    let filter = Filter::new()
+        .from_block(*next_block)
+        .address(*contract.address())
+        .event_signature(FundsReceived::SIGNATURE_HASH);
+    let sub = contract.provider().subscribe_logs(&filter).await?;
+    let mut stream = sub.into_stream();
+
+    while let Some(log) = stream.next().await {
+        if should_skip_log(&log, *next_block, *first_log_index) {
+            tracing::debug!("Skipping Ethereum subscription log: {:?}", log);
+            continue;
+        }
+
+        process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
+
+        if let Some(block_number) = log.block_number {
+            *next_block = block_number;
+        }
+        *first_log_index = log.log_index.map(|i| i.saturating_add(1));
+    }
+
+    Ok(())
+}
+
+async fn listen_polling_once<App: KolmeApp, P: Provider>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
     chain: ExternalChain,
@@ -139,18 +418,8 @@ async fn listen_once<App: KolmeApp, P: Provider>(
         .address(*contract.address());
 
     for log in contract.provider().get_logs(&filter).await? {
-        if log.removed {
+        if should_skip_log(&log, *next_block, *first_log_index) {
             continue;
-        }
-
-        if let Some(min_log_index) = *first_log_index {
-            if log.block_number == Some(*next_block)
-                && log
-                    .log_index
-                    .is_some_and(|log_index| log_index < min_log_index)
-            {
-                continue;
-            }
         }
 
         process_event(kolme, secret, chain, &log, next_bridge_event_id).await?;
@@ -159,6 +428,24 @@ async fn listen_once<App: KolmeApp, P: Provider>(
     *next_block = latest.saturating_add(1);
     *first_log_index = None;
     Ok(())
+}
+
+fn should_skip_log(log: &Log, next_block: u64, first_log_index: Option<u64>) -> bool {
+    if log.removed {
+        return true;
+    }
+
+    if let Some(min_log_index) = first_log_index {
+        if log.block_number == Some(next_block)
+            && log
+                .log_index
+                .is_some_and(|log_index| log_index < min_log_index)
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 async fn get_resume_cursor<P: Provider>(
@@ -216,6 +503,13 @@ fn event_id_topic(event_id: BridgeEventId) -> B256 {
     B256::from(bytes)
 }
 
+/// Converts `bytes[]` returned by contract's get_config() into something we can compare
+fn decode_validator_keys(keys: &[alloy::primitives::Bytes]) -> Result<BTreeSet<PublicKey>> {
+    keys.iter()
+        .map(|key| PublicKey::from_bytes(key.as_ref()).map_err(anyhow::Error::from))
+        .collect()
+}
+
 async fn process_event<App: KolmeApp>(
     kolme: &Kolme<App>,
     secret: &SecretKey,
@@ -258,8 +552,11 @@ mod tests {
 
     #[test]
     fn funds_received_topic_hash_matches_constant() {
+        // To recalculate signature hash:
+        // cast keccak "FundsReceived(uint64,address,address[],uint256[],bytes[])"
+        // (in contracts/ethereum)
         const FUNDS_RECEIVED_EVENT_TOPIC0_HEX: &str =
-            "0x4ade6a296f99f38f840a2a880cc9a27cec9ee56ce8d56cd80d3350e3419ed44c";
+            "0x02bb338ef0fcb89993f4087b28532775e53951c8025a81666d399e7263389a6c";
         let expected = FUNDS_RECEIVED_EVENT_TOPIC0_HEX.parse::<B256>().unwrap();
         assert_eq!(FundsReceived::SIGNATURE_HASH, expected);
     }
@@ -271,6 +568,10 @@ mod tests {
         let sender = "0x1111111111111111111111111111111111111111"
             .parse::<Address>()
             .unwrap();
+        let token_a = "0x2222222222222222222222222222222222222222"
+            .parse::<Address>()
+            .unwrap();
+        let token_b = Address::ZERO;
 
         let event_id = 7u64;
         let mut event_id_topic = [0u8; 32];
@@ -278,10 +579,16 @@ mod tests {
 
         let mut sender_topic = [0u8; 32];
         sender_topic[12..].copy_from_slice(sender.as_slice());
-
-        let amount = U256::from(42u64);
-        let mut data = [0u8; 32];
-        data[0..32].copy_from_slice(&amount.to_be_bytes::<32>());
+        let amounts = vec![U256::from(42u64), U256::from(7u64)];
+        let tokens = vec![token_a, token_b];
+        let keys = vec![Bytes::from(vec![0x02; 33])];
+        let event = FundsReceived {
+            eventId: event_id,
+            sender,
+            tokens: tokens.clone(),
+            amounts: amounts.clone(),
+            keys: keys.clone(),
+        };
 
         let log_data = LogData::new(
             vec![
@@ -289,7 +596,7 @@ mod tests {
                 B256::from(event_id_topic),
                 B256::from(sender_topic),
             ],
-            Bytes::copy_from_slice(&data),
+            Bytes::from(event.encode_data()),
         )
         .unwrap();
         let log = Log {
@@ -304,7 +611,9 @@ mod tests {
 
         assert_eq!(decoded.eventId, event_id);
         assert_eq!(decoded.sender, sender);
-        assert_eq!(decoded.amount, amount);
+        assert_eq!(decoded.tokens, tokens);
+        assert_eq!(decoded.amounts, amounts);
+        assert_eq!(decoded.keys, keys);
     }
 
     #[test]
@@ -328,7 +637,95 @@ mod tests {
     }
 
     #[test]
+    fn to_kolme_message_maps_eth_and_erc20_denoms() {
+        let event = EthereumBridgeEvent::FundsReceived(FundsReceived {
+            eventId: 9,
+            sender: "0x1111111111111111111111111111111111111111"
+                .parse::<Address>()
+                .unwrap(),
+            tokens: vec![
+                "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .parse::<Address>()
+                    .unwrap(),
+                Address::ZERO,
+            ],
+            amounts: vec![U256::from(5u64), U256::from(7u64)],
+            keys: vec![],
+        });
+
+        let message = event
+            .to_kolme_message::<()>(ExternalChain::EthereumLocal, BridgeEventId(9))
+            .unwrap();
+        let Message::Listener {
+            event: BridgeEvent::Regular { wallet, funds, .. },
+            ..
+        } = message
+        else {
+            panic!("unexpected message kind");
+        };
+
+        assert_eq!(
+            wallet,
+            Wallet("0x1111111111111111111111111111111111111111".to_owned())
+        );
+        assert_eq!(funds.len(), 2);
+        assert_eq!(funds[0].denom, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(funds[0].amount, 5);
+        assert_eq!(funds[1].denom, "eth");
+        assert_eq!(funds[1].amount, 7);
+    }
+
+    #[test]
+    fn to_kolme_message_rejects_mismatched_token_and_amount_lengths() {
+        let event = EthereumBridgeEvent::FundsReceived(FundsReceived {
+            eventId: 1,
+            sender: "0x1111111111111111111111111111111111111111"
+                .parse::<Address>()
+                .unwrap(),
+            tokens: vec![Address::ZERO],
+            amounts: vec![],
+            keys: vec![],
+        });
+
+        assert!(event
+            .to_kolme_message::<()>(ExternalChain::EthereumLocal, BridgeEventId(1))
+            .is_err());
+    }
+
+    #[test]
     fn u256_to_u128_rejects_overflow() {
         assert!(u256_to_u128(U256::from(u128::MAX) + U256::from(1)).is_err());
+    }
+
+    #[test]
+    fn ethereum_listener_mode_parser_defaults_to_hybrid() {
+        assert_eq!(
+            EthereumListenerMode::from_env_value(None),
+            EthereumListenerMode::Hybrid
+        );
+        assert_eq!(
+            EthereumListenerMode::from_env_value(Some("")),
+            EthereumListenerMode::Hybrid
+        );
+        assert_eq!(
+            EthereumListenerMode::from_env_value(Some("hybrid")),
+            EthereumListenerMode::Hybrid
+        );
+    }
+
+    #[test]
+    fn ethereum_listener_mode_parser_accepts_subscription_only() {
+        assert_eq!(
+            EthereumListenerMode::from_env_value(Some("subscription-only")),
+            EthereumListenerMode::SubscriptionOnly
+        );
+        assert_eq!(
+            EthereumListenerMode::from_env_value(Some("  subscription-only ")),
+            EthereumListenerMode::SubscriptionOnly
+        );
+        assert_eq!(
+            EthereumListenerMode::from_env_value(Some("SUBSCRIPTION-ONLY")),
+            EthereumListenerMode::SubscriptionOnly
+        );
     }
 }

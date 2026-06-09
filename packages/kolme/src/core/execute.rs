@@ -343,7 +343,8 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
                     let config = &mut self.framework_state.chains.get_mut(chain)?.config;
                     match config.bridge {
                         BridgeContract::NeededCosmosBridge { .. }
-                        | BridgeContract::NeededSolanaBridge { .. } => (),
+                        | BridgeContract::NeededSolanaBridge { .. }
+                        | BridgeContract::NeededEthereumBridge => (),
                         BridgeContract::Deployed(_) => {
                             return Err(KolmeError::BridgeAlreadyDeployed(chain));
                         }
@@ -434,7 +435,9 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .pending_actions
             .get_mut(&action_id)
             .ok_or(KolmeError::CannotApproveMissingBridgeAction { chain, action_id })?;
-        let key = signature.validate(action.payload.as_bytes())?;
+           
+        let payload = action.payload_bytes_to_sign(chain)?;
+        let key = signature.validate(&payload)?;
         // Using config.as_ref() instead of framework_state.get_config to work around
         // a borrow conflict with the mutable borrow above
         if !self
@@ -485,7 +488,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             return Err(KolmeError::ProcessorAlreadyApproved);
         }
 
-        let payload = action.payload.as_bytes();
+        let payload = action.payload_bytes_to_sign(chain)?;
         let processor_key = processor.validate(payload)?;
         let expected = self.framework_state.validator_set.as_ref().processor;
 

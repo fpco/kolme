@@ -1351,6 +1351,12 @@ impl<App: KolmeApp> KolmeRead<App> {
                         validator_set: self.get_framework_state().get_validator_set().clone(),
                     });
                 }
+                BridgeContract::NeededEthereumBridge => {
+                    return Some(GenesisAction::InstantiateEthereum {
+                        chain: chain.to_ethereum_chain().unwrap(),
+                        validator_set: self.get_framework_state().get_validator_set().clone(),
+                    });
+                }
                 BridgeContract::Deployed(_) => (),
             }
         }

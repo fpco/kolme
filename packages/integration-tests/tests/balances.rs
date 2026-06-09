@@ -185,6 +185,7 @@ async fn test_balances_inner(testtasks: TestTasks, (): ()) {
     {
         BridgeContract::NeededCosmosBridge { .. } => unreachable!(),
         BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
+        BridgeContract::NeededEthereumBridge => unreachable!(),
         BridgeContract::Deployed(addr) => addr.parse().unwrap(),
     };
     let contract = cosmos.make_contract(contract);

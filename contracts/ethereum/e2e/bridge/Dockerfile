@@ -1,4 +1,6 @@
-FROM ubuntu:24.04 AS foundry
+FROM ubuntu:24.04@sha256:0d39fcc8335d6d74d5502f6df2d30119ff4790ebbb60b364818d5112d9e3e932 AS foundry
+
+# check for fresh version hash here: https://hub.docker.com/_/ubuntu
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates git jq && \
@@ -18,7 +20,7 @@ RUN curl -L https://github.com/ethereum/solidity/releases/download/v0.8.30/solc-
 
 ENV PATH="/root/.foundry/bin:${PATH}"
 
-FROM foundry AS state_builder
+FROM foundry AS contract_builder
 
 WORKDIR /app
 
@@ -27,18 +29,20 @@ ARG ANVIL_MNEMONIC="test test test test test test test test test test test junk"
 COPY foundry.toml foundry.lock ./
 COPY lib ./lib
 COPY src ./src
-COPY e2e/bridge/bootstrap-state.sh /usr/local/bin/bootstrap-state.sh
 
 # Build contract artifacts inside the image.
 RUN forge build --use /usr/local/bin/solc
 
-# Bootstrap chain state and deploy Bridge.
-RUN chmod +x /usr/local/bin/bootstrap-state.sh
-RUN /usr/local/bin/bootstrap-state.sh
-
 FROM foundry
 
-COPY --from=state_builder /bootstrap /bootstrap
+WORKDIR /app
+
+ARG ANVIL_MNEMONIC="test test test test test test test test test test test junk"
+
+RUN mkdir -p /bootstrap && \
+    printf "%s" "${ANVIL_MNEMONIC}" > /bootstrap/mnemonic.txt
+
+COPY --from=contract_builder /app/out /app/out
 COPY e2e/bridge/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh

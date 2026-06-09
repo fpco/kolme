@@ -181,6 +181,7 @@ impl<App: KolmeApp> Listener<App> {
                 let expected_code_id = match config.bridge {
                     BridgeContract::NeededCosmosBridge { code_id } => code_id,
                     BridgeContract::NeededSolanaBridge { .. } => unreachable!(),
+                    BridgeContract::NeededEthereumBridge => unreachable!(),
                     BridgeContract::Deployed(_) => {
                         return Err(KolmeError::ContractAlreadyDeployed(chain.into()));
                     }
@@ -209,9 +210,18 @@ impl<App: KolmeApp> Listener<App> {
             }
             #[cfg(not(feature = "solana"))]
             ChainKind::Solana(_) => Ok(()),
-            ChainKind::Ethereum(_) => {
-                return Err(KolmeError::EthereumListenerContractChecksNotImplemented);
+            #[cfg(feature = "ethereum")]
+            ChainKind::Ethereum(chain) => {
+                let provider = kolme.get_ethereum_client(chain).await?;
+                ethereum::sanity_check_contract(
+                    &provider,
+                    contract,
+                    self.kolme.get_app().genesis_info(),
+                )
+                .await
             }
+            #[cfg(not(feature = "ethereum"))]
+            ChainKind::Ethereum(_) => Ok(()),
             #[cfg(feature = "pass_through")]
             ChainKind::PassThrough => {
                 return Err(KolmeError::UnexpectedPassThroughContract);
@@ -247,7 +257,8 @@ impl<App: KolmeApp> Listener<App> {
 
             match &state.config.bridge {
                 BridgeContract::NeededCosmosBridge { .. }
-                | BridgeContract::NeededSolanaBridge { .. } => return None,
+                | BridgeContract::NeededSolanaBridge { .. }
+                | BridgeContract::NeededEthereumBridge => return None,
                 BridgeContract::Deployed(contract) => {
                     res.insert(chain, contract.clone());
                 }

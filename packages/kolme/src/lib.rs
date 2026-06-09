@@ -13,7 +13,12 @@ pub(crate) mod listener;
 #[cfg(feature = "pass_through")]
 pub mod pass_through;
 mod processor;
-#[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
+#[cfg(any(
+    feature = "solana",
+    feature = "cosmwasm",
+    feature = "ethereum",
+    feature = "pass_through"
+))]
 mod submitter;
 pub mod testtasks;
 mod upgrader;
@@ -37,7 +42,12 @@ pub use processor::Processor;
 pub use rust_decimal::Decimal;
 pub use shared::debug::*;
 pub use shared::{cryptography::*, types::*};
-#[cfg(any(feature = "solana", feature = "cosmwasm", feature = "pass_through"))]
+#[cfg(any(
+    feature = "solana",
+    feature = "cosmwasm",
+    feature = "ethereum",
+    feature = "pass_through"
+))]
 pub use submitter::Submitter;
 pub use upgrader::Upgrader;
 

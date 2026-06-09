@@ -33,6 +33,7 @@ impl Arbitrary for BridgeContract {
             BridgeContract::NeededSolanaBridge {
                 program_id: <String>::arbitrary(g),
             },
+            BridgeContract::NeededEthereumBridge,
             BridgeContract::Deployed(<String>::arbitrary(g)),
         ];
         g.choose(&values).unwrap().clone()
