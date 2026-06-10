@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
+use crate::KolmeError;
 use alloy::{
     network::TransactionBuilder,
     primitives::Address,
@@ -9,10 +10,8 @@ use alloy::{
     sol,
     sol_types::SolConstructor,
 };
-use anyhow::Context;
-use serde::Deserialize;
-
 use base64::Engine;
+use serde::Deserialize;
 
 use crate::{EthereumChain, PublicKey, SignatureWithRecovery, ValidatorSet};
 
@@ -53,27 +52,25 @@ fn bridge_artifact_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BRIDGE_ARTIFACT_PATH)
 }
 
-fn parse_bridge_create_bytecode_str(json: &str) -> anyhow::Result<Vec<u8>> {
-    let artifact: FoundryArtifact =
-        serde_json::from_str(json).context("failed to parse Bridge.json artifact")?;
-
+fn parse_bridge_create_bytecode_str(json: &str) -> Result<Vec<u8>, KolmeError> {
+    let artifact: FoundryArtifact = serde_json::from_str(json)?;
     let object = artifact.bytecode.object.trim();
-    anyhow::ensure!(
-        !object.is_empty(),
-        "Bridge.json artifact contains empty bytecode.object"
-    );
+
+    if object.is_empty() {
+        return Err(KolmeError::EmptyEthereumBridgeBytecodeObject);
+    }
 
     hex::decode(object.trim_start_matches("0x"))
-        .context("Bridge.json artifact contains invalid hex in bytecode.object")
+        .map_err(KolmeError::InvalidEthereumBridgeBytecodeHex)
 }
 
-pub(super) fn load_bridge_create_bytecode() -> anyhow::Result<Vec<u8>> {
+pub(super) fn load_bridge_create_bytecode() -> Result<Vec<u8>, KolmeError> {
     let path = bridge_artifact_path();
-    let artifact = fs::read_to_string(&path).with_context(|| {
-        format!(
-            "failed to read Ethereum bridge artifact at {}. Run `just build-ethereum-contract` first",
-            path.display()
-        )
+    let artifact = fs::read_to_string(&path).map_err(|error| {
+        KolmeError::FailedToReadEthereumBridgeArtifact {
+            path: path.clone(),
+            error,
+        }
     })?;
 
     parse_bridge_create_bytecode_str(&artifact)
@@ -108,7 +105,7 @@ fn build_bridge_initcode_with_create_bytecode(
     initcode
 }
 
-fn build_bridge_initcode(validator_set: &ValidatorSet) -> anyhow::Result<Vec<u8>> {
+fn build_bridge_initcode(validator_set: &ValidatorSet) -> Result<Vec<u8>, KolmeError> {
     Ok(build_bridge_initcode_with_create_bytecode(
         &load_bridge_create_bytecode()?,
         validator_set,
@@ -119,9 +116,8 @@ pub(super) async fn instantiate(
     chain: EthereumChain,
     signer: PrivateKeySigner,
     validator_set: &ValidatorSet,
-) -> anyhow::Result<String> {
-    let url = reqwest::Url::parse(chain.default_rpc_url())
-        .with_context(|| format!("Invalid default Ethereum RPC URL for {chain:?}"))?;
+) -> Result<String, KolmeError> {
+    let url = reqwest::Url::parse(chain.default_rpc_url())?;
     let provider = ProviderBuilder::new().wallet(signer).connect_http(url);
     let receipt = provider
         .send_transaction(
@@ -132,19 +128,18 @@ pub(super) async fn instantiate(
         .await?;
     let address = receipt
         .contract_address
-        .context("Ethereum deployment transaction did not return a contract address")?;
+        .ok_or(KolmeError::EthereumDeploymentMissingContractAddress)?;
     Ok(format!("{address:#x}"))
 }
 
 /// Converts Kolme internal ECDSA signature format into Ethereum expected wire
 /// format (r||s||v, v=27/28)
-fn to_ethereum_signature(sig: SignatureWithRecovery) -> anyhow::Result<Vec<u8>> {
+fn to_ethereum_signature(sig: SignatureWithRecovery) -> Result<Vec<u8>, KolmeError> {
     let mut out = sig.sig.to_bytes();
     let recid = sig.recid.to_byte();
-    anyhow::ensure!(
-        recid <= 1,
-        "Invalid Ethereum recovery id {recid}, expected 0 or 1"
-    );
+    if recid > 1 {
+        return Err(KolmeError::InvalidEthereumRecoveryId(recid));
+    }
     out.push(recid + 27);
     Ok(out)
 }
@@ -160,17 +155,15 @@ fn prepare_execute_signed_args(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: &str,
-) -> anyhow::Result<ExecuteSignedArgs> {
-    let payload = base64::engine::general_purpose::STANDARD
-        .decode(payload_b64)
-        .context("Failed to decode Ethereum bridge action payload from base64")?;
+) -> Result<ExecuteSignedArgs, KolmeError> {
+    let payload = base64::engine::general_purpose::STANDARD.decode(payload_b64)?;
 
     let processor = to_ethereum_signature(processor)?;
     let approvers = approvals
         .values()
         .copied()
         .map(to_ethereum_signature)
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, KolmeError>>()?;
 
     Ok(ExecuteSignedArgs {
         payload,
@@ -186,17 +179,22 @@ pub(super) async fn execute(
     processor: SignatureWithRecovery,
     approvals: &BTreeMap<PublicKey, SignatureWithRecovery>,
     payload_b64: &str,
-) -> anyhow::Result<String> {
+) -> Result<String, KolmeError> {
     let ExecuteSignedArgs {
         payload,
         processor,
         approvers,
     } = prepare_execute_signed_args(processor, approvals, payload_b64)?;
 
-    let url = reqwest::Url::parse(chain.default_rpc_url())
-        .with_context(|| format!("Invalid default Ethereum RPC URL for {chain:?}"))?;
+    let url = reqwest::Url::parse(chain.default_rpc_url())?;
     let provider = ProviderBuilder::new().wallet(signer).connect_http(url);
-    let address: Address = contract.parse()?;
+    let address: Address =
+        contract
+            .parse()
+            .map_err(|error| KolmeError::InvalidEthereumContractAddress {
+                contract: contract.to_string(),
+                error,
+            })?;
     let bridge = BridgeExecute::new(address, provider);
 
     let pending = bridge

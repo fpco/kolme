@@ -264,29 +264,20 @@ impl EthereumChain {
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn parse_default_http_url(self) -> Result<reqwest::Url> {
-        reqwest::Url::parse(self.default_http_url())
-            .with_context(|| format!("Invalid default Ethereum HTTP URL for {self:?}"))
+    pub fn parse_default_http_url(self) -> Result<reqwest::Url, KolmeError> {
+        Ok(reqwest::Url::parse(self.default_http_url())?)
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn parse_default_ws_url(self) -> Result<reqwest::Url> {
-        reqwest::Url::parse(self.default_ws_url())
-            .with_context(|| format!("Invalid default Ethereum WS URL for {self:?}"))
+    pub fn parse_default_ws_url(self) -> Result<reqwest::Url, KolmeError> {
+        Ok(reqwest::Url::parse(self.default_ws_url())?)
     }
 
     #[cfg(feature = "ethereum")]
     pub fn make_client(self) -> Result<DynProvider, KolmeError> {
-        let url = self.parse_default_http_url().map_err(|error| {
-            KolmeError::InvalidDefaultEthereumRpcUrl {
-                chain: self,
-                error,
-            }
-        })?;
-   
-        Ok(DynProvider::new(
-            ProviderBuilder::new().connect_http(url),
-        ))
+        let url = self.parse_default_http_url()?;
+
+        Ok(DynProvider::new(ProviderBuilder::new().connect_http(url)))
     }
 }
 
@@ -551,12 +542,15 @@ impl PendingBridgeAction {
     ///
     /// Most chains sign raw payload string bytes. Ethereum signs decoded ABI bytes
     /// stored as base64 in `payload`.
-    pub(crate) fn payload_bytes_to_sign(&self, chain: ExternalChain) -> Result<Vec<u8>> {
+    pub(crate) fn payload_bytes_to_sign(
+        &self,
+        chain: ExternalChain,
+    ) -> Result<Vec<u8>, KolmeError> {
         match chain.name() {
-            ChainName::Ethereum => {
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &self.payload)
-                    .context("Failed to decode Ethereum bridge payload from base64")
-            }
+            ChainName::Ethereum => Ok(base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                &self.payload,
+            )?),
             _ => Ok(self.payload.as_bytes().to_vec()),
         }
     }
@@ -1627,9 +1621,7 @@ impl ConfiguredChains {
             }
             BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(program_id)?,
             BridgeContract::NeededEthereumBridge => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure an Ethereum contract as a Solana bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureEthereumContractAsSolanaBridge)
             }
             BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
         };
@@ -1652,9 +1644,7 @@ impl ConfiguredChains {
                 return Err(KolmeError::SolanaBridgeConfiguredAsCosmos);
             }
             BridgeContract::NeededEthereumBridge => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure an Ethereum contract as a Cosmos bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureEthereumContractAsCosmosBridge)
             }
             BridgeContract::NeededCosmosBridge { .. } => (),
             BridgeContract::Deployed(program_id) => {
@@ -1696,19 +1686,18 @@ impl ConfiguredChains {
         let mut config = config;
         let mut normalized_assets = BTreeMap::new();
         for (asset_name, asset_config) in std::mem::take(&mut config.assets) {
-            let normalized_name = normalize_ethereum_denom(&asset_name.0)
-                .with_context(|| format!("Invalid Ethereum asset name: {}", asset_name.0))?;
+            let normalized_name = normalize_ethereum_denom(&asset_name.0)?;
             let old = normalized_assets.insert(AssetName(normalized_name.clone()), asset_config);
-            anyhow::ensure!(
-                old.is_none(),
-                "Duplicate Ethereum asset name after normalization: {normalized_name}"
-            );
+            if old.is_some() {
+                return Err(KolmeError::DuplicateEthereumAssetNameAfterNormalization {
+                    name: normalized_name,
+                });
+            }
         }
         config.assets = normalized_assets;
 
         if let BridgeContract::Deployed(address) = &mut config.bridge {
-            *address = normalize_evm_address(address)
-                .with_context(|| format!("Invalid Ethereum bridge contract address: {address}"))?;
+            *address = normalize_evm_address(address)?;
         }
 
         match &config.bridge {
@@ -1719,13 +1708,7 @@ impl ConfiguredChains {
                 return Err(KolmeError::TryingToConfigureSolanaProgramAsEthereumBridge);
             }
             BridgeContract::NeededEthereumBridge => (),
-            BridgeContract::Deployed(address) => {
-                if !is_valid_evm_address(address) {
-                    return Err(KolmeError::InvalidEthereumBridgeContractAddress(
-                        address.to_owned(),
-                    ));
-                }
-            }
+            BridgeContract::Deployed(_) => (),
         }
 
         self.0.insert(chain.into(), config);
@@ -1873,9 +1856,9 @@ impl ExecAction {
 
                         if funds.len() != 1 {
                             return Err(KolmeError::InvalidEthereumTransferFundsCount {
-                            got: funds.len(),
+                                got: funds.len(),
                             });
-                        }     
+                        }
                         let fund = &funds[0];
 
                         // TODO: find more efficient way to find asset name
@@ -1883,11 +1866,8 @@ impl ExecAction {
                             .assets
                             .iter()
                             .find(|(_, config)| config.asset_id == fund.id)
-                            .context("Unsupported asset ID")?;
-                        let normalized_asset_name = normalize_ethereum_denom(&asset_name.0)
-                            .with_context(|| {
-                                format!("Invalid Ethereum asset name in config: {}", asset_name.0)
-                            })?;
+                            .ok_or(KolmeError::UnsupportedAssetId)?;
+                        let normalized_asset_name = normalize_ethereum_denom(&asset_name.0)?;
 
                         let action = if normalized_asset_name == ETH_NATIVE_DENOM {
                             EthereumActionPayload::TransferEth {
@@ -2087,7 +2067,7 @@ enum EthereumActionPayload {
 fn serialize_ethereum_payload(
     id: BridgeActionId,
     action: &EthereumActionPayload,
-) -> Result<String> {
+) -> Result<String, KolmeError> {
     let action = match action {
         EthereumActionPayload::TransferEth { recipient, amount } => {
             crate::utils::ethereum::encode_action_transfer_eth(recipient, *amount)?

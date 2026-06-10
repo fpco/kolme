@@ -1,4 +1,8 @@
+#[cfg(feature = "ethereum")]
+use std::path::PathBuf;
+
 use crate::core::*;
+use alloy::primitives::Address;
 
 #[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]
 /// Errors that need to be serialized on order to report through Gossip.
@@ -204,6 +208,8 @@ pub enum KolmeError {
     Base64DecodeError(#[from] base64::DecodeError),
     #[error("WebSocket stream terminated")]
     WebSocketClosed,
+    #[error(transparent)]
+    UrlParseError(#[from] url::ParseError),
     #[error(transparent)]
     TungsteniteError(Box<tokio_tungstenite::tungstenite::Error>),
     #[cfg(feature = "solana")]
@@ -451,6 +457,10 @@ pub enum KolmeError {
     TryingToConfigureCosmosContractAsEthereumBridge,
     #[error("Trying to configure a Solana program as an Ethereum bridge.")]
     TryingToConfigureSolanaProgramAsEthereumBridge,
+    #[error("Trying to configure an Ethereum contract as a Cosmos bridge.")]
+    TryingToConfigureEthereumContractAsCosmosBridge,
+    #[error("Trying to configure an Ethereum contract as a Solana bridge.")]
+    TryingToConfigureEthereumContractAsSolanaBridge,
     #[cfg(feature = "ethereum")]
     #[error("Ethereum value {0} does not fit into u128")]
     EthereumValueDoesNotFitIntoU128(alloy::primitives::U256),
@@ -473,6 +483,69 @@ pub enum KolmeError {
     UnexpectedEthereumBridgeEventId {
         actual: BridgeEventId,
         expected: BridgeEventId,
+    },
+    #[cfg(feature = "ethereum")]
+    #[error("Invalid Ethereum recovery id {0}, expected 0 or 1")]
+    InvalidEthereumRecoveryId(u8),
+    #[cfg(feature = "ethereum")]
+    #[error(
+        "failed to read Ethereum bridge artifact at {path}. Run `just build-ethereum-contract` first"
+    )]
+    FailedToReadEthereumBridgeArtifact {
+        path: PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
+    #[cfg(feature = "ethereum")]
+    #[error("Bridge.json artifact contains empty bytecode.object")]
+    EmptyEthereumBridgeBytecodeObject,
+    #[cfg(feature = "ethereum")]
+    #[error("Bridge.json artifact contains invalid hex in bytecode.object")]
+    InvalidEthereumBridgeBytecodeHex(#[source] hex::FromHexError),
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum transfer action supports exactly one fund, got {got}")]
+    InvalidEthereumTransferFundsCount { got: usize },
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum deployment transaction did not return a contract address")]
+    EthereumDeploymentMissingContractAddress,
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum contract {contract} has no bytecode deployed")]
+    EthereumContractHasNoBytecode { contract: String },
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum processor key mismatch")]
+    EthereumProcessorKeyMismatch,
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum listener set mismatch")]
+    EthereumListenerSetMismatch,
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum needed listener quorum mismatch")]
+    EthereumNeededListenerQuorumMismatch,
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum approver set mismatch")]
+    EthereumApproverSetMismatch,
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum needed approver quorum mismatch")]
+    EthereumNeededApproverQuorumMismatch,
+    #[cfg(feature = "ethereum")]
+    #[error("Duplicate Ethereum asset name after normalization: {name}")]
+    DuplicateEthereumAssetNameAfterNormalization { name: String },
+    #[cfg(feature = "ethereum")]
+    #[error(transparent)]
+    EthereumPendingTransactionError(#[from] alloy::providers::PendingTransactionError),
+    #[cfg(feature = "ethereum")]
+    #[error(transparent)]
+    AlloyContractError(#[from] alloy::contract::Error),
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum listener subscription ended on chain {chain:?}, contract {contract:#x}")]
+    EthereumListenerSubscriptionEnded {
+        chain: ExternalChain,
+        contract: Address,
+    },
+    #[cfg(feature = "ethereum")]
+    #[error("Ethereum FundsReceived malformed payload: tokens length {tokens_len} != amounts length {amounts_len}")]
+    EthereumFundsReceivedMalformedPayload {
+        tokens_len: usize,
+        amounts_len: usize,
     },
     #[cfg(feature = "pass_through")]
     #[error("Pass-through submission attempted on wrong chain: expected PassThrough, got {0}")]

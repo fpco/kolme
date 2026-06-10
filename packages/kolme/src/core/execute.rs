@@ -435,7 +435,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
             .pending_actions
             .get_mut(&action_id)
             .ok_or(KolmeError::CannotApproveMissingBridgeAction { chain, action_id })?;
-           
+
         let payload = action.payload_bytes_to_sign(chain)?;
         let key = signature.validate(&payload)?;
         // Using config.as_ref() instead of framework_state.get_config to work around
@@ -489,7 +489,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         }
 
         let payload = action.payload_bytes_to_sign(chain)?;
-        let processor_key = processor.validate(payload)?;
+        let processor_key = processor.validate(&payload)?;
         let expected = self.framework_state.validator_set.as_ref().processor;
 
         if processor_key != expected {
@@ -502,7 +502,7 @@ impl<App: KolmeApp> ExecutionContext<'_, App> {
         let approvers_checked = approvers
             .iter()
             .map(|sig| {
-                let pubkey = sig.validate(payload)?;
+                let pubkey = sig.validate(&payload)?;
                 if !self
                     .framework_state
                     .validator_set

@@ -184,8 +184,8 @@ impl KolmeApp for EthereumBridgeTestApp {
 
     async fn execute(
         &self,
-        _ctx: &mut ExecutionContext<'_, Self>,
-        _msg: &Self::Message,
+        ctx: &mut ExecutionContext<'_, Self>,
+        msg: &Self::Message,
     ) -> Result<(), KolmeError> {
         match msg {
             EmptyMessage::Mint { amount } => {
