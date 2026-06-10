@@ -1,15 +1,22 @@
 use merkle_map::{MerkleSerialError, Sha256Hash};
 
+#[derive(Debug, Clone, Copy, strum::Display)]
+pub enum StorageBackend {
+    Fjall,
+    Postgres,
+    InMemory,
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum KolmeStoreError {
     #[error(transparent)]
     Custom(Box<dyn std::error::Error + Send + Sync>),
     #[error(transparent)]
-    Merkle(#[from] MerkleSerialError),
+    MerkleSerialError(#[from] MerkleSerialError),
     #[error("Block not found in storage: {height}")]
     BlockNotFound { height: u64 },
     #[error("KolmeStore::delete_block is not supported by this store: {0}")]
-    UnsupportedDeleteOperation(&'static str),
+    UnsupportedDeleteOperation(StorageBackend),
     // kolme#144 - Reports a diverging hash with same height
     #[error("Block with height {height} in database with different hash {existing}, trying to add {adding}")]
     ConflictingBlockInDb {
@@ -22,6 +29,36 @@ pub enum KolmeStoreError {
     MatchingBlockAlreadyInserted { height: u64 },
     #[error("Transaction is already present in database: {txhash}")]
     TxAlreadyInDb { txhash: Sha256Hash },
+    #[error("get_height_for_tx: invalid height in {backend} store: {error}")]
+    InvalidHeight {
+        backend: StorageBackend,
+        #[source]
+        error: std::array::TryFromSliceError,
+    },
+    #[error(transparent)]
+    FjallError(#[from] fjall::Error),
+    #[error("Unable to update partition with given height: {0}")]
+    UnableToUpdatePartition(#[source] fjall::Error),
+    #[error("Unable to retrieve latest height: {0}")]
+    UnableToRetrieveLatestHeight(#[source] fjall::Error),
+    #[error(transparent)]
+    SqlxError(#[from] sqlx::Error),
+    #[error("Could not connect to the database: {0}")]
+    CouldNotConnectToDatabase(#[source] sqlx::Error),
+    #[error("Unable to execute migrations: {0}")]
+    UnableToExecuteMigrations(#[source] sqlx::migrate::MigrateError),
+    #[error("Unable to query tx height: {0}")]
+    UnableToQueryTxHeight(#[source] sqlx::Error),
+    #[error(transparent)]
+    TryFromIntError(#[from] std::num::TryFromIntError),
+    #[error("Unable to start database: {0}")]
+    UnableToStartDatabase(#[source] sqlx::Error),
+    #[error("Unable to store latest archived block height: {0}")]
+    UnableToStoreLatestArchivedBlockHeight(#[source] sqlx::Error),
+    #[error("Unable to refresh materialized view: {0}")]
+    UnableToRefreshMaterializedView(#[source] sqlx::Error),
+    #[error("Unable to commit archive block height changes: {0}")]
+    UnableToCommitArchiveBlockHeightChanges(#[source] sqlx::Error),
     #[error("{0}")]
     Other(String),
 }

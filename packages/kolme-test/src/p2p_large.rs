@@ -85,7 +85,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(SampleState {
             next_hi: 0,
             payloads: MerkleMap::new(),
@@ -96,7 +96,7 @@ impl KolmeApp for SampleKolmeApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             SampleMessage::SayHi { payload } => {
                 let state = ctx.state_mut();

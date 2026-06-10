@@ -61,7 +61,7 @@ async fn test_invalid_hashes_inner(testtasks: TestTasks, (): ()) {
         kolme: &Kolme<SampleKolmeApp>,
         mut block: Block<SampleMessage>,
         f: impl FnOnce(&mut Block<SampleMessage>),
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), KolmeError> {
         f(&mut block);
         let signed = TaggedJson::new(block)
             .unwrap()

@@ -178,7 +178,7 @@ impl KolmeApp for EthereumBridgeTestApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> anyhow::Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(EmptyState {})
     }
 
@@ -186,7 +186,7 @@ impl KolmeApp for EthereumBridgeTestApp {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         msg: &Self::Message,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), KolmeError> {
         match msg {
             EmptyMessage::Mint { amount } => {
                 ctx.mint_asset(ETH_ASSET_ID, ctx.get_sender_id(), *amount)?;

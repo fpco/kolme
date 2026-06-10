@@ -65,7 +65,7 @@ impl EthereumBridgeEvent {
         }
     }
 
-    fn from_log(log: &Log) -> Result<Option<Self>> {
+    fn from_log(log: &Log) -> Result<Option<Self>, KolmeError> {
         let Some(topic) = log.topic0().copied() else {
             // having `topic0` as None would be unusual given our filters
             tracing::debug!(
@@ -79,7 +79,7 @@ impl EthereumBridgeEvent {
             FundsReceived::SIGNATURE_HASH => Some(Self::FundsReceived(
                 log.log_decode()
                     .map(|decoded| decoded.inner.data)
-                    .map_err(|e| anyhow::anyhow!("Failed to decode FundsReceived: {e}"))?,
+                    .map_err(KolmeError::FailedToDecodeFundsReceived)?,
             )),
             _ => {
                 tracing::debug!(
@@ -95,7 +95,7 @@ impl EthereumBridgeEvent {
         &self,
         chain: ExternalChain,
         event_id: BridgeEventId,
-    ) -> Result<Message<AppMessage>> {
+    ) -> Result<Message<AppMessage>, KolmeError> {
         let event = match self {
             Self::FundsReceived(FundsReceived {
                 sender,
@@ -104,12 +104,12 @@ impl EthereumBridgeEvent {
                 keys,
                 ..
             }) => {
-                anyhow::ensure!(
-                    tokens.len() == amounts.len(),
-                    "Ethereum FundsReceived malformed payload: tokens length {} != amounts length {}",
-                    tokens.len(),
-                    amounts.len()
-                );
+                if tokens.len() != amounts.len() {
+                    return Err(KolmeError::EthereumFundsReceivedMalformedPayload {
+                        tokens_len: tokens.len(),
+                        amounts_len: amounts.len(),
+                    });
+                }
                 let funds = tokens
                     .iter()
                     .zip(amounts.iter())
@@ -119,7 +119,7 @@ impl EthereumBridgeEvent {
                             amount: u256_to_u128(*amount)?,
                         })
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>, KolmeError>>()?;
 
                 BridgeEvent::Regular {
                     wallet: Wallet::from_ethereum(*sender),
@@ -145,12 +145,12 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     ethereum_chain: EthereumChain,
     contract: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let chain: ExternalChain = ethereum_chain.into();
     let mode = EthereumListenerMode::from_env();
     let contract: Address = contract
         .parse()
-        .with_context(|| format!("Invalid Ethereum contract address: {contract}"))?;
+        .map_err(|error| KolmeError::InvalidEthereumContractAddress { contract, error })?;
     let provider = kolme.get_ethereum_client(ethereum_chain).await?;
     let contract: ContractInstance<_> =
         ContractInstance::new(contract, provider, Interface::new(JsonAbi::default()));
@@ -191,7 +191,7 @@ pub async fn listen<App: KolmeApp>(
 async fn connect_ws(
     chain: EthereumChain,
     contract: Address,
-) -> Result<ContractInstance<DynProvider>> {
+) -> Result<ContractInstance<DynProvider>, KolmeError> {
     let ws_url = chain.parse_default_ws_url()?;
     let provider = ProviderBuilder::new()
         .connect_ws(WsConnect::new(ws_url.as_str()))
@@ -214,7 +214,7 @@ async fn listen_with_ws_retry<App: KolmeApp, P: Provider>(
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let chain: ExternalChain = ethereum_chain.into();
     let mut next_ws_retry = tokio::time::Instant::now();
 
@@ -266,7 +266,7 @@ async fn try_ws_session_once<App: KolmeApp>(
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let chain: ExternalChain = ethereum_chain.into();
     let ws_contract = match connect_ws(ethereum_chain, contract_address).await {
         Ok(ws_contract) => {
@@ -310,25 +310,32 @@ async fn try_ws_session_once<App: KolmeApp>(
         ws_contract.address(),
         WS_RETRY_INTERVAL.as_secs()
     );
-    anyhow::bail!(
-        "Ethereum listener subscription ended on chain {chain:?}, contract {:#x}",
-        ws_contract.address()
-    );
+    Err(KolmeError::EthereumListenerSubscriptionEnded {
+        chain,
+        contract: *ws_contract.address(),
+    })
 }
 
 pub async fn sanity_check_contract(
     provider: &DynProvider,
     contract: &str,
     info: &GenesisInfo,
-) -> Result<()> {
-    let address: Address = contract
-        .parse()
-        .with_context(|| format!("Invalid Ethereum contract address: {contract}"))?;
+) -> Result<(), KolmeError> {
+    let address: Address =
+        contract
+            .parse()
+            .map_err(|error| KolmeError::InvalidEthereumContractAddress {
+                contract: contract.to_string(),
+                error,
+            })?;
+
     let code = provider.get_code_at(address).await?;
-    anyhow::ensure!(
-        !code.is_empty(),
-        "Ethereum contract {contract} has no bytecode deployed"
-    );
+
+    if code.is_empty() {
+        return Err(KolmeError::EthereumContractHasNoBytecode {
+            contract: contract.to_string(),
+        });
+    }
 
     let bridge = Bridge::new(address, provider.clone());
     let Bridge::get_configReturn {
@@ -341,26 +348,25 @@ pub async fn sanity_check_contract(
         configNextActionId: _,
     } = bridge.get_config().call().await?;
 
-    anyhow::ensure!(
-        PublicKey::from_bytes(&processor)? == info.validator_set.processor,
-        "Ethereum processor key mismatch"
-    );
-    anyhow::ensure!(
-        decode_validator_keys(&listeners)? == info.validator_set.listeners,
-        "Ethereum listener set mismatch"
-    );
-    anyhow::ensure!(
-        needed_listeners == info.validator_set.needed_listeners,
-        "Ethereum needed listener quorum mismatch"
-    );
-    anyhow::ensure!(
-        decode_validator_keys(&approvers)? == info.validator_set.approvers,
-        "Ethereum approver set mismatch"
-    );
-    anyhow::ensure!(
-        needed_approvers == info.validator_set.needed_approvers,
-        "Ethereum needed approver quorum mismatch"
-    );
+    if PublicKey::from_bytes(&processor)? != info.validator_set.processor {
+        return Err(KolmeError::EthereumProcessorKeyMismatch);
+    }
+
+    if decode_validator_keys(&listeners)? != info.validator_set.listeners {
+        return Err(KolmeError::EthereumListenerSetMismatch);
+    }
+
+    if needed_listeners != info.validator_set.needed_listeners {
+        return Err(KolmeError::EthereumNeededListenerQuorumMismatch);
+    }
+
+    if decode_validator_keys(&approvers)? != info.validator_set.approvers {
+        return Err(KolmeError::EthereumApproverSetMismatch);
+    }
+
+    if needed_approvers != info.validator_set.needed_approvers {
+        return Err(KolmeError::EthereumNeededApproverQuorumMismatch);
+    }
 
     Ok(())
 }
@@ -373,7 +379,7 @@ async fn listen_with_subscription<App: KolmeApp, P: Provider>(
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let filter = Filter::new()
         .from_block(*next_block)
         .address(*contract.address())
@@ -406,7 +412,7 @@ async fn listen_polling_once<App: KolmeApp, P: Provider>(
     next_bridge_event_id: &mut BridgeEventId,
     next_block: &mut u64,
     first_log_index: &mut Option<u64>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let latest = contract.provider().get_block_number().await?;
     if *next_block > latest {
         return Ok(());
@@ -451,7 +457,7 @@ fn should_skip_log(log: &Log, next_block: u64, first_log_index: Option<u64>) -> 
 async fn get_resume_cursor<P: Provider>(
     contract: &ContractInstance<P>,
     next_bridge_event_id: BridgeEventId,
-) -> Result<(u64, Option<u64>)> {
+) -> Result<(u64, Option<u64>), KolmeError> {
     // On listener startup, we find sync point by scanning from genesis while
     // filtering by contract address and indexed event ID.
     // TODO: Switch from "since genesis" to "since contract deployment block".
@@ -477,12 +483,12 @@ async fn get_resume_cursor<P: Provider>(
             continue;
         };
 
-        anyhow::ensure!(
-            event.event_id() == next_bridge_event_id,
-            "Ethereum filtered resume query returned mismatched event ID. Expected {}, got {}",
-            next_bridge_event_id,
-            event.event_id()
-        );
+        if event.event_id() != next_bridge_event_id {
+            return Err(KolmeError::EthereumFilteredResumeQueryEventIdMismatch {
+                actual: event.event_id(),
+                expected: next_bridge_event_id,
+            });
+        }
         return Ok((log.block_number.unwrap_or(0), log.log_index));
     }
 
@@ -504,9 +510,11 @@ fn event_id_topic(event_id: BridgeEventId) -> B256 {
 }
 
 /// Converts `bytes[]` returned by contract's get_config() into something we can compare
-fn decode_validator_keys(keys: &[alloy::primitives::Bytes]) -> Result<BTreeSet<PublicKey>> {
+fn decode_validator_keys(
+    keys: &[alloy::primitives::Bytes],
+) -> Result<BTreeSet<PublicKey>, KolmeError> {
     keys.iter()
-        .map(|key| PublicKey::from_bytes(key.as_ref()).map_err(anyhow::Error::from))
+        .map(|key| PublicKey::from_bytes(key.as_ref()).map_err(KolmeError::from))
         .collect()
 }
 
@@ -516,17 +524,17 @@ async fn process_event<App: KolmeApp>(
     chain: ExternalChain,
     log: &Log,
     next_bridge_event_id: &mut BridgeEventId,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let Some(event) = EthereumBridgeEvent::from_log(log)? else {
         return Ok(());
     };
     let actual_event_id = event.event_id();
-    anyhow::ensure!(
-        actual_event_id == *next_bridge_event_id,
-        "Unexpected Ethereum bridge event ID. Expected {}, got {}",
-        *next_bridge_event_id,
-        actual_event_id
-    );
+    if actual_event_id != *next_bridge_event_id {
+        return Err(KolmeError::UnexpectedEthereumBridgeEventId {
+            actual: actual_event_id,
+            expected: *next_bridge_event_id,
+        });
+    }
 
     let message = event.to_kolme_message::<App::Message>(chain, actual_event_id)?;
     kolme
@@ -538,9 +546,9 @@ async fn process_event<App: KolmeApp>(
 
 // Ethereum uses uint256 as the standard amount type, in kolme we have u128,
 // hence the explicit conversion function with a distinct error logging
-fn u256_to_u128(value: U256) -> Result<u128> {
+fn u256_to_u128(value: U256) -> Result<u128, KolmeError> {
     if value > U256::from(u128::MAX) {
-        anyhow::bail!("Ethereum value {value} does not fit into u128");
+        return Err(KolmeError::EthereumValueDoesNotFitIntoU128(value));
     }
     Ok(value.to())
 }

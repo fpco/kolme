@@ -91,7 +91,7 @@ impl KolmeApp for SampleKolmeApp {
         &self.genesis
     }
 
-    fn new_state(&self) -> anyhow::Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(SampleState {})
     }
 
@@ -99,7 +99,7 @@ impl KolmeApp for SampleKolmeApp {
         &self,
         _ctx: &mut ExecutionContext<'_, Self>,
         _msg: &Self::Message,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), KolmeError> {
         Ok(())
     }
 }

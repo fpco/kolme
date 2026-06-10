@@ -11,7 +11,7 @@ pub async fn listen<App: KolmeApp>(
     secret: SecretKey,
     chain: CosmosChain,
     contract: String,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let kolme_r = kolme.read();
 
     let cosmos = kolme_r.get_cosmos(chain).await?;
@@ -40,7 +40,7 @@ async fn listen_once<App: KolmeApp>(
     chain: CosmosChain,
     contract: &Contract,
     next_bridge_event_id: &mut BridgeEventId,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     match contract
         .query(&QueryMsg::GetEvent {
             id: *next_bridge_event_id,
@@ -69,14 +69,17 @@ pub async fn sanity_check_contract(
     contract: &str,
     expected_code_id: u64,
     info: &GenesisInfo,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let contract = cosmos.make_contract(contract.parse()?);
     let actual_code_id = contract.info().await?.code_id;
 
-    anyhow::ensure!(
-        actual_code_id == expected_code_id,
-        "Code ID mismatch, expected {expected_code_id}, but {contract} has {actual_code_id}"
-    );
+    if actual_code_id != expected_code_id {
+        return Err(KolmeError::CodeIdMismatch {
+            expected: expected_code_id,
+            actual: actual_code_id,
+            contract: contract.to_string(),
+        });
+    }
 
     let shared::cosmos::State {
         set:
@@ -91,11 +94,39 @@ pub async fn sanity_check_contract(
         next_action_id: _,
     } = contract.query(shared::cosmos::QueryMsg::Config {}).await?;
 
-    anyhow::ensure!(info.validator_set.processor == processor);
-    anyhow::ensure!(listeners == info.validator_set.listeners);
-    anyhow::ensure!(needed_listeners == info.validator_set.needed_listeners);
-    anyhow::ensure!(approvers == info.validator_set.approvers);
-    anyhow::ensure!(needed_approvers == info.validator_set.needed_approvers);
+    if info.validator_set.processor != processor {
+        return Err(KolmeError::ProcessorMismatch {
+            expected: Box::new(info.validator_set.processor),
+            actual: Box::new(processor),
+        });
+    }
+    if listeners != info.validator_set.listeners {
+        return Err(KolmeError::ListenersMismatch {
+            expected: info.validator_set.listeners.clone(),
+            actual: listeners,
+        });
+    }
+
+    if needed_listeners != info.validator_set.needed_listeners {
+        return Err(KolmeError::NeededListenersMismatch {
+            expected: info.validator_set.needed_listeners,
+            actual: needed_listeners,
+        });
+    }
+
+    if approvers != info.validator_set.approvers {
+        return Err(KolmeError::ApproversMismatch {
+            expected: info.validator_set.approvers.clone(),
+            actual: approvers,
+        });
+    }
+
+    if needed_approvers != info.validator_set.needed_approvers {
+        return Err(KolmeError::NeededApproversMismatch {
+            expected: info.validator_set.needed_approvers,
+            actual: needed_approvers,
+        });
+    }
 
     Ok(())
 }

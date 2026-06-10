@@ -39,7 +39,7 @@ pub enum RemoteDataListener {
 }
 
 impl KolmeStore {
-    pub async fn new_postgres(url: &str) -> anyhow::Result<Self> {
+    pub async fn new_postgres(url: &str) -> Result<Self, KolmeStoreError> {
         Ok(KolmeStore::KolmePostgresStore(
             postgres::Store::new(url).await?,
         ))
@@ -47,13 +47,13 @@ impl KolmeStore {
     pub async fn new_postgres_with_options(
         connect: PgConnectOptions,
         options: PoolOptions<Postgres>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, KolmeStoreError> {
         Ok(KolmeStore::KolmePostgresStore(
             postgres::Store::new_with_options(connect, options).await?,
         ))
     }
 
-    pub fn new_fjall(fjall_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub fn new_fjall(fjall_dir: impl AsRef<Path>) -> Result<Self, KolmeStoreError> {
         Ok(KolmeStore::KolmeFjallStore(fjall::Store::new(fjall_dir)?))
     }
 

@@ -24,7 +24,7 @@ use {
 use crate::*;
 
 pub use accounts::{Account, Accounts, AccountsError};
-pub use error::KolmeError;
+pub use error::{KolmeError, KolmeTransactionError};
 
 #[cfg(feature = "solana")]
 /// Wrapper around the Solana RPC client to hide sensitive information.
@@ -163,7 +163,7 @@ impl CosmosChain {
     }
 
     #[cfg(feature = "cosmwasm")]
-    pub async fn make_client(self) -> Result<cosmos::Cosmos> {
+    pub async fn make_client(self) -> Result<cosmos::Cosmos, KolmeError> {
         let network = match self {
             Self::OsmosisTestnet => cosmos::CosmosNetwork::OsmosisTestnet,
             Self::NeutronTestnet => cosmos::CosmosNetwork::NeutronTestnet,
@@ -223,12 +223,12 @@ impl SolanaClientEndpoint {
         })
     }
 
-    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient> {
+    pub async fn make_pubsub_client(self) -> Result<SolanaPubsubClient, KolmeError> {
         match self {
             SolanaClientEndpoint::Static(url) => SolanaPubsubClient::new(url).await,
             SolanaClientEndpoint::Arc(url) => SolanaPubsubClient::new(&url).await,
         }
-        .map_err(anyhow::Error::from)
+        .map_err(KolmeError::from)
     }
 }
 
@@ -264,20 +264,19 @@ impl EthereumChain {
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn parse_default_http_url(self) -> Result<reqwest::Url> {
-        reqwest::Url::parse(self.default_http_url())
-            .with_context(|| format!("Invalid default Ethereum HTTP URL for {self:?}"))
+    pub fn parse_default_http_url(self) -> Result<reqwest::Url, KolmeError> {
+        Ok(reqwest::Url::parse(self.default_http_url())?)
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn parse_default_ws_url(self) -> Result<reqwest::Url> {
-        reqwest::Url::parse(self.default_ws_url())
-            .with_context(|| format!("Invalid default Ethereum WS URL for {self:?}"))
+    pub fn parse_default_ws_url(self) -> Result<reqwest::Url, KolmeError> {
+        Ok(reqwest::Url::parse(self.default_ws_url())?)
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn make_client(self) -> Result<DynProvider> {
+    pub fn make_client(self) -> Result<DynProvider, KolmeError> {
         let url = self.parse_default_http_url()?;
+
         Ok(DynProvider::new(ProviderBuilder::new().connect_http(url)))
     }
 }
@@ -442,19 +441,23 @@ pub struct ChainState {
 }
 
 impl ChainState {
-    pub(crate) fn deposit(&mut self, asset_id: AssetId, amount: Decimal) -> Result<()> {
+    pub(crate) fn deposit(&mut self, asset_id: AssetId, amount: Decimal) -> Result<(), KolmeError> {
         let old = self.assets.entry(asset_id).or_default();
-        *old = old.checked_add(amount).with_context(|| {
-            format!("Overflow while depositing asset {asset_id}, amount == {amount}")
-        })?;
+        *old = old
+            .checked_add(amount)
+            .ok_or(KolmeError::OverflowWhileDepositing { asset_id, amount })?;
         Ok(())
     }
 
-    pub(crate) fn withdraw(&mut self, asset_id: AssetId, amount: Decimal) -> Result<()> {
+    pub(crate) fn withdraw(
+        &mut self,
+        asset_id: AssetId,
+        amount: Decimal,
+    ) -> Result<(), KolmeError> {
         let old = self.assets.entry(asset_id).or_default();
-        *old = old.checked_sub(amount).with_context(|| {
-            format!("Insufficient funds while withdrawing asset {asset_id}, amount == {amount}")
-        })?;
+        *old = old
+            .checked_sub(amount)
+            .ok_or(KolmeError::InsufficientFundsWhileWithdrawing { asset_id, amount })?;
         Ok(())
     }
 }
@@ -539,12 +542,15 @@ impl PendingBridgeAction {
     ///
     /// Most chains sign raw payload string bytes. Ethereum signs decoded ABI bytes
     /// stored as base64 in `payload`.
-    pub(crate) fn payload_bytes_to_sign(&self, chain: ExternalChain) -> Result<Vec<u8>> {
+    pub(crate) fn payload_bytes_to_sign(
+        &self,
+        chain: ExternalChain,
+    ) -> Result<Vec<u8>, KolmeError> {
         match chain.name() {
-            ChainName::Ethereum => {
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &self.payload)
-                    .context("Failed to decode Ethereum bridge payload from base64")
-            }
+            ChainName::Ethereum => Ok(base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                &self.payload,
+            )?),
             _ => Ok(self.payload.as_bytes().to_vec()),
         }
     }
@@ -902,9 +908,9 @@ impl MerkleDeserializeRaw for AccountNonce {
 }
 
 impl TryFrom<i64> for AccountNonce {
-    type Error = anyhow::Error;
+    type Error = KolmeError;
 
-    fn try_from(value: i64) -> Result<Self> {
+    fn try_from(value: i64) -> Result<Self, KolmeError> {
         Ok(AccountNonce(value.try_into()?))
     }
 }
@@ -933,10 +939,12 @@ impl BlockHeight {
 
     pub fn increasing_middle(&self, block_height: BlockHeight) -> Result<BlockHeight, KolmeError> {
         if self.0 >= block_height.0 {
-            return Err(KolmeError::InvalidBlockHeight {
-                start: *self,
-                end: block_height,
-            });
+            return Err(KolmeError::TransactionError(
+                KolmeTransactionError::InvalidBlockHeight {
+                    start: *self,
+                    end: block_height,
+                },
+            ));
         }
 
         // This cannot underflow due to the check above.
@@ -954,10 +962,10 @@ impl Display for BlockHeight {
 }
 
 impl TryFrom<i64> for BlockHeight {
-    type Error = anyhow::Error;
+    type Error = KolmeError;
 
-    fn try_from(value: i64) -> Result<Self> {
-        value.try_into().map_err(anyhow::Error::from).map(Self)
+    fn try_from(value: i64) -> Result<Self, KolmeError> {
+        value.try_into().map_err(KolmeError::from).map(Self)
     }
 }
 
@@ -1039,9 +1047,16 @@ impl MerkleDeserializeRaw for Wallet {
 pub struct SignedBlock<AppMessage>(pub SignedTaggedJson<Block<AppMessage>>);
 
 impl<AppMessage> SignedBlock<AppMessage> {
-    pub fn validate_signature(&self) -> Result<()> {
+    pub fn validate_signature(&self) -> Result<(), KolmeError> {
         let pubkey = self.0.verify_signature()?;
-        anyhow::ensure!(pubkey == self.0.message.as_inner().processor);
+        let expected = self.0.message.as_inner().processor;
+        if pubkey != expected {
+            return Err(KolmeError::InvalidBlockProcessorSignature {
+                expected: Box::new(expected),
+                actual: Box::new(pubkey),
+            });
+        }
+
         Ok(())
     }
 
@@ -1153,9 +1168,16 @@ pub struct Block<AppMessage> {
 pub struct SignedTransaction<AppMessage>(pub SignedTaggedJson<Transaction<AppMessage>>);
 
 impl<AppMessage: serde::Serialize> SignedTransaction<AppMessage> {
-    pub fn validate_signature(&self) -> Result<()> {
+    pub fn validate_signature(&self) -> Result<(), KolmeError> {
         let pubkey = self.0.verify_signature()?;
-        anyhow::ensure!(pubkey == self.0.message.as_inner().pubkey);
+        let expected = self.0.message.as_inner().pubkey;
+        if pubkey != expected {
+            return Err(KolmeError::InvalidTransactionSignature {
+                expected: Box::new(expected),
+                actual: Box::new(pubkey),
+            });
+        }
+
         Ok(())
     }
 }
@@ -1168,15 +1190,22 @@ impl<AppMessage> SignedTransaction<AppMessage> {
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
-    pub fn ensure_is_genesis(&self) -> Result<()> {
-        anyhow::ensure!(self.messages.len() == 1);
-        anyhow::ensure!(matches!(self.messages[0], Message::Genesis(_)));
+    pub fn ensure_is_genesis(&self) -> Result<(), KolmeError> {
+        if self.messages.len() != 1 {
+            return Err(KolmeError::InvalidGenesisTransaction);
+        }
+
+        if !matches!(self.messages[0], Message::Genesis(_)) {
+            return Err(KolmeError::InvalidGenesisTransaction);
+        }
         Ok(())
     }
 
-    pub fn ensure_no_genesis(&self) -> Result<()> {
+    pub fn ensure_no_genesis(&self) -> Result<(), KolmeError> {
         for msg in &self.messages {
-            anyhow::ensure!(!matches!(msg, Message::Genesis(_)));
+            if matches!(msg, Message::Genesis(_)) {
+                return Err(KolmeError::InvalidGenesisTransaction);
+            }
         }
         Ok(())
     }
@@ -1193,7 +1222,7 @@ pub struct Transaction<AppMessage> {
 }
 
 impl<AppMessage: serde::Serialize> Transaction<AppMessage> {
-    pub fn sign(self, key: &SecretKey) -> Result<SignedTransaction<AppMessage>> {
+    pub fn sign(self, key: &SecretKey) -> Result<SignedTransaction<AppMessage>, KolmeError> {
         Ok(SignedTransaction(TaggedJson::new(self)?.sign(key)?))
     }
 }
@@ -1405,7 +1434,7 @@ impl AdminMessage {
         validator_type: ValidatorType,
         replacement: PublicKey,
         current: &SecretKey,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         let self_replace = SelfReplace {
             validator_type,
             replacement,
@@ -1415,7 +1444,7 @@ impl AdminMessage {
         Ok(AdminMessage::SelfReplace(Box::new(signed)))
     }
 
-    pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self> {
+    pub fn new_set(set: ValidatorSet, proposer: &SecretKey) -> Result<Self, KolmeError> {
         let json = TaggedJson::new(set)?;
         let signed = json.sign(proposer)?;
         Ok(AdminMessage::NewSet {
@@ -1423,7 +1452,10 @@ impl AdminMessage {
         })
     }
 
-    pub fn upgrade(desired_version: impl Into<String>, proposer: &SecretKey) -> Result<Self> {
+    pub fn upgrade(
+        desired_version: impl Into<String>,
+        proposer: &SecretKey,
+    ) -> Result<Self, KolmeError> {
         let json = TaggedJson::new(Upgrade {
             desired_version: desired_version.into(),
         })?;
@@ -1435,7 +1467,7 @@ impl AdminMessage {
         admin_proposal_id: AdminProposalId,
         payload: &ProposalPayload,
         validator: &SecretKey,
-    ) -> Result<Self> {
+    ) -> Result<Self, KolmeError> {
         let signature = validator.sign_recoverable(payload.as_bytes())?;
         Ok(AdminMessage::Approve {
             admin_proposal_id,
@@ -1519,7 +1551,7 @@ pub struct GenesisInfo {
 }
 
 impl GenesisInfo {
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<(), KolmeError> {
         self.validator_set.validate()?;
         Ok(())
     }
@@ -1576,20 +1608,20 @@ pub struct ConfiguredChains(pub(crate) BTreeMap<ExternalChain, ChainConfig>);
 
 impl ConfiguredChains {
     #[cfg(feature = "solana")]
-    pub fn insert_solana(&mut self, chain: SolanaChain, config: ChainConfig) -> Result<()> {
+    pub fn insert_solana(
+        &mut self,
+        chain: SolanaChain,
+        config: ChainConfig,
+    ) -> Result<(), KolmeError> {
         use kolme_solana_bridge_client::pubkey::Pubkey;
 
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Cosmos contract as a Solana bridge."
-                ))
+                return Err(KolmeError::CosmosBridgeConfiguredAsSolana);
             }
             BridgeContract::NeededSolanaBridge { program_id } => Pubkey::from_str(program_id)?,
             BridgeContract::NeededEthereumBridge => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure an Ethereum contract as a Solana bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureEthereumContractAsSolanaBridge)
             }
             BridgeContract::Deployed(program_id) => Pubkey::from_str(program_id)?,
         };
@@ -1600,19 +1632,19 @@ impl ConfiguredChains {
     }
 
     #[cfg(feature = "cosmwasm")]
-    pub fn insert_cosmos(&mut self, chain: CosmosChain, config: ChainConfig) -> Result<()> {
+    pub fn insert_cosmos(
+        &mut self,
+        chain: CosmosChain,
+        config: ChainConfig,
+    ) -> Result<(), KolmeError> {
         use cosmos::Address;
 
         match &config.bridge {
             BridgeContract::NeededSolanaBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Solana program as a Cosmos bridge."
-                ))
+                return Err(KolmeError::SolanaBridgeConfiguredAsCosmos);
             }
             BridgeContract::NeededEthereumBridge => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure an Ethereum contract as a Cosmos bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureEthereumContractAsCosmosBridge)
             }
             BridgeContract::NeededCosmosBridge { .. } => (),
             BridgeContract::Deployed(program_id) => {
@@ -1626,59 +1658,54 @@ impl ConfiguredChains {
     }
 
     #[cfg(feature = "pass_through")]
-    pub fn insert_pass_through(&mut self, config: ChainConfig) -> Result<()> {
+    pub fn insert_pass_through(&mut self, config: ChainConfig) -> Result<(), KolmeError> {
         if let BridgeContract::Deployed(_) = config.bridge {
             if self
                 .0
                 .get(&ExternalChain::PassThrough)
                 .is_some_and(|existing| *existing != config)
             {
-                Err(anyhow::anyhow!(
-                    "Multiple pass-through bridges are not supported"
-                ))
+                Err(KolmeError::MultiplePassThroughBridgesUnsupported)
             } else {
                 self.0.insert(ExternalChain::PassThrough, config);
                 Ok(())
             }
         } else {
-            Err(anyhow::anyhow!(
-                "Pass-through bridge can't require Cosmos or Solana bridge contract"
-            ))
+            Err(KolmeError::InvalidPassThroughBridgeType)
         }
     }
 
     #[cfg(feature = "ethereum")]
-    pub fn insert_ethereum(&mut self, chain: EthereumChain, config: ChainConfig) -> Result<()> {
+    pub fn insert_ethereum(
+        &mut self,
+        chain: EthereumChain,
+        config: ChainConfig,
+    ) -> Result<(), KolmeError> {
         use crate::utils::ethereum::{normalize_ethereum_denom, normalize_evm_address};
 
         let mut config = config;
         let mut normalized_assets = BTreeMap::new();
         for (asset_name, asset_config) in std::mem::take(&mut config.assets) {
-            let normalized_name = normalize_ethereum_denom(&asset_name.0)
-                .with_context(|| format!("Invalid Ethereum asset name: {}", asset_name.0))?;
+            let normalized_name = normalize_ethereum_denom(&asset_name.0)?;
             let old = normalized_assets.insert(AssetName(normalized_name.clone()), asset_config);
-            anyhow::ensure!(
-                old.is_none(),
-                "Duplicate Ethereum asset name after normalization: {normalized_name}"
-            );
+            if old.is_some() {
+                return Err(KolmeError::DuplicateEthereumAssetNameAfterNormalization {
+                    name: normalized_name,
+                });
+            }
         }
         config.assets = normalized_assets;
 
         if let BridgeContract::Deployed(address) = &mut config.bridge {
-            *address = normalize_evm_address(address)
-                .with_context(|| format!("Invalid Ethereum bridge contract address: {address}"))?;
+            *address = normalize_evm_address(address)?;
         }
 
         match &config.bridge {
             BridgeContract::NeededCosmosBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Cosmos contract as an Ethereum bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureCosmosContractAsEthereumBridge);
             }
             BridgeContract::NeededSolanaBridge { .. } => {
-                return Err(anyhow::anyhow!(
-                    "Trying to configure a Solana program as an Ethereum bridge."
-                ))
+                return Err(KolmeError::TryingToConfigureSolanaProgramAsEthereumBridge);
             }
             BridgeContract::NeededEthereumBridge => (),
             BridgeContract::Deployed(_) => (),
@@ -1728,7 +1755,7 @@ impl ExecAction {
         chain: ExternalChain,
         config: &ChainConfig,
         id: BridgeActionId,
-    ) -> Result<String> {
+    ) -> Result<String, KolmeError> {
         #[cfg(feature = "cosmwasm")]
         use shared::cosmos;
         #[cfg(feature = "solana")]
@@ -1751,7 +1778,7 @@ impl ExecAction {
                                 .assets
                                 .iter()
                                 .find(|(_name, config)| config.asset_id == *id)
-                                .context("Unsupported asset ID")?
+                                .ok_or(KolmeError::UnsupportedAssetId)?
                                 .0;
 
                             let denom = denom.0.clone();
@@ -1783,8 +1810,7 @@ impl ExecAction {
                                 .assets
                                 .iter()
                                 .find(|(_name, config)| config.asset_id == coin.id)
-                                .context("Unsupported asset ID")?;
-
+                                .ok_or(KolmeError::UnsupportedAssetId)?;
                             coins.push((&asset.0 .0, coin.amount));
                         }
 
@@ -1828,11 +1854,11 @@ impl ExecAction {
                     ChainName::Ethereum => {
                         use crate::utils::ethereum::{normalize_ethereum_denom, ETH_NATIVE_DENOM};
 
-                        anyhow::ensure!(
-                            funds.len() == 1,
-                            "Ethereum transfer action supports exactly one fund, got {}",
-                            funds.len()
-                        );
+                        if funds.len() != 1 {
+                            return Err(KolmeError::InvalidEthereumTransferFundsCount {
+                                got: funds.len(),
+                            });
+                        }
                         let fund = &funds[0];
 
                         // TODO: find more efficient way to find asset name
@@ -1840,11 +1866,8 @@ impl ExecAction {
                             .assets
                             .iter()
                             .find(|(_, config)| config.asset_id == fund.id)
-                            .context("Unsupported asset ID")?;
-                        let normalized_asset_name = normalize_ethereum_denom(&asset_name.0)
-                            .with_context(|| {
-                                format!("Invalid Ethereum asset name in config: {}", asset_name.0)
-                            })?;
+                            .ok_or(KolmeError::UnsupportedAssetId)?;
+                        let normalized_asset_name = normalize_ethereum_denom(&asset_name.0)?;
 
                         let action = if normalized_asset_name == ETH_NATIVE_DENOM {
                             EthereumActionPayload::TransferEth {
@@ -1965,9 +1988,9 @@ impl ExecAction {
             ExecAction::MigrateContract { migrate_contract } => {
                 let contract_addr = match &config.bridge {
                     BridgeContract::Deployed(addr) => addr.clone(),
-                    _ => anyhow::bail!(
-                        "Unable to migrate contract for chain {chain}: contract isn't deployed"
-                    ),
+                    _ => {
+                        return Err(KolmeError::ContractNotDeployed(chain));
+                    }
                 };
 
                 match migrate_contract.as_inner() {
@@ -2044,7 +2067,7 @@ enum EthereumActionPayload {
 fn serialize_ethereum_payload(
     id: BridgeActionId,
     action: &EthereumActionPayload,
-) -> Result<String> {
+) -> Result<String, KolmeError> {
     let action = match action {
         EthereumActionPayload::TransferEth { recipient, amount } => {
             crate::utils::ethereum::encode_action_transfer_eth(recipient, *amount)?
@@ -2078,13 +2101,13 @@ fn serialize_ethereum_payload(
 }
 
 #[cfg(feature = "solana")]
-fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String> {
-    let len = borsh::object_length(&payload)
-        .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
+fn serialize_solana_payload(payload: &shared::solana::Payload) -> Result<String, KolmeError> {
+    let len =
+        borsh::object_length(&payload).map_err(KolmeError::SolanaPayloadSerializationError)?;
 
     let mut buf = Vec::with_capacity(len);
     borsh::BorshSerialize::serialize(&payload, &mut buf)
-        .map_err(|x| anyhow::anyhow!("Error serializing Solana bridge payload: {:?}", x))?;
+        .map_err(KolmeError::SolanaPayloadSerializationError)?;
 
     let payload = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
 
@@ -2102,7 +2125,7 @@ pub struct FailedTransaction {
     pub txhash: TxHash,
     /// Block height we attempted to generate.
     pub proposed_height: BlockHeight,
-    pub error: KolmeError,
+    pub error: KolmeTransactionError,
 }
 
 impl Display for FailedTransaction {
@@ -2168,15 +2191,21 @@ impl SolanaClient {
         Self(SolanaRpcClient::new(url))
     }
 
-    pub async fn with_redacted_error<'client, F, Fut, T>(&'client self, func: F) -> Result<T>
+    pub async fn with_redacted_error<'client, F, Fut, T>(
+        &'client self,
+        func: F,
+    ) -> Result<T, KolmeError>
     where
         F: FnOnce(&'client SolanaRpcClient) -> Fut,
         Fut: std::future::Future<Output = std::result::Result<T, client_error::Error>> + 'client,
     {
-        func(&self.0).await.map_err(redact_solana_error)
+        Ok(func(&self.0).await.map_err(redact_solana_error)?)
     }
 
-    pub async fn get_account(&self, pubkey: &SolanaPubkey) -> Result<solana_account::Account> {
+    pub async fn get_account(
+        &self,
+        pubkey: &SolanaPubkey,
+    ) -> Result<solana_account::Account, KolmeError> {
         self.with_redacted_error(|client| client.get_account(pubkey))
             .await
     }
@@ -2184,8 +2213,10 @@ impl SolanaClient {
     pub async fn get_signatures_for_address(
         &self,
         address: &SolanaPubkey,
-    ) -> Result<Vec<solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature>>
-    {
+    ) -> Result<
+        Vec<solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature>,
+        KolmeError,
+    > {
         self.with_redacted_error(|client| client.get_signatures_for_address(address))
             .await
     }
@@ -2194,13 +2225,15 @@ impl SolanaClient {
         &self,
         signature: &SolanaSignature,
         encoding: solana_transaction_status_client_types::UiTransactionEncoding,
-    ) -> Result<solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta>
-    {
+    ) -> Result<
+        solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta,
+        KolmeError,
+    > {
         self.with_redacted_error(|client| client.get_transaction(signature, encoding))
             .await
     }
 
-    pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash> {
+    pub async fn get_latest_blockhash(&self) -> Result<solana_hash::Hash, KolmeError> {
         self.with_redacted_error(|client| client.get_latest_blockhash())
             .await
     }
@@ -2208,7 +2241,7 @@ impl SolanaClient {
     pub async fn send_and_confirm_transaction(
         &self,
         transaction: &impl solana_rpc_client::rpc_client::SerializableTransaction,
-    ) -> Result<SolanaSignature> {
+    ) -> Result<SolanaSignature, KolmeError> {
         self.with_redacted_error(|client| client.send_and_confirm_transaction(transaction))
             .await
     }

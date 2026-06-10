@@ -35,27 +35,53 @@ pub async fn sanity_check_contract(
     client: &SolanaClient,
     program: &str,
     info: &GenesisInfo,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let program_id = Pubkey::from_str(program)?;
     let state_acc = kolme_solana_bridge_client::derive_state_pda(&program_id);
 
     let acc = client.get_account(&state_acc).await?;
 
     if acc.owner != program_id || acc.data.len() < 2 {
-        return Err(anyhow::anyhow!(
-            "Bridge program {program} hasn't been initialized yet."
-        ));
+        return Err(KolmeError::UninitializedSolanaBridge(program.to_owned()));
     }
 
     // Skip the first two bytes which are the discriminator byte and the bump seed respectively.
     let state: BridgeState = BorshDeserialize::try_from_slice(&acc.data[2..])
-        .map_err(|x| anyhow::anyhow!("Error deserializing Solana bridge state: {:?}", x))?;
+        .map_err(KolmeError::InvalidSolanaBridgeState)?;
 
-    anyhow::ensure!(info.validator_set.processor == state.set.processor);
-    anyhow::ensure!(info.validator_set.listeners == state.set.listeners);
-    anyhow::ensure!(info.validator_set.approvers == state.set.approvers);
-    anyhow::ensure!(info.validator_set.needed_listeners == state.set.needed_listeners);
-    anyhow::ensure!(info.validator_set.needed_approvers == state.set.needed_approvers);
+    if info.validator_set.processor != state.set.processor {
+        return Err(KolmeError::ProcessorMismatch {
+            expected: Box::new(info.validator_set.processor),
+            actual: Box::new(state.set.processor),
+        });
+    }
+    if info.validator_set.listeners != state.set.listeners {
+        return Err(KolmeError::ListenersMismatch {
+            expected: info.validator_set.listeners.clone(),
+            actual: state.set.listeners,
+        });
+    }
+
+    if info.validator_set.approvers != state.set.approvers {
+        return Err(KolmeError::ApproversMismatch {
+            expected: info.validator_set.approvers.clone(),
+            actual: state.set.approvers,
+        });
+    }
+
+    if info.validator_set.needed_listeners != state.set.needed_listeners {
+        return Err(KolmeError::NeededListenersMismatch {
+            expected: info.validator_set.needed_listeners,
+            actual: state.set.needed_listeners,
+        });
+    }
+
+    if info.validator_set.needed_approvers != state.set.needed_approvers {
+        return Err(KolmeError::NeededApproversMismatch {
+            expected: info.validator_set.needed_approvers,
+            actual: state.set.needed_approvers,
+        });
+    }
 
     Ok(())
 }
@@ -65,7 +91,7 @@ async fn listen_internal<App: KolmeApp>(
     secret: &SecretKey,
     chain: SolanaChain,
     contract: &str,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     let contract_pubkey = Pubkey::from_str_const(contract);
 
     let client = kolme.get_solana_client(chain).await;
@@ -165,7 +191,7 @@ async fn catch_up<App: KolmeApp>(
     last_seen: BridgeEventId,
     chain: SolanaChain,
     contract: &Pubkey,
-) -> Result<Option<BridgeEventId>> {
+) -> Result<Option<BridgeEventId>, KolmeError> {
     tracing::info!("Catching up on missing bridge events until {}.", last_seen);
 
     let mut messages = vec![];
@@ -233,7 +259,7 @@ async fn catch_up<App: KolmeApp>(
     Ok(Some(BridgeEventId(latest_id)))
 }
 
-fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMessage>> {
+fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMessage>, KolmeError> {
     const PROGRAM_DATA_LOG: &str = "Program data: ";
 
     // Our program data should always be the last "Program data:" entry even if CPI was invoked.
@@ -245,12 +271,8 @@ fn extract_bridge_message_from_logs(logs: &[String]) -> Result<Option<BridgeMess
         let data = &log.as_str()[PROGRAM_DATA_LOG.len()..];
         let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
 
-        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes).map_err(|x| {
-            anyhow::anyhow!(
-                "Error deserializing Solana bridge message from logs: {:?}",
-                x
-            )
-        });
+        let result = <BridgeMessage as BorshDeserialize>::try_from_slice(&bytes)
+            .map_err(KolmeError::InvalidSolanaBridgeLogMessage);
 
         match result {
             Ok(result) => return Ok(Some(result)),

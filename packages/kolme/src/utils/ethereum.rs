@@ -1,6 +1,7 @@
 //! Ethereum-specific helpers.
 #![cfg(feature = "ethereum")]
 
+use crate::KolmeError;
 use std::str::FromStr;
 
 use alloy::{
@@ -70,14 +71,18 @@ pub fn evm_address_to_string(address: Address) -> String {
     format!("{:#x}", address)
 }
 
-pub fn normalize_evm_address(address: &str) -> anyhow::Result<String> {
-    let address = Address::from_str(address)?;
+pub fn normalize_evm_address(address: &str) -> Result<String, KolmeError> {
+    let address =
+        Address::from_str(address).map_err(|error| KolmeError::InvalidEthereumContractAddress {
+            contract: address.to_string(),
+            error,
+        })?;
     Ok(evm_address_to_string(address))
 }
 
 /// `denom` could be "eth" (case-insensitive) or a EVM address.
 /// Will be canonicalized (lowercase "eth" or "0x...")
-pub fn normalize_ethereum_denom(denom: &str) -> anyhow::Result<String> {
+pub fn normalize_ethereum_denom(denom: &str) -> Result<String, KolmeError> {
     if denom.eq_ignore_ascii_case(ETH_NATIVE_DENOM) {
         return Ok(ETH_NATIVE_DENOM.to_owned());
     }
@@ -93,8 +98,13 @@ pub fn token_address_to_denom(token: Address) -> String {
 }
 
 /// Build ACTION_EXECUTE payload for ETH transfers
-pub fn encode_action_transfer_eth(recipient: &str, amount: u128) -> anyhow::Result<Vec<u8>> {
-    let recipient = Address::from_str(recipient)?;
+pub fn encode_action_transfer_eth(recipient: &str, amount: u128) -> Result<Vec<u8>, KolmeError> {
+    let recipient = Address::from_str(recipient).map_err(|error| {
+        KolmeError::InvalidEthereumContractAddress {
+            contract: recipient.to_string(),
+            error,
+        }
+    })?;
     Ok(encode_execute_action(recipient, U256::from(amount), vec![]))
 }
 
@@ -103,9 +113,18 @@ pub fn encode_action_transfer_erc20(
     token: &str,
     recipient: &str,
     amount: u128,
-) -> anyhow::Result<Vec<u8>> {
-    let token = Address::from_str(token)?;
-    let recipient = Address::from_str(recipient)?;
+) -> Result<Vec<u8>, KolmeError> {
+    let token =
+        Address::from_str(token).map_err(|error| KolmeError::InvalidEthereumContractAddress {
+            contract: token.to_string(),
+            error,
+        })?;
+    let recipient = Address::from_str(recipient).map_err(|error| {
+        KolmeError::InvalidEthereumContractAddress {
+            contract: recipient.to_string(),
+            error,
+        }
+    })?;
     let transfer_call = IERC20::transferCall {
         recipient,
         amount: U256::from(amount),
@@ -136,13 +155,12 @@ pub fn encode_self_replace_action(
 
 fn signature_with_recovery_to_ethereum_bytes(
     signature: &SignatureWithRecovery,
-) -> anyhow::Result<Vec<u8>> {
+) -> Result<Vec<u8>, KolmeError> {
     let mut out = signature.sig.to_bytes();
     let recid = signature.recid.to_byte();
-    anyhow::ensure!(
-        recid <= 1,
-        "Invalid Ethereum recovery id {recid}, expected 0 or 1"
-    );
+    if recid > 1 {
+        return Err(KolmeError::InvalidEthereumRecoveryId(recid));
+    }
     out.push(recid + 27);
     Ok(out)
 }
@@ -151,11 +169,11 @@ pub fn encode_new_set_action(
     validator_set: &ValidatorSet,
     rendered: &str,
     approvals: &[SignatureWithRecovery],
-) -> anyhow::Result<Vec<u8>> {
+) -> Result<Vec<u8>, KolmeError> {
     let approvals = approvals
         .iter()
         .map(signature_with_recovery_to_ethereum_bytes)
-        .collect::<anyhow::Result<Vec<_>>>()?
+        .collect::<Result<Vec<_>, KolmeError>>()?
         .into_iter()
         .map(Into::into)
         .collect();

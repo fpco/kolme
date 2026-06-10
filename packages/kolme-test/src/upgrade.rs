@@ -56,7 +56,7 @@ impl KolmeApp for SampleKolmeApp1 {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         Ok(SampleState {
             hi_count1: 0,
             hi_count2: 0,
@@ -67,7 +67,7 @@ impl KolmeApp for SampleKolmeApp1 {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         SampleMessage::SayHi: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         ctx.state_mut().hi_count1 += 1;
         Ok(())
     }
@@ -86,7 +86,7 @@ impl KolmeApp for SampleKolmeApp2 {
         &self.genesis
     }
 
-    fn new_state(&self) -> Result<Self::State> {
+    fn new_state(&self) -> Result<Self::State, KolmeError> {
         SampleKolmeApp1 {
             genesis: self.genesis.clone(),
         }
@@ -97,7 +97,7 @@ impl KolmeApp for SampleKolmeApp2 {
         &self,
         ctx: &mut ExecutionContext<'_, Self>,
         SampleMessage::SayHi: &Self::Message,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         // This is the only difference between the two versions!
         // But it results in totally different resulting app states.
         ctx.state_mut().hi_count2 += 1;

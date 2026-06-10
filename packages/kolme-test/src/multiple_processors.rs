@@ -134,7 +134,7 @@ async fn multiple_processors_inner(
     (kolmes, all_txhashes, highest_block)
 }
 
-async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
+async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<(), KolmeError> {
     let mut failed_txs = kolme.subscribe_failed_txs();
     let failed = failed_txs.recv().await?;
     let FailedTransaction {
@@ -142,16 +142,16 @@ async fn check_failed_txs(kolme: Kolme<SampleKolmeApp>) -> Result<()> {
         proposed_height,
         error,
     } = failed.message.as_inner();
-    Err(anyhow::anyhow!(
+    Err(KolmeError::Other(format!(
         "Error with transaction {txhash} for block {proposed_height}: {error}"
-    ))
+    )))
 }
 
 async fn client(
     kolmes: Arc<[Kolme<SampleKolmeApp>]>,
     all_txhashes: Arc<Mutex<HashSet<TxHash>>>,
     highest_block: Arc<Mutex<BlockHeight>>,
-) -> Result<()> {
+) -> Result<(), KolmeError> {
     for _ in 0..10 {
         let (kolme, secret) = {
             let mut rng = rand::thread_rng();

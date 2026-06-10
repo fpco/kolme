@@ -119,7 +119,7 @@ impl<App: KolmeApp> Submitter<App> {
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> Result<(), KolmeError> {
         let chains = self
             .kolme
             .read()
@@ -174,7 +174,7 @@ impl<App: KolmeApp> Submitter<App> {
                     _ = listen_genesis_available.listen() => (),
                 }
             }
-            anyhow::Ok(())
+            Ok(())
         };
 
         let ongoing = async {
@@ -195,7 +195,7 @@ impl<App: KolmeApp> Submitter<App> {
     /// Submit 0 transactions (if nothing is needed) or the next event's transactions.
     ///
     /// We only do 0 or 1, since we always wait for listeners to confirm that our actions succeeded before continuing.
-    async fn submit_zero_or_one(&mut self, chains: &[ExternalChain]) -> Result<()> {
+    async fn submit_zero_or_one(&mut self, chains: &[ExternalChain]) -> Result<(), KolmeError> {
         // TODO we can probably unify genesis and other actions into a single per-chain feed
         let genesis_action = self.kolme.read().get_next_genesis_action();
         if let Some(genesis_action) = genesis_action {
@@ -211,7 +211,7 @@ impl<App: KolmeApp> Submitter<App> {
         Ok(())
     }
 
-    async fn handle_genesis(&mut self, genesis_action: GenesisAction) -> Result<()> {
+    async fn handle_genesis(&mut self, genesis_action: GenesisAction) -> Result<(), KolmeError> {
         match genesis_action {
             #[cfg(feature = "cosmwasm")]
             GenesisAction::InstantiateCosmos {
@@ -297,7 +297,7 @@ impl<App: KolmeApp> Submitter<App> {
         }
     }
 
-    fn propose(kolme: &Kolme<App>, chain: ExternalChain, addr: String) -> Result<()> {
+    fn propose(kolme: &Kolme<App>, chain: ExternalChain, addr: String) -> Result<(), KolmeError> {
         // We broadcast our own transaction for genesis instantiation, using an
         // arbitrary secret key. The listeners will watch for such transactions
         // and, if they're satisfied with our generated contracts, rebroadcast
@@ -328,7 +328,7 @@ impl<App: KolmeApp> Submitter<App> {
             approvals,
             processor,
         }: &PendingBridgeAction,
-    ) -> Result<()> {
+    ) -> Result<(), KolmeError> {
         let Some(processor) = processor else {
             return Ok(());
         };
@@ -397,7 +397,9 @@ impl<App: KolmeApp> Submitter<App> {
             }
             #[cfg(feature = "pass_through")]
             ChainArgs::PassThrough { port } => {
-                anyhow::ensure!(chain == ExternalChain::PassThrough);
+                if chain != ExternalChain::PassThrough {
+                    return Err(KolmeError::InvalidPassThroughChain(chain));
+                }
                 let client = self.kolme.read().get_pass_through_client();
 
                 tracing::info!("Executing pass through contract: {contract}");
