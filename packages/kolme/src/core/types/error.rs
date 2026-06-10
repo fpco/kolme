@@ -2,6 +2,7 @@
 use std::path::PathBuf;
 
 use crate::core::*;
+#[cfg(feature = "ethereum")]
 use alloy::primitives::Address;
 
 #[derive(thiserror::Error, Debug, Clone, serde::Serialize, serde::Deserialize)]

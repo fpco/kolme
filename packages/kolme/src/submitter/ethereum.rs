@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
-use crate::KolmeError;
 use alloy::{
     network::TransactionBuilder,
     primitives::Address,
@@ -13,7 +12,7 @@ use alloy::{
 use base64::Engine;
 use serde::Deserialize;
 
-use crate::{EthereumChain, PublicKey, SignatureWithRecovery, ValidatorSet};
+use crate::{KolmeError, EthereumChain, PublicKey, SignatureWithRecovery, ValidatorSet};
 
 const BRIDGE_ARTIFACT_PATH: &str = "../../contracts/ethereum/out/Bridge.sol/Bridge.json";
 
@@ -221,7 +220,7 @@ mod tests {
         build_bridge_initcode_with_create_bytecode, parse_bridge_create_bytecode_str,
         prepare_execute_signed_args, to_ethereum_signature, validator_set_constructor_args,
     };
-    use crate::{PublicKey, SecretKey, SignatureWithRecovery, ValidatorSet};
+    use crate::{KolmeError, PublicKey, SecretKey, SignatureWithRecovery, ValidatorSet};
     use std::collections::BTreeMap;
 
     #[test]
@@ -244,10 +243,10 @@ mod tests {
             "bytecode": {}
         }"#;
 
-        let err = parse_bridge_create_bytecode_str(json)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("failed to parse Bridge.json artifact"));
+        assert!(matches!(
+            parse_bridge_create_bytecode_str(json),
+            Err(KolmeError::JsonError(_))
+        ));
     }
 
     #[test]
@@ -355,9 +354,9 @@ mod tests {
         let sig = key.sign_recoverable(b"msg").unwrap();
         let approvals = BTreeMap::new();
 
-        let err = prepare_execute_signed_args(sig, &approvals, "not-base64")
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("decode Ethereum bridge action payload"));
+        assert!(matches!(
+            prepare_execute_signed_args(sig, &approvals, "not-base64"),
+            Err(KolmeError::Base64DecodeError(_))
+        ));
     }
 }
