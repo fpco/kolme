@@ -12,7 +12,7 @@ use alloy::{
 use base64::Engine;
 use serde::Deserialize;
 
-use crate::{KolmeError, EthereumChain, PublicKey, SignatureWithRecovery, ValidatorSet};
+use crate::{EthereumChain, KolmeError, PublicKey, SignatureWithRecovery, ValidatorSet};
 
 const BRIDGE_ARTIFACT_PATH: &str = "../../contracts/ethereum/out/Bridge.sol/Bridge.json";
 
